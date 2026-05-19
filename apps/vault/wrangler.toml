@@ -17,10 +17,33 @@ local_protocol = "http"
 [[d1_databases]]
 binding = "DB"
 database_name = "demo-mcp"
-database_id = "00000000-0000-0000-0000-000000000000"   # overwrite per env in production
+database_id = "a7c95b56-8753-47ae-a044-446d5d37cf58"   # overwrite per env in production
 migrations_dir = "migrations"
 
 [vars]
 RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = "31337"
 MCP_AUDIENCE = "urn:mcp:server:person"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Production environment — Worker name: "demo-mcp-production"
+#
+# Deploy via `pnpm deploy:cloudflare`. Contract addresses are injected via
+# `--var` flags from deployments-base-sepolia.json at deploy time.
+#
+# REQUIRED ONE-TIME SETUP — paste the production D1 database_id below after:
+#   wrangler d1 create demo-mcp
+#   wrangler d1 migrations apply demo-mcp --remote --env production
+# The deploy script re-runs `migrations apply` on every deploy (idempotent).
+# ──────────────────────────────────────────────────────────────────────────
+
+[env.production.vars]
+RPC_URL = "https://sepolia.base.org"
+CHAIN_ID = "84532"
+MCP_AUDIENCE = "urn:mcp:server:person"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "demo-mcp"
+database_id = "a7c95b56-8753-47ae-a044-446d5d37cf58"
+migrations_dir = "migrations"

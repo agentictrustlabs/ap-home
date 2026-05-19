@@ -34,9 +34,37 @@ ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
 MCP_URL = "http://127.0.0.1:8788"
 
 # Contract addresses + secrets live in .dev.vars (gitignored) for local dev.
-# For production deploy, set via:
-#   wrangler secret put SESSION_JWT_SECRETS
-#   wrangler secret put CSRF_SECRET
-#   wrangler secret put A2A_SESSION_SECRET
-#   wrangler secret put A2A_MASTER_PRIVATE_KEY
-# and override RPC_URL / contract addrs in [env.production].
+
+# ──────────────────────────────────────────────────────────────────────────
+# Production environment — Worker name: "demo-a2a-production"
+#
+# Deploy via `pnpm deploy:cloudflare` (scripts/deploy-cloudflare.ts), which
+# wraps `wrangler deploy --env production` with `--var` flags for contract
+# addresses (from deployments-base-sepolia.json) and the just-deployed
+# demo-mcp URL.
+#
+# Secrets are set ONCE per environment via:
+#   wrangler secret put SESSION_JWT_SECRETS    --env production
+#   wrangler secret put CSRF_SECRET            --env production
+#   wrangler secret put A2A_SESSION_SECRET     --env production
+#   wrangler secret put A2A_MASTER_PRIVATE_KEY --env production
+#
+# Non-inheritable keys (vars, durable_objects, kv, d1, etc.) must be
+# re-declared per environment — that's why this block repeats the DO binding.
+# ──────────────────────────────────────────────────────────────────────────
+
+[env.production.vars]
+RPC_URL = "https://sepolia.base.org"
+CHAIN_ID = "84532"
+# These two are placeholders — `pnpm deploy:cloudflare` overrides via `--var`
+# with the freshly-deployed Pages URL + demo-mcp Worker URL. Defaults left
+# blank so a misconfigured deploy fails closed (no CORS allowed, no MCP).
+ALLOWED_ORIGINS = ""
+MCP_URL = ""
+# Contract addresses (ENTRY_POINT, DELEGATION_MANAGER, etc.) likewise injected
+# at deploy time via --var from deployments-base-sepolia.json.
+
+[env.production.durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionStoreDO" },
+]
