@@ -21,6 +21,7 @@ import {
 } from '@agenticprimitives/identity-auth';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { buildKeyProvider, buildSignerBackend, type KmsBackend } from '@agenticprimitives/key-custody';
+import { createKmsViemAccount } from '@agenticprimitives/key-custody/kms-viem';
 import {
   SessionManager,
   hashDelegation,
@@ -56,12 +57,6 @@ export interface Env {
   CSRF_SECRET: string;
   A2A_SESSION_SECRET: string;
   A2A_MASTER_PRIVATE_KEY: string;
-
-  // Optional: when present, demo-a2a lazy-deploys the smart account on
-  // first SIWE login. Without it, smart accounts stay counterfactual
-  // (existing demo behavior). The address holding this key needs Base
-  // Sepolia ETH to pay deployment gas. See specs/120-deploy.md §4.6.
-  A2A_BOOTSTRAP_PRIVATE_KEY?: string;
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -208,24 +203,20 @@ app.post('/auth/siwe-verify', async (c) => {
 
   let isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
 
-  // Lazy deploy: if a bootstrap key is configured and the smart account
-  // isn't on-chain yet, deploy it before issuing any delegations. This is
-  // what lets demo-mcp drop `requireDeployed: false` and fully validate
-  // ERC-1271 in production. The bootstrap key pays gas; the user keeps
-  // ownership of the resulting account.
-  if (!isDeployed && c.env.A2A_BOOTSTRAP_PRIVATE_KEY) {
+  // Lazy deploy: if the smart account isn't on-chain yet, deploy it now
+  // using the KMS-backed signer as the relayer. The KMS-derived address
+  // (NOT a local private key) pays gas; the user keeps ownership of the
+  // resulting smart account. Failures are logged but non-fatal — the demo
+  // falls back to counterfactual mode so login still works.
+  if (!isDeployed) {
     try {
-      await accountClient(c.env).createAccountFromPrivateKey(
-        walletAddress,
-        0n,
-        c.env.A2A_BOOTSTRAP_PRIVATE_KEY as Hex,
-      );
+      const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+      const kmsBackend = buildSignerBackend({ backend });
+      const relayerAccount = await createKmsViemAccount(kmsBackend);
+      await accountClient(c.env).createAccountFromAccount(walletAddress, 0n, relayerAccount);
       isDeployed = true;
     } catch (e) {
-      // Don't block login — fall through with isDeployed=false so the demo
-      // can still run in counterfactual mode. The frontend sees the flag
-      // and can warn that the account isn't deployed.
-      console.error('[demo-a2a] lazy account deploy failed:', e);
+      console.error('[demo-a2a] KMS-relayed lazy deploy failed:', e);
     }
   }
 
