@@ -7,7 +7,7 @@
 // Env bindings come from c.env (typed via the Bindings interface below).
 
 import { Hono } from 'hono';
-import { setCookie } from 'hono/cookie';
+import { setCookie, getCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
 import {
   verify as siweVerify,
@@ -15,6 +15,7 @@ import {
 } from '@agenticprimitives/identity-auth/siwe';
 import {
   mintSession,
+  verifySession,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
 } from '@agenticprimitives/identity-auth';
@@ -150,10 +151,24 @@ function accountClient(env: Env): AgentAccountClient {
   });
 }
 
-function sessionManagerFor(env: Env): SessionManager {
+function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {
   const keyCustody = buildKeyProvider({ backend: 'local-aes' });
-  const store = new DurableObjectSessionStore(env.SESSIONS);
+  // Shard per-user: idFromName(accountAddress) → isolated DO instance.
+  const store = new DurableObjectSessionStore(env.SESSIONS, accountAddress);
   return new SessionManager({ keyCustody, store });
+}
+
+// Extract the smart-account address from the JWT session cookie. Returns
+// null if no cookie / invalid signature / expired. Used by routes that
+// need to route to the correct per-user Durable Object.
+function smartAccountFromCookie(c: { req: { raw: Request }; env?: unknown }): Address | null {
+  // `getCookie` works on Hono Context; we use a narrowly-typed shape so
+  // this helper can stay outside the closure if needed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cookieValue = getCookie(c as any, SESSION_COOKIE);
+  if (!cookieValue) return null;
+  const claims = verifySession(cookieValue);
+  return (claims?.smartAccountAddress as Address | undefined) ?? null;
 }
 
 // ─── STEP 1: SIWE login → JWT session ─────────────────────────────────────
@@ -214,7 +229,7 @@ app.post('/session/init', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { accountAddress?: Address } | null;
   if (!body?.accountAddress) return c.json({ error: 'accountAddress required' }, 400);
   try {
-    const { sessionId, sessionKeyAddress } = await sessionManagerFor(c.env).init(
+    const { sessionId, sessionKeyAddress } = await sessionManagerFor(c.env, body.accountAddress).init(
       body.accountAddress,
       Number(c.env.CHAIN_ID),
     );
@@ -244,8 +259,10 @@ app.post('/session/package', async (c) => {
     delegation.signature,
   );
 
+  // delegation.delegator IS the smart-account address — use it to route to
+  // the correct per-user DO.
   try {
-    await sessionManagerFor(c.env).package(body.sessionId, delegation);
+    await sessionManagerFor(c.env, delegation.delegator).package(body.sessionId, delegation);
   } catch (e) {
     return c.json({ error: 'session package failed', detail: String(e) }, 400);
   }
@@ -268,9 +285,16 @@ app.post('/tools/:name', async (c) => {
   } | null;
   if (!body?.sessionId) return c.json({ error: 'sessionId required' }, 400);
 
+  // /tools/:name is JWT-gated: the user's smart-account address lives in
+  // their session cookie. Route to that user's DO.
+  const accountAddress = smartAccountFromCookie(c);
+  if (!accountAddress) {
+    return c.json({ error: 'auth required (missing or invalid session cookie)' }, 401);
+  }
+
   let resolved;
   try {
-    resolved = await sessionManagerFor(c.env).resolve(body.sessionId);
+    resolved = await sessionManagerFor(c.env, accountAddress).resolve(body.sessionId);
   } catch (e) {
     return c.json({ error: 'session resolve failed', detail: String(e) }, 400);
   }

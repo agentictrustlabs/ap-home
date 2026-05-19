@@ -1,8 +1,9 @@
-// SessionStoreDO — Durable Object holding all session rows for the demo.
+// SessionStoreDO — Durable Object holding session rows for ONE user.
 //
-// For the demo we use a single named DO instance ('global'). Production
-// would shard per-user (idFromName(walletAddress)) so each user has their
-// own DO with its own storage namespace.
+// Sharded per-user via idFromName(accountAddress). Each user's session
+// storage lives in an isolated DO instance, so a hot user can't starve
+// others' I/O budget. The accountAddress is the smart-account address
+// (matches SessionRow.accountAddress), lowercased for stable hashing.
 //
 // SessionRow contains Uint8Array fields (encryptedPackage, iv, encryptedDataKey).
 // DO storage supports structured-clone, but we transmit over HTTP (fetch
@@ -126,10 +127,26 @@ export class SessionStoreDO {
 // ─── Adapter for delegation.SessionStore that talks to the DO ─────────────
 
 export class DurableObjectSessionStore {
-  constructor(private namespace: DurableObjectNamespace, private name: string = 'global') {}
+  private readonly doName: string;
+
+  /**
+   * @param namespace      The DurableObjectNamespace binding (env.SESSIONS).
+   * @param accountAddress The smart-account address that owns this user's
+   *                       sessions. Used to derive the DO instance name via
+   *                       idFromName(accountAddress.toLowerCase()), giving
+   *                       each user an isolated DO. Required.
+   */
+  constructor(private namespace: DurableObjectNamespace, accountAddress: string) {
+    if (!accountAddress || !accountAddress.startsWith('0x')) {
+      throw new Error(
+        `DurableObjectSessionStore: accountAddress (0x-prefixed) is required for per-user sharding. Got: ${accountAddress}`,
+      );
+    }
+    this.doName = accountAddress.toLowerCase();
+  }
 
   private stub() {
-    const id = this.namespace.idFromName(this.name);
+    const id = this.namespace.idFromName(this.doName);
     return this.namespace.get(id);
   }
 
