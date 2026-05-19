@@ -1,93 +1,59 @@
+// demo-mcp as a Cloudflare Worker with D1.
+//
+// Local dev:  wrangler dev (port 8788; uses local D1 SQLite)
+// Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
+
 import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import {
-  withDelegation,
-  createMemoryJtiStore,
-  McpAuthError,
-} from '@agenticprimitives/mcp-runtime';
+import { withDelegation, McpAuthError } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import type { Address } from '@agenticprimitives/types';
-import { upsertDemoProfile, getProfile } from './db';
+import { upsertDemoProfile, getProfile, createD1JtiStore } from './db';
 
-const PORT = Number(process.env.PORT ?? 8788);
+export interface Env {
+  DB: D1Database;
 
-// Load contract deployments — same JSON the a2a server reads.
-function loadDeployments(): {
-  chainId: number;
-  delegationManager: Address;
-  timestampEnforcer: Address;
-  allowedTargetsEnforcer: Address;
-  allowedMethodsEnforcer: Address;
-  valueEnforcer: Address;
-} {
-  const network = process.env.DEPLOY_NETWORK ?? 'anvil';
-  const path = join(
-    process.env.DEPLOYMENTS_DIR ?? join(process.cwd(), '..', 'contracts'),
-    `deployments-${network}.json`,
-  );
-  if (!existsSync(path)) {
-    throw new Error(
-      `demo-mcp: deployments file not found at ${path}. Run \`pnpm dev:contracts\`.`,
-    );
-  }
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
+  RPC_URL: string;
+  CHAIN_ID: string;
+  MCP_AUDIENCE: string;
+
+  DELEGATION_MANAGER: string;
+  TIMESTAMP_ENFORCER: string;
+  ALLOWED_TARGETS_ENFORCER: string;
+  ALLOWED_METHODS_ENFORCER: string;
+  VALUE_ENFORCER: string;
+}
+
+function baseConfig(env: Env): McpResourceVerifyConfig {
   return {
-    chainId: Number(raw.chainId ?? 31337),
-    delegationManager: raw.delegationManager as Address,
-    timestampEnforcer: raw.timestampEnforcer as Address,
-    allowedTargetsEnforcer: raw.allowedTargetsEnforcer as Address,
-    allowedMethodsEnforcer: raw.allowedMethodsEnforcer as Address,
-    valueEnforcer: raw.valueEnforcer as Address,
+    audience: env.MCP_AUDIENCE,
+    chainId: Number(env.CHAIN_ID),
+    rpcUrl: env.RPC_URL,
+    delegationManager: env.DELEGATION_MANAGER as Address,
+    enforcerMap: {
+      delegationManager: env.DELEGATION_MANAGER as Address,
+      timestamp: env.TIMESTAMP_ENFORCER as Address,
+      value: env.VALUE_ENFORCER as Address,
+      allowedTargets: env.ALLOWED_TARGETS_ENFORCER as Address,
+      allowedMethods: env.ALLOWED_METHODS_ENFORCER as Address,
+    },
+    jtiStore: createD1JtiStore(env.DB),
   };
 }
 
-const deployments = loadDeployments();
-const rpcUrl = process.env.RPC_URL ?? 'http://127.0.0.1:8545';
+const app = new Hono<{ Bindings: Env }>();
 
-const baseConfig: McpResourceVerifyConfig = {
-  audience: 'urn:mcp:server:person',
-  chainId: deployments.chainId,
-  rpcUrl,
-  delegationManager: deployments.delegationManager,
-  enforcerMap: {
-    delegationManager: deployments.delegationManager,
-    timestamp: deployments.timestampEnforcer,
-    value: deployments.valueEnforcer,
-    allowedTargets: deployments.allowedTargetsEnforcer,
-    allowedMethods: deployments.allowedMethodsEnforcer,
-  },
-  jtiStore: createMemoryJtiStore(),
-};
-
-const app = new Hono();
-
-app.get('/health', (c) => c.json({ ok: true, service: 'demo-mcp' }));
-
-// ─── get_profile — delegation-verified, low-risk read ────────────────────
-type GetProfileArgs = { args?: Record<string, unknown> };
-
-const handleGetProfile = withDelegation<GetProfileArgs>(
-  baseConfig,
-  async ({ principal }) => {
-    // First call seeds deterministic PII for the principal; subsequent
-    // calls return the same profile.
-    upsertDemoProfile(principal);
-    const profile = getProfile(principal);
-    return { ok: true, profile };
-  },
-  { toolName: 'get_profile' },
+app.get('/health', (c) =>
+  c.json({ ok: true, service: 'demo-mcp', runtime: 'cloudflare-workers' }),
 );
 
-const getProfileTool = declareTool(
-  { name: 'get_profile', handler: handleGetProfile },
-  {
-    '@sa-tool': 'delegation-verified',
-    '@sa-auth': 'session-token',
-    '@sa-risk-tier': 'low',
-  },
+// ─── get_profile — delegation-verified, low-risk read ────────────────────
+
+// Classification (lint surface; tool-policy.evaluatePolicy enforcement will
+// live alongside the wrapper in v0.1).
+declareTool(
+  { name: 'get_profile' },
+  { '@sa-tool': 'delegation-verified', '@sa-auth': 'session-token', '@sa-risk-tier': 'low' },
 );
 
 app.post('/tools/get_profile', async (c) => {
@@ -97,34 +63,34 @@ app.post('/tools/get_profile', async (c) => {
   } | null;
   if (!body?.token) return c.json({ error: 'token required' }, 400);
 
+  type Args = { args?: Record<string, unknown> };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal }) => {
+      await upsertDemoProfile(c.env.DB, principal);
+      const profile = await getProfile(c.env.DB, principal);
+      return { ok: true, profile };
+    },
+    { toolName: 'get_profile' },
+  );
+
   try {
-    const result = await getProfileTool.handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) {
-      // Externally opaque; details only in stderr (see mcp-runtime).
-      return c.json({ error: 'auth failed' }, 401);
-    }
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
 
-// ─── update_profile — defer; demo step 3 only exercises read ─────────────
 app.post('/tools/update_profile', (c) => c.json({ error: 'not implemented in demo step 3' }, 501));
 
-// Dev-only seeder: hits the PII store directly without delegation checks.
-// @sa-tool dev-only
-// @sa-auth none
+// Dev-only seeder.
 app.post('/_dev/seed', async (c) => {
-  const { address } = await c.req.json();
+  const { address } = (await c.req.json()) as { address?: string };
   if (typeof address !== 'string') return c.json({ error: 'address required' }, 400);
-  const profile = upsertDemoProfile(address);
+  const profile = await upsertDemoProfile(c.env.DB, address);
   return c.json({ ok: true, profile });
 });
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`demo-mcp listening on http://127.0.0.1:${info.port}`);
-  console.log(`  chainId: ${deployments.chainId}`);
-  console.log(`  delegationManager: ${deployments.delegationManager}`);
-  console.log(`  PII store: ${process.env.MCP_DB_PATH ?? './demo-mcp.db'}`);
-});
+export default app;

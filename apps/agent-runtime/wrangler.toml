@@ -1,0 +1,42 @@
+# Cloudflare Worker config for demo-a2a.
+#
+# Local dev:  wrangler dev (reads .dev.vars for secrets + Anvil contract addrs)
+# Production: wrangler deploy (uses [vars] + secrets set via `wrangler secret put`)
+#
+# Durable Object SESSIONS holds the SessionStore (one global instance for the
+# demo; production would shard per-user via idFromName(walletAddress)).
+#
+# nodejs_compat is on so our @agenticprimitives/* packages can keep using
+# `process.env`, `Buffer`, and the Web-Crypto interfaces they already use.
+
+name = "demo-a2a"
+main = "src/index.ts"
+compatibility_date = "2026-05-19"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8787
+local_protocol = "http"
+
+[durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionStoreDO" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionStoreDO"]
+
+[vars]
+RPC_URL = "http://127.0.0.1:8545"
+CHAIN_ID = "31337"
+ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
+MCP_URL = "http://127.0.0.1:8788"
+
+# Contract addresses + secrets live in .dev.vars (gitignored) for local dev.
+# For production deploy, set via:
+#   wrangler secret put SESSION_JWT_SECRETS
+#   wrangler secret put CSRF_SECRET
+#   wrangler secret put A2A_SESSION_SECRET
+#   wrangler secret put A2A_MASTER_PRIVATE_KEY
+# and override RPC_URL / contract addrs in [env.production].

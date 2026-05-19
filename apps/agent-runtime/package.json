@@ -2,12 +2,12 @@
   "name": "@agenticprimitives-demo/a2a",
   "version": "0.0.1",
   "private": true,
-  "description": "Demo a2a-agent server: SIWE verify, session lifecycle, mints delegation tokens for MCP.",
+  "description": "Demo a2a-agent: Cloudflare Worker with Durable Object for sessions. SIWE verify, session lifecycle, mints delegation tokens for MCP.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "wrangler dev --port 8787 --persist-to ../../.wrangler/state-a2a",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -16,15 +16,13 @@
     "@agenticprimitives/identity-auth": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
-    "@hono/node-server": "^1.13.0",
-    "better-sqlite3": "^11.3.0",
     "hono": "^4.6.0",
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@cloudflare/workers-types": "^4.20240909.0",
     "@types/node": "^22.7.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
   }
 }

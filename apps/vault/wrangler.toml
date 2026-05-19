@@ -1,0 +1,26 @@
+# Cloudflare Worker config for demo-mcp.
+#
+# Local dev:  wrangler dev (uses local D1 SQLite at .wrangler/state-mcp/v3/d1/)
+# Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
+#
+# D1 holds profiles + token_usage (JTI replay tracking).
+
+name = "demo-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-05-19"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8788
+local_protocol = "http"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "demo-mcp"
+database_id = "00000000-0000-0000-0000-000000000000"   # overwrite per env in production
+migrations_dir = "migrations"
+
+[vars]
+RPC_URL = "http://127.0.0.1:8545"
+CHAIN_ID = "31337"
+MCP_AUDIENCE = "urn:mcp:server:person"

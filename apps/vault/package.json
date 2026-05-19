@@ -2,12 +2,14 @@
   "name": "@agenticprimitives-demo/mcp",
   "version": "0.0.1",
   "private": true,
-  "description": "Demo MCP person-repository server: holds simple PII, exposes get/update profile tools wrapped by withDelegation.",
+  "description": "Demo MCP server: Cloudflare Worker + D1 for profiles + JTI replay. Person-repository with delegation-verified get_profile tool.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "wrangler dev --port 8788 --persist-to ../../.wrangler/state-mcp",
+    "deploy": "wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply demo-mcp --local --persist-to ../../.wrangler/state-mcp",
+    "d1:migrate:remote": "wrangler d1 migrations apply demo-mcp --remote",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -15,15 +17,13 @@
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/tool-policy": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
-    "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "better-sqlite3": "^11.3.0",
     "hono": "^4.6.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@cloudflare/workers-types": "^4.20240909.0",
     "@types/node": "^22.7.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
   }
 }

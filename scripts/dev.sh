@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Local end-to-end dev orchestration:
-#   1. Start Anvil
-#   2. Deploy contracts
-#   3. Start demo-a2a, demo-mcp, demo-web in parallel
+# Local end-to-end dev orchestration for the all-Cloudflare demo stack.
+#
+#   1. Anvil on :8545
+#   2. forge script Deploy.s.sol → deployments-anvil.json
+#   3. gen-dev-vars.ts → .dev.vars for demo-a2a + demo-mcp
+#   4. wrangler d1 migrations apply demo-mcp --local
+#   5. wrangler dev for demo-a2a (:8787) + demo-mcp (:8788) + vite dev for demo-web (:5173)
 #
 # Ctrl-C cleans everything up.
 
@@ -20,42 +23,47 @@ cleanup() {
 trap cleanup INT TERM
 
 if ! command -v anvil >/dev/null 2>&1; then
-  echo "ERROR: anvil not found. Install foundry: https://book.getfoundry.sh/getting-started/installation"
+  echo "ERROR: anvil not found. Install Foundry: https://book.getfoundry.sh/getting-started/installation"
   exit 1
 fi
 
 ANVIL_PORT=${ANVIL_PORT:-8545}
-A2A_PORT=${A2A_PORT:-8787}
-MCP_PORT=${MCP_PORT:-8788}
-WEB_PORT=${WEB_PORT:-5173}
 
 # 1. Anvil
-echo "[1/3] Starting Anvil on :$ANVIL_PORT…"
+echo "[1/5] Starting Anvil on :$ANVIL_PORT…"
 anvil --port "$ANVIL_PORT" --silent &
 ANVIL_PID=$!
 sleep 1
 
-# 2. Deploy contracts (skips if Deploy.s.sol is still a stub)
-if [ -d apps/contracts/lib ] && [ -d apps/contracts/src ] && [ "$(ls -A apps/contracts/src 2>/dev/null)" ]; then
-  echo "[2/3] Deploying contracts to Anvil…"
-  (cd apps/contracts && pnpm deploy:anvil) || echo "  (contract deploy skipped — vendoring not yet complete)"
+# 2. Deploy contracts
+if [ -d apps/contracts/lib ] && [ "$(ls -A apps/contracts/src 2>/dev/null)" ]; then
+  echo "[2/5] Deploying contracts to Anvil…"
+  (cd apps/contracts && pnpm deploy:anvil)
 else
-  echo "[2/3] Skipping contract deploy (apps/contracts not yet vendored / setup not run)."
-  echo "      Run: cd apps/contracts && bash setup.sh && pnpm build"
+  echo "[2/5] Contracts not built. Run: cd apps/contracts && bash setup.sh && pnpm build"
+  exit 1
 fi
 
-# 3. Start the three apps in parallel
-echo "[3/3] Starting demo-a2a, demo-mcp, demo-web…"
-PORT=$A2A_PORT pnpm --filter @agenticprimitives-demo/a2a dev &
-PORT=$MCP_PORT pnpm --filter @agenticprimitives-demo/mcp dev &
+# 3. Generate .dev.vars for the Workers
+echo "[3/5] Generating .dev.vars for demo Workers…"
+pnpm tsx scripts/gen-dev-vars.ts
+
+# 4. Apply D1 migrations to the local SQLite
+echo "[4/5] Applying D1 migrations to local demo-mcp database…"
+(cd apps/demo-mcp && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
+
+# 5. Start workers + web
+echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-web (:5173)…"
+pnpm --filter @agenticprimitives-demo/a2a dev &
+pnpm --filter @agenticprimitives-demo/mcp dev &
 pnpm --filter @agenticprimitives-demo/web dev &
 
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
-demo-web    http://127.0.0.1:$WEB_PORT
-demo-a2a    http://127.0.0.1:$A2A_PORT/health
-demo-mcp    http://127.0.0.1:$MCP_PORT/health
+demo-web    http://127.0.0.1:5173
+demo-a2a    http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
+demo-mcp    http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
 anvil       http://127.0.0.1:$ANVIL_PORT
 ────────────────────────────────────────────────────────────
 
