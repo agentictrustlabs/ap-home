@@ -19,7 +19,7 @@ import {
   SESSION_TTL_SECONDS,
 } from '@agenticprimitives/identity-auth';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import { buildKeyProvider } from '@agenticprimitives/key-custody';
+import { buildKeyProvider, buildSignerBackend, type KmsBackend } from '@agenticprimitives/key-custody';
 import {
   SessionManager,
   hashDelegation,
@@ -122,6 +122,24 @@ app.get('/deployments', (c) =>
     valueEnforcer: c.env.VALUE_ENFORCER,
   }),
 );
+
+// Surface the agent's master signing identity. This exercises the signer
+// backend (LocalSecp256k1Signer or GcpKmsSigner) — it's the only endpoint
+// that actually hits the master key, so it's the canonical smoke test for
+// KMS migrations.
+app.get('/agent/identity', async (c) => {
+  const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes') as KmsBackend;
+  try {
+    const signer = buildSignerBackend({ backend });
+    const address = await signer.getSignerAddress();
+    return c.json({ backend, address });
+  } catch (err) {
+    return c.json(
+      { backend, error: err instanceof Error ? err.message : String(err) },
+      500,
+    );
+  }
+});
 
 function accountClient(env: Env): AgentAccountClient {
   return new AgentAccountClient({

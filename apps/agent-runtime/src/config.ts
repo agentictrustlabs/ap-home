@@ -54,11 +54,24 @@ function loadDeployments(): DemoA2aConfig['deployments'] {
 }
 
 export function loadConfig(): DemoA2aConfig {
-  // Required for identity-auth and key-custody, regardless of demo state:
+  // Required regardless of signer backend:
   require_('SESSION_JWT_SECRETS');
   require_('CSRF_SECRET');
   require_('A2A_SESSION_SECRET');
-  require_('A2A_MASTER_PRIVATE_KEY');
+
+  // Signer backend: A2A_KMS_BACKEND controls which set of env vars is required.
+  // 'local-aes' (default) → A2A_MASTER_PRIVATE_KEY
+  // 'gcp-kms'             → GCP_KMS_KEY_NAME + GCP_SERVICE_ACCOUNT_JSON
+  const backend = (process.env.A2A_KMS_BACKEND ?? 'local-aes').trim();
+  if (backend === 'gcp-kms') {
+    require_('GCP_KMS_KEY_NAME');
+    require_('GCP_SERVICE_ACCOUNT_JSON');
+  } else if (backend === 'aws-kms') {
+    require_('AWS_KMS_KEY_ID');
+    // AWS SDK reads AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY itself.
+  } else {
+    require_('A2A_MASTER_PRIVATE_KEY');
+  }
 
   return {
     port: Number(process.env.PORT ?? 8787),

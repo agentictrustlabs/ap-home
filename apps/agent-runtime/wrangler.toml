@@ -61,6 +61,13 @@ CHAIN_ID = "84532"
 # blank so a misconfigured deploy fails closed (no CORS allowed, no MCP).
 ALLOWED_ORIGINS = ""
 MCP_URL = ""
+# Signer backend selection. Empty default → factory falls back to 'local-aes'
+# (which reads A2A_MASTER_PRIVATE_KEY secret). Override per-deploy with
+# A2A_KMS_BACKEND=gcp-kms GCP_KMS_KEY_NAME=projects/... pnpm deploy:cloudflare
+# — the deploy script passes both via --var, and GCP_SERVICE_ACCOUNT_JSON
+# is set via `wrangler secret put`.
+A2A_KMS_BACKEND = ""
+GCP_KMS_KEY_NAME = ""
 # Contract addresses (ENTRY_POINT, DELEGATION_MANAGER, etc.) likewise injected
 # at deploy time via --var from deployments-base-sepolia.json.
 
