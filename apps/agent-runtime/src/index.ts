@@ -17,6 +17,7 @@ import {
   SessionManager,
   createMemorySessionStore,
   hashDelegation,
+  mintDelegationToken,
   type Delegation,
 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
@@ -181,7 +182,52 @@ app.post('/session/package', async (c) => {
   });
 });
 
-app.post('/tools/:name', (c) => c.json({ error: 'not implemented' }, 501));
+// STEP 3: tool proxy. Web app calls /tools/<name> with sessionId; a2a
+// resolves the session, mints a DelegationToken bound to the MCP audience,
+// and forwards the call. The mcp side validates the token end-to-end
+// (signature, on-chain isRevoked, ERC-1271, caveats, JTI).
+const MCP_AUDIENCE = 'urn:mcp:server:person';
+const MCP_URL = process.env.MCP_URL ?? 'http://127.0.0.1:8788';
+
+app.post('/tools/:name', async (c) => {
+  const toolName = c.req.param('name');
+  const body = (await c.req.json().catch(() => null)) as {
+    sessionId?: string;
+    args?: Record<string, unknown>;
+  } | null;
+  if (!body?.sessionId) return c.json({ error: 'sessionId required' }, 400);
+
+  let resolved;
+  try {
+    resolved = await sessionManager.resolve(body.sessionId);
+  } catch (e) {
+    return c.json({ error: 'session resolve failed', detail: String(e) }, 400);
+  }
+  if (!resolved.delegation) return c.json({ error: 'session has no delegation bound' }, 400);
+
+  // Mint a token signed by the session key, scoped to the MCP audience.
+  const { token } = await mintDelegationToken(
+    {
+      iss: 'demo-a2a',
+      aud: MCP_AUDIENCE,
+      sub: resolved.delegation.delegator,
+      delegation: resolved.delegation,
+      sessionKeyAddress: resolved.signer.address,
+      ttlSeconds: 300,
+      usageLimit: 10,
+    },
+    (msg) => resolved.signer.signMessage(msg),
+  );
+
+  // Forward to the MCP server.
+  const mcpRes = await fetch(`${MCP_URL}/tools/${toolName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, args: body.args ?? {} }),
+  });
+  const mcpBody = (await mcpRes.json().catch(() => ({ error: 'mcp returned non-JSON' }))) as Record<string, unknown>;
+  return c.json(mcpBody, mcpRes.ok ? 200 : (mcpRes.status as never));
+});
 
 // Suppress unused import (used in package.json type)
 void deriveSaltFromLabel;
