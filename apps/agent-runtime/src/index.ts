@@ -56,6 +56,12 @@ export interface Env {
   CSRF_SECRET: string;
   A2A_SESSION_SECRET: string;
   A2A_MASTER_PRIVATE_KEY: string;
+
+  // Optional: when present, demo-a2a lazy-deploys the smart account on
+  // first SIWE login. Without it, smart accounts stay counterfactual
+  // (existing demo behavior). The address holding this key needs Base
+  // Sepolia ETH to pay deployment gas. See specs/120-deploy.md §4.6.
+  A2A_BOOTSTRAP_PRIVATE_KEY?: string;
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -200,7 +206,28 @@ app.post('/auth/siwe-verify', async (c) => {
     return c.json({ error: 'smart-account-address derivation failed', detail: String(e) }, 500);
   }
 
-  const isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
+  let isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
+
+  // Lazy deploy: if a bootstrap key is configured and the smart account
+  // isn't on-chain yet, deploy it before issuing any delegations. This is
+  // what lets demo-mcp drop `requireDeployed: false` and fully validate
+  // ERC-1271 in production. The bootstrap key pays gas; the user keeps
+  // ownership of the resulting account.
+  if (!isDeployed && c.env.A2A_BOOTSTRAP_PRIVATE_KEY) {
+    try {
+      await accountClient(c.env).createAccountFromPrivateKey(
+        walletAddress,
+        0n,
+        c.env.A2A_BOOTSTRAP_PRIVATE_KEY as Hex,
+      );
+      isDeployed = true;
+    } catch (e) {
+      // Don't block login — fall through with isDeployed=false so the demo
+      // can still run in counterfactual mode. The frontend sees the flag
+      // and can warn that the account isn't deployed.
+      console.error('[demo-a2a] lazy account deploy failed:', e);
+    }
+  }
 
   const name = typeof body.name === 'string' && body.name.length > 0 ? body.name : 'Demo User';
   const cookie = mintSession({
