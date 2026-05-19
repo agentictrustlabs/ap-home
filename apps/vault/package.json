@@ -1,0 +1,29 @@
+{
+  "name": "@agenticprimitives-demo/mcp",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Demo MCP person-repository server: holds simple PII, exposes get/update profile tools wrapped by withDelegation.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agenticprimitives/delegation": "workspace:*",
+    "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/tool-policy": "workspace:*",
+    "@agenticprimitives/types": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.3.0",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.0"
+  }
+}
