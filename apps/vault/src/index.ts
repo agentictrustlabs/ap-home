@@ -13,8 +13,14 @@ import {
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
 import { declareTool } from '@agenticprimitives/tool-policy';
+import { createConsoleAuditSink } from '@agenticprimitives/audit';
 import type { Address } from '@agenticprimitives/types';
 import { upsertDemoProfile, getProfile, createD1JtiStore } from './db';
+
+// Audit sink (audit C3). Today: console emission only — Cloudflare's
+// `wrangler tail` surfaces these lines for forensics. Follow-up will
+// add a durable D1 sink composed via composeSinks().
+const auditSink = createConsoleAuditSink({ prefix: '[AUDIT mcp]' });
 
 export interface Env {
   DB: D1Database;
@@ -121,6 +127,8 @@ app.use('/tools/*', async (c, next) => {
     headers: { mac, nonce, timestamp, keyId },
     provider,
     jtiStore: createD1JtiStore(c.env.DB),
+    auditSink,
+    correlationId: c.req.header('cf-ray') ?? undefined,
   });
   if (!result.ok) {
     console.error(`[demo-mcp] service-mac rejected:`, result.reason);
@@ -164,7 +172,12 @@ app.post('/tools/get_profile', async (c) => {
       const profile = await getProfile(c.env.DB, principal);
       return { ok: true, profile };
     },
-    { toolName: 'get_profile', classification: GET_PROFILE_CLASSIFICATION },
+    {
+      toolName: 'get_profile',
+      classification: GET_PROFILE_CLASSIFICATION,
+      auditSink,
+      correlationId: c.req.header('cf-ray') ?? undefined,
+    },
   );
 
   try {
