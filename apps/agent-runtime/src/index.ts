@@ -19,6 +19,8 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
   verifyUserSignature,
+  csrfTokenFor,
+  verifyCsrf,
 } from '@agenticprimitives/identity-auth';
 import { createPublicClient, http } from 'viem';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
@@ -136,6 +138,69 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// CSRF middleware — audit H1.
+//
+// Double-submit cookie pattern: the browser fetches /auth/csrf once
+// (returns a token + sets a non-HttpOnly cookie). For every mutating
+// request, the browser sends the token both as a cookie AND as the
+// `X-CSRF-Token` header. The middleware:
+//  1. asserts header == cookie (timing-safe)
+//  2. verifies the HMAC over the embedded origin+timestamp
+//
+// Skipped for:
+//  - non-mutating methods (GET/HEAD/OPTIONS)
+//  - /auth/csrf (the bootstrap GET that issues the token)
+//
+// Failure mode is fail-closed: missing/invalid CSRF → 403, never 200.
+const CSRF_HEADER = 'X-CSRF-Token';
+const CSRF_COOKIE = 'agentic-csrf';
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+app.use('*', async (c, next) => {
+  if (!MUTATING_METHODS.has(c.req.method)) return next();
+  // Header double-submit + HMAC.
+  const headerToken = c.req.header(CSRF_HEADER);
+  const cookieToken = getCookie(c, CSRF_COOKIE);
+  if (!headerToken || !cookieToken || headerToken !== cookieToken) {
+    return c.json({ error: 'csrf required' }, 403);
+  }
+  // Build allowed origins from ALLOWED_ORIGINS env (the same list SIWE
+  // uses). Localhost variants always permitted for dev.
+  const allowed = ['http://127.0.0.1:5173', 'http://localhost:5173'];
+  for (const o of (c.env.ALLOWED_ORIGINS ?? '').split(',')) {
+    const t = o.trim();
+    if (t) allowed.push(t);
+  }
+  if (!verifyCsrf(headerToken, allowed)) {
+    return c.json({ error: 'csrf invalid' }, 403);
+  }
+  return next();
+});
+
+// CSRF token issuer. GET so it bypasses the middleware. Sets the
+// double-submit cookie (non-HttpOnly so JS can read it and echo it
+// back as a header). The token's HMAC binds it to the request origin.
+app.get('/auth/csrf', (c) => {
+  const origin = c.req.header('origin') ?? c.req.header('referer') ?? '';
+  if (!origin) return c.json({ error: 'origin header required' }, 400);
+  // Parse origin → scheme://host[:port], reject if it doesn't look like a URL.
+  let parsedOrigin: string;
+  try {
+    parsedOrigin = new URL(origin).origin;
+  } catch {
+    return c.json({ error: 'malformed origin' }, 400);
+  }
+  const token = csrfTokenFor(parsedOrigin);
+  setCookie(c, CSRF_COOKIE, token, {
+    httpOnly: false, // JS reads this and echoes as X-CSRF-Token
+    sameSite: 'Lax',
+    secure: parsedOrigin.startsWith('https://'),
+    maxAge: 60 * 60, // 1 hour
+    path: '/',
+  });
+  return c.json({ ok: true, token });
+});
+
 app.get('/health', (c) =>
   c.json({
     ok: true,
@@ -170,7 +235,48 @@ app.get('/deployments', (c) =>
 // view-call relaying is permitted because no signature inspection
 // happens here; only the factory method choice (which is a UserOp-
 // construction concern, NOT a signature-verification concern).
+// Audit N2: input validation + per-IP rate limit.
+const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
+const BYTES32_REGEX = /^0x[0-9a-fA-F]{64}$/;
+const UINT256_DECIMAL_REGEX = /^[0-9]{1,78}$/;
+const UINT256_MAX = (1n << 256n) - 1n;
+
+function tryUint256(s: string): bigint | null {
+  if (!UINT256_DECIMAL_REGEX.test(s)) return null;
+  let n: bigint;
+  try {
+    n = BigInt(s);
+  } catch {
+    return null;
+  }
+  if (n < 0n || n > UINT256_MAX) return null;
+  return n;
+}
+
+// Simple per-IP token bucket. Sized for demo traffic; production
+// should swap for a Durable Object or Cloudflare WAF rule.
+const RATE_LIMIT_PER_MIN = 30;
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+  if (!bucket || bucket.resetAt < now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + 60_000 });
+    return true;
+  }
+  if (bucket.count >= RATE_LIMIT_PER_MIN) return false;
+  bucket.count += 1;
+  return true;
+}
+
 app.post('/account/derive-address', async (c) => {
+  const clientIp =
+    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return c.json({ error: 'rate limit exceeded' }, 429);
+  }
+
   const body = (await c.req.json().catch(() => null)) as {
     initMethod?: 'eoa' | 'passkey';
     owner?: Address;
@@ -180,29 +286,62 @@ app.post('/account/derive-address', async (c) => {
     salt?: string;
   } | null;
   if (!body) return c.json({ error: 'body required' }, 400);
-  const salt = body.salt ? BigInt(body.salt) : 0n;
+  if (body.initMethod && body.initMethod !== 'eoa' && body.initMethod !== 'passkey') {
+    return c.json({ error: 'initMethod must be "eoa" or "passkey"' }, 400);
+  }
+
+  // Validate salt (optional, defaults to 0).
+  let salt = 0n;
+  if (body.salt !== undefined) {
+    const validated = tryUint256(body.salt);
+    if (validated === null) {
+      return c.json({ error: 'salt must be a decimal uint256 string' }, 400);
+    }
+    salt = validated;
+  }
+
   try {
     let smartAccountAddress: Address;
     if (body.initMethod === 'passkey') {
-      if (!body.credentialIdDigest || !body.pubKeyX || !body.pubKeyY) {
+      // Validate credentialIdDigest (bytes32 hex) + pubKey coords (uint256 decimal).
+      if (
+        typeof body.credentialIdDigest !== 'string' ||
+        !BYTES32_REGEX.test(body.credentialIdDigest)
+      ) {
         return c.json(
-          { error: 'credentialIdDigest, pubKeyX, pubKeyY required for initMethod=passkey' },
+          { error: 'credentialIdDigest must be a 0x-prefixed 32-byte hex string' },
           400,
         );
       }
+      const x = body.pubKeyX !== undefined ? tryUint256(body.pubKeyX) : null;
+      const y = body.pubKeyY !== undefined ? tryUint256(body.pubKeyY) : null;
+      if (x === null || y === null) {
+        return c.json(
+          { error: 'pubKeyX and pubKeyY must be decimal uint256 strings' },
+          400,
+        );
+      }
+      if (x === 0n || y === 0n) {
+        return c.json({ error: 'pubKeyX and pubKeyY must be non-zero' }, 400);
+      }
       smartAccountAddress = await accountClient(c.env).getAddressForPasskey(
-        body.credentialIdDigest,
-        BigInt(body.pubKeyX),
-        BigInt(body.pubKeyY),
+        body.credentialIdDigest as Hex,
+        x,
+        y,
         salt,
       );
     } else {
-      if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
+      if (typeof body.owner !== 'string' || !ADDRESS_REGEX.test(body.owner)) {
+        return c.json({ error: 'owner must be a 0x-prefixed 20-byte hex address' }, 400);
+      }
       smartAccountAddress = await accountClient(c.env).getAddress(body.owner, salt);
     }
     return c.json({ ok: true, smartAccountAddress });
   } catch (e) {
-    return c.json({ error: 'address derivation failed', detail: String(e) }, 500);
+    // Never echo internal error details to external callers — that
+    // could leak chain state, RPC structure, etc.
+    console.error('[/account/derive-address] failed:', e);
+    return c.json({ error: 'address derivation failed' }, 500);
   }
 });
 

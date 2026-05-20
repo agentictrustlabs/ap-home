@@ -89,12 +89,20 @@ app.post('/tools/get_profile', async (c) => {
 
 app.post('/tools/update_profile', (c) => c.json({ error: 'not implemented in demo step 3' }, 501));
 
-// Dev-only seeder.
-app.post('/_dev/seed', async (c) => {
-  const { address } = (await c.req.json()) as { address?: string };
-  if (typeof address !== 'string') return c.json({ error: 'address required' }, 400);
-  const profile = await upsertDemoProfile(c.env.DB, address);
-  return c.json({ ok: true, profile });
-});
+// Dev-only seeder. Audit M3: must not exist in production.
+// Guard wraps the route REGISTRATION (not just the handler body) so:
+//  - the route literally doesn't exist on production Workers (Hono 404s
+//    naturally for unknown paths, no "this URL was once interesting"
+//    leak)
+//  - the production preflight (scripts/check-production-deploy.ts)
+//    statically detects this as a properly-guarded dev route
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/_dev/seed', async (c) => {
+    const { address } = (await c.req.json()) as { address?: string };
+    if (typeof address !== 'string') return c.json({ error: 'address required' }, 400);
+    const profile = await upsertDemoProfile(c.env.DB, address);
+    return c.json({ ok: true, profile });
+  });
+}
 
 export default app;
