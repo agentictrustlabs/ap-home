@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agenticprimitives/agent-account": "workspace:*",
+    "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/identity-auth": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",

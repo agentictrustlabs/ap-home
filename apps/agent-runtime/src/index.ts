@@ -38,8 +38,28 @@ import {
   type Delegation,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
+import {
+  composeSinks,
+  createConsoleAuditSink,
+  type AuditSink,
+} from '@agenticprimitives/audit';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
+
+/**
+ * Audit sink for demo-a2a (C3 pass 5b). Console-only for now — demo-a2a has
+ * no D1 binding, so audit rows surface in `wrangler tail`. demo-mcp persists
+ * its half of the trail in D1. The system audit doc tracks "unify a2a + mcp
+ * audit destination" as a follow-up (audit_id N15 candidate); the security
+ * invariant satisfied today is "every signing/minting op produces an audit
+ * event", regardless of destination.
+ *
+ * composeSinks isolates per-sink failures (when more sinks are added the
+ * fan-out won't blackhole if one of them throws).
+ */
+function buildAuditSink(_env: Env): AuditSink {
+  return composeSinks(createConsoleAuditSink({ prefix: '[AUDIT a2a]' }));
+}
 
 export { SessionStoreDO };
 
@@ -375,7 +395,10 @@ app.post('/account/derive-address', async (c) => {
 app.get('/agent/identity', async (c) => {
   const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes') as KmsBackend;
   try {
-    const signer = buildSignerBackend({ backend });
+    // getSignerAddress doesn't sign, so no audit row emits here — pass the
+    // sink anyway so this endpoint stays a faithful smoke test for the
+    // production wiring.
+    const signer = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
     const address = await signer.getSignerAddress();
     return c.json({ backend, address });
   } catch (err) {
@@ -647,7 +670,7 @@ app.post('/session/deploy', async (c) => {
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
       const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
-      const kmsBackend = buildSignerBackend({ backend });
+      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
       const kmsAccount = await createKmsViemAccount(kmsBackend);
       verifyingPaymaster = {
         signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
@@ -719,7 +742,7 @@ app.post('/session/deploy/submit', async (c) => {
 
   try {
     const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
-    const kmsBackend = buildSignerBackend({ backend });
+    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
     const relayerAccount = await createKmsViemAccount(kmsBackend);
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp(
       signedUserOp,
@@ -814,6 +837,8 @@ app.post('/tools/:name', async (c) => {
   }
   if (!resolved.delegation) return c.json({ error: 'session has no delegation bound' }, 400);
 
+  const auditSink = buildAuditSink(c.env);
+  const correlationId = c.req.header('x-correlation-id') ?? crypto.randomUUID();
   const { token } = await mintDelegationToken(
     {
       iss: 'demo-a2a',
@@ -825,6 +850,7 @@ app.post('/tools/:name', async (c) => {
       usageLimit: 10,
     },
     (msg) => resolved.signer.signMessage(msg),
+    { auditSink, correlationId },
   );
 
   // Build the request body first so we can take its sha256 for the
@@ -842,6 +868,7 @@ app.post('/tools/:name', async (c) => {
   const macProvider = buildMacProvider(MCP_AUDIENCE, {
     backend: 'local-aes',
     config: { sessionSecretHex: c.env.A2A_MAC_SECRET ?? '' },
+    auditSink,
   });
   const macHeaders = await generateServiceMac({
     ctx: {
@@ -864,6 +891,7 @@ app.post('/tools/:name', async (c) => {
       'X-A2A-Mac-Nonce': macHeaders.nonce,
       'X-A2A-Mac-Timestamp': macHeaders.timestamp,
       'X-A2A-Mac-Key-Id': macHeaders.keyId,
+      'X-Correlation-Id': correlationId,
     },
     body: requestBody,
   };
