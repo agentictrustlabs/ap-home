@@ -38,10 +38,10 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
       allowedMethods: env.ALLOWED_METHODS_ENFORCER as Address,
     },
     jtiStore: createD1JtiStore(env.DB),
-    // Demo opt-in: the demo doesn't deploy the smart account before issuing
-    // delegations (counterfactual address only), so ERC-1271 can't be checked
-    // on-chain. Production code MUST remove this — see Task #43 / spec 120 §4.5.
-    requireDeployed: false,
+    // requireDeployed defaults to true (fail-closed). The demo deploys smart
+    // accounts via paymaster-sponsored UserOp in Step 1.5 before any
+    // delegation is issued, so ERC-1271 verification against the live
+    // on-chain contract is the production-grade behavior.
   };
 }
 
