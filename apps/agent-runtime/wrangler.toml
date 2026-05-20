@@ -71,6 +71,15 @@ MCP_URL = ""
 # is set via `wrangler secret put`.
 A2A_KMS_BACKEND = ""
 GCP_KMS_KEY_NAME = ""
+# A2A_ALLOW_LOCAL_MASTER_KEY: opt-in for the dev-only LocalSecp256k1Signer
+# (which loads A2A_MASTER_PRIVATE_KEY into worker memory) to run in
+# NODE_ENV=production. Required for the demo because esbuild's --define
+# bakes NODE_ENV='production' at build time, so the runtime guard fires
+# unconditionally without this opt-in. Production stacks with real-value
+# keys MUST replace this with A2A_KMS_BACKEND=gcp-kms before this flag
+# is removed. The signer logs a loud one-time warning when this flag is in
+# use. See packages/key-custody/AUDIT.md → KC-3.
+A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 # GCP_KMS_ENCRYPT_KEY_NAME: full resource name of the symmetric Cloud KMS
 # key used by GcpKmsProvider for session-data-key envelope encryption.
 # When set (alongside A2A_KMS_BACKEND=gcp-kms), demo-a2a uses Cloud KMS
