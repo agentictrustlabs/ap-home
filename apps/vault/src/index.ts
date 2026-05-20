@@ -17,6 +17,7 @@ import {
   createConsoleAuditSink,
   composeSinks,
   buildEvent,
+  createPiiGuardrailSink,
   type AuditSink,
 } from '@agenticprimitives/audit';
 import type { Address } from '@agenticprimitives/types';
@@ -35,9 +36,25 @@ import {
 // the request flow. Built per-request because the D1 sink needs
 // c.env.DB.
 function buildAuditSink(env: Env): AuditSink {
+  // Pass 5g (AUD-1): wrap the durable D1 sink with the PII guardrail so
+  // accidental secret leaks in emitted events get redacted at the sink
+  // boundary BEFORE they hit the append-only forensics table. Per the
+  // package CLAUDE.md invariant this is defense-in-depth — emitters
+  // still MUST hash/omit raw secrets — but D1 rows are forever, so a
+  // single sloppy emitter would otherwise poison the trail permanently.
+  // Console intentionally bypasses the guardrail: ops debugging in
+  // `wrangler tail` benefits from raw values, and worker logs roll off.
   return composeSinks(
     createConsoleAuditSink({ prefix: '[AUDIT mcp]' }),
-    createD1AuditSink(env.DB),
+    createPiiGuardrailSink(createD1AuditSink(env.DB), {
+      mode: 'redact',
+      onDetect: ({ event, findings }) => {
+        console.warn(
+          `[AUDIT mcp] PII guardrail flagged event ${event.id} (action=${event.action}):`,
+          findings.map((f) => `${f.path}=${f.reason}/${f.preview}`).join(', '),
+        );
+      },
+    }),
   );
 }
 
