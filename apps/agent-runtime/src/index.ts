@@ -10,15 +10,17 @@ import { Hono } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
 import {
-  verify as siweVerify,
-  type SiweVerifyResult,
+  verify as siweVerifyLegacy,
+  verifyOnchain as siweVerifyOnchain,
 } from '@agenticprimitives/identity-auth/siwe';
 import {
   mintSession,
   verifySession,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
+  verifyUserSignature,
 } from '@agenticprimitives/identity-auth';
+import { createPublicClient, http } from 'viem';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { buildKeyProvider, buildSignerBackend, type KmsBackend } from '@agenticprimitives/key-custody';
 import { createKmsViemAccount } from '@agenticprimitives/key-custody/kms-viem';
@@ -55,6 +57,17 @@ export interface Env {
   ALLOWED_TARGETS_ENFORCER: string;
   ALLOWED_METHODS_ENFORCER: string;
   VALUE_ENFORCER: string;
+  /**
+   * UniversalSignatureValidator address. When set, /auth/siwe-verify
+   * uses the on-chain validator (handles EOA + ERC-1271 + ERC-6492
+   * uniformly — required for passkey-owned smart accounts). When unset,
+   * falls back to legacy ECDSA-only verification (EOA-owner flow only).
+   *
+   * Per spec 130 and the `demo-a2a is signer-agnostic` doctrine: with
+   * the validator wired in, demo-a2a never inspects the signature bytes
+   * — passkey vs EOA dispatch happens on-chain inside the validator.
+   */
+  UNIVERSAL_SIGNATURE_VALIDATOR?: string;
   /**
    * Optional. When set, /session/deploy + /session/deploy/submit are
    * enabled — users can deploy their smart accounts via UserOp sponsored
@@ -214,6 +227,15 @@ app.post('/auth/siwe-verify', async (c) => {
     message?: string;
     signature?: Hex;
     name?: string;
+    /**
+     * Optional. When the SIWE `address` field is an EOA (legacy flow),
+     * the smart account is derived from it via the factory. When the
+     * SIWE `address` IS the smart account (passkey flow or any new
+     * client built signer-agnostic), set this to true so we skip the
+     * derivation and just verify the signature against the claimed
+     * smart-account address.
+     */
+    addressIsSmartAccount?: boolean;
   } | null;
   if (!body || typeof body.message !== 'string' || typeof body.signature !== 'string') {
     return c.json({ error: 'message and signature required' }, 400);
@@ -221,8 +243,6 @@ app.post('/auth/siwe-verify', async (c) => {
 
   // Allowed SIWE domains: local dev + any hostname extracted from
   // ALLOWED_ORIGINS (which is the deployed Pages URL in production).
-  // The frontend's SIWE message uses `window.location.hostname`, so the
-  // hostnames here must match whatever origin a legitimate user is on.
   const allowedDomains = ['demo.agenticprimitives.local', '127.0.0.1', 'localhost'];
   for (const origin of (c.env.ALLOWED_ORIGINS ?? '').split(',')) {
     const trimmed = origin.trim();
@@ -233,33 +253,65 @@ app.post('/auth/siwe-verify', async (c) => {
       // ignore malformed origin entries
     }
   }
-  const result: SiweVerifyResult | { ok: false; reason: string } = siweVerify(
-    body.message,
-    body.signature,
-    { allowedDomains },
-  );
-  if (!result.ok) {
-    return c.json({ error: 'siwe verify failed', reason: result.reason }, 401);
+
+  // Two verification modes:
+  //   1. Signer-agnostic (preferred): UNIVERSAL_SIGNATURE_VALIDATOR is set →
+  //      use verifyOnchain. Handles EOA, ERC-1271, and ERC-6492 uniformly.
+  //   2. Legacy ECDSA-only: validator address missing → fall back to
+  //      siweVerify (ECDSA recovery). EOA-only.
+  let verifyResult: { ok: true; address: Address } | { ok: false; reason: string };
+  if (c.env.UNIVERSAL_SIGNATURE_VALIDATOR) {
+    const publicClient = createPublicClient({
+      transport: http(c.env.RPC_URL),
+    });
+    const r = await siweVerifyOnchain(
+      body.message,
+      body.signature,
+      async ({ signer, hash, signature }) =>
+        verifyUserSignature({
+          universalValidator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address,
+          signer,
+          hash,
+          signature,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          client: publicClient as any,
+        }),
+      { allowedDomains },
+    );
+    verifyResult = r.ok ? { ok: true, address: r.address } : { ok: false, reason: r.reason };
+  } else {
+    const r = siweVerifyLegacy(body.message, body.signature, { allowedDomains });
+    verifyResult = r.ok ? { ok: true, address: r.address } : { ok: false, reason: r.reason };
+  }
+  if (!verifyResult.ok) {
+    return c.json({ error: 'siwe verify failed', reason: verifyResult.reason }, 401);
   }
 
-  const walletAddress = result.address;
+  // Resolve the smart-account address. Two cases:
+  //   - addressIsSmartAccount=true  → the SIWE message already names the
+  //     smart account; use it directly. walletAddress=null (no EOA in
+  //     the trust chain, e.g. passkey-owned account).
+  //   - addressIsSmartAccount=false (legacy) → SIWE address is an EOA;
+  //     derive the smart-account via factory.getAddress(eoa, 0).
+  let walletAddress: Address | null;
   let smartAccountAddress: Address;
-  try {
-    smartAccountAddress = await accountClient(c.env).getAddress(walletAddress, 0n);
-  } catch (e) {
-    return c.json({ error: 'smart-account-address derivation failed', detail: String(e) }, 500);
+  if (body.addressIsSmartAccount) {
+    walletAddress = null;
+    smartAccountAddress = verifyResult.address;
+  } else {
+    walletAddress = verifyResult.address;
+    try {
+      smartAccountAddress = await accountClient(c.env).getAddress(walletAddress, 0n);
+    } catch (e) {
+      return c.json({ error: 'smart-account-address derivation failed', detail: String(e) }, 500);
+    }
   }
 
   const isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
-  // No backend-driven deploy here. Step 1.5 in the frontend handles deploy
-  // via paymaster-sponsored UserOp (user signs the userOpHash, demo-a2a
-  // bundles + submits through the EntryPoint). That's the canonical
-  // deployment path; this endpoint just reports whether the account is
-  // already on-chain.
 
   const name = typeof body.name === 'string' && body.name.length > 0 ? body.name : 'Demo User';
   const cookie = mintSession({
-    sub: `did:ethr:${c.env.CHAIN_ID}:${walletAddress}`,
+    sub: `did:ethr:${c.env.CHAIN_ID}:${smartAccountAddress}`,
     walletAddress,
     smartAccountAddress,
     name,
@@ -282,26 +334,66 @@ app.post('/auth/siwe-verify', async (c) => {
 
 /**
  * POST /session/deploy
- * Body: { owner: Address, salt?: string }
- * Returns: { userOp, userOpHash, sender } — for the client to sign userOpHash
  *
- * No-op (returns 409) if PAYMASTER env is unset, since we have no paymaster
- * to route the UserOp through.
+ * EOA path (legacy):
+ *   Body: { initMethod?: 'eoa', owner: Address, salt?: string }
+ *   Builds a UserOp whose initCode calls `createAccount(owner, salt)`.
+ *
+ * Passkey path (spec 130):
+ *   Body: { initMethod: 'passkey', credentialIdDigest: Hex,
+ *           pubKeyX: string, pubKeyY: string, salt?: string }
+ *   Builds a UserOp whose initCode calls
+ *   `createAccountWithPasskey(credentialIdDigest, x, y, salt)`. The
+ *   deployed account has zero EOA owners — the passkey IS the owner.
+ *
+ * Returns: { userOp, userOpHash, sender } — for the client to sign
+ * userOpHash. **demo-a2a does NOT inspect the signature** in the submit
+ * step; the EntryPoint + AgentAccount validate it on-chain (passkey
+ * dispatches through _verifyWebAuthn). The signer-agnostic doctrine
+ * holds — only the factory-method choice is server-visible here.
+ *
+ * No-op (returns 409) if PAYMASTER env is unset.
  */
 app.post('/session/deploy', async (c) => {
   if (!c.env.PAYMASTER) {
     return c.json({ error: 'paymaster not configured', detail: 'set PAYMASTER env to enable lazy deploy' }, 409);
   }
-  const body = (await c.req.json().catch(() => null)) as { owner?: Address; salt?: string } | null;
-  if (!body?.owner) return c.json({ error: 'owner required' }, 400);
+  const body = (await c.req.json().catch(() => null)) as {
+    initMethod?: 'eoa' | 'passkey';
+    owner?: Address;
+    credentialIdDigest?: Hex;
+    pubKeyX?: string;
+    pubKeyY?: string;
+    salt?: string;
+  } | null;
+  if (!body) return c.json({ error: 'body required' }, 400);
   const salt = body.salt ? BigInt(body.salt) : 0n;
+  const initMethod = body.initMethod ?? 'eoa';
+
   try {
-    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOp({
-      owner: body.owner,
-      salt,
-      paymaster: c.env.PAYMASTER as Address,
-    });
-    // Serialize bigints to strings for JSON.
+    let userOp, userOpHash, sender;
+    if (initMethod === 'passkey') {
+      if (!body.credentialIdDigest || !body.pubKeyX || !body.pubKeyY) {
+        return c.json(
+          { error: 'credentialIdDigest, pubKeyX, pubKeyY required for initMethod=passkey' },
+          400,
+        );
+      }
+      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpWithPasskey({
+        credentialIdDigest: body.credentialIdDigest,
+        pubKeyX: BigInt(body.pubKeyX),
+        pubKeyY: BigInt(body.pubKeyY),
+        salt,
+        paymaster: c.env.PAYMASTER as Address,
+      }));
+    } else {
+      if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
+      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOp({
+        owner: body.owner,
+        salt,
+        paymaster: c.env.PAYMASTER as Address,
+      }));
+    }
     return c.json({
       ok: true,
       sender,
