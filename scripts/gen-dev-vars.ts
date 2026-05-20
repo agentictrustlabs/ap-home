@@ -54,6 +54,10 @@ const DEV_SECRETS = {
   A2A_SESSION_SECRET: '0x' + 'cc'.repeat(32),
   // Anvil[0] private key. Public knowledge; safe for dev.
   A2A_MASTER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+  // Audit C1: shared MAC secret used by demo-a2a (caller) AND
+  // demo-mcp (verifier) to authenticate the A2A→MCP service envelope.
+  // Same 32-byte hex on both .dev.vars files so the HMAC subkeys match.
+  A2A_MAC_SECRET: '0x' + 'dd'.repeat(32),
 };
 
 function writeDotEnv(filePath: string, content: Record<string, string>): void {
@@ -93,6 +97,8 @@ const mcpVars: Record<string, string> = {
   ALLOWED_TARGETS_ENFORCER: d.allowedTargetsEnforcer,
   ALLOWED_METHODS_ENFORCER: d.allowedMethodsEnforcer,
   VALUE_ENFORCER: d.valueEnforcer,
+  // Audit C1: shared MAC secret matching demo-a2a's value above.
+  A2A_MAC_SECRET: DEV_SECRETS.A2A_MAC_SECRET,
 };
 
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars);
