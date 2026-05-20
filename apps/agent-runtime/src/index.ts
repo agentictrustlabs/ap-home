@@ -156,8 +156,55 @@ app.get('/deployments', (c) =>
     allowedMethodsEnforcer: c.env.ALLOWED_METHODS_ENFORCER,
     valueEnforcer: c.env.VALUE_ENFORCER,
     universalSignatureValidator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR ?? null,
+    // Note: RPC_URL is intentionally NOT exposed. When it embeds an
+    // API key (Alchemy / Infura / etc.), the public /deployments
+    // endpoint would leak it. The browser instead calls
+    // /account/derive-address for any view-call address derivation.
   }),
 );
+
+// View-call relay: derive a smart-account address from constructor
+// args, server-side, using the demo-a2a's configured RPC. Lets the
+// browser stay RPC-agnostic — the API key for the RPC provider never
+// leaves the Worker. Per the `demo-a2a is signer-agnostic` doctrine:
+// view-call relaying is permitted because no signature inspection
+// happens here; only the factory method choice (which is a UserOp-
+// construction concern, NOT a signature-verification concern).
+app.post('/account/derive-address', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    initMethod?: 'eoa' | 'passkey';
+    owner?: Address;
+    credentialIdDigest?: Hex;
+    pubKeyX?: string;
+    pubKeyY?: string;
+    salt?: string;
+  } | null;
+  if (!body) return c.json({ error: 'body required' }, 400);
+  const salt = body.salt ? BigInt(body.salt) : 0n;
+  try {
+    let smartAccountAddress: Address;
+    if (body.initMethod === 'passkey') {
+      if (!body.credentialIdDigest || !body.pubKeyX || !body.pubKeyY) {
+        return c.json(
+          { error: 'credentialIdDigest, pubKeyX, pubKeyY required for initMethod=passkey' },
+          400,
+        );
+      }
+      smartAccountAddress = await accountClient(c.env).getAddressForPasskey(
+        body.credentialIdDigest,
+        BigInt(body.pubKeyX),
+        BigInt(body.pubKeyY),
+        salt,
+      );
+    } else {
+      if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
+      smartAccountAddress = await accountClient(c.env).getAddress(body.owner, salt);
+    }
+    return c.json({ ok: true, smartAccountAddress });
+  } catch (e) {
+    return c.json({ error: 'address derivation failed', detail: String(e) }, 500);
+  }
+});
 
 // Surface the agent's master signing identity. This exercises the signer
 // backend (LocalSecp256k1Signer or GcpKmsSigner) — it's the only endpoint
