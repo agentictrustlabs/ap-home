@@ -13,7 +13,7 @@ import {
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
 import { declareTool } from '@agenticprimitives/tool-policy';
-import { createConsoleAuditSink } from '@agenticprimitives/audit';
+import { createConsoleAuditSink, buildEvent } from '@agenticprimitives/audit';
 import type { Address } from '@agenticprimitives/types';
 import { upsertDemoProfile, getProfile, createD1JtiStore } from './db';
 
@@ -95,12 +95,40 @@ app.use('/tools/*', async (c, next) => {
   const nonce = c.req.header('X-A2A-Mac-Nonce');
   const timestamp = c.req.header('X-A2A-Mac-Timestamp');
   const keyId = c.req.header('X-A2A-Mac-Key-Id');
+  const correlationId = c.req.header('cf-ray') ?? undefined;
   if (!mac || !nonce || !timestamp || !keyId) {
+    // Emit before returning so missing-header rejections also land in
+    // the audit trail. Audit C3 follow-up: belongs alongside the other
+    // service-mac reject paths.
+    await auditSink
+      .write(
+        buildEvent({
+          action: 'mcp-runtime.service-mac.reject',
+          outcome: 'denied',
+          correlationId,
+          actor: { type: 'service', id: 'unknown' },
+          subject: { type: 'tool', id: c.req.path.split('/').pop() ?? '' },
+          audience: c.env.MCP_AUDIENCE,
+          reason: 'service-mac headers required',
+        }),
+      )
+      .catch(() => {});
     return c.json({ error: 'service-mac headers required' }, 401);
   }
   if (!c.env.A2A_MAC_SECRET) {
     if (process.env.NODE_ENV === 'production') {
       console.error('[demo-mcp] A2A_MAC_SECRET is not set in production — fail-closed');
+      await auditSink
+        .write(
+          buildEvent({
+            action: 'mcp-runtime.service-mac.reject',
+            outcome: 'error',
+            correlationId,
+            audience: c.env.MCP_AUDIENCE,
+            reason: 'A2A_MAC_SECRET unset in production',
+          }),
+        )
+        .catch(() => {});
       return c.json({ error: 'service-mac unavailable' }, 401);
     }
     console.warn('[demo-mcp] A2A_MAC_SECRET unset — dev bypass; production would 401');
