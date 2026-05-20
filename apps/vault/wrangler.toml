@@ -38,7 +38,8 @@ MCP_AUDIENCE = "urn:mcp:server:person"
 # ──────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
-RPC_URL = "https://sepolia.base.org"
+# RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
+# the rationale. Set as a wrangler secret instead.
 CHAIN_ID = "84532"
 MCP_AUDIENCE = "urn:mcp:server:person"
 

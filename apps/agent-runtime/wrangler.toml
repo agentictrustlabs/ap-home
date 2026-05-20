@@ -54,7 +54,10 @@ MCP_URL = "http://127.0.0.1:8788"
 # ──────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
-RPC_URL = "https://sepolia.base.org"
+# RPC_URL intentionally omitted — set as a secret instead so the value
+# (which may embed an API key for a paid RPC provider like Alchemy /
+# Infura) doesn't end up in the tracked wrangler.toml. Configure with:
+#   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
 # These two are placeholders — `pnpm deploy:cloudflare` overrides via `--var`
 # with the freshly-deployed Pages URL + demo-mcp Worker URL. Defaults left
