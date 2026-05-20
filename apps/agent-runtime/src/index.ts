@@ -393,7 +393,7 @@ app.post('/account/derive-address', async (c) => {
 // that actually hits the master key, so it's the canonical smoke test for
 // KMS migrations.
 app.get('/agent/identity', async (c) => {
-  const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes') as KmsBackend;
+  const backend = (((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes')) as KmsBackend;
   try {
     // getSignerAddress doesn't sign, so no audit row emits here — pass the
     // sink anyway so this endpoint stays a faithful smoke test for the
@@ -477,7 +477,7 @@ function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {
   //   wrap session data keys with Cloud KMS Encrypt/Decrypt. Production-grade.
   // - Otherwise fall back to local-aes (dev backend; fails fast when
   //   NODE_ENV=production per its production guard).
-  const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+  const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
   const keyCustody =
     backend === 'gcp-kms' && env.GCP_KMS_ENCRYPT_KEY_NAME && env.GCP_SERVICE_ACCOUNT_JSON
       ? buildKeyProvider({
@@ -669,7 +669,7 @@ app.post('/session/deploy', async (c) => {
       | { signFn: (hash: Hex) => Promise<Hex> }
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
       const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
       const kmsAccount = await createKmsViemAccount(kmsBackend);
       verifyingPaymaster = {
@@ -741,7 +741,7 @@ app.post('/session/deploy/submit', async (c) => {
   };
 
   try {
-    const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
     const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
     const relayerAccount = await createKmsViemAccount(kmsBackend);
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp(
