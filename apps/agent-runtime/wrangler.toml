@@ -68,6 +68,13 @@ MCP_URL = ""
 # is set via `wrangler secret put`.
 A2A_KMS_BACKEND = ""
 GCP_KMS_KEY_NAME = ""
+# PAYMASTER: SmartAgentPaymaster contract address. When set, demo-a2a
+# enables the /session/deploy endpoints; demo-web shows the Step 1.5
+# "Deploy smart account" prompt and the user's smart account is deployed
+# via a paymaster-sponsored UserOp on first SIWE login. When empty,
+# /session/deploy returns 409 and the demo falls back to counterfactual
+# mode (requireDeployed:false in demo-mcp).
+PAYMASTER = ""
 # Contract addresses (ENTRY_POINT, DELEGATION_MANAGER, etc.) likewise injected
 # at deploy time via --var from deployments-base-sepolia.json.
 

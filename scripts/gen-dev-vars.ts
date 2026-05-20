@@ -39,6 +39,7 @@ interface Deployments {
   allowedTargetsEnforcer: string;
   allowedMethodsEnforcer: string;
   valueEnforcer: string;
+  smartAgentPaymaster?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -73,6 +74,10 @@ const a2aVars: Record<string, string> = {
   ALLOWED_TARGETS_ENFORCER: d.allowedTargetsEnforcer,
   ALLOWED_METHODS_ENFORCER: d.allowedMethodsEnforcer,
   VALUE_ENFORCER: d.valueEnforcer,
+  // PAYMASTER: only present when deployments JSON has the address.
+  // Without it, demo-a2a's /session/deploy returns 409 and the frontend
+  // falls back to counterfactual mode.
+  ...(d.smartAgentPaymaster ? { PAYMASTER: d.smartAgentPaymaster } : {}),
 };
 
 const mcpVars: Record<string, string> = {
