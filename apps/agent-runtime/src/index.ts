@@ -42,6 +42,10 @@ export interface Env {
   CHAIN_ID: string;
   ALLOWED_ORIGINS: string;
   MCP_URL: string;
+  /** Service binding to demo-mcp (production only; not set in local dev).
+   *  Use env.MCP.fetch(...) instead of fetch(MCP_URL/...) — sibling
+   *  Worker calls via workers.dev hit Cloudflare error 1042. */
+  MCP?: Fetcher;
 
   // Contract addresses (.dev.vars locally; wrangler secret put for production)
   ENTRY_POINT: string;
@@ -140,41 +144,6 @@ app.get('/deployments', (c) =>
     valueEnforcer: c.env.VALUE_ENFORCER,
   }),
 );
-
-// Temporary diagnostic — returns key env values so we can spot misconfig
-// without redeploying. Remove before any public release.
-app.get('/debug/env', (c) =>
-  c.json({
-    MCP_URL: c.env.MCP_URL,
-    MCP_URL_length: c.env.MCP_URL?.length,
-    ALLOWED_ORIGINS: c.env.ALLOWED_ORIGINS,
-    A2A_KMS_BACKEND: process.env.A2A_KMS_BACKEND,
-    HAS_GCP_ENCRYPT_KEY: !!c.env.GCP_KMS_ENCRYPT_KEY_NAME,
-  }),
-);
-
-// Temporary diagnostic — replays the demo-a2a → demo-mcp call shape and
-// reports what comes back. Helps diagnose worker-to-worker fetch quirks.
-app.get('/debug/mcp-roundtrip', async (c) => {
-  const url = `${c.env.MCP_URL}/tools/get_profile`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: 'fake', args: {} }),
-    });
-    const text = await res.text();
-    return c.json({
-      url,
-      status: res.status,
-      contentType: res.headers.get('content-type'),
-      bodyPreview: text.slice(0, 200),
-      bodyLength: text.length,
-    });
-  } catch (e) {
-    return c.json({ url, error: e instanceof Error ? e.message : String(e) }, 500);
-  }
-});
 
 // Surface the agent's master signing identity. This exercises the signer
 // backend (LocalSecp256k1Signer or GcpKmsSigner) — it's the only endpoint
@@ -481,11 +450,17 @@ app.post('/tools/:name', async (c) => {
     (msg) => resolved.signer.signMessage(msg),
   );
 
-  const mcpRes = await fetch(`${c.env.MCP_URL}/tools/${toolName}`, {
+  // Worker-to-Worker call: prefer the service binding when available
+  // (production — avoids Cloudflare error 1042 on sibling-Worker fetches),
+  // fall back to public-URL fetch for local dev where no binding exists.
+  const reqInit: RequestInit = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, args: body.args ?? {} }),
-  });
+  };
+  const mcpRes = c.env.MCP
+    ? await c.env.MCP.fetch(new Request(`https://internal/tools/${toolName}`, reqInit))
+    : await fetch(`${c.env.MCP_URL}/tools/${toolName}`, reqInit);
   const mcpBody = (await mcpRes.json().catch(() => ({ error: 'mcp returned non-JSON' }))) as Record<string, unknown>;
   return c.json(mcpBody, mcpRes.ok ? 200 : (mcpRes.status as never));
 });

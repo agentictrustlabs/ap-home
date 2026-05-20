@@ -89,3 +89,12 @@ PAYMASTER = ""
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
 ]
+
+# Service binding: demo-a2a → demo-mcp. Cloudflare blocks direct
+# fetch(*.workers.dev) between sibling Workers on the same account
+# with error 1042 (recursion/loop protection). Service bindings are
+# the canonical fix — calls flow through Cloudflare's internal
+# routing, never touching the public edge.
+[[env.production.services]]
+binding = "MCP"
+service = "demo-mcp-production"
