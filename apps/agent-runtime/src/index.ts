@@ -191,10 +191,24 @@ app.post('/auth/siwe-verify', async (c) => {
     return c.json({ error: 'message and signature required' }, 400);
   }
 
+  // Allowed SIWE domains: local dev + any hostname extracted from
+  // ALLOWED_ORIGINS (which is the deployed Pages URL in production).
+  // The frontend's SIWE message uses `window.location.hostname`, so the
+  // hostnames here must match whatever origin a legitimate user is on.
+  const allowedDomains = ['demo.agenticprimitives.local', '127.0.0.1', 'localhost'];
+  for (const origin of (c.env.ALLOWED_ORIGINS ?? '').split(',')) {
+    const trimmed = origin.trim();
+    if (!trimmed) continue;
+    try {
+      allowedDomains.push(new URL(trimmed).hostname);
+    } catch {
+      // ignore malformed origin entries
+    }
+  }
   const result: SiweVerifyResult | { ok: false; reason: string } = siweVerify(
     body.message,
     body.signature,
-    { allowedDomains: ['demo.agenticprimitives.local', '127.0.0.1', 'localhost'] },
+    { allowedDomains },
   );
   if (!result.ok) {
     return c.json({ error: 'siwe verify failed', reason: result.reason }, 401);
@@ -208,24 +222,12 @@ app.post('/auth/siwe-verify', async (c) => {
     return c.json({ error: 'smart-account-address derivation failed', detail: String(e) }, 500);
   }
 
-  let isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
-
-  // Lazy deploy: if the smart account isn't on-chain yet, deploy it now
-  // using the KMS-backed signer as the relayer. The KMS-derived address
-  // (NOT a local private key) pays gas; the user keeps ownership of the
-  // resulting smart account. Failures are logged but non-fatal — the demo
-  // falls back to counterfactual mode so login still works.
-  if (!isDeployed) {
-    try {
-      const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
-      const kmsBackend = buildSignerBackend({ backend });
-      const relayerAccount = await createKmsViemAccount(kmsBackend);
-      await accountClient(c.env).createAccountFromAccount(walletAddress, 0n, relayerAccount);
-      isDeployed = true;
-    } catch (e) {
-      console.error('[demo-a2a] KMS-relayed lazy deploy failed:', e);
-    }
-  }
+  const isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
+  // No backend-driven deploy here. Step 1.5 in the frontend handles deploy
+  // via paymaster-sponsored UserOp (user signs the userOpHash, demo-a2a
+  // bundles + submits through the EntryPoint). That's the canonical
+  // deployment path; this endpoint just reports whether the account is
+  // already on-chain.
 
   const name = typeof body.name === 'string' && body.name.length > 0 ? body.name : 'Demo User';
   const cookie = mintSession({
