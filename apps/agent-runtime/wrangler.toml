@@ -80,6 +80,15 @@ GCP_KMS_KEY_NAME = ""
 # is removed. The signer logs a loud one-time warning when this flag is in
 # use. See packages/key-custody/AUDIT.md → KC-3.
 A2A_ALLOW_LOCAL_MASTER_KEY = "true"
+# A2A_ALLOW_LOCAL_ENVELOPE_KEY: opt-in for LocalAesProvider's HKDF-AES
+# session-data-key wrap/unwrap (the envelope crypto under
+# delegation.SessionManager). Same shape as A2A_ALLOW_LOCAL_MASTER_KEY
+# but a stricter threat model: compromise of the wrangler-secret
+# master = decrypt every session keypair at rest = forge delegations.
+# Acceptable for the demo (test keys, ephemeral DOs); MUST be replaced
+# by A2A_KMS_BACKEND=gcp-kms + GCP_KMS_ENCRYPT_KEY_NAME before any
+# real-value keys land. See packages/key-custody/AUDIT.md → KC-3.
+A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 # GCP_KMS_ENCRYPT_KEY_NAME: full resource name of the symmetric Cloud KMS
 # key used by GcpKmsProvider for session-data-key envelope encryption.
 # When set (alongside A2A_KMS_BACKEND=gcp-kms), demo-a2a uses Cloud KMS
@@ -94,6 +103,14 @@ GCP_KMS_ENCRYPT_KEY_NAME = ""
 # /session/deploy returns 409 and the demo falls back to counterfactual
 # mode (requireDeployed:false in demo-mcp).
 PAYMASTER = ""
+# PAYMASTER_VERIFYING_SIGNER: address that demo-a2a must sign paymaster
+# envelopes for. MUST match SmartAgentPaymaster.verifyingSigner() on-chain;
+# /session/deploy appends a 77-byte verifying-paymaster signature using
+# the master KMS account when this is set. When unset, paymasterAndData
+# is built without a signature (acceptable only if paymaster is in
+# allowlist/dev mode). Realigned on-chain 2026-05-20 to the demo-a2a
+# master signer's address; tracked under audit C2.
+PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"
 # UNIVERSAL_SIGNATURE_VALIDATOR: address of the on-chain ECDSA/ERC-1271/
 # ERC-6492 verifier deployed by Deploy.s.sol. When set, /auth/siwe-verify
 # uses the validator (required for the passkey path — spec 130). When
