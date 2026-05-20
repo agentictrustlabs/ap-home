@@ -64,6 +64,13 @@ export interface Env {
   CSRF_SECRET: string;
   A2A_SESSION_SECRET: string;
   A2A_MASTER_PRIVATE_KEY: string;
+  /** Full resource name of the symmetric Cloud KMS key for envelope
+   *  encryption. Required when A2A_KMS_BACKEND=gcp-kms. */
+  GCP_KMS_ENCRYPT_KEY_NAME?: string;
+  /** Service-account JSON (set as wrangler secret). Same SA as the
+   *  signing key; needs roles/cloudkms.cryptoKeyEncrypterDecrypter on
+   *  GCP_KMS_ENCRYPT_KEY_NAME. */
+  GCP_SERVICE_ACCOUNT_JSON?: string;
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -79,6 +86,8 @@ function bridgeEnvToProcessEnv(env: Env) {
     'A2A_MASTER_PRIVATE_KEY',
     'RPC_URL',
     'CHAIN_ID',
+    'GCP_KMS_ENCRYPT_KEY_NAME',
+    'GCP_SERVICE_ACCOUNT_JSON',
   ] as const;
   for (const k of keys) {
     const v = env[k];
@@ -132,6 +141,41 @@ app.get('/deployments', (c) =>
   }),
 );
 
+// Temporary diagnostic — returns key env values so we can spot misconfig
+// without redeploying. Remove before any public release.
+app.get('/debug/env', (c) =>
+  c.json({
+    MCP_URL: c.env.MCP_URL,
+    MCP_URL_length: c.env.MCP_URL?.length,
+    ALLOWED_ORIGINS: c.env.ALLOWED_ORIGINS,
+    A2A_KMS_BACKEND: process.env.A2A_KMS_BACKEND,
+    HAS_GCP_ENCRYPT_KEY: !!c.env.GCP_KMS_ENCRYPT_KEY_NAME,
+  }),
+);
+
+// Temporary diagnostic — replays the demo-a2a → demo-mcp call shape and
+// reports what comes back. Helps diagnose worker-to-worker fetch quirks.
+app.get('/debug/mcp-roundtrip', async (c) => {
+  const url = `${c.env.MCP_URL}/tools/get_profile`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'fake', args: {} }),
+    });
+    const text = await res.text();
+    return c.json({
+      url,
+      status: res.status,
+      contentType: res.headers.get('content-type'),
+      bodyPreview: text.slice(0, 200),
+      bodyLength: text.length,
+    });
+  } catch (e) {
+    return c.json({ url, error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 // Surface the agent's master signing identity. This exercises the signer
 // backend (LocalSecp256k1Signer or GcpKmsSigner) — it's the only endpoint
 // that actually hits the master key, so it's the canonical smoke test for
@@ -160,7 +204,22 @@ function accountClient(env: Env): AgentAccountClient {
 }
 
 function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {
-  const keyCustody = buildKeyProvider({ backend: 'local-aes' });
+  // Pick the envelope-encryption backend by env:
+  // - If A2A_KMS_BACKEND=gcp-kms AND GCP_KMS_ENCRYPT_KEY_NAME is configured,
+  //   wrap session data keys with Cloud KMS Encrypt/Decrypt. Production-grade.
+  // - Otherwise fall back to local-aes (dev backend; fails fast when
+  //   NODE_ENV=production per its production guard).
+  const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+  const keyCustody =
+    backend === 'gcp-kms' && env.GCP_KMS_ENCRYPT_KEY_NAME && env.GCP_SERVICE_ACCOUNT_JSON
+      ? buildKeyProvider({
+          backend: 'gcp-kms',
+          config: {
+            cryptoKeyName: env.GCP_KMS_ENCRYPT_KEY_NAME,
+            serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
+          },
+        })
+      : buildKeyProvider({ backend: 'local-aes' });
   // Shard per-user: idFromName(accountAddress) → isolated DO instance.
   const store = new DurableObjectSessionStore(env.SESSIONS, accountAddress);
   return new SessionManager({ keyCustody, store });

@@ -68,6 +68,13 @@ MCP_URL = ""
 # is set via `wrangler secret put`.
 A2A_KMS_BACKEND = ""
 GCP_KMS_KEY_NAME = ""
+# GCP_KMS_ENCRYPT_KEY_NAME: full resource name of the symmetric Cloud KMS
+# key used by GcpKmsProvider for session-data-key envelope encryption.
+# When set (alongside A2A_KMS_BACKEND=gcp-kms), demo-a2a uses Cloud KMS
+# Encrypt/Decrypt for envelope wrapping instead of LocalAesProvider's
+# HKDF-from-local-secret path. Required for live (production) deploys
+# because LocalAesProvider fails closed when NODE_ENV=production.
+GCP_KMS_ENCRYPT_KEY_NAME = ""
 # PAYMASTER: SmartAgentPaymaster contract address. When set, demo-a2a
 # enables the /session/deploy endpoints; demo-web shows the Step 1.5
 # "Deploy smart account" prompt and the user's smart account is deployed
