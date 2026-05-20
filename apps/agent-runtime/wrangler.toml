@@ -82,6 +82,12 @@ GCP_KMS_ENCRYPT_KEY_NAME = ""
 # /session/deploy returns 409 and the demo falls back to counterfactual
 # mode (requireDeployed:false in demo-mcp).
 PAYMASTER = ""
+# UNIVERSAL_SIGNATURE_VALIDATOR: address of the on-chain ECDSA/ERC-1271/
+# ERC-6492 verifier deployed by Deploy.s.sol. When set, /auth/siwe-verify
+# uses the validator (required for the passkey path — spec 130). When
+# unset, falls back to legacy ECDSA-only recovery (EOA flow only).
+# Injected via --var at deploy time by scripts/deploy-cloudflare.ts.
+UNIVERSAL_SIGNATURE_VALIDATOR = ""
 # Contract addresses (ENTRY_POINT, DELEGATION_MANAGER, etc.) likewise injected
 # at deploy time via --var from deployments-base-sepolia.json.
 

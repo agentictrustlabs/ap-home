@@ -40,6 +40,7 @@ interface Deployments {
   allowedMethodsEnforcer: string;
   valueEnforcer: string;
   smartAgentPaymaster?: string;
+  universalSignatureValidator?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -78,6 +79,12 @@ const a2aVars: Record<string, string> = {
   // Without it, demo-a2a's /session/deploy returns 409 and the frontend
   // falls back to counterfactual mode.
   ...(d.smartAgentPaymaster ? { PAYMASTER: d.smartAgentPaymaster } : {}),
+  // UNIVERSAL_SIGNATURE_VALIDATOR: only present when deployments JSON
+  // has it. Without it, /auth/siwe-verify falls back to ECDSA-only
+  // recovery (EOA flow); passkey login will fail.
+  ...(d.universalSignatureValidator
+    ? { UNIVERSAL_SIGNATURE_VALIDATOR: d.universalSignatureValidator }
+    : {}),
 };
 
 const mcpVars: Record<string, string> = {

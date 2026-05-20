@@ -155,6 +155,7 @@ app.get('/deployments', (c) =>
     allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER,
     allowedMethodsEnforcer: c.env.ALLOWED_METHODS_ENFORCER,
     valueEnforcer: c.env.VALUE_ENFORCER,
+    universalSignatureValidator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR ?? null,
   }),
 );
 
