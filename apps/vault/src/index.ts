@@ -13,14 +13,33 @@ import {
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
 import { declareTool } from '@agenticprimitives/tool-policy';
-import { createConsoleAuditSink, buildEvent } from '@agenticprimitives/audit';
+import {
+  createConsoleAuditSink,
+  composeSinks,
+  buildEvent,
+  type AuditSink,
+} from '@agenticprimitives/audit';
 import type { Address } from '@agenticprimitives/types';
-import { upsertDemoProfile, getProfile, createD1JtiStore } from './db';
+import {
+  upsertDemoProfile,
+  getProfile,
+  createD1JtiStore,
+  createD1AuditSink,
+} from './db';
 
-// Audit sink (audit C3). Today: console emission only — Cloudflare's
-// `wrangler tail` surfaces these lines for forensics. Follow-up will
-// add a durable D1 sink composed via composeSinks().
-const auditSink = createConsoleAuditSink({ prefix: '[AUDIT mcp]' });
+// Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
+//   - console (surfaces in `wrangler tail` for live ops debugging)
+//   - D1 (durable, queryable forensics; append-only table per
+//     migration 0002)
+// composeSinks isolates per-sink failures so a D1 outage never breaks
+// the request flow. Built per-request because the D1 sink needs
+// c.env.DB.
+function buildAuditSink(env: Env): AuditSink {
+  return composeSinks(
+    createConsoleAuditSink({ prefix: '[AUDIT mcp]' }),
+    createD1AuditSink(env.DB),
+  );
+}
 
 export interface Env {
   DB: D1Database;
@@ -91,6 +110,7 @@ app.get('/health', (c) =>
 // shared secret to be present (preflight enforces).
 app.use('/tools/*', async (c, next) => {
   if (c.req.method !== 'POST') return next();
+  const auditSink = buildAuditSink(c.env);
   const mac = c.req.header('X-A2A-Mac');
   const nonce = c.req.header('X-A2A-Mac-Nonce');
   const timestamp = c.req.header('X-A2A-Mac-Timestamp');
@@ -192,6 +212,7 @@ app.post('/tools/get_profile', async (c) => {
   const body = c.get('parsedBody');
   if (!body?.token) return c.json({ error: 'token required' }, 400);
 
+  const auditSink = buildAuditSink(c.env);
   type Args = { args?: Record<string, unknown> };
   const handler = withDelegation<Args>(
     baseConfig(c.env),

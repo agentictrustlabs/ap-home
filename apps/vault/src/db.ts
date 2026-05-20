@@ -4,6 +4,7 @@
 // same INSERT … ON CONFLICT … RETURNING atomic pattern for JTI.
 
 import type { JtiStore } from '@agenticprimitives/delegation';
+import type { AuditEvent, AuditSink } from '@agenticprimitives/audit';
 
 export interface Profile {
   owner_address: string;
@@ -62,6 +63,58 @@ export function createD1JtiStore(db: D1Database, table: string = 'token_usage'):
         .first<{ usage: number }>();
       const current = row?.usage ?? 1;
       return { usage: current, allowed: current <= limit };
+    },
+  };
+}
+
+/**
+ * Durable D1 audit sink (audit C3 pass 3b). Appends each event to the
+ * `audit_events` table created by migration 0002. Append-only — the
+ * application code has no UPDATE/DELETE path.
+ *
+ * Fail-soft: any DB failure is swallowed + logged to console. The
+ * caller's request flow is never broken by an audit-emission error.
+ * Production wiring typically composes this with the console sink via
+ * `composeSinks(consoleSink, d1Sink)` so a D1 outage doesn't blackhole
+ * forensics — the console line still lands in `wrangler tail`.
+ */
+export function createD1AuditSink(
+  db: D1Database,
+  table: string = 'audit_events',
+): AuditSink {
+  return {
+    async write(event: AuditEvent) {
+      try {
+        await db
+          .prepare(
+            `INSERT INTO ${table} (
+              id, timestamp, action, outcome, correlation_id,
+              actor_type, actor_id, subject_type, subject_id,
+              reason, audience, chain_id, digest, context_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            event.id,
+            event.timestamp,
+            event.action,
+            event.outcome,
+            event.correlationId ?? null,
+            event.actor?.type ?? null,
+            event.actor?.id ?? null,
+            event.subject?.type ?? null,
+            event.subject?.id ?? null,
+            event.reason ?? null,
+            event.audience ?? null,
+            event.chainId ?? null,
+            event.digest ?? null,
+            event.context ? JSON.stringify(event.context) : null,
+          )
+          .run();
+      } catch (e) {
+        // Fail-soft: log but don't propagate. composeSinks already
+        // catches this; belt-and-braces.
+        console.error('[d1-audit-sink] write failed:', e);
+      }
     },
   };
 }
