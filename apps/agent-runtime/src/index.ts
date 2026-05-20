@@ -83,6 +83,14 @@ export interface Env {
    * falls back to counterfactual mode (requireDeployed:false in demo-mcp).
    */
   PAYMASTER?: string;
+  /**
+   * Audit C2: when set, the paymaster is in verifying-paymaster mode
+   * and demo-a2a must sign every paymaster envelope with the matching
+   * KMS key. The value is the public address of the signer (must
+   * match `paymaster.verifyingSigner()` on-chain). Unset → paymaster
+   * is in dev/accept-all mode (local anvil only).
+   */
+  PAYMASTER_VERIFYING_SIGNER?: string;
 
   // Secrets (.dev.vars / wrangler secret put)
   SESSION_JWT_SECRETS: string;
@@ -378,6 +386,59 @@ app.get('/agent/identity', async (c) => {
   }
 });
 
+// Audit N3: paymaster monitoring. Returns the current EntryPoint
+// deposit balance for the configured paymaster + alert threshold
+// status. Polled by a Cloudflare cron worker (or external monitor)
+// to surface low-deposit conditions BEFORE users hit AA31 in the
+// UX. Returns 503 when below the alert threshold so a simple
+// uptime-monitor-style probe can trigger a page/alert without
+// needing JSON parsing.
+//
+// Threshold is configurable via env PAYMASTER_ALERT_THRESHOLD_WEI.
+// Default: 5e14 wei (0.0005 ETH ≈ ~2 EOA userOps at current Base
+// Sepolia prices).
+app.get('/paymaster/status', async (c) => {
+  if (!c.env.PAYMASTER) {
+    return c.json({ ok: false, error: 'paymaster not configured' }, 503);
+  }
+  const thresholdWei = BigInt(process.env.PAYMASTER_ALERT_THRESHOLD_WEI ?? '500000000000000');
+  try {
+    const publicClient = createPublicClient({ transport: http(c.env.RPC_URL) });
+    const deposit = (await publicClient.readContract({
+      address: c.env.ENTRY_POINT as Address,
+      abi: [
+        {
+          type: 'function',
+          name: 'balanceOf',
+          stateMutability: 'view',
+          inputs: [{ name: 'account', type: 'address' }],
+          outputs: [{ type: 'uint256' }],
+        },
+      ] as const,
+      functionName: 'balanceOf',
+      args: [c.env.PAYMASTER as Address],
+    })) as bigint;
+    const lowDeposit = deposit < thresholdWei;
+    return c.json(
+      {
+        ok: !lowDeposit,
+        paymaster: c.env.PAYMASTER,
+        entryPoint: c.env.ENTRY_POINT,
+        depositWei: deposit.toString(),
+        depositEth: (Number(deposit) / 1e18).toFixed(6),
+        thresholdWei: thresholdWei.toString(),
+        lowDeposit,
+      },
+      lowDeposit ? 503 : 200,
+    );
+  } catch (e) {
+    return c.json(
+      { ok: false, error: 'paymaster status check failed', detail: String(e) },
+      500,
+    );
+  }
+});
+
 function accountClient(env: Env): AgentAccountClient {
   return new AgentAccountClient({
     rpcUrl: env.RPC_URL,
@@ -573,6 +634,26 @@ app.post('/session/deploy', async (c) => {
   const initMethod = body.initMethod ?? 'eoa';
 
   try {
+    // Audit C2: when PAYMASTER_VERIFYING_SIGNER env is set (production
+    // deploys), the paymaster is in verifying-paymaster mode and every
+    // userOp's `paymasterAndData` must carry an EIP-191-wrapped
+    // signature from that signer. We use the same KMS-backed master
+    // (also the bundler signer); demo-a2a signs the canonical hash via
+    // `signMessage({ raw })`. When the env is unset (anvil + local
+    // dev), paymaster stays in dev/accept-all mode and no signature is
+    // appended.
+    let verifyingPaymaster:
+      | { signFn: (hash: Hex) => Promise<Hex> }
+      | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+      const kmsBackend = buildSignerBackend({ backend });
+      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      verifyingPaymaster = {
+        signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
+      };
+    }
+
     let userOp, userOpHash, sender;
     if (initMethod === 'passkey') {
       if (!body.credentialIdDigest || !body.pubKeyX || !body.pubKeyY) {
@@ -587,6 +668,7 @@ app.post('/session/deploy', async (c) => {
         pubKeyY: BigInt(body.pubKeyY),
         salt,
         paymaster: c.env.PAYMASTER as Address,
+        verifyingPaymaster,
       }));
     } else {
       if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
@@ -594,6 +676,7 @@ app.post('/session/deploy', async (c) => {
         owner: body.owner,
         salt,
         paymaster: c.env.PAYMASTER as Address,
+        verifyingPaymaster,
       }));
     }
     return c.json({
