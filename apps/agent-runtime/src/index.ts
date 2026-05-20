@@ -51,6 +51,13 @@ export interface Env {
   ALLOWED_TARGETS_ENFORCER: string;
   ALLOWED_METHODS_ENFORCER: string;
   VALUE_ENFORCER: string;
+  /**
+   * Optional. When set, /session/deploy + /session/deploy/submit are
+   * enabled — users can deploy their smart accounts via UserOp sponsored
+   * by this paymaster. When unset, lazy deploy is disabled and the demo
+   * falls back to counterfactual mode (requireDeployed:false in demo-mcp).
+   */
+  PAYMASTER?: string;
 
   // Secrets (.dev.vars / wrangler secret put)
   SESSION_JWT_SECRETS: string;
@@ -239,6 +246,88 @@ app.post('/auth/siwe-verify', async (c) => {
   });
 
   return c.json({ ok: true, walletAddress, smartAccountAddress, isDeployed });
+});
+
+// ─── STEP 1.5 (optional): deploy smart account via paymaster-sponsored UserOp ─────
+
+/**
+ * POST /session/deploy
+ * Body: { owner: Address, salt?: string }
+ * Returns: { userOp, userOpHash, sender } — for the client to sign userOpHash
+ *
+ * No-op (returns 409) if PAYMASTER env is unset, since we have no paymaster
+ * to route the UserOp through.
+ */
+app.post('/session/deploy', async (c) => {
+  if (!c.env.PAYMASTER) {
+    return c.json({ error: 'paymaster not configured', detail: 'set PAYMASTER env to enable lazy deploy' }, 409);
+  }
+  const body = (await c.req.json().catch(() => null)) as { owner?: Address; salt?: string } | null;
+  if (!body?.owner) return c.json({ error: 'owner required' }, 400);
+  const salt = body.salt ? BigInt(body.salt) : 0n;
+  try {
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOp({
+      owner: body.owner,
+      salt,
+      paymaster: c.env.PAYMASTER as Address,
+    });
+    // Serialize bigints to strings for JSON.
+    return c.json({
+      ok: true,
+      sender,
+      userOpHash,
+      userOp: {
+        ...userOp,
+        nonce: userOp.nonce.toString(),
+        preVerificationGas: userOp.preVerificationGas.toString(),
+      },
+    });
+  } catch (e) {
+    return c.json({ error: 'buildDeployUserOp failed', detail: String(e) }, 500);
+  }
+});
+
+/**
+ * POST /session/deploy/submit
+ * Body: { userOp: PackedUserOperation (with signature filled) }
+ * Returns: { deployedAddress, transactionHash }
+ *
+ * Submits via our own KMS-backed bundler: handleOps([signedUserOp]) on
+ * the EntryPoint, paid (and reimbursed) by the configured paymaster.
+ */
+app.post('/session/deploy/submit', async (c) => {
+  if (!c.env.PAYMASTER) {
+    return c.json({ error: 'paymaster not configured' }, 409);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = (await c.req.json().catch(() => null)) as { userOp?: any } | null;
+  if (!body?.userOp) return c.json({ error: 'userOp required' }, 400);
+
+  // Re-hydrate bigints from string transit.
+  const signedUserOp = {
+    ...body.userOp,
+    nonce: BigInt(body.userOp.nonce),
+    preVerificationGas: BigInt(body.userOp.preVerificationGas),
+  };
+
+  try {
+    const backend = (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+    const kmsBackend = buildSignerBackend({ backend });
+    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp(
+      signedUserOp,
+      relayerAccount,
+    );
+    return c.json({
+      ok: true,
+      deployedAddress,
+      transactionHash: receipt.transactionHash,
+      status: receipt.status,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] submitDeployUserOp failed:', e);
+    return c.json({ error: 'submitDeployUserOp failed', detail: String(e) }, 500);
+  }
 });
 
 // ─── STEP 2: session lifecycle ───────────────────────────────────────────
