@@ -41,6 +41,20 @@ function buildAuditSink(env: Env): AuditSink {
   );
 }
 
+/**
+ * Extract the request's correlation ID for audit-trail stitching.
+ *
+ * Prefers `X-Correlation-Id` from the upstream caller (demo-a2a sets this
+ * per the pass-5b wiring so a single user action correlates across both
+ * workers). Falls back to Cloudflare's `cf-ray` for external clients that
+ * don't set the header — but worker-to-worker service-binding fetches
+ * don't carry `cf-ray`, so without this preference the cross-service
+ * trail breaks (correlation_id ends up NULL in D1).
+ */
+function getCorrelationId(c: { req: { header: (k: string) => string | undefined } }): string | undefined {
+  return c.req.header('X-Correlation-Id') ?? c.req.header('cf-ray') ?? undefined;
+}
+
 export interface Env {
   DB: D1Database;
 
@@ -115,7 +129,7 @@ app.use('/tools/*', async (c, next) => {
   const nonce = c.req.header('X-A2A-Mac-Nonce');
   const timestamp = c.req.header('X-A2A-Mac-Timestamp');
   const keyId = c.req.header('X-A2A-Mac-Key-Id');
-  const correlationId = c.req.header('cf-ray') ?? undefined;
+  const correlationId = getCorrelationId(c);
   if (!mac || !nonce || !timestamp || !keyId) {
     // Emit before returning so missing-header rejections also land in
     // the audit trail. Audit C3 follow-up: belongs alongside the other
@@ -176,7 +190,7 @@ app.use('/tools/*', async (c, next) => {
     provider,
     jtiStore: createD1JtiStore(c.env.DB),
     auditSink,
-    correlationId: c.req.header('cf-ray') ?? undefined,
+    correlationId: getCorrelationId(c),
   });
   if (!result.ok) {
     console.error(`[demo-mcp] service-mac rejected:`, result.reason);
@@ -225,7 +239,7 @@ app.post('/tools/get_profile', async (c) => {
       toolName: 'get_profile',
       classification: GET_PROFILE_CLASSIFICATION,
       auditSink,
-      correlationId: c.req.header('cf-ray') ?? undefined,
+      correlationId: getCorrelationId(c),
     },
   );
 
