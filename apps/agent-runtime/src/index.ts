@@ -255,10 +255,15 @@ app.get('/auth/csrf', (c) => {
     return c.json({ error: 'malformed origin' }, 400);
   }
   const token = csrfTokenFor(parsedOrigin);
+  // SameSite=None is required for cross-origin clients (demo-web-pro
+  // hits demo-a2a directly cross-site; demo-web proxies same-origin
+  // via Pages Functions). 'None' requires Secure=true, which we get on
+  // any https origin.
+  const isHttps = parsedOrigin.startsWith('https://');
   setCookie(c, CSRF_COOKIE, token, {
     httpOnly: false, // JS reads this and echoes as X-CSRF-Token
-    sameSite: 'Lax',
-    secure: parsedOrigin.startsWith('https://'),
+    sameSite: isHttps ? 'None' : 'Lax',
+    secure: isHttps,
     maxAge: 60 * 60, // 1 hour
     path: '/',
   });
