@@ -53,18 +53,20 @@ echo "[4/5] Applying D1 migrations to local demo-mcp database…"
 (cd apps/demo-mcp && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
 
 # 5. Start workers + web
-echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-web (:5173)…"
+echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-web (:5173) + demo-web-pro (:5273)…"
 pnpm --filter @agenticprimitives-demo/a2a dev &
 pnpm --filter @agenticprimitives-demo/mcp dev &
 pnpm --filter @agenticprimitives-demo/web dev &
+pnpm --filter @agenticprimitives-demo/web-pro dev &
 
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
-demo-web    http://127.0.0.1:5173
-demo-a2a    http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
-demo-mcp    http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
-anvil       http://127.0.0.1:$ANVIL_PORT
+demo-web      http://127.0.0.1:5173
+demo-web-pro  http://127.0.0.1:5273
+demo-a2a      http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
+demo-mcp      http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
+anvil         http://127.0.0.1:$ANVIL_PORT
 ────────────────────────────────────────────────────────────
 
 Press Ctrl-C to stop everything.

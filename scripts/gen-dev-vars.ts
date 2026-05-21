@@ -41,6 +41,9 @@ interface Deployments {
   valueEnforcer: string;
   smartAgentPaymaster?: string;
   universalSignatureValidator?: string;
+  thresholdValidator?: string;
+  quorumEnforcer?: string;
+  approvedHashRegistry?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -104,6 +107,26 @@ const mcpVars: Record<string, string> = {
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars);
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-mcp', '.dev.vars'), mcpVars);
 
-console.log(`gen-dev-vars: wrote .dev.vars for demo-a2a + demo-mcp (network=${NETWORK})`);
+// demo-web-pro's vite dev server reads .env.local at startup; vars must be
+// VITE_-prefixed to be inlined into the bundle. Network-dependent — runs
+// against whichever chain the contracts were last deployed to.
+const webProVars: Record<string, string> = {
+  VITE_CHAIN_ID: String(d.chainId),
+  VITE_FACTORY_ADDRESS: d.agentAccountFactory,
+  VITE_DELEGATION_MANAGER: d.delegationManager,
+  VITE_DEMO_A2A_URL: NETWORK === 'anvil'
+    ? 'http://127.0.0.1:8787'
+    : 'https://demo-a2a-production.richardpedersen3.workers.dev',
+  VITE_DEMO_MCP_URL: NETWORK === 'anvil'
+    ? 'http://127.0.0.1:8788'
+    : 'https://demo-mcp-production.richardpedersen3.workers.dev',
+  ...(d.thresholdValidator   ? { VITE_THRESHOLD_VALIDATOR:    d.thresholdValidator   } : {}),
+  ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
+  ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
+};
+writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-pro', '.env.local'), webProVars);
+
+console.log(`gen-dev-vars: wrote .dev.vars + .env.local (network=${NETWORK})`);
 console.log(`  factory: ${d.agentAccountFactory}`);
 console.log(`  delegationManager: ${d.delegationManager}`);
+if (d.thresholdValidator) console.log(`  thresholdValidator: ${d.thresholdValidator}`);
