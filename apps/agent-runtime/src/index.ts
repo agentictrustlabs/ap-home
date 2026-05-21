@@ -781,6 +781,110 @@ app.post('/session/deploy/submit', async (c) => {
   }
 });
 
+// ─── Gasless post-deploy calls (phase 6c.5-g) ─────────────────────────────
+//
+// Mirrors /session/deploy + /session/deploy/submit but for ALREADY-DEPLOYED
+// AgentAccounts. The user signs the userOpHash; demo-a2a bundles + the
+// paymaster sponsors gas. Together with the SDK's `buildCallUserOp` /
+// `submitCallUserOp` helpers (packages/agent-account/src/client.ts) this
+// is the foundation every gasless demo-web-pro flow runs on.
+
+/**
+ * POST /account/build-call-userop
+ * Body: { sender: Address, callData: Hex }
+ * Returns: { userOp, userOpHash, sender }
+ *
+ * Builds an unsigned PackedUserOperation targeting `sender` with the given
+ * `callData`. callData is whatever the AgentAccount should execute — most
+ * commonly `account.execute(target, value, data)` calldata so the user can
+ * call ANY contract via their smart account. demo-a2a does NOT inspect or
+ * restrict the callData; the on-chain `validateUserOp` (owner sig check)
+ * is the auth boundary.
+ *
+ * No-op (409) if PAYMASTER env is unset.
+ */
+app.post('/account/build-call-userop', async (c) => {
+  if (!c.env.PAYMASTER) {
+    return c.json({ error: 'paymaster not configured' }, 409);
+  }
+  const body = (await c.req.json().catch(() => null)) as {
+    sender?: Address;
+    callData?: Hex;
+  } | null;
+  if (!body?.sender || !body?.callData) {
+    return c.json({ error: 'sender + callData required' }, 400);
+  }
+
+  try {
+    // Audit C2 verifying-paymaster mode (same as /session/deploy).
+    let verifyingPaymaster:
+      | { signFn: (hash: Hex) => Promise<Hex> }
+      | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
+      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      verifyingPaymaster = {
+        signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
+      };
+    }
+
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildCallUserOp({
+      sender: body.sender,
+      callData: body.callData,
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
+    return c.json({
+      ok: true,
+      sender,
+      userOpHash,
+      userOp: {
+        ...userOp,
+        nonce: userOp.nonce.toString(),
+        preVerificationGas: userOp.preVerificationGas.toString(),
+      },
+    });
+  } catch (e) {
+    return c.json({ error: 'buildCallUserOp failed', detail: String(e) }, 500);
+  }
+});
+
+/**
+ * POST /account/submit-call-userop
+ * Body: { userOp: PackedUserOperation (with signature filled) }
+ * Returns: { transactionHash, status }
+ */
+app.post('/account/submit-call-userop', async (c) => {
+  if (!c.env.PAYMASTER) {
+    return c.json({ error: 'paymaster not configured' }, 409);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = (await c.req.json().catch(() => null)) as { userOp?: any } | null;
+  if (!body?.userOp) return c.json({ error: 'userOp required' }, 400);
+
+  const signedUserOp = {
+    ...body.userOp,
+    nonce: BigInt(body.userOp.nonce),
+    preVerificationGas: BigInt(body.userOp.preVerificationGas),
+  };
+
+  try {
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
+    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const { receipt } = await accountClient(c.env).submitCallUserOp(signedUserOp, relayerAccount);
+    return c.json({
+      ok: true,
+      transactionHash: receipt.transactionHash,
+      status: receipt.status,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] submitCallUserOp failed:', e);
+    return c.json({ error: 'submitCallUserOp failed', detail: String(e) }, 500);
+  }
+});
+
 // ─── STEP 2: session lifecycle ───────────────────────────────────────────
 
 app.post('/session/init', async (c) => {
