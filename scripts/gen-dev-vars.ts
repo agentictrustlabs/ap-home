@@ -41,7 +41,7 @@ interface Deployments {
   valueEnforcer: string;
   smartAgentPaymaster?: string;
   universalSignatureValidator?: string;
-  thresholdValidator?: string;
+  custodyPolicy?: string;
   quorumEnforcer?: string;
   approvedHashRegistry?: string;
 }
@@ -120,7 +120,7 @@ const webProVars: Record<string, string> = {
   VITE_DEMO_MCP_URL: NETWORK === 'anvil'
     ? 'http://127.0.0.1:8788'
     : 'https://demo-mcp-production.richardpedersen3.workers.dev',
-  ...(d.thresholdValidator   ? { VITE_THRESHOLD_VALIDATOR:    d.thresholdValidator   } : {}),
+  ...(d.custodyPolicy   ? { VITE_CUSTODY_POLICY:    d.custodyPolicy   } : {}),
   ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
   ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
 };
@@ -129,4 +129,4 @@ writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-pro', '.env.local'), webProVars);
 console.log(`gen-dev-vars: wrote .dev.vars + .env.local (network=${NETWORK})`);
 console.log(`  factory: ${d.agentAccountFactory}`);
 console.log(`  delegationManager: ${d.delegationManager}`);
-if (d.thresholdValidator) console.log(`  thresholdValidator: ${d.thresholdValidator}`);
+if (d.custodyPolicy) console.log(`  custodyPolicy: ${d.custodyPolicy}`);
