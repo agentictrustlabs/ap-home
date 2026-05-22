@@ -127,6 +127,10 @@ const webProVars: Record<string, string> = {
   ...(d.entryPoint           ? { VITE_ENTRY_POINT:             d.entryPoint           } : {}),
   ...(d.smartAgentPaymaster  ? { VITE_SMART_AGENT_PAYMASTER:   d.smartAgentPaymaster  } : {}),
   ...(d.deployer             ? { VITE_DEPLOYER:                d.deployer             } : {}),
+  ...(d.timestampEnforcer       ? { VITE_TIMESTAMP_ENFORCER:        d.timestampEnforcer       } : {}),
+  ...(d.valueEnforcer           ? { VITE_VALUE_ENFORCER:            d.valueEnforcer           } : {}),
+  ...(d.allowedTargetsEnforcer  ? { VITE_ALLOWED_TARGETS_ENFORCER:  d.allowedTargetsEnforcer  } : {}),
+  ...(d.allowedMethodsEnforcer  ? { VITE_ALLOWED_METHODS_ENFORCER:  d.allowedMethodsEnforcer  } : {}),
   // Use the same RPC the workers use so reads stay in sync with writes
   // (avoids the "schedule succeeded but the read RPC doesn't see it yet"
   // class of bug that mis-signs apply hashes as eta=0).

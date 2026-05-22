@@ -746,6 +746,11 @@ app.post('/session/deploy', async (c) => {
     return c.json({ error: 'paymaster not configured', detail: 'set PAYMASTER env to enable lazy deploy' }, 409);
   }
   const body = (await c.req.json().catch(() => null)) as {
+    // New polymorphic shape: any combination of external custodians + a passkey.
+    // The factory's createPersonAgent accepts mixed seeds in one shot.
+    externalCustodians?: Address[];
+    passkey?: { credentialIdDigest: Hex; pubKeyX: string; pubKeyY: string };
+    // Back-compat: legacy fields from the single-method era.
     initMethod?: 'eoa' | 'passkey';
     owner?: Address;
     credentialIdDigest?: Hex;
@@ -755,7 +760,25 @@ app.post('/session/deploy', async (c) => {
   } | null;
   if (!body) return c.json({ error: 'body required' }, 400);
   const salt = body.salt ? BigInt(body.salt) : 0n;
-  const initMethod = body.initMethod ?? 'eoa';
+  // Normalize legacy + new shapes into PersonAgentSpec inputs.
+  const externalCustodians: Address[] =
+    body.externalCustodians ??
+    (body.initMethod === 'eoa' && body.owner ? [body.owner as Address] : []);
+  const passkeyInput =
+    body.passkey ??
+    (body.initMethod === 'passkey' && body.credentialIdDigest && body.pubKeyX && body.pubKeyY
+      ? {
+          credentialIdDigest: body.credentialIdDigest,
+          pubKeyX: body.pubKeyX,
+          pubKeyY: body.pubKeyY,
+        }
+      : null);
+  if (externalCustodians.length === 0 && !passkeyInput) {
+    return c.json(
+      { error: 'at least one of externalCustodians[] or passkey must be supplied' },
+      400,
+    );
+  }
 
   try {
     // Audit C2: when PAYMASTER_VERIFYING_SIGNER env is set (production
@@ -778,37 +801,21 @@ app.post('/session/deploy', async (c) => {
       };
     }
 
-    let userOp, userOpHash, sender;
-    if (initMethod === 'passkey') {
-      if (!body.credentialIdDigest || !body.pubKeyX || !body.pubKeyY) {
-        return c.json(
-          { error: 'credentialIdDigest, pubKeyX, pubKeyY required for initMethod=passkey' },
-          400,
-        );
-      }
-      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
-        spec: {
-          passkey: {
-            credentialIdDigest: body.credentialIdDigest,
-            x: BigInt(body.pubKeyX),
-            y: BigInt(body.pubKeyY),
-          },
-          salt,
-        },
-        paymaster: c.env.PAYMASTER as Address,
-        verifyingPaymaster,
-      }));
-    } else {
-      if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
-      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
-        spec: {
-          externalCustodians: [body.owner as Address],
-          salt,
-        },
-        paymaster: c.env.PAYMASTER as Address,
-        verifyingPaymaster,
-      }));
-    }
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
+      spec: {
+        externalCustodians,
+        passkey: passkeyInput
+          ? {
+              credentialIdDigest: passkeyInput.credentialIdDigest,
+              x: BigInt(passkeyInput.pubKeyX),
+              y: BigInt(passkeyInput.pubKeyY),
+            }
+          : undefined,
+        salt,
+      },
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
     return c.json({
       ok: true,
       sender,
@@ -1000,6 +1007,348 @@ app.post('/account/submit-call-userop', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] submitCallUserOp failed:', e);
     return c.json({ error: 'submitCallUserOp failed', detail: String(e) }, 500);
+  }
+});
+
+// ─── Direct factory deploy (SIWE-only seats) ──────────────────────────────
+//
+// For seats that enrol no passkey (wallet/SIWE only), no signer is
+// available to produce a v=2 WebAuthn signature for the deploy userOp,
+// and MetaMask won't sign a raw 32-byte userOpHash. We bypass ERC-4337
+// entirely: the worker uses DEPLOYER_PRIVATE_KEY (same key that funds
+// paymaster topups) to directly invoke `factory.createPersonAgent(...)`.
+// The factory call is permissionless and registers the EOA as a
+// custodian at proxy init. Worker pays gas — gasless to the user.
+const DIRECT_DEPLOY_FACTORY_ABI = [
+  {
+    type: 'function',
+    name: 'createPersonAgent',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'externalCustodians', type: 'address[]' },
+      { name: 'passkeyCredentialIdDigest', type: 'bytes32' },
+      { name: 'passkeyX', type: 'uint256' },
+      { name: 'passkeyY', type: 'uint256' },
+      { name: 'salt', type: 'uint256' },
+    ],
+    outputs: [{ name: 'account', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getAddressForPersonAgent',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'externalCustodians', type: 'address[]' },
+      { name: 'passkeyCredentialIdDigest', type: 'bytes32' },
+      { name: 'passkeyX', type: 'uint256' },
+      { name: 'passkeyY', type: 'uint256' },
+      { name: 'salt', type: 'uint256' },
+    ],
+    outputs: [{ name: 'account', type: 'address' }],
+  },
+] as const;
+const ZERO_BYTES32: Hex = ('0x' + '00'.repeat(32)) as Hex;
+
+/**
+ * POST /session/direct-deploy-multisig
+ * Direct factory call for multi-sig Smart Agents (Org, Treasury) when
+ * the founder has no passkey to sign the userOpHash. Permissionless:
+ * `factory.createMultiSigSmartAgent(...)` accepts any caller, so the
+ * worker just sends it from the deployer EOA. CREATE2 yields the same
+ * address as a passkey-userOp-deployed one for identical init params.
+ */
+const DIRECT_MULTISIG_ABI = [
+  {
+    type: 'function',
+    name: 'createMultiSigSmartAgent',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'mode', type: 'uint8' },
+          { name: 'custodians', type: 'address[]' },
+          { name: 'trustees', type: 'address[]' },
+          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
+          { name: 'initialPasskeyX', type: 'uint256' },
+          { name: 'initialPasskeyY', type: 'uint256' },
+        ],
+      },
+      { name: 'validator', type: 'address' },
+      { name: 'safetyDelaySeconds', type: 'uint32' },
+      { name: 'salt', type: 'uint256' },
+    ],
+    outputs: [{ name: 'account', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getAddressForMultiSigSmartAgent',
+    stateMutability: 'view',
+    inputs: [
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'mode', type: 'uint8' },
+          { name: 'custodians', type: 'address[]' },
+          { name: 'trustees', type: 'address[]' },
+          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
+          { name: 'initialPasskeyX', type: 'uint256' },
+          { name: 'initialPasskeyY', type: 'uint256' },
+        ],
+      },
+      { name: 'salt', type: 'uint256' },
+    ],
+    outputs: [{ name: 'account', type: 'address' }],
+  },
+] as const;
+
+app.post('/session/direct-deploy-multisig', async (c) => {
+  try {
+    if (!c.env.DEPLOYER_PRIVATE_KEY) {
+      return c.json(
+        { ok: false, error: 'deployer_key_missing' },
+        503,
+      );
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      mode?: number;
+      custodians?: Address[];
+      trustees?: Address[];
+      initialPasskeyCredentialIdDigest?: Hex;
+      initialPasskeyX?: string;
+      initialPasskeyY?: string;
+      validator: Address;
+      safetyDelaySeconds: number;
+      salt: string;
+    } | null;
+    if (!body || !body.validator || body.safetyDelaySeconds === undefined || !body.salt) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    const params = {
+      mode: body.mode ?? 1,
+      custodians: (body.custodians ?? []) as Address[],
+      trustees: (body.trustees ?? []) as Address[],
+      initialPasskeyCredentialIdDigest: (body.initialPasskeyCredentialIdDigest ?? ZERO_BYTES32) as Hex,
+      initialPasskeyX: BigInt(body.initialPasskeyX ?? '0'),
+      initialPasskeyY: BigInt(body.initialPasskeyY ?? '0'),
+    };
+    const salt = BigInt(body.salt);
+
+    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
+      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
+      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
+    const deployer = privateKeyToAccount(pkInput);
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+
+    const predicted = (await pub.readContract({
+      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
+      abi: DIRECT_MULTISIG_ABI,
+      functionName: 'getAddressForMultiSigSmartAgent',
+      args: [params, salt],
+    })) as Address;
+
+    const code = await pub.getBytecode({ address: predicted });
+    if (code && code !== '0x') {
+      return c.json({
+        ok: true,
+        deployedAddress: predicted,
+        transactionHash: ZERO_BYTES32,
+        alreadyDeployed: true,
+      });
+    }
+
+    const hash = await wallet.writeContract({
+      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
+      abi: DIRECT_MULTISIG_ABI,
+      functionName: 'createMultiSigSmartAgent',
+      args: [params, body.validator as Address, body.safetyDelaySeconds, salt],
+    });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    return c.json({
+      ok: true,
+      deployedAddress: predicted,
+      transactionHash: hash,
+      status: receipt.status,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] direct-deploy-multisig failed:', e);
+    return c.json(
+      { ok: false, error: 'direct_multisig_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
+});
+
+app.post('/session/direct-deploy', async (c) => {
+  try {
+    if (!c.env.DEPLOYER_PRIVATE_KEY) {
+      return c.json(
+        { ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for direct deploy' },
+        503,
+      );
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      externalCustodians?: Address[];
+      salt?: string;
+    } | null;
+    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+    const externalCustodians = (body.externalCustodians ?? []).map((a) => a as Address);
+    if (externalCustodians.length === 0) {
+      return c.json({ ok: false, error: 'no_custodians' }, 400);
+    }
+    const salt = body.salt ? BigInt(body.salt) : 0n;
+
+    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
+      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
+      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
+    const deployer = privateKeyToAccount(pkInput);
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+
+    const predicted = (await pub.readContract({
+      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
+      abi: DIRECT_DEPLOY_FACTORY_ABI,
+      functionName: 'getAddressForPersonAgent',
+      args: [externalCustodians, ZERO_BYTES32, 0n, 0n, salt],
+    })) as Address;
+
+    const code = await pub.getBytecode({ address: predicted });
+    if (code && code !== '0x') {
+      return c.json({
+        ok: true,
+        deployedAddress: predicted,
+        transactionHash: ZERO_BYTES32,
+        alreadyDeployed: true,
+      });
+    }
+
+    const hash = await wallet.writeContract({
+      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
+      abi: DIRECT_DEPLOY_FACTORY_ABI,
+      functionName: 'createPersonAgent',
+      args: [externalCustodians, ZERO_BYTES32, 0n, 0n, salt],
+    });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    return c.json({
+      ok: true,
+      deployedAddress: predicted,
+      transactionHash: hash,
+      status: receipt.status,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] direct-deploy failed:', e);
+    return c.json(
+      { ok: false, error: 'direct_deploy_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
+});
+
+// ─── Custody relay (SIWE-only signers) ────────────────────────────────────
+//
+// `CustodyPolicy.scheduleCustodyChange(...)` + `.applyCustodyChange(...)`
+// validate quorum sigs over an EIP-712 hash; they DON'T constrain
+// msg.sender. So for SIWE-only signers (who can't dispatch a userOp
+// from their PSA without a passkey), the worker submits the call
+// directly from its deployer EOA. Same gas-free UX for the user.
+
+const CUSTODY_POLICY_ABI_REL = [
+  {
+    type: 'function',
+    name: 'scheduleCustodyChange',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'action', type: 'uint8' },
+      { name: 'args', type: 'bytes' },
+      { name: 'quorumSigs', type: 'bytes' },
+    ],
+    outputs: [{ name: 'changeId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'applyCustodyChange',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'changeId', type: 'uint256' },
+      { name: 'quorumSigs', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+] as const;
+
+function relayDeployer(env: Env) {
+  if (!env.DEPLOYER_PRIVATE_KEY) return null;
+  const pk = env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
+    ? (env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
+    : (`0x${env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
+  return privateKeyToAccount(pk);
+}
+
+app.post('/session/custody-schedule', async (c) => {
+  try {
+    const deployer = relayDeployer(c.env);
+    if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
+    const body = (await c.req.json().catch(() => null)) as {
+      custodyPolicy: Address;
+      account: Address;
+      action: number;
+      args: Hex;
+      quorumSigs: Hex;
+    } | null;
+    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const hash = await wallet.writeContract({
+      address: body.custodyPolicy,
+      abi: CUSTODY_POLICY_ABI_REL,
+      functionName: 'scheduleCustodyChange',
+      args: [body.account, body.action, body.args, body.quorumSigs],
+    });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    return c.json({ ok: true, transactionHash: hash, status: receipt.status });
+  } catch (e) {
+    console.error('[demo-a2a] custody-schedule failed:', e);
+    return c.json(
+      { ok: false, error: 'custody_schedule_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
+});
+
+app.post('/session/custody-apply', async (c) => {
+  try {
+    const deployer = relayDeployer(c.env);
+    if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
+    const body = (await c.req.json().catch(() => null)) as {
+      custodyPolicy: Address;
+      account: Address;
+      changeId: string;
+      quorumSigs: Hex;
+    } | null;
+    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const hash = await wallet.writeContract({
+      address: body.custodyPolicy,
+      abi: CUSTODY_POLICY_ABI_REL,
+      functionName: 'applyCustodyChange',
+      args: [body.account, BigInt(body.changeId), body.quorumSigs],
+    });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    return c.json({ ok: true, transactionHash: hash, status: receipt.status });
+  } catch (e) {
+    console.error('[demo-a2a] custody-apply failed:', e);
+    return c.json(
+      { ok: false, error: 'custody_apply_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
   }
 });
 
