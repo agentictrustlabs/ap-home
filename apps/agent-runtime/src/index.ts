@@ -22,7 +22,9 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/identity-auth';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import {
   buildKeyProvider,
@@ -118,6 +120,22 @@ export interface Env {
   A2A_SESSION_SECRET: string;
   A2A_MASTER_PRIVATE_KEY: string;
   /**
+   * Optional. When set, the worker's POST /admin/topup-paymaster endpoint
+   * can move ETH from the deployer EOA to the paymaster's EntryPoint
+   * deposit. This is how the operator refills the paymaster without
+   * shelling into the deploy environment to run `cast send`. Off by
+   * default — set via `wrangler secret put DEPLOYER_PRIVATE_KEY --env
+   * production` (or in .dev.vars locally) when you want one-click
+   * topups exposed in the demo UI.
+   *
+   * Even when set, the endpoint enforces caps:
+   *   - Each topup ≤ 0.002 ETH
+   *   - Refuses topup if paymaster deposit is already ≥ 0.005 ETH
+   *   - At most one topup per 30 seconds across the worker
+   * so a leaked endpoint cannot drain the deployer.
+   */
+  DEPLOYER_PRIVATE_KEY?: string;
+  /**
    * Opt-in flag to allow LocalSecp256k1Signer (the in-memory secp256k1
    * signer backed by A2A_MASTER_PRIVATE_KEY) under NODE_ENV=production.
    * Set to "true" in [env.production.vars] so the demo's lazy
@@ -185,6 +203,59 @@ function bridgeEnvToProcessEnv(env: Env) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (process.env as any).NODE_ENV = 'development';
   }
+}
+
+// ─── UserOp inner-revert detection ─────────────────────────────────────
+//
+// `handleOps` succeeds on the OUTER tx even when an inner userOp reverts —
+// it just emits `UserOperationEvent(..., success=false)` and (if the
+// revert had data) `UserOperationRevertReason(..., revertReason)`. Without
+// parsing those events the client thinks the userOp landed when it
+// actually no-op'd, which causes compound failures downstream (e.g.
+// schedule silently fails → apply errors with ProposalNotFound).
+//
+// Parse the receipt for any UserOperationEvent and return `{ ok: false,
+// userOpReverted: true, revertReason }` if any reverted.
+
+const USER_OP_EVENT_TOPIC = '0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f' as const;
+const USER_OP_REVERT_REASON_TOPIC = '0x1c4fada7374c0a9ee8841fc38afe82932dc0f8e69012e927f061a8bae611a201' as const;
+
+interface InnerOpResult {
+  ok: boolean;
+  /** Set when an inner userOp reverted. Best-effort hex selector + args. */
+  revertReason?: `0x${string}`;
+}
+
+function detectInnerOpFailure(receipt: {
+  logs?: ReadonlyArray<{ address?: string; topics?: ReadonlyArray<string>; data?: string }>;
+}): InnerOpResult {
+  const logs = receipt.logs ?? [];
+  let success = true;
+  let revertReason: `0x${string}` | undefined;
+  for (const log of logs) {
+    const topic0 = log.topics?.[0]?.toLowerCase();
+    if (topic0 === USER_OP_EVENT_TOPIC) {
+      // data = (nonce, success, actualGasCost, actualGasUsed)
+      // success is the second 32-byte word.
+      const d = log.data ?? '0x';
+      if (d.length >= 2 + 64 * 2) {
+        // word 0 = nonce, word 1 = success (00..0 if false, 00..1 if true)
+        const successWord = d.slice(2 + 64, 2 + 64 * 2);
+        if (BigInt('0x' + successWord) === 0n) success = false;
+      }
+    } else if (topic0 === USER_OP_REVERT_REASON_TOPIC) {
+      // data = abi.encode(bytes revertReason). Skip 32-byte offset + 32-byte length, read body.
+      const d = log.data ?? '0x';
+      if (d.length >= 2 + 64 * 2) {
+        const lengthHex = d.slice(2 + 64, 2 + 64 * 2);
+        const length = Number(BigInt('0x' + lengthHex));
+        if (Number.isFinite(length) && length > 0) {
+          revertReason = ('0x' + d.slice(2 + 64 * 2, 2 + 64 * 2 + length * 2)) as `0x${string}`;
+        }
+      }
+    }
+  }
+  return { ok: success, revertReason };
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -393,17 +464,18 @@ app.post('/account/derive-address', async (c) => {
       if (x === 0n || y === 0n) {
         return c.json({ error: 'pubKeyX and pubKeyY must be non-zero' }, 400);
       }
-      smartAccountAddress = await accountClient(c.env).getAddressForPasskey(
-        body.credentialIdDigest as Hex,
-        x,
-        y,
+      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
+        passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x, y },
         salt,
-      );
+      });
     } else {
       if (typeof body.owner !== 'string' || !ADDRESS_REGEX.test(body.owner)) {
         return c.json({ error: 'owner must be a 0x-prefixed 20-byte hex address' }, 400);
       }
-      smartAccountAddress = await accountClient(c.env).getAddress(body.owner, salt);
+      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
+        externalCustodians: [body.owner as Address],
+        salt,
+      });
     }
     return c.json({ ok: true, smartAccountAddress });
   } catch (e) {
@@ -613,7 +685,10 @@ app.post('/auth/siwe-verify', async (c) => {
   } else {
     walletAddress = verifyResult.address;
     try {
-      smartAccountAddress = await accountClient(c.env).getAddress(walletAddress, 0n);
+      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
+        externalCustodians: [walletAddress],
+        salt: 0n,
+      });
     } catch (e) {
       return c.json({ error: 'smart-account-address derivation failed', detail: String(e) }, 500);
     }
@@ -711,19 +786,25 @@ app.post('/session/deploy', async (c) => {
           400,
         );
       }
-      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpWithPasskey({
-        credentialIdDigest: body.credentialIdDigest,
-        pubKeyX: BigInt(body.pubKeyX),
-        pubKeyY: BigInt(body.pubKeyY),
-        salt,
+      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
+        spec: {
+          passkey: {
+            credentialIdDigest: body.credentialIdDigest,
+            x: BigInt(body.pubKeyX),
+            y: BigInt(body.pubKeyY),
+          },
+          salt,
+        },
         paymaster: c.env.PAYMASTER as Address,
         verifyingPaymaster,
       }));
     } else {
       if (!body.owner) return c.json({ error: 'owner required for initMethod=eoa' }, 400);
-      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOp({
-        owner: body.owner,
-        salt,
+      ({ userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
+        spec: {
+          externalCustodians: [body.owner as Address],
+          salt,
+        },
         paymaster: c.env.PAYMASTER as Address,
         verifyingPaymaster,
       }));
@@ -774,6 +855,22 @@ app.post('/session/deploy/submit', async (c) => {
       signedUserOp,
       relayerAccount,
     );
+    const inner = detectInnerOpFailure(
+      receipt as unknown as Parameters<typeof detectInnerOpFailure>[0],
+    );
+    if (!inner.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: 'userop_reverted',
+          detail: inner.revertReason
+            ? `inner userOp reverted with ${inner.revertReason}`
+            : 'inner userOp reverted (no revertReason emitted)',
+          transactionHash: receipt.transactionHash,
+        },
+        500,
+      );
+    }
     return c.json({
       ok: true,
       deployedAddress,
@@ -879,6 +976,22 @@ app.post('/account/submit-call-userop', async (c) => {
     const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
     const relayerAccount = await createKmsViemAccount(kmsBackend);
     const { receipt } = await accountClient(c.env).submitCallUserOp(signedUserOp, relayerAccount);
+    const inner = detectInnerOpFailure(
+      receipt as unknown as Parameters<typeof detectInnerOpFailure>[0],
+    );
+    if (!inner.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: 'userop_reverted',
+          detail: inner.revertReason
+            ? `inner userOp reverted with ${inner.revertReason}`
+            : 'inner userOp reverted (no revertReason emitted)',
+          transactionHash: receipt.transactionHash,
+        },
+        500,
+      );
+    }
     return c.json({
       ok: true,
       transactionHash: receipt.transactionHash,
@@ -887,6 +1000,184 @@ app.post('/account/submit-call-userop', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] submitCallUserOp failed:', e);
     return c.json({ error: 'submitCallUserOp failed', detail: String(e) }, 500);
+  }
+});
+
+// ─── Paymaster top-up (operator-only) ─────────────────────────────────────
+//
+// One-click "send ETH from the deployer EOA to the paymaster's EntryPoint
+// deposit." Used by the demo's top-bar gas readout: when the paymaster
+// runs low, clicking the ⛽ pill calls this endpoint instead of forcing
+// the operator to shell into the deploy env to run `cast send`.
+//
+// Safety caps (the deployer key is hot — this endpoint must NOT be a
+// drain vector):
+//   - Endpoint is OFF unless `DEPLOYER_PRIVATE_KEY` is set as a secret.
+//   - Per-call ≤ 0.002 ETH (TOPUP_MAX_WEI below).
+//   - Refuses topup when paymaster.balanceOf(EntryPoint) is already
+//     ≥ 0.005 ETH (TOPUP_TARGET_FLOOR — leaves plenty of headroom
+//     before the next refill).
+//   - At most 1 topup per 30s per worker isolate (lastTopupAt).
+// CSRF-protected (the global middleware enforces).
+
+const TOPUP_MAX_WEI = 2_000_000_000_000_000n;        // 0.002 ETH
+const TOPUP_TARGET_FLOOR_WEI = 5_000_000_000_000_000n; // 0.005 ETH — refuse beyond
+const TOPUP_RATE_LIMIT_MS = 30_000;
+let lastTopupAt = 0;
+
+const TOPUP_ENTRY_POINT_ABI = [
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+] as const;
+const TOPUP_PAYMASTER_ABI = [
+  { type: 'function', name: 'deposit', stateMutability: 'payable', inputs: [], outputs: [] },
+] as const;
+
+app.post('/admin/topup-paymaster', async (c) => {
+  // Outer try/catch: any uncaught throw (including unexpected runtime
+  // failures from viem helpers) gets reported as JSON, not as a Cloudflare
+  // text "Internal Server Error" page. The frontend parses res.json()
+  // unconditionally, so we never let it see non-JSON.
+  try {
+    if (!c.env.DEPLOYER_PRIVATE_KEY) {
+      return c.json(
+        {
+          ok: false,
+          error: 'topup_disabled',
+          detail: 'DEPLOYER_PRIVATE_KEY is not configured on the worker. Run `wrangler secret put DEPLOYER_PRIVATE_KEY --env production` to enable the one-click topup endpoint.',
+        },
+        503,
+      );
+    }
+    if (!c.env.PAYMASTER || !c.env.ENTRY_POINT) {
+      return c.json(
+        { ok: false, error: 'misconfigured', detail: 'PAYMASTER + ENTRY_POINT env required' },
+        503,
+      );
+    }
+    if (!c.env.RPC_URL) {
+      return c.json(
+        { ok: false, error: 'misconfigured', detail: 'RPC_URL env required' },
+        503,
+      );
+    }
+
+    const now = Date.now();
+    if (now - lastTopupAt < TOPUP_RATE_LIMIT_MS) {
+      const waitSec = Math.ceil((TOPUP_RATE_LIMIT_MS - (now - lastTopupAt)) / 1000);
+      return c.json(
+        { ok: false, error: 'rate_limited', detail: `wait ${waitSec}s before next topup` },
+        429,
+      );
+    }
+
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+
+    let depositBefore: bigint;
+    try {
+      depositBefore = (await pub.readContract({
+        address: c.env.ENTRY_POINT as Address,
+        abi: TOPUP_ENTRY_POINT_ABI,
+        functionName: 'balanceOf',
+        args: [c.env.PAYMASTER as Address],
+      })) as bigint;
+    } catch (e) {
+      return c.json({ ok: false, error: 'read_balance_failed', detail: String(e) }, 500);
+    }
+    if (depositBefore >= TOPUP_TARGET_FLOOR_WEI) {
+      return c.json(
+        {
+          ok: false,
+          error: 'already_funded',
+          detail: `paymaster has ${depositBefore.toString()} wei (≥ floor ${TOPUP_TARGET_FLOOR_WEI.toString()}); refusing further topup`,
+          depositWei: depositBefore.toString(),
+        },
+        400,
+      );
+    }
+
+    // Parse + clamp the requested amount (default 0.002 ETH).
+    const body = (await c.req.json().catch(() => ({}))) as { amountEth?: string };
+    let amountWei: bigint;
+    try {
+      amountWei = body.amountEth ? parseEther(String(body.amountEth)) : TOPUP_MAX_WEI;
+    } catch {
+      return c.json({ ok: false, error: 'bad_amount' }, 400);
+    }
+    if (amountWei > TOPUP_MAX_WEI) amountWei = TOPUP_MAX_WEI;
+    if (amountWei <= 0n) {
+      return c.json({ ok: false, error: 'bad_amount', detail: 'amount must be > 0' }, 400);
+    }
+
+    // Deployer EOA must have enough ETH + a bit for gas.
+    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
+      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
+      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
+    const deployerAcct = privateKeyToAccount(pkInput);
+    let deployerBal: bigint;
+    try {
+      deployerBal = await pub.getBalance({ address: deployerAcct.address });
+    } catch (e) {
+      return c.json({ ok: false, error: 'read_balance_failed', detail: String(e) }, 500);
+    }
+    const gasReserve = 100_000_000_000_000n; // 0.0001 ETH
+    if (deployerBal < amountWei + gasReserve) {
+      return c.json(
+        {
+          ok: false,
+          error: 'deployer_underfunded',
+          detail: `deployer has ${deployerBal.toString()} wei; needs ${(amountWei + gasReserve).toString()} (amount + gas reserve)`,
+          deployerWei: deployerBal.toString(),
+        },
+        400,
+      );
+    }
+
+    lastTopupAt = now; // claim the slot BEFORE sending so concurrent calls back off
+
+    let hash: `0x${string}`;
+    try {
+      const wallet = createWalletClient({ account: deployerAcct, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+      hash = await wallet.writeContract({
+        address: c.env.PAYMASTER as Address,
+        abi: TOPUP_PAYMASTER_ABI,
+        functionName: 'deposit',
+        args: [],
+        value: amountWei,
+      });
+    } catch (e) {
+      lastTopupAt = 0;
+      console.error('[demo-a2a] topup write failed:', e);
+      return c.json({ ok: false, error: 'topup_send_failed', detail: String(e) }, 500);
+    }
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    // Poll for the new deposit to propagate — even with the same RPC,
+    // balanceOf can lag the tx by a block or two and report stale.
+    let depositAfter = depositBefore;
+    for (let i = 0; i < 5; i++) {
+      depositAfter = (await pub.readContract({
+        address: c.env.ENTRY_POINT as Address,
+        abi: TOPUP_ENTRY_POINT_ABI,
+        functionName: 'balanceOf',
+        args: [c.env.PAYMASTER as Address],
+      })) as bigint;
+      if (depositAfter > depositBefore) break;
+      await new Promise((res) => setTimeout(res, 500));
+    }
+
+    return c.json({
+      ok: true,
+      transactionHash: hash,
+      status: receipt.status,
+      amountWei: amountWei.toString(),
+      depositBeforeWei: depositBefore.toString(),
+      depositAfterWei: depositAfter.toString(),
+    });
+  } catch (e) {
+    console.error('[demo-a2a] topup-paymaster crashed:', e);
+    return c.json(
+      { ok: false, error: 'topup_internal_error', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
   }
 });
 

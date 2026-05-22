@@ -44,6 +44,7 @@ interface Deployments {
   custodyPolicy?: string;
   quorumEnforcer?: string;
   approvedHashRegistry?: string;
+  deployer?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -123,6 +124,15 @@ const webProVars: Record<string, string> = {
   ...(d.custodyPolicy   ? { VITE_CUSTODY_POLICY:    d.custodyPolicy   } : {}),
   ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
   ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
+  ...(d.entryPoint           ? { VITE_ENTRY_POINT:             d.entryPoint           } : {}),
+  ...(d.smartAgentPaymaster  ? { VITE_SMART_AGENT_PAYMASTER:   d.smartAgentPaymaster  } : {}),
+  ...(d.deployer             ? { VITE_DEPLOYER:                d.deployer             } : {}),
+  // Use the same RPC the workers use so reads stay in sync with writes
+  // (avoids the "schedule succeeded but the read RPC doesn't see it yet"
+  // class of bug that mis-signs apply hashes as eta=0).
+  ...(process.env.BASE_SEPOLIA_RPC && NETWORK === 'base-sepolia'
+    ? { VITE_RPC_URL: process.env.BASE_SEPOLIA_RPC }
+    : {}),
 };
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-pro', '.env.local'), webProVars);
 
