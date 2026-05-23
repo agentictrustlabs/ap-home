@@ -261,6 +261,11 @@ app.post('/tools/get_profile', async (c) => {
       classification: GET_PROFILE_CLASSIFICATION,
       auditSink,
       correlationId: getCorrelationId(c),
+      // Hard-gate at wrapper construction: missing classification or
+      // auditSink throws BEFORE the handler is registered (audit P0-2).
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
     },
   );
 
@@ -314,6 +319,11 @@ app.post('/tools/get_pii', async (c) => {
       classification: GET_PII_CLASSIFICATION,
       auditSink,
       correlationId: getCorrelationId(c),
+      // Hard-gate at wrapper construction: missing classification or
+      // auditSink throws BEFORE the handler is registered (audit P0-2).
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
     },
   );
   try {
@@ -364,6 +374,11 @@ app.post('/tools/get_org_sensitive', async (c) => {
       classification: GET_ORG_SENSITIVE_CLASSIFICATION,
       auditSink,
       correlationId: getCorrelationId(c),
+      // Hard-gate at wrapper construction: missing classification or
+      // auditSink throws BEFORE the handler is registered (audit P0-2).
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
     },
   );
   try {

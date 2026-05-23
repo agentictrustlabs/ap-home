@@ -23,6 +23,19 @@ import {
   verifyCsrf,
 } from '@agenticprimitives/identity-auth';
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
+import {
+  BadInputError,
+  badInputResponse,
+  ensureArrayBound,
+  parseAddress,
+  parseAddressArray,
+  parseBytes32,
+  parseHex,
+  parseOptionalAddress,
+  parseOptionalUint256Decimal,
+  parseUint256Decimal,
+  parseUint48,
+} from './validate';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
@@ -260,13 +273,60 @@ function detectInnerOpFailure(receipt: {
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use(
-  '*',
-  cors({
-    origin: (origin) => origin ?? '*',
+/**
+ * CORS — exact-allowlist with credentials (audit P1-1).
+ *
+ * The previous `origin: (origin) => origin ?? '*'` reflected any inbound
+ * Origin while enabling credentialed requests, which is a known unsafe
+ * combination: a malicious page can issue cross-origin POSTs whose
+ * cookies are honored by the worker. CSRF middleware downstream
+ * helped, but defense-in-depth says: the CORS layer itself must be
+ * exact-match when credentials are in play.
+ *
+ * `ALLOWED_ORIGINS` is a comma-separated list (e.g.
+ * "https://demo.pages.dev,http://localhost:5173"). Origins not in the
+ * set get an empty `Access-Control-Allow-Origin`, which browsers treat
+ * as a CORS reject. Same-origin and credential-less server-to-server
+ * calls don't carry an `Origin` header and pass through unaffected.
+ */
+function buildAllowedOriginMatcher(env: Env): (origin: string | undefined | null) => string {
+  const raw = (env.ALLOWED_ORIGINS ?? '').trim();
+  if (!raw) {
+    // No allowlist configured. Refuse all cross-origin requests.
+    // Boot misconfiguration: log loud once so it's visible at deploy time.
+    console.warn(
+      '[demo-a2a] CORS: ALLOWED_ORIGINS is empty — all cross-origin credentialed requests will be rejected. Set ALLOWED_ORIGINS in wrangler vars.',
+    );
+    return () => '';
+  }
+  const allowed = new Set<string>();
+  for (const item of raw.split(',')) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    try {
+      const u = new URL(trimmed);
+      if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
+        console.warn(`[demo-a2a] CORS: refusing non-https origin "${trimmed}" outside localhost`);
+        continue;
+      }
+      allowed.add(u.origin);
+    } catch {
+      console.warn(`[demo-a2a] CORS: refusing malformed origin "${trimmed}"`);
+    }
+  }
+  if (allowed.size === 0) {
+    console.warn('[demo-a2a] CORS: ALLOWED_ORIGINS had no usable entries — all cross-origin requests will be rejected.');
+  }
+  return (origin) => (origin && allowed.has(origin) ? origin : '');
+}
+
+app.use('*', async (c, next) => {
+  const match = buildAllowedOriginMatcher(c.env);
+  return cors({
+    origin: (origin) => match(origin),
     credentials: true,
-  }),
-);
+  })(c, next);
+});
 
 app.use('*', async (c, next) => {
   bridgeEnvToProcessEnv(c.env);
@@ -464,7 +524,7 @@ app.post('/account/derive-address', async (c) => {
       if (x === 0n || y === 0n) {
         return c.json({ error: 'pubKeyX and pubKeyY must be non-zero' }, 400);
       }
-      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
+      smartAccountAddress = await accountClient(c.env).getAddressForAgentAccount({
         passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x, y },
         salt,
       });
@@ -472,8 +532,8 @@ app.post('/account/derive-address', async (c) => {
       if (typeof body.owner !== 'string' || !ADDRESS_REGEX.test(body.owner)) {
         return c.json({ error: 'owner must be a 0x-prefixed 20-byte hex address' }, 400);
       }
-      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
-        externalCustodians: [body.owner as Address],
+      smartAccountAddress = await accountClient(c.env).getAddressForAgentAccount({
+        custodians: [body.owner as Address],
         salt,
       });
     }
@@ -685,8 +745,8 @@ app.post('/auth/siwe-verify', async (c) => {
   } else {
     walletAddress = verifyResult.address;
     try {
-      smartAccountAddress = await accountClient(c.env).getAddressForPersonAgent({
-        externalCustodians: [walletAddress],
+      smartAccountAddress = await accountClient(c.env).getAddressForAgentAccount({
+        custodians: [walletAddress],
         salt: 0n,
       });
     } catch (e) {
@@ -748,7 +808,7 @@ app.post('/session/deploy', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     // New polymorphic shape: any combination of external custodians + a passkey.
     // The factory's createPersonAgent accepts mixed seeds in one shot.
-    externalCustodians?: Address[];
+    custodians?: Address[];
     passkey?: { credentialIdDigest: Hex; pubKeyX: string; pubKeyY: string };
     // Back-compat: legacy fields from the single-method era.
     initMethod?: 'eoa' | 'passkey';
@@ -761,8 +821,8 @@ app.post('/session/deploy', async (c) => {
   if (!body) return c.json({ error: 'body required' }, 400);
   const salt = body.salt ? BigInt(body.salt) : 0n;
   // Normalize legacy + new shapes into PersonAgentSpec inputs.
-  const externalCustodians: Address[] =
-    body.externalCustodians ??
+  const custodians: Address[] =
+    body.custodians ??
     (body.initMethod === 'eoa' && body.owner ? [body.owner as Address] : []);
   const passkeyInput =
     body.passkey ??
@@ -773,9 +833,9 @@ app.post('/session/deploy', async (c) => {
           pubKeyY: body.pubKeyY,
         }
       : null);
-  if (externalCustodians.length === 0 && !passkeyInput) {
+  if (custodians.length === 0 && !passkeyInput) {
     return c.json(
-      { error: 'at least one of externalCustodians[] or passkey must be supplied' },
+      { error: 'at least one of custodians[] or passkey must be supplied' },
       400,
     );
   }
@@ -801,9 +861,9 @@ app.post('/session/deploy', async (c) => {
       };
     }
 
-    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForPersonAgent({
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForAgentAccount({
       spec: {
-        externalCustodians,
+        custodians,
         passkey: passkeyInput
           ? {
               credentialIdDigest: passkeyInput.credentialIdDigest,
@@ -1016,32 +1076,53 @@ app.post('/account/submit-call-userop', async (c) => {
 // available to produce a v=2 WebAuthn signature for the deploy userOp,
 // and MetaMask won't sign a raw 32-byte userOpHash. We bypass ERC-4337
 // entirely: the worker uses DEPLOYER_PRIVATE_KEY (same key that funds
-// paymaster topups) to directly invoke `factory.createPersonAgent(...)`.
+// paymaster topups) to directly invoke `factory.createAgentAccount(...)`.
 // The factory call is permissionless and registers the EOA as a
 // custodian at proxy init. Worker pays gas — gasless to the user.
+//
+// Wave R0 collapsed the previous `/session/direct-deploy` (Person, mode=0)
+// + `/session/direct-deploy-multisig` (mode>0) into one endpoint. Mode
+// on the request body picks the shape — same axis the factory uses.
 const DIRECT_DEPLOY_FACTORY_ABI = [
   {
     type: 'function',
-    name: 'createPersonAgent',
+    name: 'createAgentAccount',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'externalCustodians', type: 'address[]' },
-      { name: 'passkeyCredentialIdDigest', type: 'bytes32' },
-      { name: 'passkeyX', type: 'uint256' },
-      { name: 'passkeyY', type: 'uint256' },
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'mode', type: 'uint8' },
+          { name: 'custodians', type: 'address[]' },
+          { name: 'trustees', type: 'address[]' },
+          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
+          { name: 'initialPasskeyX', type: 'uint256' },
+          { name: 'initialPasskeyY', type: 'uint256' },
+        ],
+      },
+      { name: 'timelockOverrides', type: 'uint32[7]' },
       { name: 'salt', type: 'uint256' },
     ],
     outputs: [{ name: 'account', type: 'address' }],
   },
   {
     type: 'function',
-    name: 'getAddressForPersonAgent',
+    name: 'getAddressForAgentAccount',
     stateMutability: 'view',
     inputs: [
-      { name: 'externalCustodians', type: 'address[]' },
-      { name: 'passkeyCredentialIdDigest', type: 'bytes32' },
-      { name: 'passkeyX', type: 'uint256' },
-      { name: 'passkeyY', type: 'uint256' },
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'mode', type: 'uint8' },
+          { name: 'custodians', type: 'address[]' },
+          { name: 'trustees', type: 'address[]' },
+          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
+          { name: 'initialPasskeyX', type: 'uint256' },
+          { name: 'initialPasskeyY', type: 'uint256' },
+        ],
+      },
       { name: 'salt', type: 'uint256' },
     ],
     outputs: [{ name: 'account', type: 'address' }],
@@ -1050,91 +1131,77 @@ const DIRECT_DEPLOY_FACTORY_ABI = [
 const ZERO_BYTES32: Hex = ('0x' + '00'.repeat(32)) as Hex;
 
 /**
- * POST /session/direct-deploy-multisig
- * Direct factory call for multi-sig Smart Agents (Org, Treasury) when
- * the founder has no passkey to sign the userOpHash. Permissionless:
- * `factory.createMultiSigSmartAgent(...)` accepts any caller, so the
- * worker just sends it from the deployer EOA. CREATE2 yields the same
- * address as a passkey-userOp-deployed one for identical init params.
+ * POST /session/direct-deploy
+ *
+ * Unified direct-factory deploy. Body shape mirrors the contract's
+ * `AgentAccountInitParams` + `(timelockOverrides, salt)`:
+ *
+ *   {
+ *     mode: 0|1|2|3,
+ *     custodians?: Address[],
+ *     trustees?: Address[],          // required for mode > 0
+ *     initialPasskeyCredentialIdDigest?: Hex,
+ *     initialPasskeyX?: string,      // decimal uint256
+ *     initialPasskeyY?: string,
+ *     timelockOverrides?: number[],  // index t in 1..6 = per-tier override
+ *                                    // (0 = factory default; T4=1h/T5=24h/T6=48h)
+ *     salt: string,                  // decimal uint256
+ *   }
+ *
+ * Permissionless: `factory.createAgentAccount(...)` accepts any caller,
+ * so the worker just sends from the deployer EOA. CREATE2 yields the
+ * same address as a passkey-userOp-deployed one for identical init params.
  */
-const DIRECT_MULTISIG_ABI = [
-  {
-    type: 'function',
-    name: 'createMultiSigSmartAgent',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {
-        name: 'params',
-        type: 'tuple',
-        components: [
-          { name: 'mode', type: 'uint8' },
-          { name: 'custodians', type: 'address[]' },
-          { name: 'trustees', type: 'address[]' },
-          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
-          { name: 'initialPasskeyX', type: 'uint256' },
-          { name: 'initialPasskeyY', type: 'uint256' },
-        ],
-      },
-      { name: 'validator', type: 'address' },
-      { name: 'safetyDelaySeconds', type: 'uint32' },
-      { name: 'salt', type: 'uint256' },
-    ],
-    outputs: [{ name: 'account', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'getAddressForMultiSigSmartAgent',
-    stateMutability: 'view',
-    inputs: [
-      {
-        name: 'params',
-        type: 'tuple',
-        components: [
-          { name: 'mode', type: 'uint8' },
-          { name: 'custodians', type: 'address[]' },
-          { name: 'trustees', type: 'address[]' },
-          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
-          { name: 'initialPasskeyX', type: 'uint256' },
-          { name: 'initialPasskeyY', type: 'uint256' },
-        ],
-      },
-      { name: 'salt', type: 'uint256' },
-    ],
-    outputs: [{ name: 'account', type: 'address' }],
-  },
-] as const;
-
-app.post('/session/direct-deploy-multisig', async (c) => {
+app.post('/session/direct-deploy', async (c) => {
   try {
     if (!c.env.DEPLOYER_PRIVATE_KEY) {
       return c.json(
-        { ok: false, error: 'deployer_key_missing' },
+        { ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for direct deploy' },
         503,
       );
     }
-    const body = (await c.req.json().catch(() => null)) as {
-      mode?: number;
-      custodians?: Address[];
-      trustees?: Address[];
-      initialPasskeyCredentialIdDigest?: Hex;
-      initialPasskeyX?: string;
-      initialPasskeyY?: string;
-      validator: Address;
-      safetyDelaySeconds: number;
-      salt: string;
-    } | null;
-    if (!body || !body.validator || body.safetyDelaySeconds === undefined || !body.salt) {
-      return c.json({ ok: false, error: 'bad_body' }, 400);
-    }
-    const params = {
-      mode: body.mode ?? 1,
-      custodians: (body.custodians ?? []) as Address[],
-      trustees: (body.trustees ?? []) as Address[],
-      initialPasskeyCredentialIdDigest: (body.initialPasskeyCredentialIdDigest ?? ZERO_BYTES32) as Hex,
-      initialPasskeyX: BigInt(body.initialPasskeyX ?? '0'),
-      initialPasskeyY: BigInt(body.initialPasskeyY ?? '0'),
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+
+    let params: {
+      mode: number;
+      custodians: Address[];
+      trustees: Address[];
+      initialPasskeyCredentialIdDigest: Hex;
+      initialPasskeyX: bigint;
+      initialPasskeyY: bigint;
     };
-    const salt = BigInt(body.salt);
+    let timelockOverrides: readonly [number, number, number, number, number, number, number];
+    let salt: bigint;
+    try {
+      // Validated shape: every field bounded + typed. No silent
+      // `as Address` casts on attacker input (audit P1-3).
+      const mode = body.mode === undefined ? 0 : parseUint48('mode', body.mode);
+      if (mode > 3) throw new BadInputError('mode', 'mode > 3');
+      const custodians = body.custodians === undefined ? [] : parseAddressArray('custodians', body.custodians);
+      const trustees = body.trustees === undefined ? [] : parseAddressArray('trustees', body.trustees);
+      const credId = body.initialPasskeyCredentialIdDigest === undefined
+        ? ZERO_BYTES32
+        : parseBytes32('initialPasskeyCredentialIdDigest', body.initialPasskeyCredentialIdDigest);
+      const passkeyX = body.initialPasskeyX === undefined ? 0n : parseUint256Decimal('initialPasskeyX', body.initialPasskeyX);
+      const passkeyY = body.initialPasskeyY === undefined ? 0n : parseUint256Decimal('initialPasskeyY', body.initialPasskeyY);
+      const overrideSrc = Array.isArray(body.timelockOverrides) ? body.timelockOverrides : [];
+      timelockOverrides = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+        const v = overrideSrc[i];
+        return v === undefined ? 0 : parseUint48(`timelockOverrides[${i}]`, v);
+      }) as unknown as readonly [number, number, number, number, number, number, number];
+      salt = parseUint256Decimal('salt', body.salt);
+      params = {
+        mode,
+        custodians,
+        trustees,
+        initialPasskeyCredentialIdDigest: credId,
+        initialPasskeyX: passkeyX,
+        initialPasskeyY: passkeyY,
+      };
+    } catch (e) {
+      return badInputResponse(c, e) as Response;
+    }
 
     const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
       ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
@@ -1145,8 +1212,8 @@ app.post('/session/direct-deploy-multisig', async (c) => {
 
     const predicted = (await pub.readContract({
       address: c.env.AGENT_ACCOUNT_FACTORY as Address,
-      abi: DIRECT_MULTISIG_ABI,
-      functionName: 'getAddressForMultiSigSmartAgent',
+      abi: DIRECT_DEPLOY_FACTORY_ABI,
+      functionName: 'getAddressForAgentAccount',
       args: [params, salt],
     })) as Address;
 
@@ -1162,74 +1229,9 @@ app.post('/session/direct-deploy-multisig', async (c) => {
 
     const hash = await wallet.writeContract({
       address: c.env.AGENT_ACCOUNT_FACTORY as Address,
-      abi: DIRECT_MULTISIG_ABI,
-      functionName: 'createMultiSigSmartAgent',
-      args: [params, body.validator as Address, body.safetyDelaySeconds, salt],
-    });
-    const receipt = await pub.waitForTransactionReceipt({ hash });
-    return c.json({
-      ok: true,
-      deployedAddress: predicted,
-      transactionHash: hash,
-      status: receipt.status,
-    });
-  } catch (e) {
-    console.error('[demo-a2a] direct-deploy-multisig failed:', e);
-    return c.json(
-      { ok: false, error: 'direct_multisig_failed', detail: e instanceof Error ? e.message : String(e) },
-      500,
-    );
-  }
-});
-
-app.post('/session/direct-deploy', async (c) => {
-  try {
-    if (!c.env.DEPLOYER_PRIVATE_KEY) {
-      return c.json(
-        { ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for direct deploy' },
-        503,
-      );
-    }
-    const body = (await c.req.json().catch(() => null)) as {
-      externalCustodians?: Address[];
-      salt?: string;
-    } | null;
-    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
-    const externalCustodians = (body.externalCustodians ?? []).map((a) => a as Address);
-    if (externalCustodians.length === 0) {
-      return c.json({ ok: false, error: 'no_custodians' }, 400);
-    }
-    const salt = body.salt ? BigInt(body.salt) : 0n;
-
-    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
-      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
-      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
-    const deployer = privateKeyToAccount(pkInput);
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
-
-    const predicted = (await pub.readContract({
-      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
       abi: DIRECT_DEPLOY_FACTORY_ABI,
-      functionName: 'getAddressForPersonAgent',
-      args: [externalCustodians, ZERO_BYTES32, 0n, 0n, salt],
-    })) as Address;
-
-    const code = await pub.getBytecode({ address: predicted });
-    if (code && code !== '0x') {
-      return c.json({
-        ok: true,
-        deployedAddress: predicted,
-        transactionHash: ZERO_BYTES32,
-        alreadyDeployed: true,
-      });
-    }
-
-    const hash = await wallet.writeContract({
-      address: c.env.AGENT_ACCOUNT_FACTORY as Address,
-      abi: DIRECT_DEPLOY_FACTORY_ABI,
-      functionName: 'createPersonAgent',
-      args: [externalCustodians, ZERO_BYTES32, 0n, 0n, salt],
+      functionName: 'createAgentAccount',
+      args: [params, timelockOverrides, salt],
     });
     const receipt = await pub.waitForTransactionReceipt({ hash });
     return c.json({
@@ -1293,22 +1295,33 @@ app.post('/session/custody-schedule', async (c) => {
   try {
     const deployer = relayDeployer(c.env);
     if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
-    const body = (await c.req.json().catch(() => null)) as {
-      custodyPolicy: Address;
-      account: Address;
-      action: number;
-      args: Hex;
-      quorumSigs: Hex;
-    } | null;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+    let custodyPolicy: Address;
+    let account: Address;
+    let action: number;
+    let args: Hex;
+    let quorumSigs: Hex;
+    try {
+      custodyPolicy = parseAddress('custodyPolicy', body.custodyPolicy);
+      account = parseAddress('account', body.account);
+      action = parseUint48('action', body.action);
+      if (action > 255) throw new BadInputError('action', 'action exceeds uint8');
+      args = parseHex('args', body.args, { maxBytes: 4096 });
+      // Quorum sig blob: bounded at 32 KiB (multi-slot quorum + tails;
+      // realistic max ~1 KiB; cap is loose-but-finite).
+      quorumSigs = parseHex('quorumSigs', body.quorumSigs, { maxBytes: 32768 });
+    } catch (e) {
+      return badInputResponse(c, e) as Response;
+    }
 
     const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
-      address: body.custodyPolicy,
+      address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
       functionName: 'scheduleCustodyChange',
-      args: [body.account, body.action, body.args, body.quorumSigs],
+      args: [account, action, args, quorumSigs],
     });
     const receipt = await pub.waitForTransactionReceipt({ hash });
     return c.json({ ok: true, transactionHash: hash, status: receipt.status });
@@ -1325,21 +1338,28 @@ app.post('/session/custody-apply', async (c) => {
   try {
     const deployer = relayDeployer(c.env);
     if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
-    const body = (await c.req.json().catch(() => null)) as {
-      custodyPolicy: Address;
-      account: Address;
-      changeId: string;
-      quorumSigs: Hex;
-    } | null;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+    let custodyPolicy: Address;
+    let account: Address;
+    let changeId: bigint;
+    let quorumSigs: Hex;
+    try {
+      custodyPolicy = parseAddress('custodyPolicy', body.custodyPolicy);
+      account = parseAddress('account', body.account);
+      changeId = parseUint256Decimal('changeId', body.changeId);
+      quorumSigs = parseHex('quorumSigs', body.quorumSigs, { maxBytes: 32768 });
+    } catch (e) {
+      return badInputResponse(c, e) as Response;
+    }
 
     const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
-      address: body.custodyPolicy,
+      address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
       functionName: 'applyCustodyChange',
-      args: [body.account, BigInt(body.changeId), body.quorumSigs],
+      args: [account, changeId, quorumSigs],
     });
     const receipt = await pub.waitForTransactionReceipt({ hash });
     return c.json({ ok: true, transactionHash: hash, status: receipt.status });
@@ -1907,6 +1927,25 @@ app.post('/session/package', async (c) => {
     eip712Hash,
     delegation.signature,
   );
+
+  // Fail-CLOSED on invalid delegation signature (audit P1-2). The
+  // previous behavior persisted regardless of `isValid` and just
+  // returned the boolean — that was a state-integrity bug: downstream
+  // tool calls would mint tokens against a delegation the contract
+  // would have rejected on chain. Reject before persistence.
+  if (!isValid) {
+    return c.json(
+      {
+        ok: false,
+        error: 'delegation_invalid',
+        // Detail intentionally generic (info-leak invariant from
+        // mcp-runtime CLAUDE.md). The contract-level reason is logged
+        // server-side via the audit sink, not returned to the browser.
+        detail: 'ERC-1271 verification failed against the delegator smart account',
+      },
+      403,
+    );
+  }
 
   // Route to the session owner's DO. For the "I delegate to my own
   // agent" flow this is identical to the delegator. For cross-user

@@ -139,6 +139,9 @@ const webProVars: Record<string, string> = {
     : {}),
 };
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-pro', '.env.local'), webProVars);
+// Recovery demo uses the exact same env shape as demo-web-pro — same
+// chain, same contracts, same workers; the apps differ only in story.
+writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-recovery', '.env.local'), webProVars);
 
 console.log(`gen-dev-vars: wrote .dev.vars + .env.local (network=${NETWORK})`);
 console.log(`  factory: ${d.agentAccountFactory}`);
