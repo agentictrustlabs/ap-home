@@ -24,6 +24,10 @@ import type { Address } from '@agenticprimitives/types';
 import {
   upsertDemoProfile,
   getProfile,
+  upsertDemoPii,
+  getPii,
+  upsertDemoOrgSensitive,
+  getOrgSensitive,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
@@ -264,7 +268,102 @@ app.post('/tools/get_profile', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+// ─── get_pii — delegation-verified PII read (Person MCP) ─────────────────
+//
+// Returns the PII record keyed by the *delegator* of the inbound token.
+// The principal recovered by `withDelegation` IS the delegator — so the
+// request "Read Alice's PII via Alice→Bob delegation" lands here as
+// `principal = Alice`. Mock data is seeded lazily on first read.
+
+const GET_PII_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'medium',
+} as const;
+declareTool({ name: 'get_pii' }, GET_PII_CLASSIFICATION);
+
+app.post('/tools/get_pii', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: Record<string, unknown> };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal }) => {
+      // Lazy-seed so the first access for a freshly-claimed seat works.
+      await upsertDemoPii(c.env.DB, principal);
+      const record = await getPii(c.env.DB, principal);
+      return {
+        ok: true,
+        subject: principal,
+        record,
+        served_by: 'demo-mcp:get_pii',
+      };
+    },
+    {
+      toolName: 'get_pii',
+      classification: GET_PII_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+// ─── get_org_sensitive — delegation-verified Org data read (Org MCP) ─────
+//
+// Returns the sensitive Org record keyed by the *delegator* of the
+// inbound token. Used in Act 6: caller presents Org→Alice/Bob
+// delegation, `principal` resolves to the Org address, MCP returns
+// Org-internal data (revenue, EIN, banking, …).
+
+const GET_ORG_SENSITIVE_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'high',
+} as const;
+declareTool({ name: 'get_org_sensitive' }, GET_ORG_SENSITIVE_CLASSIFICATION);
+
+app.post('/tools/get_org_sensitive', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: Record<string, unknown> };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal }) => {
+      await upsertDemoOrgSensitive(c.env.DB, principal);
+      const record = await getOrgSensitive(c.env.DB, principal);
+      return {
+        ok: true,
+        org: principal,
+        record,
+        served_by: 'demo-mcp:get_org_sensitive',
+      };
+    },
+    {
+      toolName: 'get_org_sensitive',
+      classification: GET_ORG_SENSITIVE_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });

@@ -1352,6 +1352,340 @@ app.post('/session/custody-apply', async (c) => {
   }
 });
 
+// ─── MCP-style delegation-gated data endpoints (phase 6f.6 LIVE) ──────────
+//
+// Two endpoints exercise the off-chain Variant A delegation path end-to-end:
+//   - POST /mcp/person/pii        → returns mock PII for `delegator` (a
+//                                    Person Smart Agent), if the supplied
+//                                    delegation proves the caller (delegate)
+//                                    has read-PII authority from that PSA.
+//   - POST /mcp/org/sensitive     → returns mock Org-internal data, if the
+//                                    supplied delegation is signed by the Org
+//                                    smart account naming the caller as delegate.
+//
+// Verification path:
+//   1. Recompute the EIP-712 delegation hash against the deployed
+//      AgentDelegationManager domain.
+//   2. Call `delegator.isValidSignature(hash, delegation.signature)` —
+//      ERC-1271 query against the on-chain smart account. Returns the
+//      magic value 0x1626ba7e on success.
+//   3. Walk the delegation's timestamp caveat — reject if expired or
+//      not-yet-valid.
+//   4. Audit the verdict on chain via the typical worker logging.
+//
+// Anything fancier (full DelegationToken envelopes, on-chain enforcer
+// invocation, multi-step delegation chains) is out of scope for this
+// pass; the simpler shape here is what the demo needs to be honest.
+
+const AGENT_DELEGATION_MANAGER_TYPES = {
+  Delegation: [
+    { name: 'delegator', type: 'address' },
+    { name: 'delegate', type: 'address' },
+    { name: 'authority', type: 'bytes32' },
+    { name: 'caveats', type: 'Caveat[]' },
+    { name: 'salt', type: 'uint256' },
+  ],
+  Caveat: [
+    { name: 'enforcer', type: 'address' },
+    { name: 'terms', type: 'bytes' },
+    { name: 'args', type: 'bytes' },
+  ],
+} as const;
+
+const ERC1271_ABI = [
+  {
+    type: 'function',
+    name: 'isValidSignature',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'hash', type: 'bytes32' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    outputs: [{ name: 'magic', type: 'bytes4' }],
+  },
+] as const;
+const ERC1271_MAGIC = '0x1626ba7e';
+
+interface IncomingCaveat {
+  enforcer: Address;
+  terms: Hex;
+  args?: Hex;
+}
+interface IncomingDelegation {
+  delegator: Address;
+  delegate: Address;
+  authority: Hex;
+  caveats: IncomingCaveat[];
+  salt: string; // bigint as string
+  signature: Hex;
+}
+
+async function verifyDelegation(
+  env: Env,
+  delegation: IncomingDelegation,
+  expectedDelegate: Address,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!env.DELEGATION_MANAGER) {
+    return { ok: false, reason: 'DELEGATION_MANAGER env not configured' };
+  }
+  if (delegation.delegate.toLowerCase() !== expectedDelegate.toLowerCase()) {
+    return {
+      ok: false,
+      reason: `delegate mismatch — token names ${delegation.delegate}, request from ${expectedDelegate}`,
+    };
+  }
+  // Walk timestamp caveat (first 4 bytes of terms are an ABI-encoded
+  // pair of uint128s for validAfter/validUntil per the enforcer's
+  // canonical shape). Other caveats are descriptive in this slice
+  // (target / method / value); the worker does NOT execute on-chain,
+  // so it just checks the time window. Anything we leave un-checked
+  // here would re-fire on the on-chain redeem path in a later phase.
+  const now = Math.floor(Date.now() / 1000);
+  for (const c of delegation.caveats) {
+    if (c.enforcer.toLowerCase() === (env.TIMESTAMP_ENFORCER ?? '').toLowerCase()) {
+      try {
+        // terms = abi.encode(uint128 validAfter, uint128 validUntil)
+        const bytes = c.terms.startsWith('0x') ? c.terms.slice(2) : c.terms;
+        const validAfter = parseInt(bytes.slice(0, 64), 16);
+        const validUntil = parseInt(bytes.slice(64, 128), 16);
+        if (now < validAfter) {
+          return { ok: false, reason: `delegation not yet valid (validAfter=${validAfter} now=${now})` };
+        }
+        if (now >= validUntil) {
+          return { ok: false, reason: `delegation expired (validUntil=${validUntil} now=${now})` };
+        }
+      } catch { /* malformed terms — fall through to signature check */ }
+    }
+  }
+  // ERC-1271 verify against the delegator smart account.
+  const pub = createPublicClient({ chain: baseSepolia, transport: http(env.RPC_URL) });
+  const domain = {
+    name: 'AgentDelegationManager',
+    version: '1',
+    chainId: 84532,
+    verifyingContract: env.DELEGATION_MANAGER as Address,
+  };
+  const { hashTypedData } = await import('viem');
+  const digest = hashTypedData({
+    domain,
+    types: AGENT_DELEGATION_MANAGER_TYPES,
+    primaryType: 'Delegation',
+    message: {
+      delegator: delegation.delegator,
+      delegate: delegation.delegate,
+      authority: delegation.authority,
+      caveats: delegation.caveats.map((c) => ({
+        enforcer: c.enforcer,
+        terms: c.terms,
+        args: (c.args ?? '0x') as Hex,
+      })),
+      salt: BigInt(delegation.salt),
+    },
+  });
+  try {
+    const magic = (await pub.readContract({
+      address: delegation.delegator,
+      abi: ERC1271_ABI,
+      functionName: 'isValidSignature',
+      args: [digest, delegation.signature],
+    })) as Hex;
+    if (magic.toLowerCase() !== ERC1271_MAGIC) {
+      return { ok: false, reason: `ERC-1271 returned ${magic} (expected ${ERC1271_MAGIC})` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `ERC-1271 call to delegator failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+/**
+ * Run the full session → token → service-MAC → demo-mcp tool-call chain
+ * for a delegation-gated MCP tool. Shared by the PII + Org-sensitive
+ * orchestrators below.
+ *
+ * Steps:
+ *   1. ERC-1271-verify the Variant A delegation on the delegator
+ *      smart account. Reject early if invalid.
+ *   2. Open a fresh session on the requester's (delegate's) Durable
+ *      Object. The session's signing key is HSM-wrapped via
+ *      `key-custody` — local-aes in dev, GCP-KMS in production.
+ *   3. Package the delegation envelope into the session. The session
+ *      record now holds the delegation + the wrapped session key.
+ *   4. Resolve the session, mint a DelegationToken signed by the
+ *      session key (sub = delegator, sessionKey = signer address,
+ *      aud = mcp). Audit-emit `delegation.mint`.
+ *   5. Wrap in a service-MAC envelope (audit C1). demo-mcp checks the
+ *      MAC before parsing the body.
+ *   6. Worker-to-worker call to demo-mcp's `/tools/<name>`. demo-mcp
+ *      verifies the token via `withDelegation`, runs the fail-closed
+ *      caveat evaluator, calls the registered tool handler, and
+ *      returns the record from D1.
+ *   7. Audit-emit `delegation.verify.accept|reject` happens inside
+ *      `withDelegation` on the MCP side.
+ */
+async function callMcpToolViaDelegation(args: {
+  env: Env;
+  toolName: 'get_pii' | 'get_org_sensitive';
+  delegation: IncomingDelegation;
+  requester: Address;
+}): Promise<Response> {
+  // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side
+  //    rejection; same proof either way).
+  const verify = await verifyDelegation(args.env, args.delegation, args.requester);
+  if (!verify.ok) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'delegation_invalid', detail: verify.reason }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  const auditSink = buildAuditSink(args.env);
+  const correlationId = crypto.randomUUID();
+
+  const sm = sessionManagerFor(args.env, args.requester);
+  const initRes = await sm.init(args.requester, Number(args.env.CHAIN_ID));
+
+  const delegationStruct: Delegation = {
+    delegator: args.delegation.delegator,
+    delegate: args.delegation.delegate,
+    authority: args.delegation.authority,
+    caveats: args.delegation.caveats.map((c) => ({
+      enforcer: c.enforcer,
+      terms: c.terms,
+      args: (c.args ?? '0x') as Hex,
+    })),
+    salt: BigInt(args.delegation.salt),
+    signature: args.delegation.signature,
+  };
+  await sm.package(initRes.sessionId, delegationStruct);
+
+  const resolved = await sm.resolve(initRes.sessionId);
+  if (!resolved.delegation) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'session_resolve_no_delegation' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  // 4. Mint the delegation token signed by the session key.
+  const { token } = await mintDelegationToken(
+    {
+      iss: 'demo-a2a',
+      aud: MCP_AUDIENCE,
+      sub: resolved.delegation.delegator,
+      delegation: resolved.delegation,
+      sessionKeyAddress: resolved.signer.address,
+      ttlSeconds: 300,
+      usageLimit: 10,
+    },
+    (msg) => resolved.signer.signMessage(msg),
+    { auditSink, correlationId },
+  );
+
+  // 5. Service-MAC envelope for the worker-to-worker call.
+  const requestBody = JSON.stringify({ token, args: {} });
+  const macProvider = buildMacProvider(MCP_AUDIENCE, {
+    backend: 'local-aes',
+    config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
+    auditSink,
+  });
+  const macHeaders = await generateServiceMac({
+    ctx: {
+      audience: MCP_AUDIENCE,
+      service: 'a2a-to-mcp',
+      route: args.toolName,
+      bodyDigest: bodyDigestHex(requestBody),
+    },
+    provider: macProvider,
+  });
+  const reqInit: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-A2A-Mac': macHeaders.mac,
+      'X-A2A-Mac-Nonce': macHeaders.nonce,
+      'X-A2A-Mac-Timestamp': macHeaders.timestamp,
+      'X-A2A-Mac-Key-Id': macHeaders.keyId,
+      'X-Correlation-Id': correlationId,
+    },
+    body: requestBody,
+  };
+  // 6. Call the MCP server. Prefer the service binding in production
+  //    (avoids Cloudflare error 1042 on sibling-Worker fetches); fall
+  //    back to public-URL fetch in local dev.
+  const mcpRes = args.env.MCP
+    ? await args.env.MCP.fetch(new Request(`https://internal/tools/${args.toolName}`, reqInit))
+    : await fetch(`${args.env.MCP_URL}/tools/${args.toolName}`, reqInit);
+  const mcpBody = await mcpRes.text();
+  // Pass through demo-mcp's response. On a non-2xx, wrap the body so
+  // the front-end sees a consistent { ok: false, error, detail } shape.
+  if (!mcpRes.ok) {
+    let detail = mcpBody;
+    let error = `mcp_${mcpRes.status}`;
+    try {
+      const parsed = JSON.parse(mcpBody) as { error?: string; detail?: string };
+      if (parsed.error) error = parsed.error;
+      if (parsed.detail) detail = parsed.detail;
+    } catch { /* keep raw body */ }
+    return new Response(
+      JSON.stringify({ ok: false, error, detail, mcp_status: mcpRes.status }),
+      { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  return new Response(mcpBody, {
+    status: mcpRes.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+app.post('/mcp/person/pii', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      delegation: IncomingDelegation;
+      requester: Address;
+    } | null;
+    if (!body?.delegation || !body?.requester) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    return await callMcpToolViaDelegation({
+      env: c.env,
+      toolName: 'get_pii',
+      delegation: body.delegation,
+      requester: body.requester,
+    });
+  } catch (e) {
+    return c.json(
+      { ok: false, error: 'pii_lookup_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
+});
+
+app.post('/mcp/org/sensitive', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      delegation: IncomingDelegation;
+      requester: Address;
+    } | null;
+    if (!body?.delegation || !body?.requester) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    return await callMcpToolViaDelegation({
+      env: c.env,
+      toolName: 'get_org_sensitive',
+      delegation: body.delegation,
+      requester: body.requester,
+    });
+  } catch (e) {
+    return c.json(
+      { ok: false, error: 'org_data_failed', detail: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
+});
+
 // ─── Paymaster top-up (operator-only) ─────────────────────────────────────
 //
 // One-click "send ETH from the deployer EOA to the paymaster's EntryPoint
@@ -1550,6 +1884,14 @@ app.post('/session/package', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     sessionId?: string;
     delegation?: Omit<Delegation, 'salt'> & { salt: string };
+    /**
+     * Optional. The smart-account address the session was opened under
+     * (via `/session/init`). Required when the session holder is the
+     * delegate, not the delegator — e.g. Bob's session packaging an
+     * Alice→Bob delegation. Defaults to `delegation.delegator` to
+     * preserve the original "user packages their own delegation" flow.
+     */
+    sessionOwner?: Address;
   } | null;
   if (!body?.sessionId || !body.delegation) {
     return c.json({ error: 'sessionId and delegation required' }, 400);
@@ -1566,10 +1908,13 @@ app.post('/session/package', async (c) => {
     delegation.signature,
   );
 
-  // delegation.delegator IS the smart-account address — use it to route to
-  // the correct per-user DO.
+  // Route to the session owner's DO. For the "I delegate to my own
+  // agent" flow this is identical to the delegator. For cross-user
+  // patterns ("Bob holds Alice's delegation") the caller passes the
+  // session holder explicitly so we land on the right shard.
+  const owner = body.sessionOwner ?? delegation.delegator;
   try {
-    await sessionManagerFor(c.env, delegation.delegator).package(body.sessionId, delegation);
+    await sessionManagerFor(c.env, owner).package(body.sessionId, delegation);
   } catch (e) {
     return c.json({ error: 'session package failed', detail: String(e) }, 400);
   }

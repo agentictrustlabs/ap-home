@@ -118,3 +118,154 @@ export function createD1AuditSink(
     },
   };
 }
+
+// ─── Person PII + Org sensitive (phase 6f.6) ──────────────────────────
+
+export interface PersonPii {
+  subject_address: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  dob: string | null;
+  ssn_last4: string | null;
+  postal_address: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export async function upsertDemoPii(
+  db: D1Database,
+  subject: string,
+  fields?: Partial<Omit<PersonPii, 'subject_address' | 'updated_at'>>,
+): Promise<PersonPii> {
+  const addr = subject.toLowerCase();
+  const existing = await db
+    .prepare('SELECT * FROM person_pii WHERE subject_address = ?')
+    .bind(addr)
+    .first<PersonPii>();
+  if (existing && !fields) return existing;
+  const seeded: PersonPii = {
+    subject_address: addr,
+    full_name: fields?.full_name ?? `Demo Person (${subject.slice(0, 6)}…${subject.slice(-4)})`,
+    email: fields?.email ?? `${subject.slice(2, 10).toLowerCase()}@demo.agenticprimitives.local`,
+    phone: fields?.phone ?? '+1-555-0142',
+    dob: fields?.dob ?? '1985-06-15',
+    ssn_last4: fields?.ssn_last4 ?? subject.slice(-4),
+    postal_address: fields?.postal_address ?? '1 Demo Way, Springfield, IL 62701',
+    notes: fields?.notes ?? 'Seeded by demo-mcp.',
+    updated_at: new Date().toISOString(),
+  };
+  await db
+    .prepare(
+      `INSERT INTO person_pii (subject_address, full_name, email, phone, dob, ssn_last4, postal_address, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(subject_address) DO UPDATE SET
+         full_name = excluded.full_name,
+         email = excluded.email,
+         phone = excluded.phone,
+         dob = excluded.dob,
+         ssn_last4 = excluded.ssn_last4,
+         postal_address = excluded.postal_address,
+         notes = excluded.notes,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(
+      seeded.subject_address,
+      seeded.full_name,
+      seeded.email,
+      seeded.phone,
+      seeded.dob,
+      seeded.ssn_last4,
+      seeded.postal_address,
+      seeded.notes,
+    )
+    .run();
+  return seeded;
+}
+
+export async function getPii(db: D1Database, subject: string): Promise<PersonPii | undefined> {
+  return (
+    (await db
+      .prepare('SELECT * FROM person_pii WHERE subject_address = ?')
+      .bind(subject.toLowerCase())
+      .first<PersonPii>()) ?? undefined
+  );
+}
+
+export interface OrgSensitive {
+  org_address: string;
+  legal_name: string;
+  ein: string | null;
+  incorporated_in: string | null;
+  ytd_revenue_usd: number | null;
+  active_contracts: number | null;
+  pending_litigation: number | null;
+  primary_banking: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export async function upsertDemoOrgSensitive(
+  db: D1Database,
+  orgAddress: string,
+  fields?: Partial<Omit<OrgSensitive, 'org_address' | 'updated_at'>>,
+): Promise<OrgSensitive> {
+  const addr = orgAddress.toLowerCase();
+  const existing = await db
+    .prepare('SELECT * FROM org_sensitive WHERE org_address = ?')
+    .bind(addr)
+    .first<OrgSensitive>();
+  if (existing && !fields) return existing;
+  const seeded: OrgSensitive = {
+    org_address: addr,
+    legal_name: fields?.legal_name ?? 'Acme Construction LLC',
+    ein: fields?.ein ?? '87-4421099',
+    incorporated_in: fields?.incorporated_in ?? 'Delaware',
+    ytd_revenue_usd: fields?.ytd_revenue_usd ?? 12_840_000,
+    active_contracts: fields?.active_contracts ?? 14,
+    pending_litigation: fields?.pending_litigation ?? 0,
+    primary_banking: fields?.primary_banking ?? 'Chase Business · acct ****8821',
+    notes: fields?.notes ?? 'Seeded by demo-mcp.',
+    updated_at: new Date().toISOString(),
+  };
+  await db
+    .prepare(
+      `INSERT INTO org_sensitive (org_address, legal_name, ein, incorporated_in, ytd_revenue_usd, active_contracts, pending_litigation, primary_banking, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(org_address) DO UPDATE SET
+         legal_name = excluded.legal_name,
+         ein = excluded.ein,
+         incorporated_in = excluded.incorporated_in,
+         ytd_revenue_usd = excluded.ytd_revenue_usd,
+         active_contracts = excluded.active_contracts,
+         pending_litigation = excluded.pending_litigation,
+         primary_banking = excluded.primary_banking,
+         notes = excluded.notes,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(
+      seeded.org_address,
+      seeded.legal_name,
+      seeded.ein,
+      seeded.incorporated_in,
+      seeded.ytd_revenue_usd,
+      seeded.active_contracts,
+      seeded.pending_litigation,
+      seeded.primary_banking,
+      seeded.notes,
+    )
+    .run();
+  return seeded;
+}
+
+export async function getOrgSensitive(
+  db: D1Database,
+  orgAddress: string,
+): Promise<OrgSensitive | undefined> {
+  return (
+    (await db
+      .prepare('SELECT * FROM org_sensitive WHERE org_address = ?')
+      .bind(orgAddress.toLowerCase())
+      .first<OrgSensitive>()) ?? undefined
+  );
+}
