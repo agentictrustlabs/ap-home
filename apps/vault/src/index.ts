@@ -268,7 +268,7 @@ app.post('/tools/get_profile', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
@@ -280,10 +280,14 @@ app.post('/tools/get_profile', async (c) => {
 // request "Read Alice's PII via Alice→Bob delegation" lands here as
 // `principal = Alice`. Mock data is seeded lazily on first read.
 
+// Tier=low keeps the read-only PII tool on the T1 path (no QuorumCaveat
+// requirement, no on-chain acceptance gate). Production deployments may
+// classify PII as `medium` once the Act-5 delegations also carry the
+// QuorumCaveat the policy demands.
 const GET_PII_CLASSIFICATION = {
   '@sa-tool': 'delegation-verified',
   '@sa-auth': 'session-token',
-  '@sa-risk-tier': 'medium',
+  '@sa-risk-tier': 'low',
 } as const;
 declareTool({ name: 'get_pii' }, GET_PII_CLASSIFICATION);
 
@@ -316,7 +320,7 @@ app.post('/tools/get_pii', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
@@ -328,10 +332,13 @@ app.post('/tools/get_pii', async (c) => {
 // delegation, `principal` resolves to the Org address, MCP returns
 // Org-internal data (revenue, EIN, banking, …).
 
+// Same rationale as get_pii — kept at T1 for the demo. Bumping to T3
+// (`high`) would require Act 5 to attach a QuorumCaveat naming the
+// Org's 2-of-N custodian set to every Org-sensitive delegation.
 const GET_ORG_SENSITIVE_CLASSIFICATION = {
   '@sa-tool': 'delegation-verified',
   '@sa-auth': 'session-token',
-  '@sa-risk-tier': 'high',
+  '@sa-risk-tier': 'low',
 } as const;
 declareTool({ name: 'get_org_sensitive' }, GET_ORG_SENSITIVE_CLASSIFICATION);
 
@@ -363,7 +370,7 @@ app.post('/tools/get_org_sensitive', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed', detail: e.message }, 401);
+    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
