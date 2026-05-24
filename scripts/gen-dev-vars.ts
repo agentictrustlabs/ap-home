@@ -45,6 +45,15 @@ interface Deployments {
   quorumEnforcer?: string;
   approvedHashRegistry?: string;
   deployer?: string;
+  // NS/RL/ID Phase 3 stack (live since 2026-05-23).
+  ontologyTermRegistry?: string;
+  shapeRegistry?: string;
+  agentNameRegistry?: string;
+  agentNameResolver?: string;
+  agentNameUniversalResolver?: string;
+  agentRelationship?: string;
+  relationshipTypeRegistry?: string;
+  agentProfileResolver?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -131,6 +140,17 @@ const webProVars: Record<string, string> = {
   ...(d.valueEnforcer           ? { VITE_VALUE_ENFORCER:            d.valueEnforcer           } : {}),
   ...(d.allowedTargetsEnforcer  ? { VITE_ALLOWED_TARGETS_ENFORCER:  d.allowedTargetsEnforcer  } : {}),
   ...(d.allowedMethodsEnforcer  ? { VITE_ALLOWED_METHODS_ENFORCER:  d.allowedMethodsEnforcer  } : {}),
+  // NS/RL/ID Phase 3 stack — naming + relationships + identity profile
+  // contracts. Surface to demo so the read-side hooks can construct
+  // their clients without bundling the deployments JSON.
+  ...(d.agentNameRegistry          ? { VITE_AGENT_NAME_REGISTRY:           d.agentNameRegistry          } : {}),
+  ...(d.agentNameResolver          ? { VITE_AGENT_NAME_RESOLVER:           d.agentNameResolver          } : {}),
+  ...(d.agentNameUniversalResolver ? { VITE_AGENT_NAME_UNIVERSAL_RESOLVER: d.agentNameUniversalResolver } : {}),
+  ...(d.agentRelationship          ? { VITE_AGENT_RELATIONSHIP:            d.agentRelationship          } : {}),
+  ...(d.relationshipTypeRegistry   ? { VITE_RELATIONSHIP_TYPE_REGISTRY:    d.relationshipTypeRegistry   } : {}),
+  ...(d.agentProfileResolver       ? { VITE_AGENT_PROFILE_RESOLVER:        d.agentProfileResolver       } : {}),
+  ...(d.ontologyTermRegistry       ? { VITE_ONTOLOGY_TERM_REGISTRY:        d.ontologyTermRegistry       } : {}),
+  ...(d.shapeRegistry              ? { VITE_SHAPE_REGISTRY:                d.shapeRegistry              } : {}),
   // Use the same RPC the workers use so reads stay in sync with writes
   // (avoids the "schedule succeeded but the read RPC doesn't see it yet"
   // class of bug that mis-signs apply hashes as eta=0).
