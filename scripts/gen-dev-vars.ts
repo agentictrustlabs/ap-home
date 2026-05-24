@@ -54,6 +54,7 @@ interface Deployments {
   agentRelationship?: string;
   relationshipTypeRegistry?: string;
   agentProfileResolver?: string;
+  permissionlessSubregistry?: string;
 }
 
 const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Deployments;
@@ -151,6 +152,7 @@ const webProVars: Record<string, string> = {
   ...(d.agentProfileResolver       ? { VITE_AGENT_PROFILE_RESOLVER:        d.agentProfileResolver       } : {}),
   ...(d.ontologyTermRegistry       ? { VITE_ONTOLOGY_TERM_REGISTRY:        d.ontologyTermRegistry       } : {}),
   ...(d.shapeRegistry              ? { VITE_SHAPE_REGISTRY:                d.shapeRegistry              } : {}),
+  ...(d.permissionlessSubregistry  ? { VITE_PERMISSIONLESS_SUBREGISTRY:    d.permissionlessSubregistry  } : {}),
   // Use the same RPC the workers use so reads stay in sync with writes
   // (avoids the "schedule succeeded but the read RPC doesn't see it yet"
   // class of bug that mis-signs apply hashes as eta=0).
