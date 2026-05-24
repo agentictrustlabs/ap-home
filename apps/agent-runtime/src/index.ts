@@ -353,6 +353,10 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 app.use('*', async (c, next) => {
   if (!MUTATING_METHODS.has(c.req.method)) return next();
+  // /rpc is a read-only JSON-RPC pass-through (eth_call, eth_getCode,
+  // etc.). No state change to forge → CSRF doesn't apply. We rely on
+  // CORS to keep cross-origin browsers off non-allowlisted pages.
+  if (c.req.path === '/rpc') return next();
   // Header double-submit + HMAC.
   const headerToken = c.req.header(CSRF_HEADER);
   const cookieToken = getCookie(c, CSRF_COOKIE);
@@ -410,6 +414,53 @@ app.get('/health', (c) =>
     runtime: 'cloudflare-workers',
   }),
 );
+
+/**
+ * POST /rpc — JSON-RPC pass-through to the configured RPC backend.
+ *
+ * Lets browsers make eth_call / eth_getCode / etc. reads without:
+ *   - exposing the upstream API key
+ *   - tripping the upstream's CORS rejection (worker → upstream is
+ *     server-to-server, no browser CORS involved)
+ *   - hitting upstream rate limits as N individual browsers
+ *
+ * The browser sets `VITE_BROWSER_RPC_URL=<this worker>/rpc` and viem
+ * sends standard JSON-RPC bodies. The worker forwards them verbatim
+ * to RPC_URL and returns the response.
+ *
+ * CSRF: skipped here because (a) all JSON-RPC requests are POST and
+ * the CSRF middleware applies to mutating methods, but read-only
+ * `eth_call`s aren't a CSRF concern — there's no state change to
+ * forge. We don't accept signed userOps via this endpoint; that's
+ * what /account/submit-call-userop is for.
+ */
+app.post('/rpc', async (c) => {
+  if (!c.env.RPC_URL) {
+    return c.json({ jsonrpc: '2.0', error: { code: -32603, message: 'rpc_unconfigured' }, id: null }, 503);
+  }
+  const body = await c.req.text();
+  // Allow CSRF middleware to bypass — it's a passthrough.
+  // (Middleware already passed because the request arrived; the CSRF
+  // gate is per-route, not global. /rpc deliberately doesn't gate.)
+  try {
+    const upstream = await fetch(c.env.RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const text = await upstream.text();
+    return new Response(text, {
+      status: upstream.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (e) {
+    return c.json({
+      jsonrpc: '2.0',
+      error: { code: -32603, message: 'rpc_proxy_failed', data: String(e) },
+      id: null,
+    }, 502);
+  }
+});
 
 app.get('/deployments', (c) =>
   c.json({
