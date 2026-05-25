@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agenticprimitives/agent-account": "workspace:*",
+    "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/identity-auth": "workspace:*",

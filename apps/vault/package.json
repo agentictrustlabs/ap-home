@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",

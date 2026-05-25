@@ -31,6 +31,7 @@ import {
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
+import { resolveAgentName } from './naming';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
 //   - console (surfaces in `wrangler tail` for live ops debugging)
@@ -82,6 +83,11 @@ export interface Env {
   RPC_URL: string;
   CHAIN_ID: string;
   MCP_AUDIENCE: string;
+
+  // Naming service (single-call reverseResolveString; no fallback).
+  // Optional: when unset, read tools simply omit the `.agent` name label.
+  AGENT_NAME_REGISTRY?: string;
+  AGENT_NAME_UNIVERSAL_RESOLVER?: string;
 
   DELEGATION_MANAGER: string;
   TIMESTAMP_ENFORCER: string;
@@ -254,7 +260,9 @@ app.post('/tools/get_profile', async (c) => {
     async ({ principal }) => {
       await upsertDemoProfile(c.env.DB, principal);
       const profile = await getProfile(c.env.DB, principal);
-      return { ok: true, profile };
+      // Label the owner with its `.agent` name (single-call resolve).
+      const owner_name = await resolveAgentName(c.env, principal);
+      return { ok: true, profile, owner_name };
     },
     {
       toolName: 'get_profile',
@@ -307,9 +315,11 @@ app.post('/tools/get_pii', async (c) => {
       // Lazy-seed so the first access for a freshly-claimed seat works.
       await upsertDemoPii(c.env.DB, principal);
       const record = await getPii(c.env.DB, principal);
+      const subject_name = await resolveAgentName(c.env, principal);
       return {
         ok: true,
         subject: principal,
+        subject_name,
         record,
         served_by: 'demo-mcp:get_pii',
       };
@@ -362,9 +372,11 @@ app.post('/tools/get_org_sensitive', async (c) => {
     async ({ principal }) => {
       await upsertDemoOrgSensitive(c.env.DB, principal);
       const record = await getOrgSensitive(c.env.DB, principal);
+      const org_name = await resolveAgentName(c.env, principal);
       return {
         ok: true,
         org: principal,
+        org_name,
         record,
         served_by: 'demo-mcp:get_org_sensitive',
       };

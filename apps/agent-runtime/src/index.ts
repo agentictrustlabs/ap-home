@@ -39,6 +39,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -100,6 +101,11 @@ export interface Env {
   ALLOWED_TARGETS_ENFORCER: string;
   ALLOWED_METHODS_ENFORCER: string;
   VALUE_ENFORCER: string;
+  // Naming service (spec 215). When set, /name/reverse resolves an SA
+  // address → its primary `.agent` name via a single reverseResolveString
+  // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
+  AGENT_NAME_REGISTRY?: string;
+  AGENT_NAME_UNIVERSAL_RESOLVER?: string;
   /**
    * UniversalSignatureValidator address. When set, /auth/siwe-verify
    * uses the on-chain validator (handles EOA + ERC-1271 + ERC-6492
@@ -472,12 +478,57 @@ app.get('/deployments', (c) =>
     allowedMethodsEnforcer: c.env.ALLOWED_METHODS_ENFORCER,
     valueEnforcer: c.env.VALUE_ENFORCER,
     universalSignatureValidator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR ?? null,
+    agentNameRegistry: c.env.AGENT_NAME_REGISTRY ?? null,
+    agentNameUniversalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER ?? null,
     // Note: RPC_URL is intentionally NOT exposed. When it embeds an
     // API key (Alchemy / Infura / etc.), the public /deployments
     // endpoint would leak it. The browser instead calls
     // /account/derive-address for any view-call address derivation.
   }),
 );
+
+/**
+ * GET /name/reverse?address=0x… — resolve a Smart Agent address to its
+ * primary `.agent` name, server-side, using the worker's RPC. The
+ * relayer's naming surface: one `reverseResolveString` view call via the
+ * package client — NO eth_getLogs walk, NO fallback to a second
+ * resolution path (ADR-0012 / ADR-0013). Returns `{ address, name }`
+ * where `name` is null when the SA has no primary name set.
+ *
+ * Lets any consumer label an address without embedding the naming
+ * contract addresses or an RPC key in its own bundle.
+ */
+app.get('/name/reverse', async (c) => {
+  const clientIp =
+    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return c.json({ error: 'rate limit exceeded' }, 429);
+  }
+  const address = c.req.query('address');
+  if (!address || !ADDRESS_REGEX.test(address)) {
+    return c.json({ error: 'valid ?address=0x… required' }, 400);
+  }
+  if (
+    !c.env.RPC_URL ||
+    !c.env.CHAIN_ID ||
+    !c.env.AGENT_NAME_REGISTRY ||
+    !c.env.AGENT_NAME_UNIVERSAL_RESOLVER
+  ) {
+    return c.json({ error: 'naming not configured' }, 503);
+  }
+  try {
+    const client = new AgentNamingClient({
+      rpcUrl: c.env.RPC_URL,
+      chainId: Number(c.env.CHAIN_ID),
+      registry: c.env.AGENT_NAME_REGISTRY as `0x${string}`,
+      universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as `0x${string}`,
+    });
+    const name = await client.reverseResolve(address as `0x${string}`);
+    return c.json({ address, name });
+  } catch (e) {
+    return c.json({ error: 'reverse_resolve_failed', detail: String(e) }, 502);
+  }
+});
 
 // View-call relay: derive a smart-account address from constructor
 // args, server-side, using the demo-a2a's configured RPC. Lets the
