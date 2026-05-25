@@ -15,7 +15,7 @@
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
-    "@agenticprimitives/identity-auth": "workspace:*",
+    "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/types": "workspace:*",

@@ -12,7 +12,7 @@ import { cors } from 'hono/cors';
 import {
   verify as siweVerifyLegacy,
   verifyOnchain as siweVerifyOnchain,
-} from '@agenticprimitives/identity-auth/siwe';
+} from '@agenticprimitives/connect-auth/siwe';
 import {
   mintSession,
   verifySession,
@@ -21,7 +21,7 @@ import {
   verifyUserSignature,
   csrfTokenFor,
   verifyCsrf,
-} from '@agenticprimitives/identity-auth';
+} from '@agenticprimitives/connect-auth';
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
 import {
   BadInputError,
