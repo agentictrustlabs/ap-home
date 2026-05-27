@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "comment": "Monorepo: set the Vercel project Root Directory to apps/demo-sso-next. The workspace packages ship gitignored dist/, so the build first builds packages/* (pnpm -r) then this app. Install runs at the workspace root.",
   "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm -r --filter './packages/*' build && pnpm --filter @agenticprimitives-demo/sso-next build"
 }
