@@ -8,11 +8,12 @@
 import { Redis } from '@upstash/redis';
 import type { KVNamespace } from '../../server/_lib/server-broker';
 
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL ?? '',
-  token: process.env.KV_REST_API_TOKEN ?? '',
-  automaticDeserialization: false,
-});
+// Accept both the legacy "Vercel KV" names (KV_REST_API_*) and the current
+// Upstash Marketplace integration names (UPSTASH_REDIS_REST_*).
+const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? '';
+const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
+
+const redis = new Redis({ url, token, automaticDeserialization: false });
 
 export const kv: KVNamespace = {
   async get(key: string): Promise<string | null> {
