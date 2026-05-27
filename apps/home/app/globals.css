@@ -1,0 +1,823 @@
+      /* ── Design tokens ─────────────────────────────────────────────── */
+      :root {
+        --c-primary: #4338ca; --c-primary-hover: #3730a3; --c-primary-active: #312e81;
+        --c-primary-subtle: #eef2ff; --c-primary-border: #c7d2fe;
+        --c-primary-mid: #818cf8; --c-primary-light: #6366f1;
+        --c-g900: #0f172a; --c-g700: #334155; --c-g500: #64748b; --c-g400: #94a3b8;
+        --c-g300: #cbd5e1; --c-g200: #e2e8f0; --c-g100: #f1f5f9; --c-g50: #f8fafc;
+        --c-success: #059669; --c-success-bg: #ecfdf5; --c-success-border: #a7f3d0;
+        --c-danger: #dc2626; --c-danger-bg: #fef2f2; --c-danger-border: #fecaca;
+        --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-2xl: 24px;
+        --sh-sm: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+        --sh-md: 0 4px 14px rgba(15,23,42,.09), 0 2px 6px rgba(15,23,42,.05);
+        --sh-card: 0 2px 16px rgba(67,56,202,.10), 0 1px 4px rgba(15,23,42,.06);
+        --sh-primary: 0 4px 16px rgba(67,56,202,.35), 0 2px 6px rgba(67,56,202,.20);
+        --sh-modal: 0 24px 60px rgba(15,23,42,.22), 0 8px 24px rgba(15,23,42,.10);
+        --ease: cubic-bezier(0.16, 1, 0.3, 1);
+        --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+        /* Popup is narrower; standalone is wider */
+        --app-max: 420px;
+        --app-px: 20px;
+        --shell-max: 780px;
+        --grad-shield: linear-gradient(145deg, #6366f1 0%, #4338ca 50%, #3730a3 100%);
+        --grad-hero: radial-gradient(ellipse at 50% 110%, rgba(99,102,241,.20) 0%, rgba(79,70,229,.10) 38%, rgba(139,92,246,.06) 62%, transparent 80%);
+      }
+
+      /* ── Reset & base ──────────────────────────────────────────────── */
+      * { box-sizing: border-box; }
+      body {
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        background: #fff;
+        color: var(--c-g700);
+        margin: 0; padding: 0;
+        min-height: 100dvh;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── App shell (standalone, not popup) ─────────────────────────── */
+      #root { display: flex; flex-direction: column; min-height: 100dvh; }
+      .app-shell {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: var(--shell-max);
+        width: 100%;
+        margin: 0 auto;
+        padding: 0 1.25rem 2rem;
+      }
+
+      /* ── Standalone top bar ─────────────────────────────────────────── */
+      .standalone-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 56px;
+        border-bottom: 1px solid var(--c-g100);
+        padding: 0 1.25rem;
+        position: sticky;
+        top: 0;
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        z-index: 30;
+        max-width: 100%;
+      }
+      .standalone-topbar-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        max-width: var(--shell-max);
+        margin: 0 auto;
+      }
+      .standalone-brand {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        font-size: .9375rem;
+        font-weight: 800;
+        color: var(--c-g900);
+        letter-spacing: -.02em;
+      }
+
+      /* ── Standalone page header ─────────────────────────────────────── */
+      .standalone-hero {
+        padding: 2rem 0 1.25rem;
+        margin-bottom: 1.25rem;
+      }
+      .standalone-hero h1 {
+        font-size: 1.75rem;
+        font-weight: 900;
+        color: var(--c-g900);
+        letter-spacing: -.04em;
+        margin: 0 0 .375rem;
+        line-height: 1.15;
+      }
+      .standalone-hero p {
+        font-size: .9rem;
+        color: var(--c-g500);
+        margin: 0;
+        line-height: 1.5;
+      }
+
+      /* ── Standalone two-column grid ─────────────────────────────────── */
+      .standalone-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+      }
+      @media (max-width: 640px) {
+        .standalone-grid { grid-template-columns: 1fr; }
+      }
+
+      /* ── Standalone cards ───────────────────────────────────────────── */
+      .scard {
+        padding: 1.25rem 1.375rem;
+        border: 1px solid var(--c-g200);
+        border-radius: var(--r-xl);
+        background: #fff;
+        box-shadow: var(--sh-card);
+        margin-bottom: 1rem;
+        transition: box-shadow .2s var(--ease);
+      }
+      .scard.accent {
+        border-color: var(--c-primary-border);
+        background: linear-gradient(160deg, #fff 55%, var(--c-primary-subtle));
+        box-shadow: 0 4px 20px rgba(67,56,202,.12), 0 1px 6px rgba(15,23,42,.06);
+      }
+      .scard h2 {
+        font-size: 1.0625rem;
+        font-weight: 700;
+        color: var(--c-g900);
+        margin: 0 0 .625rem;
+        letter-spacing: -.02em;
+      }
+      .scard p { font-size: .9rem; margin: 0 0 .625rem; }
+      .scard pre {
+        background: var(--c-g100);
+        padding: .6rem;
+        border-radius: var(--r-sm);
+        overflow-x: auto;
+        font-size: .78rem;
+        margin: 0 0 .625rem;
+      }
+
+      /* Workspace identity block */
+      .ws-name {
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: var(--c-g900);
+        letter-spacing: -.03em;
+        line-height: 1.2;
+      }
+      .ws-agent {
+        font-family: 'SF Mono', 'Roboto Mono', monospace;
+        font-size: .76rem;
+        color: var(--c-g400);
+        word-break: break-all;
+        margin: .25rem 0 .75rem;
+      }
+      .ws-row {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        font-size: .875rem;
+        color: var(--c-g700);
+        margin-bottom: .25rem;
+      }
+      .ws-row strong { color: var(--c-g900); }
+
+      /* ── Action row ─────────────────────────────────────────────────── */
+      .standalone-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem;
+        margin-top: .875rem;
+      }
+      .standalone-actions button { margin: 0; }
+
+      /* ── Typography ────────────────────────────────────────────────── */
+      h1 {
+        font-size: 1.75rem; font-weight: 900; color: var(--c-g900);
+        letter-spacing: -0.04em; margin: 0 0 .5rem; line-height: 1.15;
+      }
+      h2 {
+        font-size: 1.0625rem; font-weight: 700; color: var(--c-g900);
+        letter-spacing: -0.02em; margin: 0 0 .5rem; line-height: 1.3;
+      }
+      h3 {
+        font-size: .75rem; font-weight: 700; color: var(--c-g400);
+        text-transform: uppercase; letter-spacing: .08em; margin: 0 0 .75rem;
+      }
+      p { margin: 0 0 .6rem; }
+      a { color: var(--c-primary-light); }
+      .muted { color: var(--c-g500); font-size: .9rem; }
+      .ok { color: var(--c-success); }
+      .err { color: var(--c-danger); }
+      .accent { color: var(--c-primary-light); }
+      code {
+        background: var(--c-g100); color: var(--c-g700);
+        padding: .1rem .35rem; border-radius: 5px; font-size: .85em;
+      }
+
+      /* ── Focus ring ────────────────────────────────────────────────── */
+      *:focus-visible {
+        outline: 2.5px solid var(--c-primary-light);
+        outline-offset: 2px;
+        border-radius: var(--r-sm);
+      }
+
+      /* ── Standalone buttons ─────────────────────────────────────────── */
+      button {
+        font: inherit; font-weight: 700; font-size: .9rem;
+        padding: .6rem 1.1rem; min-height: 44px; margin: 0;
+        cursor: pointer; border: 1.5px solid transparent; border-radius: var(--r-md);
+        background: var(--c-primary); color: #fff;
+        display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+        transition: background 0.18s var(--ease), box-shadow 0.18s var(--ease),
+                    transform 0.12s var(--ease), opacity .15s;
+        white-space: nowrap; letter-spacing: -.01em;
+      }
+      button:hover:not(:disabled) {
+        background: var(--c-primary-hover);
+        transform: translateY(-1px);
+      }
+      button:active:not(:disabled) {
+        background: var(--c-primary-active);
+        transform: translateY(0);
+      }
+      button:disabled { opacity: .42; cursor: default; }
+      button.ghost {
+        background: #fff; color: var(--c-g700);
+        border-color: var(--c-g200); box-shadow: none;
+      }
+      button.ghost:hover:not(:disabled) {
+        background: var(--c-g50); border-color: var(--c-g300);
+        box-shadow: none; transform: translateY(-1px);
+      }
+      button.ghost:disabled { background: #fff; }
+
+      /* Full-width CTA (popup + modal) */
+      button.cta {
+        width: 100%;
+        font-size: 1rem; font-weight: 700;
+        padding: .9rem 1.5rem; min-height: 56px;
+        border-radius: var(--r-xl);
+        background: var(--grad-shield);
+        box-shadow: var(--sh-primary);
+        letter-spacing: -.02em; margin: 0;
+      }
+      button.cta:not(:disabled):hover {
+        box-shadow: 0 6px 24px rgba(67,56,202,.45), 0 2px 8px rgba(67,56,202,.24);
+        transform: translateY(-1px);
+      }
+      button.cta:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: var(--sh-primary);
+      }
+
+      /* Full-width ghost CTA */
+      button.cta.ghost {
+        background: none;
+        color: var(--c-g700);
+        border: 1.5px solid var(--c-g200);
+        box-shadow: none;
+        font-weight: 600;
+        margin: 0;
+      }
+      button.cta.ghost:hover:not(:disabled) {
+        background: var(--c-g50);
+        border-color: var(--c-g300);
+        box-shadow: none;
+      }
+
+      /* ── Inputs ─────────────────────────────────────────────────────── */
+      input {
+        width: 100%; max-width: 100%; height: 48px;
+        padding: 0 .875rem; font: inherit; font-size: .9375rem;
+        color: var(--c-g900); background: #fff;
+        border: 1.5px solid var(--c-g200); border-radius: var(--r-md);
+        transition: border-color .15s, box-shadow .15s;
+      }
+      input:hover { border-color: var(--c-g300); }
+      input:focus {
+        outline: none;
+        border-color: var(--c-primary-light);
+        box-shadow: 0 0 0 3.5px rgba(99,102,241,.16);
+      }
+
+      /* ── Badge ──────────────────────────────────────────────────────── */
+      .badge {
+        display: inline-flex; align-items: center;
+        font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+        padding: .2rem .6rem; border-radius: 999px;
+        background: var(--c-primary-subtle); color: var(--c-primary);
+        border: 1px solid var(--c-primary-border);
+        white-space: nowrap; text-transform: uppercase;
+      }
+      .badge.success {
+        background: var(--c-success-bg); color: var(--c-success);
+        border-color: var(--c-success-border);
+      }
+      .badge.neutral {
+        background: var(--c-g100); color: var(--c-g500);
+        border-color: var(--c-g200);
+      }
+
+      /* ── Reward chips ───────────────────────────────────────────────── */
+      /*
+       * Ownership celebration — the moment you earn your agent name + Smart Agent.
+       * Spring animation makes them feel like something real popping into existence.
+       */
+      .reward-row {
+        display: flex; flex-wrap: wrap; gap: .5rem;
+        margin: .875rem 0 .25rem;
+      }
+      .reward-chip {
+        display: inline-flex; align-items: center; gap: .375rem;
+        padding: .35rem .875rem .35rem .5rem;
+        border-radius: 999px;
+        background: var(--c-success-bg);
+        border: 1.5px solid var(--c-success-border);
+        font-size: .78rem; font-weight: 700; color: var(--c-success);
+        white-space: nowrap;
+        animation: chip-in .5s var(--ease-back) both;
+      }
+      .reward-chip:nth-child(2) { animation-delay: .09s; }
+      @keyframes chip-in {
+        from { opacity: 0; transform: scale(.82) translateY(6px); }
+        to   { opacity: 1; transform: scale(1) translateY(0); }
+      }
+      .reward-chip-icon {
+        width: 20px; height: 20px; border-radius: 50%;
+        background: var(--c-success); color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-size: .6rem; flex-shrink: 0; font-weight: 800;
+      }
+      .reward-chip.primary {
+        background: var(--c-primary-subtle);
+        border-color: var(--c-primary-border);
+        color: var(--c-primary);
+      }
+      .reward-chip.primary .reward-chip-icon { background: var(--c-primary); }
+
+      /* ── Step indicator pill ────────────────────────────────────────── */
+      .step-indicator {
+        display: inline-flex; align-items: center; gap: .35rem;
+        font-size: .72rem; font-weight: 700;
+        color: var(--c-primary);
+        background: var(--c-primary-subtle);
+        border: 1px solid var(--c-primary-border);
+        border-radius: 999px;
+        padding: .2rem .625rem; margin-bottom: .75rem;
+        letter-spacing: .02em; text-transform: uppercase;
+      }
+      .step-dots { display: flex; gap: .3rem; align-items: center; }
+      .step-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--c-primary-border); transition: background .2s;
+      }
+      .step-dot.active { background: var(--c-primary); }
+
+      /* ── Ceremony step pill + receipts (spec 230 part 2) ──────────────── */
+      .step-pill {
+        display: inline-flex; align-self: flex-start; align-items: center;
+        font-size: .72rem; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
+        color: var(--c-primary); background: var(--c-primary-subtle);
+        border: 1px solid var(--c-primary-border); border-radius: 999px;
+        padding: .2rem .625rem; margin-bottom: .65rem;
+      }
+      .receipt-chip {
+        display: flex; align-items: center; gap: .5rem;
+        background: var(--c-success-bg); border: 1.5px solid var(--c-success-border);
+        border-radius: var(--r-md, 12px); padding: .6rem .75rem;
+        font-size: .875rem; font-weight: 650; color: #065f46;
+      }
+      .receipt-tick {
+        flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+        background: var(--c-success); color: #fff;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: .8rem; font-weight: 800;
+      }
+      @keyframes receipt-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: no-preference) { .receipt-chip { animation: receipt-in .25s var(--ease, ease); } }
+
+      /* ── Personal secure-home hero ─────────────────────────────────── */
+      .agent-home-card,
+      .agent-badge-card {
+        background: linear-gradient(160deg, #fff 35%, var(--c-primary-subtle));
+        border: 1.5px solid var(--c-primary-border);
+        border-radius: var(--r-xl);
+        padding: 1.05rem 1.1rem;
+        margin: .625rem 0 .75rem;
+        box-shadow: var(--sh-card);
+        text-align: center;
+      }
+      .agent-home-hero,
+      .agent-badge-shield {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: .45rem;
+        margin-bottom: .7rem;
+      }
+      .agent-home-url {
+        max-width: 100%;
+        padding: .32rem .75rem;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--c-primary-border);
+        color: var(--c-primary);
+        font-family: 'SF Mono', 'Roboto Mono', monospace;
+        font-size: .75rem;
+        font-weight: 800;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        box-shadow: var(--sh-sm);
+      }
+      .agent-badge-kicker {
+        font-size: .7rem;
+        font-weight: 900;
+        color: var(--c-success);
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        margin-bottom: .3rem;
+      }
+      .agent-badge-name {
+        font-size: 1.35rem;
+        font-weight: 900;
+        color: var(--c-g900);
+        letter-spacing: -.04em;
+        line-height: 1.18;
+        word-break: break-word;
+      }
+      .agent-badge-sub {
+        margin-top: .35rem;
+        color: var(--c-g500);
+        font-size: .82rem;
+        line-height: 1.45;
+      }
+      .first-step-note {
+        background: #fff;
+        border: 1px solid var(--c-g200);
+        border-radius: var(--r-md);
+        padding: .75rem .875rem;
+        margin-bottom: .625rem;
+      }
+      .first-step-note strong {
+        display: block;
+        color: var(--c-g900);
+        font-size: .875rem;
+        margin-bottom: .25rem;
+      }
+      .first-step-note span {
+        display: block;
+        color: var(--c-g500);
+        font-size: .8rem;
+        line-height: 1.45;
+      }
+
+      /* ── Spinner ────────────────────────────────────────────────────── */
+      .spinner {
+        width: 1.05rem; height: 1.05rem;
+        border: 2px solid var(--c-g200);
+        border-top-color: var(--c-primary);
+        border-radius: 50%;
+        display: inline-block;
+        animation: spin .65s linear infinite;
+        flex-shrink: 0;
+      }
+      .spinner-lg { width: 2rem; height: 2rem; border-width: 3px; }
+
+      /* ── Steps checklist ────────────────────────────────────────────── */
+      .steps { list-style: none; padding: 0; margin: .5rem 0 1rem; }
+      .steps li {
+        padding: .4rem 0;
+        display: flex; align-items: flex-start; gap: .625rem;
+        font-size: .9375rem; line-height: 1.4;
+      }
+      .steps li.pending { color: var(--c-g300); }
+      .steps li.done    { color: var(--c-success); }
+      .steps li.current { color: var(--c-g900); font-weight: 700; }
+      .steps .step-icon { flex-shrink: 0; margin-top: .1em; width: 1.1em; text-align: center; }
+
+      /* ── Signup progress modal ──────────────────────────────────────── */
+      .modal-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(15,23,42,.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 50; padding: 1rem;
+        animation: fade .2s var(--ease);
+      }
+      .modal {
+        background: #fff;
+        border-radius: var(--r-2xl);
+        padding: 1.75rem 2rem;
+        width: min(30rem, 94vw);
+        box-shadow: var(--sh-modal);
+        animation: pop .3s var(--ease);
+      }
+      .modal h2 { margin-top: 0; }
+
+      /* ── Keyframes ───────────────────────────────────────────────────── */
+      @keyframes spin  { to { transform: rotate(360deg); } }
+      @keyframes fade  { from { opacity: 0; } }
+      @keyframes pop   { from { opacity: 0; transform: translateY(10px) scale(.97); } }
+      @keyframes float1 {
+        0%, 100% { transform: translateY(0) rotate(0deg); }
+        50%       { transform: translateY(-6px) rotate(2deg); }
+      }
+      @keyframes float2 {
+        0%, 100% { transform: translateY(0) rotate(0deg); }
+        50%       { transform: translateY(4px) rotate(-2deg); }
+      }
+
+      /* ── Reduced motion ──────────────────────────────────────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: .01ms !important;
+          transition-duration: .01ms !important;
+        }
+      }
+
+
+      /* ════════════════════════════════════════════════════════════════
+         POPUP / CONSENT SCREEN STYLES
+         ────────────────────────────────────────────────────────────────
+         Target viewports:
+           Popup window: 480×680
+           Mobile:       390×844, 360×640
+         Layout goal: ALL primary CTAs reachable without scrolling at
+         each of these viewports.
+
+         Strategy:
+           • Compact centred top bar (40px)
+           • Large shield-wordmark hero in the heading block
+           • Entity chip: compact 56px height
+           • Can card: 2 bullets max
+           • Cannot section: collapsed <details>
+           • Privacy footer: minimal 1-line
+           • Sticky bottom action bar: always visible
+         ════════════════════════════════════════════════════════════════ */
+
+      /* Popup root */
+      .popup-root {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        background: #fff;
+        position: relative;
+        overflow: hidden;
+      }
+
+      /* Scrollable content column */
+      .popup-scroll {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: var(--app-max);
+        width: 100%;
+        margin: 0 auto;
+        padding: 0 var(--app-px) 4px;
+        position: relative; z-index: 1;
+        overflow-y: auto;
+      }
+
+      /* ── Popup top bar: brand centred, 40px ─────────────────────────── */
+      .popup-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        gap: .5rem;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--c-g100);
+        position: relative; z-index: 2;
+        background: rgba(255,255,255,.95);
+      }
+      .popup-brand {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        font-size: .8125rem;
+        font-weight: 800;
+        color: var(--c-g900);
+        letter-spacing: -0.02em;
+      }
+      .popup-brand-sub { font-weight: 600; color: var(--c-primary); letter-spacing: -0.01em; }
+      .brand-shield { width: 22px; height: 22px; }
+
+      /* ── Popup heading ───────────────────────────────────────────────── */
+      .popup-heading {
+        padding: .625rem 0 .5rem;
+      }
+      .popup-heading h1 {
+        font-size: 1.4375rem;
+        font-weight: 900;
+        color: var(--c-g900);
+        letter-spacing: -0.04em;
+        line-height: 1.18;
+        margin: 0;
+      }
+      .popup-heading .accent-name { color: var(--c-primary-light); }
+
+      /* ── Entity chip ─────────────────────────────────────────────────── */
+      .entity-chip {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        padding: .5rem .75rem;
+        background: #fff;
+        border: 1px solid var(--c-g200);
+        border-radius: var(--r-lg);
+        box-shadow: var(--sh-card);
+        margin: .5rem 0 .625rem;
+      }
+      .entity-chip-icon {
+        width: 34px; height: 34px;
+        border-radius: 10px;
+        background: var(--c-primary-subtle);
+        display: flex; align-items: center; justify-content: center;
+        font-size: .9375rem; flex-shrink: 0; color: var(--c-primary);
+      }
+      .entity-chip-meta { flex: 1; min-width: 0; }
+      .entity-chip-name {
+        font-weight: 700; font-size: .9rem; color: var(--c-g900);
+        line-height: 1.3;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .entity-chip-sub {
+        font-size: .72rem; color: var(--c-g400);
+        font-family: 'SF Mono', 'Roboto Mono', monospace;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .entity-chip-badge {
+        font-size: .68rem; font-weight: 700;
+        color: var(--c-success);
+        background: var(--c-success-bg); border: 1px solid var(--c-success-border);
+        border-radius: 999px; padding: .1rem .45rem;
+        white-space: nowrap; flex-shrink: 0;
+      }
+
+      /* ── Can / cannot cards ─────────────────────────────────────────── */
+      .perm-card {
+        border-radius: var(--r-md);
+        padding: .75rem .875rem .625rem;
+        margin-bottom: .5rem;
+      }
+      .perm-card.can {
+        background: var(--c-success-bg);
+        border: 1px solid var(--c-success-border);
+      }
+      .perm-card.cannot {
+        background: var(--c-g50);
+        border: 1px solid var(--c-g100);
+      }
+      .perm-card-title {
+        font-size: .68rem; font-weight: 800;
+        text-transform: uppercase; letter-spacing: .07em;
+        margin-bottom: .5rem;
+      }
+      .perm-card.can .perm-card-title { color: var(--c-success); }
+      .perm-card.cannot .perm-card-title { color: var(--c-g400); }
+      .perm-list {
+        list-style: none; padding: 0; margin: 0;
+        display: flex; flex-direction: column; gap: .3rem;
+      }
+      .perm-list li {
+        display: flex; align-items: flex-start; gap: .4rem;
+        font-size: .8375rem; line-height: 1.4; color: var(--c-g700); margin: 0;
+      }
+      .perm-icon {
+        width: 16px; height: 16px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: .6rem; flex-shrink: 0; margin-top: .15em; font-weight: 800;
+      }
+      .perm-icon.ok {
+        background: var(--c-success); color: #fff;
+      }
+      .perm-icon.no  {
+        background: #fff; color: var(--c-g400);
+        border: 1.5px solid var(--c-g200);
+      }
+
+      /* Cannot disclosure — collapsed by default */
+      .cannot-disclosure { margin-bottom: .5rem; }
+      .cannot-disclosure summary {
+        display: flex; align-items: center; gap: .375rem;
+        font-size: .78rem; font-weight: 700; color: var(--c-g400);
+        cursor: pointer; list-style: none;
+        padding: .375rem 0; user-select: none;
+      }
+      .cannot-disclosure summary::-webkit-details-marker { display: none; }
+      .cannot-disclosure summary::before {
+        content: '▸';
+        font-size: .625rem;
+        transition: transform .15s;
+        color: var(--c-g300);
+      }
+      .cannot-disclosure[open] summary::before { transform: rotate(90deg); }
+      .cannot-disclosure .perm-card { margin-top: .375rem; margin-bottom: 0; }
+
+      /* ── Ceremony card (running state) ──────────────────────────────── */
+      .ceremony-card {
+        background: var(--c-primary-subtle);
+        border: 1px solid var(--c-primary-border);
+        border-radius: var(--r-xl);
+        padding: 1.25rem 1.125rem 1.125rem;
+        margin: .5rem 0 .75rem;
+        text-align: center;
+        box-shadow: var(--sh-card);
+        animation: pop .28s var(--ease);
+      }
+      .ceremony-spinner-wrap {
+        display: flex; align-items: center; justify-content: center;
+        margin-bottom: .75rem;
+      }
+
+      /* ── Error card ─────────────────────────────────────────────────── */
+      .error-card {
+        background: var(--c-danger-bg);
+        border: 1px solid var(--c-danger-border);
+        border-radius: var(--r-md);
+        padding: .875rem 1rem; margin-bottom: .875rem;
+      }
+      .error-card-title {
+        font-weight: 700; font-size: .9375rem;
+        color: var(--c-danger); margin-bottom: .2rem;
+      }
+      .error-card-body { font-size: .875rem; color: var(--c-g700); margin: 0; }
+
+      /* ── Blocked card ───────────────────────────────────────────────── */
+      .blocked-card {
+        background: var(--c-danger-bg); border: 1px solid var(--c-danger-border);
+        border-radius: var(--r-xl);
+        padding: 1.5rem 1.25rem; margin: .5rem 0 .75rem;
+        text-align: center;
+      }
+      .blocked-icon { font-size: 2rem; margin-bottom: .625rem; }
+
+      /* ── Sticky bottom action bar ───────────────────────────────────── */
+      /*
+       * Always pinned at the bottom of the popup window — the primary CTA
+       * never scrolls out of reach regardless of content length.
+       */
+      .popup-actions {
+        flex-shrink: 0;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: .625rem var(--app-px) max(.875rem, env(safe-area-inset-bottom, .875rem));
+        background: rgba(255,255,255,.97);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-top: 1px solid var(--c-g100);
+        position: relative; z-index: 2;
+        max-width: var(--app-max);
+        width: 100%;
+        margin: 0 auto;
+      }
+      /* Push to bottom of flex column */
+      .popup-root .popup-actions { margin-top: auto; }
+
+      /* ── Privacy footer ─────────────────────────────────────────────── */
+      .privacy-footer {
+        padding: .5rem 0 .375rem;
+        text-align: center;
+        font-size: .7rem;
+        color: var(--c-g400);
+        letter-spacing: .01em;
+      }
+
+      /* ── New-user callout ───────────────────────────────────────────── */
+      .new-user-notice {
+        background: var(--c-primary-subtle);
+        border: 1px solid var(--c-primary-border);
+        border-radius: var(--r-md);
+        padding: .625rem .875rem;
+        margin-top: .5rem;
+        font-size: .8375rem;
+        color: var(--c-g700);
+        line-height: 1.5;
+      }
+
+      /* ── Agent grant card — the concrete "what you get" hero ────────── */
+      /*
+       * The centrepiece of the consent screen. Shows the real agent name
+       * as the primary value, not buried in a permission question.
+       * Replaces the old popup-heading h1 for the sign-in consent path.
+       */
+      .agent-grant-card {
+        background: linear-gradient(160deg, #fff 40%, var(--c-primary-subtle));
+        border: 1.5px solid var(--c-primary-border);
+        border-radius: var(--r-xl);
+        padding: 1rem 1.125rem .875rem;
+        margin: .625rem 0 .625rem;
+        box-shadow: var(--sh-card);
+      }
+      .agent-grant-label {
+        font-size: .68rem;
+        font-weight: 800;
+        color: var(--c-primary);
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        margin-bottom: .3rem;
+      }
+      .agent-grant-name {
+        font-size: 1.3125rem;
+        font-weight: 900;
+        color: var(--c-g900);
+        letter-spacing: -0.03em;
+        line-height: 1.2;
+        word-break: break-all;
+      }
+      .agent-grant-sub {
+        font-size: .76rem;
+        color: var(--c-g500);
+        margin-top: .3rem;
+        line-height: 1.4;
+      }

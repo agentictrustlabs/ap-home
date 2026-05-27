@@ -1,0 +1,803 @@
+// Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
+// → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
+import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
+import { buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
+import { buildExecuteCallData, buildExecuteBatchCallData, AgentAccountClient } from '@agenticprimitives/agent-account';
+import {
+  buildProposeEdgeCall,
+  buildConfirmEdgeCall,
+  computeEdgeId,
+  RELATIONSHIP_TYPE,
+  type RelationshipType,
+} from '@agenticprimitives/agent-relationships';
+import type { Address, Hex } from '@agenticprimitives/types';
+import { encodeFunctionData } from 'viem';
+import { connectWallet, personalSign } from './lib/wallet';
+import { registerPasskey, signWithPasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
+import { ensureCsrfToken, csrfHeaders } from './csrf';
+import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
+import { issueSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
+
+/** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
+export type SignHash = (hash: Hex) => Promise<Hex>;
+
+export const AUD = 'demo-sso';
+const CHAIN_ID = 84532;
+
+export type SiweOutcome =
+  | { status: 'issued'; token: string; address: Address; agent: Address }
+  | { status: 'bootstrap'; address: Address }
+  | { status: 'disambiguate' | 'rejected'; address?: Address; reason?: string };
+
+async function getNonce(): Promise<string> {
+  const r = await fetch('/connect/nonce');
+  if (!r.ok) throw new Error('nonce fetch failed');
+  return ((await r.json()) as { nonce: string }).nonce;
+}
+
+/** Connect a wallet, sign SIWE, resolve to an AgentSession (or signal bootstrap). */
+export async function siweLogin(): Promise<SiweOutcome> {
+  const address = await connectWallet();
+  const nonce = await getNonce();
+  const message = buildMessage({
+    domain: window.location.host,
+    address,
+    uri: window.location.origin,
+    chainId: CHAIN_ID,
+    nonce,
+    statement: 'Sign in to Agentic Connect — proving you control this wallet.',
+  });
+  const signature = await personalSign(address, message);
+  const r = await fetch('/connect/siwe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message, signature, aud: AUD }),
+  });
+  const body = (await r.json()) as { status: string; token?: string; agent?: string; reason?: string };
+  if (body.status === 'issued' && body.token) {
+    return { status: 'issued', token: body.token, address, agent: (body.agent ?? address) as Address };
+  }
+  if (body.status === 'bootstrap') return { status: 'bootstrap', address };
+  return { status: (body.status as 'disambiguate' | 'rejected') ?? 'rejected', address, reason: body.reason };
+}
+
+/** Bootstrap: deploy a person SA (EOA custodian) via demo-a2a, then enroll the facet. */
+export async function bootstrapWithWallet(
+  address: Address,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
+  await ensureCsrfToken();
+  onStep?.('Preparing your workspace…');
+  const buildRes = await fetch('/a2a/session/deploy', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ initMethod: 'eoa', owner: address }),
+  });
+  if (buildRes.status === 409) {
+    return { ok: false, error: 'Gas sponsorship is not enabled on the backend (paymaster).' };
+  }
+  const built = (await buildRes.json()) as {
+    ok?: boolean;
+    sender?: Address;
+    userOpHash?: Hex;
+    userOp?: Record<string, unknown>;
+    error?: string;
+  };
+  if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
+    return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
+  }
+  onStep?.('Confirm in your wallet…');
+  const signature = await personalSign(address, built.userOpHash);
+  onStep?.('Securing on the network…');
+  const submitRes = await fetch('/a2a/session/deploy/submit', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
+  });
+  const submitted = (await submitRes.json()) as {
+    ok?: boolean;
+    deployedAddress?: Address;
+    error?: string;
+    detail?: string;
+  };
+  if (!submitRes.ok || !submitted.ok || !submitted.deployedAddress) {
+    return {
+      ok: false,
+      error: [submitted.error, submitted.detail].filter(Boolean).join(' — ') || `deploy submit failed (HTTP ${submitRes.status})`,
+    };
+  }
+  const agent = submitted.deployedAddress;
+  // No separate enroll step: /connect/siwe derives the SA + records the facet on
+  // the reconnect (with a post-deploy poll for RPC lag), so this is just the deploy.
+  return { ok: true, agent };
+}
+
+/** Execute a call FROM a deployed agent: build userOp -> sign hash -> submit (via /a2a).
+ *
+ *  The hard part is the nonce. A just-deployed SA consumed nonce 0 in its deploy op, so its
+ *  first post-deploy op needs nonce 1 — but the relayer's `getNonce` read can lag and return
+ *  0, producing `AA25 invalid account nonce` (the wrong nonce is baked into the signature, so
+ *  resubmitting the same op can't fix it). `minNonce` gates this: we poll the BUILD (no
+ *  signing — no credential prompt) until the relayer's view reaches the expected nonce, THEN
+ *  sign ONCE and submit. So we never sign a stale-nonce op, and the passkey/wallet is prompted
+ *  exactly once. If a submit still fails (residual simulation lag, or an unexpected AA25), we
+ *  rebuild+resign on the next loop with a fresh nonce. */
+async function executeCall(
+  sender: Address,
+  signHash: SignHash,
+  callData: Hex,
+  opts: { minNonce?: bigint; attempts?: number } = {},
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const { minNonce, attempts = 4 } = opts;
+  await ensureCsrfToken();
+  let lastErr = 'execute failed';
+
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 2500));
+
+    // Build (no signing yet → no credential prompt on this step).
+    const buildRes = await fetch('/a2a/account/build-call-userop', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeaders() },
+      body: JSON.stringify({ sender, callData }),
+    });
+    const b = (await buildRes.json()) as {
+      ok?: boolean;
+      userOpHash?: Hex;
+      userOp?: (Record<string, unknown> & { nonce?: string });
+      error?: string;
+      detail?: string;
+    };
+    if (!buildRes.ok || !b.ok || !b.userOpHash || !b.userOp) {
+      lastErr = [b.error, b.detail].filter(Boolean).join(' — ') || `build-call failed (HTTP ${buildRes.status})`;
+      continue;
+    }
+
+    // Nonce gate: don't sign until the relayer's nonce view reflects the deploy.
+    if (minNonce !== undefined && BigInt(b.userOp.nonce ?? '0') < minNonce) {
+      lastErr = `relayer nonce ${b.userOp.nonce} < ${minNonce} — deploy not yet propagated`;
+      continue; // rebuild next loop; still no prompt
+    }
+
+    // Sign ONCE for this (correct-nonce) op, then submit.
+    const signature = await signHash(b.userOpHash);
+    const submitRes = await fetch('/a2a/account/submit-call-userop', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeaders() },
+      body: JSON.stringify({ userOp: { ...b.userOp, signature } }),
+    });
+    const submitted = (await submitRes.json()) as { ok?: boolean; transactionHash?: Hex; error?: string; detail?: string };
+    if (submitRes.ok && submitted.ok) return { ok: true, txHash: submitted.transactionHash };
+    lastErr =
+      [submitted.error, submitted.detail].filter(Boolean).join(' — ') || `submit-call failed (HTTP ${submitRes.status})`;
+  }
+  return { ok: false, error: lastErr };
+}
+
+/** Claim a forced-unique `<base>[N].demo.agent` for the agent + set it as primary.
+ *  register + setPrimaryName are BATCHED into one execute UserOp (one nonce, one signature):
+ *  they must land together, and the batch avoids an inter-userOp race where the second op
+ *  sees a stale view of the first's state. `minNonce` rides out the post-deploy nonce lag
+ *  (pass the nonce the SA must be at after its deploy, e.g. 1n right after a fresh deploy). */
+export async function claimName(
+  agent: Address,
+  signHash: SignHash,
+  base: string,
+  onStep?: (s: string) => void,
+  minNonce?: bigint,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  onStep?.('Finding a free name…');
+  const nameRes = await fetch(`/connect/name?base=${encodeURIComponent(base)}`);
+  const picked = (await nameRes.json()) as { label?: string; name?: string; node?: Hex; error?: string };
+  if (!nameRes.ok || !picked.name || !picked.node || !picked.label) {
+    return { ok: false, error: picked.error ?? 'no free name' };
+  }
+
+  onStep?.(`Claiming ${picked.name}…`);
+  const register = buildSubregistryRegisterCall({
+    subregistry: CONTRACTS.permissionlessSubregistry,
+    label: picked.label,
+    newOwner: agent,
+  });
+  const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
+  const batch = buildExecuteBatchCallData([register, setPrimary]);
+  const res = await executeCall(agent, signHash, batch, { minNonce, attempts: 10 });
+  if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
+  return { ok: true, name: picked.name };
+}
+
+// ── Passkey (WebAuthn) ──────────────────────────────────────────────
+export type { DemoPasskey };
+export type PasskeyOutcome =
+  | { status: 'issued'; token: string; passkey: DemoPasskey }
+  | { status: 'bootstrap'; passkey: DemoPasskey }
+  | { status: 'disambiguate' | 'rejected'; passkey?: DemoPasskey; reason?: string };
+
+/** A signHash backed by the registered passkey (WebAuthn). */
+export const passkeySignHash: SignHash = (hash) => signWithPasskey(hash);
+
+/** Sign in with a passkey (registering one first if none on this device), then resolve. */
+export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOutcome> {
+  let passkey = loadPasskey();
+  if (!passkey) {
+    if (!registerIfMissing) return { status: 'rejected', reason: 'no passkey on this device' };
+    passkey = await registerPasskey('Agentic Connect passkey');
+  }
+  const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
+  const signature = await signWithPasskey(challenge);
+  const r = await fetch('/connect/passkey', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      credentialIdDigest: passkey.credentialIdDigest,
+      pubKeyX: passkey.pubKeyX.toString(),
+      pubKeyY: passkey.pubKeyY.toString(),
+      challenge,
+      signature,
+      aud: AUD,
+    }),
+  });
+  const body = (await r.json()) as { status: string; token?: string };
+  if (body.status === 'issued' && body.token) return { status: 'issued', token: body.token, passkey };
+  if (body.status === 'bootstrap') return { status: 'bootstrap', passkey };
+  return { status: (body.status as 'disambiguate' | 'rejected') ?? 'rejected', passkey };
+}
+
+// ── Deploy + claim in ONE userOp (ERC-4337 initCode + callData) ─────
+// One signature instead of deploy-then-claim. The freshly-deployed account executes the name
+// claim (register + set-primary) in the same op. Needs the SA address up front (the claim's
+// newOwner) — derived deterministically from the passkey + salt (a factory view, no signature).
+
+/** Deterministic passkey-direct SA address (mode 0, no custodians, the passkey, given salt). */
+async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
+  const accounts = new AgentAccountClient({
+    rpcUrl: DEFAULT_RPC_URL,
+    chainId: CHAIN_ID,
+    entryPoint: CONTRACTS.entryPoint,
+    factory: CONTRACTS.agentAccountFactory,
+  });
+  return accounts.getAddressForAgentAccount({
+    custodians: [],
+    passkey: { credentialIdDigest: passkey.credentialIdDigest, x: passkey.pubKeyX, y: passkey.pubKeyY },
+    salt,
+  });
+}
+
+/** Pick a free name + build the `executeBatch(register, setPrimary)` calldata the new SA runs
+ *  to claim it (newOwner = the SA itself). Returned to ride along in the deploy userOp. */
+async function buildClaimCallData(
+  base: string,
+  sa: Address,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; callData: Hex; name: string } | { ok: false; error: string }> {
+  onStep?.('Finding a free name…');
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+    label?: string;
+    name?: string;
+    node?: Hex;
+    error?: string;
+  };
+  if (!picked.name || !picked.node || !picked.label) return { ok: false, error: picked.error ?? 'no free name' };
+  const register = buildSubregistryRegisterCall({ subregistry: CONTRACTS.permissionlessSubregistry, label: picked.label, newOwner: sa });
+  const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
+  return { ok: true, callData: buildExecuteBatchCallData([register, setPrimary]), name: picked.name };
+}
+
+/** Bootstrap a passkey-direct person SA (no server custodian ever, P0-A). When `callData` is
+ *  given, the deploy userOp ALSO executes it (e.g. claim the name) — one signature, not two. */
+export async function bootstrapWithPasskey(
+  passkey: DemoPasskey,
+  onStep?: (s: string) => void,
+  callData?: Hex,
+): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
+  await ensureCsrfToken();
+  onStep?.('Preparing your workspace…');
+  const buildRes = await fetch('/a2a/session/deploy', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({
+      initMethod: 'passkey',
+      credentialIdDigest: passkey.credentialIdDigest,
+      pubKeyX: passkey.pubKeyX.toString(),
+      pubKeyY: passkey.pubKeyY.toString(),
+      ...(callData ? { callData } : {}),
+    }),
+  });
+  if (buildRes.status === 409) return { ok: false, error: 'Gas sponsorship is not enabled on the backend (paymaster).' };
+  const built = (await buildRes.json()) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
+  if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
+    return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
+  }
+  onStep?.('Confirm with your device…');
+  const signature = await signWithPasskey(built.userOpHash);
+  onStep?.('Securing on the network…');
+  const submitRes = await fetch('/a2a/session/deploy/submit', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
+  });
+  const submitted = (await submitRes.json()) as {
+    ok?: boolean;
+    deployedAddress?: Address;
+    error?: string;
+    detail?: string;
+  };
+  if (!submitRes.ok || !submitted.ok || !submitted.deployedAddress) {
+    return {
+      ok: false,
+      error: [submitted.error, submitted.detail].filter(Boolean).join(' — ') || `deploy submit failed (HTTP ${submitRes.status})`,
+    };
+  }
+  const agent = submitted.deployedAddress;
+  // No separate enroll step: /connect/passkey derives the SA + records the facet on
+  // the reconnect (with a post-deploy poll for RPC lag), so this is just the deploy.
+  return { ok: true, agent };
+}
+
+// ── A2A service agent + relationship edge (spec 227 §6 / M5) ────────
+
+/** Deploy a Smart Agent via demo-a2a (no facet enroll). Used for the A2A agent. */
+async function deployAgent(
+  deployBody: Record<string, unknown>,
+  signHash: SignHash,
+): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
+  await ensureCsrfToken();
+  const buildRes = await fetch('/a2a/session/deploy', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify(deployBody),
+  });
+  if (buildRes.status === 409) return { ok: false, error: 'paymaster not enabled' };
+  const built = (await buildRes.json()) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
+  if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
+    return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
+  }
+  const signature = await signHash(built.userOpHash);
+  const submitRes = await fetch('/a2a/session/deploy/submit', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
+  });
+  const submitted = (await submitRes.json()) as {
+    ok?: boolean;
+    deployedAddress?: Address;
+    error?: string;
+    detail?: string;
+  };
+  if (!submitRes.ok || !submitted.ok || !submitted.deployedAddress) {
+    return {
+      ok: false,
+      error: [submitted.error, submitted.detail].filter(Boolean).join(' — ') || `deploy submit failed (HTTP ${submitRes.status})`,
+    };
+  }
+  return { ok: true, agent: submitted.deployedAddress };
+}
+
+export interface ProvisionResult {
+  a2aAgent: Address;
+  edgeId: Hex;
+}
+
+/** Provision a 2nd SA (the A2A service agent) custodied by the same credential, and
+ *  link `a2a --OPERATES_ON_BEHALF_OF--> person` (a2a proposes as subject; person
+ *  confirms as object — architect F1). Both txs signed by the user's one credential. */
+export async function provisionA2aAgent(
+  via: 'wallet' | 'passkey',
+  personAgent: Address,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; result: ProvisionResult } | { ok: false; error: string }> {
+  const A2A_SALT = '1'; // distinct from the person SA (salt 0) -> distinct address
+  let signHash: SignHash;
+  let deployBody: Record<string, unknown>;
+  if (via === 'wallet') {
+    const addr = await connectWallet();
+    signHash = (h) => personalSign(addr, h);
+    deployBody = { initMethod: 'eoa', owner: addr, salt: A2A_SALT };
+  } else {
+    const pk = loadPasskey();
+    if (!pk) return { ok: false, error: 'no passkey on this device' };
+    signHash = passkeySignHash;
+    deployBody = {
+      initMethod: 'passkey',
+      credentialIdDigest: pk.credentialIdDigest,
+      pubKeyX: pk.pubKeyX.toString(),
+      pubKeyY: pk.pubKeyY.toString(),
+      salt: A2A_SALT,
+    };
+  }
+
+  onStep?.('Deploying your agent service…');
+  const dep = await deployAgent(deployBody, signHash);
+  if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
+  const a2aAgent = dep.agent;
+  if (a2aAgent.toLowerCase() === personAgent.toLowerCase()) {
+    return { ok: false, error: 'agent service collided with the person agent (salt)' };
+  }
+
+  const relationships = CONTRACTS.agentRelationship;
+  const relationshipType = RELATIONSHIP_TYPE.OPERATES_ON_BEHALF_OF as RelationshipType;
+
+  onStep?.('Linking it to operate on your behalf…');
+  const propose = buildProposeEdgeCall({ relationships, subject: a2aAgent, object: personAgent, relationshipType });
+  // a2a = subject (proposer); freshly deployed (nonce 0 consumed) → first op is nonce 1.
+  const p = await executeCall(a2aAgent, signHash, buildExecuteCallData(propose), { minNonce: 1n, attempts: 10 });
+  if (!p.ok) return { ok: false, error: `propose edge failed: ${p.error}` };
+
+  onStep?.('Confirming the link…');
+  const edgeId = computeEdgeId(a2aAgent, personAgent, relationshipType);
+  const confirm = buildConfirmEdgeCall({ relationships, edgeId });
+  await executeCall(personAgent, signHash, buildExecuteCallData(confirm), { attempts: 4 }); // person = object (confirmer); best-effort
+
+  return { ok: true, result: { a2aAgent, edgeId } };
+}
+
+// ── Create a child agent custodied by the ROOT passkey, on behalf of a relying site ──
+//
+// The template for ALL agents a relying site asks the central auth to create (organization
+// now; Treasury / any service agent later — memory project_demo_org_durable_org_custody).
+// Every such agent follows the SAME pattern as the person SA: deployed here, custodied by
+// the person's ROOT passkey ONLY (never the relying site's per-origin key, never the person
+// SA — the latter is contract-forbidden as a custodian). The relying site is handed back a
+// scoped, redeemer-bound delegation (child → the site's delegate SA) so it can operate the
+// child without another passkey ceremony (ADR-0019).
+
+export interface CreatedAgent {
+  childAgent: Address;
+  childName: string;
+  edgeId: Hex;
+  governed: boolean;
+  delegation: DelegationWire; // child → relying site's delegate SA (scoped)
+}
+
+/** Deploy a child SA (org / service agent) custodied by the ROOT passkey, claim `<base>.demo.agent`,
+ *  record `person --relationshipType--> child` (person proposes, child confirms — both signed by
+ *  the ROOT passkey, the person's & child's custodian), and mint the scoped child→site delegation.
+ *  `relationshipType` defaults to HAS_GOVERNANCE_OVER (organization). */
+export async function createChildAgentForSite(
+  personAgent: Address,
+  base: string,
+  delegateSA: Address,
+  onStep?: (s: string) => void,
+  relationshipType: RelationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType,
+): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
+  const pk = loadPasskey();
+  if (!pk) return { ok: false, error: 'Your central-auth passkey isn’t on this device — sign in to Agentic Connect first.' };
+  // Name-independent salt (ADR-0010): credential scope + entropy, never the name.
+  const saltBytes = crypto.getRandomValues(new Uint8Array(8));
+  let salt = 0n;
+  for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
+
+  // Derive the SA up front so we can deploy + claim its name in ONE userOp (one prompt).
+  const childAgent = await derivePasskeySa(pk, salt);
+  if (childAgent.toLowerCase() === personAgent.toLowerCase()) {
+    return { ok: false, error: 'agent collided with your person agent (salt)' };
+  }
+  const claim = await buildClaimCallData(base, childAgent, onStep);
+  if (!claim.ok) return { ok: false, error: claim.error };
+
+  onStep?.('Deploying the agent + claiming its name…');
+  const dep = await deployAgent(
+    {
+      initMethod: 'passkey',
+      credentialIdDigest: pk.credentialIdDigest,
+      pubKeyX: pk.pubKeyX.toString(),
+      pubKeyY: pk.pubKeyY.toString(),
+      salt: salt.toString(),
+      callData: claim.callData, // deploy + claim atomically
+    },
+    passkeySignHash,
+  );
+  if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
+
+  const relationships = CONTRACTS.agentRelationship;
+  const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
+  const propose = buildProposeEdgeCall({ relationships, subject: personAgent, object: childAgent, relationshipType });
+
+  onStep?.('Recording your control on-chain…');
+  // ROOT passkey is the person's custodian → sign the propose directly on the person SA.
+  const p = await executeCall(personAgent, passkeySignHash, buildExecuteCallData(propose), { attempts: 6 });
+  let governed = p.ok;
+  if (governed) {
+    onStep?.('Confirming the link…');
+    const confirm = buildConfirmEdgeCall({ relationships, edgeId });
+    // child = object (confirmer); deploy+claim was the child's nonce 0, so confirm is nonce 1.
+    await executeCall(childAgent, passkeySignHash, buildExecuteCallData(confirm), { minNonce: 1n, attempts: 6 });
+  }
+
+  onStep?.('Granting the site scoped access…');
+  // child → relying site's delegate SA, signed by the ROOT passkey (child's custodian).
+  const delegation = await issueSiteDelegation(childAgent, delegateSA, passkeySignHash);
+
+  return { ok: true, result: { childAgent, childName: claim.name, edgeId, governed, delegation: toWire(delegation) } };
+}
+
+// ── Add a second custody credential to an existing agent (the unification) ──
+//
+// The canonical SA address never changes; credentials are facets that can be added.
+// `addCustodian` / `addPasskey` are `onlySelf` on AgentAccount, so the EXISTING
+// credential signs an `execute(self, addX(...))` UserOp. After this the agent is
+// reachable by NAME via either credential (connectWithName verifies isCustodian),
+// and name-info reports both. (ADR-0011: credentials rotate, identity persists.)
+
+const ADD_CUSTODIAN_ABI = [
+  { type: 'function', name: 'addCustodian', stateMutability: 'nonpayable', inputs: [{ name: 'owner', type: 'address' }], outputs: [] },
+] as const;
+const ADD_PASSKEY_ABI = [
+  {
+    type: 'function',
+    name: 'addPasskey',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'credentialIdDigest', type: 'bytes32' },
+      { name: 'x', type: 'uint256' },
+      { name: 'y', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** Add a WALLET (EOA) custodian to an agent currently controlled by a PASSKEY.
+ *  Connects the wallet to add + proves control of it (personal_sign), then the
+ *  EXISTING passkey signs `execute(self, addCustodian(newEoa))`. */
+export async function addWalletCredential(
+  personAgent: Address,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; added: Address } | { ok: false; error: string }> {
+  onStep?.('Connecting the wallet to add…');
+  const addr = await connectWallet();
+  onStep?.('Confirm with the wallet you’re adding…');
+  await personalSign(addr, `Add this wallet as a custodian of ${personAgent} on Agentic Connect.`);
+
+  const inner = encodeFunctionData({ abi: ADD_CUSTODIAN_ABI, functionName: 'addCustodian', args: [addr] });
+  const callData = buildExecuteCallData({ to: personAgent, value: 0n, data: inner });
+  onStep?.(`Adding ${addr.slice(0, 6)}…${addr.slice(-4)} — confirm with your passkey…`);
+  const res = await executeCall(personAgent, passkeySignHash, callData, { attempts: 5 });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, added: addr };
+}
+
+/** Add a PASSKEY custodian to an agent currently controlled by a WALLET.
+ *  Registers a fresh passkey on this device, then the EXISTING wallet signs
+ *  `execute(self, addPasskey(digest, x, y))`. */
+export async function addPasskeyCredential(
+  personAgent: Address,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; credentialIdDigest: Hex } | { ok: false; error: string }> {
+  onStep?.('Creating the passkey to add…');
+  const pk = await registerPasskey(`${personAgent.slice(0, 8)}… passkey`); // fresh passkey, stored on this device
+
+  const inner = encodeFunctionData({
+    abi: ADD_PASSKEY_ABI,
+    functionName: 'addPasskey',
+    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY],
+  });
+  const callData = buildExecuteCallData({ to: personAgent, value: 0n, data: inner });
+  onStep?.('Adding the passkey — confirm with your wallet…');
+  const addr = await connectWallet(); // the EXISTING wallet custodian signs the add
+  const res = await executeCall(personAgent, (h) => personalSign(addr, h), callData, { attempts: 5 });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, credentialIdDigest: pk.credentialIdDigest };
+}
+
+/** Central-auth enrollment (spec 229 §5): add a RELYING SITE's PROVIDED local passkey
+ *  (PUBLIC key only) as a custodian of `name`'s agent, signed by THIS origin's primary
+ *  passkey. The site's private key never leaves the site's device — we only register its
+ *  (x, y). This is how a new origin gets its own per-site signer without reusing the
+ *  central credential. Fails closed: addPasskey only validates if the primary passkey is
+ *  already a custodian of the agent. */
+export async function enrollSitePasskey(
+  name: string,
+  enroll: { credentialIdDigest: Hex; x: bigint; y: bigint },
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
+  onStep?.('Resolving your agent…');
+  const r = await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`);
+  const info = (await r.json()) as { exists?: boolean; name?: string; agent?: Address };
+  if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
+  const inner = encodeFunctionData({
+    abi: ADD_PASSKEY_ABI,
+    functionName: 'addPasskey',
+    args: [enroll.credentialIdDigest, enroll.x, enroll.y],
+  });
+  const callData = buildExecuteCallData({ to: info.agent, value: 0n, data: inner });
+  onStep?.('Approve with your passkey…');
+  const res = await executeCall(info.agent, passkeySignHash, callData, { attempts: 6 });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, agent: info.agent, name: info.name ?? name };
+}
+
+/** Step a Google (login-grade) session UP to custody-grade for the SAME bound agent.
+ *  The target agent is the googleToken's sub (server-enforced) — so a Google login can
+ *  only ever step up into its one bound workspace; the credential must be a custodian of it. */
+export async function stepUpToAgent(
+  via: 'wallet' | 'passkey',
+  googleToken: string,
+): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  if (via === 'wallet') {
+    const address = await connectWallet();
+    const nonce = await getNonce();
+    const message = buildMessage({
+      domain: window.location.host,
+      address,
+      uri: window.location.origin,
+      chainId: CHAIN_ID,
+      nonce,
+      statement: 'Confirm custody of your Agentic Connect workspace.',
+    });
+    const signature = await personalSign(address, message);
+    const r = await fetch('/connect/stepup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ googleToken, kind: 'siwe-eoa', aud: AUD, message, signature }),
+    });
+    const b = (await r.json()) as { status?: string; token?: string; error?: string };
+    if (r.ok && b.status === 'issued' && b.token) return { ok: true, token: b.token };
+    return { ok: false, error: b.error ?? `step-up failed (HTTP ${r.status})` };
+  }
+  const pk = loadPasskey();
+  if (!pk) return { ok: false, error: 'no passkey on this device' };
+  const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
+  const signature = await signWithPasskey(challenge);
+  const r = await fetch('/connect/stepup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ googleToken, kind: 'passkey', aud: AUD, credentialIdDigest: pk.credentialIdDigest, challenge, signature }),
+  });
+  const b = (await r.json()) as { status?: string; token?: string; error?: string };
+  if (r.ok && b.status === 'issued' && b.token) return { ok: true, token: b.token };
+  return { ok: false, error: b.error ?? `step-up failed (HTTP ${r.status})` };
+}
+
+/** Connect to the agent that OWNS `name`, proving control with a custody credential.
+ *  Name-first: the agent-service name is the identity; the server resolves name→agent
+ *  on-chain and verifies the credential is a custodian of it. */
+export async function connectWithName(
+  name: string,
+  via: 'wallet' | 'passkey',
+): Promise<{ ok: true; token: string; name?: string } | { ok: false; error: string }> {
+  let proof: Record<string, unknown>;
+  if (via === 'wallet') {
+    const address = await connectWallet();
+    const nonce = await getNonce();
+    const message = buildMessage({
+      domain: window.location.host,
+      address,
+      uri: window.location.origin,
+      chainId: CHAIN_ID,
+      nonce,
+      statement: `Connect to ${name} on Agentic Connect.`,
+    });
+    const signature = await personalSign(address, message);
+    proof = { kind: 'siwe-eoa', message, signature };
+  } else {
+    const pk = loadPasskey();
+    if (!pk) return { ok: false, error: 'No passkey on this device — sign up first, or connect with your wallet.' };
+    const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
+    const signature = await signWithPasskey(challenge);
+    proof = { kind: 'passkey', credentialIdDigest: pk.credentialIdDigest, challenge, signature };
+  }
+  const r = await fetch('/connect/with-name', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, aud: AUD, ...proof }),
+  });
+  const b = (await r.json()) as { status?: string; token?: string; name?: string; error?: string };
+  if (r.ok && b.status === 'issued' && b.token) return { ok: true, token: b.token, name: b.name };
+  return { ok: false, error: b.error ?? `connect failed (HTTP ${r.status})` };
+}
+
+// ── Guided ceremony steps (spec 230 part 2) ─────────────────────────
+// Each step is its OWN exported call so the relying UI can gate every WebAuthn prompt behind a
+// button with a promise before + a receipt after — no two prompts fire back-to-back. (signupWithName
+// runs the same work in one shot; these expose the seams.)
+
+/** Step 1 — create the person's secure-home passkey (ONE WebAuthn create). Stored on this device. */
+export async function createSecureHomePasskey(name: string): Promise<DemoPasskey> {
+  const base = name.replace(/\.demo\.agent$/, '');
+  return registerPasskey(`${base}.demo.agent`);
+}
+
+/** Step 2 — deploy the person's Smart Agent + claim its name in ONE userOp (ONE WebAuthn sign). */
+export async function deployAndClaimAgent(
+  passkey: DemoPasskey,
+  base: string,
+): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
+  const sa = await derivePasskeySa(passkey, 0n);
+  const claim = await buildClaimCallData(base, sa);
+  if (!claim.ok) return { ok: false, error: claim.error };
+  const dep = await bootstrapWithPasskey(passkey, undefined, claim.callData);
+  if (!dep.ok) return { ok: false, error: dep.error };
+  return { ok: true, agent: dep.agent, name: claim.name };
+}
+
+/** Sign up: create a workspace named `<base>.demo.agent` with a custody credential,
+ *  and CLAIM the name for THAT credential's agent (so connect-by-name later offers the
+ *  right credential). Passkey → a FRESH passkey (a new workspace); wallet → the EOA's
+ *  agent. The claim runs whether the agent is freshly deployed or reconnected. */
+export async function signupWithName(
+  base: string,
+  via: 'wallet' | 'passkey',
+  onStep?: (s: string) => void,
+  signIn = true,
+): Promise<{ ok: true; token: string; name: string; agent: Address } | { ok: false; error: string }> {
+  if (via === 'passkey') {
+    onStep?.('Creating your passkey…');
+    const pk = await registerPasskey(`${base}.demo.agent`); // FRESH passkey for this workspace
+    // Deploy + claim the name in ONE userOp (one device prompt): derive the SA address, build
+    // the claim calldata (newOwner = that SA), and deploy with it attached.
+    const sa = await derivePasskeySa(pk, 0n);
+    const claim = await buildClaimCallData(base, sa, onStep);
+    if (!claim.ok) return { ok: false, error: claim.error };
+    const dep = await bootstrapWithPasskey(pk, onStep, claim.callData);
+    if (!dep.ok) return { ok: false, error: dep.error };
+    // The OIDC enrollment ceremony signs the person in via the grant + id_token, so it skips
+    // this extra passkeyLogin (its token would be unused) — saving one device prompt. We return
+    // the KNOWN agent address (from the deploy) so callers needn't re-resolve by name — the
+    // just-claimed name lags on-chain for a moment (RPC), and `sa` is already authoritative.
+    if (!signIn) return { ok: true, token: '', name: claim.name, agent: sa };
+    onStep?.('Signing you in…');
+    const login = await passkeyLogin(false);
+    return login.status === 'issued'
+      ? { ok: true, token: login.token, name: claim.name, agent: sa }
+      : { ok: false, error: `created, but sign-in returned ${login.status}` };
+  }
+  // wallet: the EOA's deterministic agent (reconnect if it exists, else bootstrap).
+  onStep?.('Connecting your wallet…');
+  const first = await siweLogin(); // connects wallet + signs
+  let agent: Address;
+  let address: Address;
+  let minNonce: bigint | undefined; // set only on a fresh deploy (nonce 0 just consumed)
+  if (first.status === 'issued') {
+    agent = first.agent;
+    address = first.address;
+  } else if (first.status === 'bootstrap') {
+    address = first.address;
+    const dep = await bootstrapWithWallet(address, onStep);
+    if (!dep.ok) return { ok: false, error: dep.error };
+    agent = dep.agent;
+    minNonce = 1n;
+  } else {
+    return { ok: false, error: first.reason ?? `sign-in ${first.status}` };
+  }
+  const signHash: SignHash = (h) => personalSign(address, h);
+  const claim = await claimName(agent, signHash, base, onStep, minNonce);
+  if (!claim.ok) return { ok: false, error: claim.error };
+  onStep?.('Signing you in…');
+  const login = await siweLogin();
+  return login.status === 'issued'
+    ? { ok: true, token: login.token, name: claim.name, agent }
+    : { ok: false, error: `created, but sign-in returned ${login.status}` };
+}
+
+export interface BasicProfile {
+  agent: string;
+  name: string | null;
+  credential: string;
+  access: string;
+}
+
+export async function fetchProfile(token: string): Promise<BasicProfile | null> {
+  const r = await fetch('/me/profile', { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) return null;
+  return ((await r.json()) as { profile: BasicProfile }).profile;
+}
+
+export async function fetchSensitive(
+  token: string,
+): Promise<{ ok: true; email: string; phone: string } | { ok: false; reason: string }> {
+  const r = await fetch('/me/sensitive', { headers: { authorization: `Bearer ${token}` } });
+  const body = (await r.json()) as Record<string, unknown>;
+  if (r.ok && body.sensitive) {
+    const s = body.sensitive as { email: string; phone: string };
+    return { ok: true, email: s.email, phone: s.phone };
+  }
+  return { ok: false, reason: (body.reason as string) ?? 'Sensitive details need a custody-grade sign-in.' };
+}

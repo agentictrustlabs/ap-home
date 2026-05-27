@@ -6,7 +6,7 @@
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
 import {
@@ -40,6 +40,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { originAllowed, hostnameAllowed } from './origins';
+import { resolveAgentHost, buildA2aAgentCard } from './host-context';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -106,6 +108,10 @@ export interface Env {
   // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
   AGENT_NAME_REGISTRY?: string;
   AGENT_NAME_UNIVERSAL_RESOLVER?: string;
+  /** Public registrable base domain for personal A2A endpoints (spec 231).
+   *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
+   *  Defaults to `impact-agent.io`. */
+  A2A_PUBLIC_BASE_DOMAIN?: string;
   /**
    * UniversalSignatureValidator address. When set, /auth/siwe-verify
    * uses the on-chain validator (handles EOA + ERC-1271 + ERC-6492
@@ -305,25 +311,11 @@ function buildAllowedOriginMatcher(env: Env): (origin: string | undefined | null
     );
     return () => '';
   }
-  const allowed = new Set<string>();
-  for (const item of raw.split(',')) {
-    const trimmed = item.trim();
-    if (!trimmed) continue;
-    try {
-      const u = new URL(trimmed);
-      if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
-        console.warn(`[demo-a2a] CORS: refusing non-https origin "${trimmed}" outside localhost`);
-        continue;
-      }
-      allowed.add(u.origin);
-    } catch {
-      console.warn(`[demo-a2a] CORS: refusing malformed origin "${trimmed}"`);
-    }
-  }
-  if (allowed.size === 0) {
-    console.warn('[demo-a2a] CORS: ALLOWED_ORIGINS had no usable entries — all cross-origin requests will be rejected.');
-  }
-  return (origin) => (origin && allowed.has(origin) ? origin : '');
+  // Patterns may be exact origins OR one wildcard form `https://*.<base>`
+  // (spec 231 — per-person subdomains are each a distinct Origin). Match via
+  // the shared, fail-closed `originAllowed` (see src/origins.ts).
+  const patterns = raw.split(',');
+  return (origin) => (origin && originAllowed(origin, patterns) ? origin : '');
 }
 
 app.use('*', async (c, next) => {
@@ -363,6 +355,9 @@ app.use('*', async (c, next) => {
   // etc.). No state change to forge → CSRF doesn't apply. We rely on
   // CORS to keep cross-origin browsers off non-allowlisted pages.
   if (c.req.path === '/rpc') return next();
+  // /api/a2a is the machine-to-machine A2A endpoint (spec 231) — no browser
+  // cookie/CSRF; authorization is per the A2A protocol, not double-submit.
+  if (c.req.path === '/api/a2a') return next();
   // Header double-submit + HMAC.
   const headerToken = c.req.header(CSRF_HEADER);
   const cookieToken = getCookie(c, CSRF_COOKIE);
@@ -375,6 +370,14 @@ app.use('*', async (c, next) => {
   for (const o of (c.env.ALLOWED_ORIGINS ?? '').split(',')) {
     const t = o.trim();
     if (t) allowed.push(t);
+  }
+  // Per-person subdomains (spec 231) are wildcarded in ALLOWED_ORIGINS as
+  // `https://*.<base>`. verifyCsrf is exact-match on the token's bound origin,
+  // so admit the request's own origin when it matches a wildcard — the HMAC
+  // still pins the token to its mint origin, so this can't be forged.
+  const reqOrigin = c.req.header('origin');
+  if (reqOrigin && originAllowed(reqOrigin, allowed) && !allowed.includes(reqOrigin)) {
+    allowed.push(reqOrigin);
   }
   if (!verifyCsrf(headerToken, allowed)) {
     return c.json({ error: 'csrf invalid' }, 403);
@@ -420,6 +423,63 @@ app.get('/health', (c) =>
     runtime: 'cloudflare-workers',
   }),
 );
+
+// ─── A2A by personal subdomain (spec 231) ─────────────────────────────
+// `<handle>.impact-agent.io` is one agent's unified endpoint. demo-sso (Pages)
+// owns the subdomain origin and proxies these paths here, injecting
+// `X-Agent-Subdomain` (the label) + `X-Public-Origin`. Pattern ported from
+// agentic-trust atp-agent (`.well-known/agent-card.json` + `/api/a2a`).
+
+/** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
+async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const reqOrigin = new URL(c.req.url).origin;
+  const ctx = await resolveAgentHost(c.req.raw, c.env, reqOrigin);
+  if (ctx.label && !ctx.agent) {
+    return c.json({ error: 'agent_not_found', detail: `no Smart Agent for ${ctx.name}` }, 404);
+  }
+  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID)));
+}
+app.get('/.well-known/agent-card.json', serveAgentCard);
+app.get('/.well-known/agent.json', serveAgentCard); // legacy alias
+
+/** A2A JSON-RPC message endpoint, scoped to the host's agent. */
+app.post('/api/a2a', async (c) => {
+  const reqOrigin = new URL(c.req.url).origin;
+  const ctx = await resolveAgentHost(c.req.raw, c.env, reqOrigin);
+  if (!ctx.label) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'A2A requests must target a personal subdomain (<handle>.impact-agent.io)' } }, 400);
+  }
+  if (!ctx.agent) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
+  }
+  let body: { jsonrpc?: string; id?: string | number | null; method?: string; params?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400);
+  }
+  if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
+    return c.json({ jsonrpc: '2.0', id: body.id ?? null, error: { code: -32600, message: 'invalid JSON-RPC request' } }, 400);
+  }
+  const id = body.id ?? null;
+  switch (body.method) {
+    case 'message/send':
+      // Minimal "live routing" — confirm the message reached the right agent.
+      // Skill handling is future work (spec 231 ships discovery + routing).
+      return c.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          agentName: ctx.name,
+          agentAddress: ctx.agent,
+          status: 'received',
+          message: `A2A message routed to ${ctx.name}`,
+        },
+      });
+    default:
+      return c.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${body.method}` } }, 404);
+  }
+});
 
 /**
  * POST /rpc — JSON-RPC pass-through to the configured RPC backend.
@@ -790,14 +850,27 @@ app.post('/auth/siwe-verify', async (c) => {
   // Allowed SIWE domains: local dev + any hostname extracted from
   // ALLOWED_ORIGINS (which is the deployed Pages URL in production).
   const allowedDomains = ['demo.agenticprimitives.local', '127.0.0.1', 'localhost'];
-  for (const origin of (c.env.ALLOWED_ORIGINS ?? '').split(',')) {
+  const originPatterns = (c.env.ALLOWED_ORIGINS ?? '').split(',');
+  for (const origin of originPatterns) {
     const trimmed = origin.trim();
-    if (!trimmed) continue;
+    if (!trimmed || trimmed.includes('*')) continue; // wildcard entries handled below
     try {
       allowedDomains.push(new URL(trimmed).hostname);
     } catch {
       // ignore malformed origin entries
     }
+  }
+  // Per-person subdomains (spec 231): admit the requesting subdomain's hostname
+  // when it matches a `https://*.<base>` wildcard in ALLOWED_ORIGINS.
+  const reqHost = (() => {
+    try {
+      return new URL(c.req.header('origin') ?? c.req.header('referer') ?? '').hostname;
+    } catch {
+      return '';
+    }
+  })();
+  if (reqHost && hostnameAllowed(reqHost, originPatterns) && !allowedDomains.includes(reqHost)) {
+    allowedDomains.push(reqHost);
   }
 
   // Two verification modes:
