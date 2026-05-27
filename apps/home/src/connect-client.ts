@@ -13,7 +13,7 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { encodeFunctionData } from 'viem';
 import { connectWallet, personalSign } from './lib/wallet';
-import { registerPasskey, signWithPasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
+import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { issueSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
@@ -217,8 +217,14 @@ export type PasskeyOutcome =
   | { status: 'bootstrap'; passkey: DemoPasskey }
   | { status: 'disambiguate' | 'rejected'; passkey?: DemoPasskey; reason?: string };
 
-/** A signHash backed by the registered passkey (WebAuthn). */
-export const passkeySignHash: SignHash = (hash) => signWithPasskey(hash);
+/** A signHash backed by the ROOT passkey via a DISCOVERABLE WebAuthn assertion
+ *  (spec 233, Mechanism A): empty allowCredentials, no localStorage — the platform
+ *  offers the (possibly synced) passkey for this RP, so ROOT-signed ceremonies work
+ *  on any device that has the passkey, not just the one that created it. The SA
+ *  verifies the signature on-chain by credentialIdDigest, so a discovered key only
+ *  works if it is genuinely a custodian. (`signWithPasskey` — localStorage-cached —
+ *  is retained for callers that already hold the local passkey object.) */
+export const passkeySignHash: SignHash = (hash) => signWithDiscoverablePasskey(hash);
 
 /** Sign in with a passkey (registering one first if none on this device), then resolve. */
 export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOutcome> {

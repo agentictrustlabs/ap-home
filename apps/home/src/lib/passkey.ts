@@ -110,11 +110,40 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   return passkey;
 }
 
-/** Sign a 32-byte digest via WebAuthn → on-chain sig blob (0x01 || assertion). */
+/** Sign a 32-byte digest via WebAuthn → on-chain sig blob (0x01 || assertion).
+ *  Uses the localStorage-cached credential (allowCredentials). Kept for flows
+ *  that already hold the local passkey; prefer the discoverable variant for
+ *  cross-device sign-in (spec 233). */
 export async function signWithPasskey(digest: Hex): Promise<Hex> {
   const passkey = loadPasskey();
   if (!passkey) throw new Error('signWithPasskey: no registered passkey');
-  const credentialIdBytes = b64uDecode(passkey.credentialIdB64);
+  return signAssertion(digest, b64uDecode(passkey.credentialIdB64));
+}
+
+/** Sign a 32-byte digest via a DISCOVERABLE passkey (spec 233, Mechanism A) —
+ *  empty `allowCredentials`, no localStorage. The platform offers any passkey for
+ *  this RP (including platform-synced ones on other devices); we read the chosen
+ *  credentialId from `rawId`. The returned blob carries the credentialIdDigest,
+ *  so the server verifies it on-chain via `getPasskey`/`isValidSignature` against
+ *  the (name-resolved) agent SA — no client-supplied pubkey, no device cache. */
+export async function signWithDiscoverablePasskey(digest: Hex): Promise<Hex> {
+  if (typeof navigator === 'undefined' || !navigator.credentials) {
+    throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
+  }
+  const credential = (await navigator.credentials.get({
+    publicKey: {
+      challenge: hexToBytes(digest) as BufferSource,
+      allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
+      userVerification: 'required',
+      timeout: 60_000,
+    },
+  })) as PublicKeyCredential | null;
+  if (!credential) throw new Error('no passkey available on this device');
+  // The platform tells us which credential signed — use its rawId, not a cache.
+  return signAssertionFromCredential(credential);
+}
+
+async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
@@ -124,6 +153,11 @@ export async function signWithPasskey(digest: Hex): Promise<Hex> {
     },
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error('passkey signing cancelled');
+  return signAssertionFromCredential(credential);
+}
+
+function signAssertionFromCredential(credential: PublicKeyCredential): Hex {
+  const credentialIdBytes = new Uint8Array(credential.rawId);
   const response = credential.response as AuthenticatorAssertionResponse;
   const assertion = buildWebAuthnAssertion({
     credentialIdBytes,
