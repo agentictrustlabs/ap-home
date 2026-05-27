@@ -53,6 +53,20 @@ MCP_URL = "http://127.0.0.1:8788"
 # re-declared per environment — that's why this block repeats the DO binding.
 # ──────────────────────────────────────────────────────────────────────────
 
+[env.production]
+# A2A-by-subdomain (spec 231): bind EVERY <handle>.impact-agent.io to this Worker
+# so it serves that agent's A2A endpoint directly (host-context reads the Host —
+# no passthrough). Apex impact-agent.io stays on the demo-sso project (its own
+# DNS record). Requires a proxied `*.impact-agent.io` DNS record in the zone.
+routes = [
+  { pattern = "*.impact-agent.io/*", zone_name = "impact-agent.io" }
+]
+# KEEP the workers.dev URL alive alongside the route — demo-sso's /a2a proxy +
+# demo-web*/demo-mcp all call this Worker via DEMO_A2A_URL/MCP_URL
+# (https://demo-a2a-production.<acct>.workers.dev). Declaring a route flips the
+# workers_dev default to false, so we set it back to true explicitly.
+workers_dev = true
+
 [env.production.vars]
 # RPC_URL intentionally omitted — set as a secret instead so the value
 # (which may embed an API key for a paid RPC provider like Alchemy /
