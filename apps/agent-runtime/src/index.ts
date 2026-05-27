@@ -1499,20 +1499,6 @@ app.post('/session/custody-apply', async (c) => {
 // invocation, multi-step delegation chains) is out of scope for this
 // pass; the simpler shape here is what the demo needs to be honest.
 
-const AGENT_DELEGATION_MANAGER_TYPES = {
-  Delegation: [
-    { name: 'delegator', type: 'address' },
-    { name: 'delegate', type: 'address' },
-    { name: 'authority', type: 'bytes32' },
-    { name: 'caveats', type: 'Caveat[]' },
-    { name: 'salt', type: 'uint256' },
-  ],
-  Caveat: [
-    { name: 'enforcer', type: 'address' },
-    { name: 'terms', type: 'bytes' },
-    { name: 'args', type: 'bytes' },
-  ],
-} as const;
 
 const ERC1271_ABI = [
   {
@@ -1581,29 +1567,23 @@ async function verifyDelegation(
   }
   // ERC-1271 verify against the delegator smart account.
   const pub = createPublicClient({ chain: baseSepolia, transport: http(env.RPC_URL) });
-  const domain = {
-    name: 'AgentDelegationManager',
-    version: '1',
-    chainId: 84532,
-    verifyingContract: env.DELEGATION_MANAGER as Address,
-  };
-  const { hashTypedData } = await import('viem');
-  const digest = hashTypedData({
-    domain,
-    types: AGENT_DELEGATION_MANAGER_TYPES,
-    primaryType: 'Delegation',
-    message: {
+  // Use the CANONICAL delegation hash (packages/delegation hashDelegation) — it matches the
+  // on-chain DelegationManager CAVEAT_TYPEHASH, which EXCLUDES `args` from the signed hash
+  // (audit F-1). The previous inline hashTypedData here wrongly included `args` in the Caveat
+  // type, so it computed a different digest than what any correct signer produces → every
+  // valid delegation was rejected with 0xffffffff.
+  const digest = hashDelegation(
+    {
       delegator: delegation.delegator,
       delegate: delegation.delegate,
       authority: delegation.authority,
-      caveats: delegation.caveats.map((c) => ({
-        enforcer: c.enforcer,
-        terms: c.terms,
-        args: (c.args ?? '0x') as Hex,
-      })),
+      caveats: delegation.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })),
       salt: BigInt(delegation.salt),
+      signature: delegation.signature,
     },
-  });
+    Number(env.CHAIN_ID ?? 84532),
+    env.DELEGATION_MANAGER as Address,
+  );
   try {
     const magic = (await pub.readContract({
       address: delegation.delegator,
