@@ -919,6 +919,9 @@ app.post('/session/deploy', async (c) => {
     pubKeyX?: string;
     pubKeyY?: string;
     salt?: string;
+    // Optional: calldata the freshly-deployed account executes in the SAME userOp (deploy +
+    // execute atomically, e.g. claim its name) — one signature instead of deploy-then-claim.
+    callData?: Hex;
   } | null;
   if (!body) return c.json({ error: 'body required' }, 400);
   const salt = body.salt ? BigInt(body.salt) : 0n;
@@ -975,6 +978,7 @@ app.post('/session/deploy', async (c) => {
           : undefined,
         salt,
       },
+      callData: body.callData, // deploy + claim in one userOp when supplied
       paymaster: c.env.PAYMASTER as Address,
       verifyingPaymaster,
     });
