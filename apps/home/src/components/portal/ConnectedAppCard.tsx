@@ -3,19 +3,9 @@
 // active→revoking→revoked shape is built, but revoke transitions are gated behind
 // `revokeEnabled` (false today — revoke is custody-grade, see Step-7/security follow-up).
 import { useState } from 'react';
+import type { Permission } from '../../home/types';
 import { CheckIcon, XIcon } from '../shared/Icons';
 import { InlineConfirm } from '../shared/InlineConfirm';
-
-export interface ConnectedApp {
-  clientId: string;
-  appName: string;
-  appDomain: string;
-  logo?: string;
-  canDo: string[];
-  cannotDo: string[];
-  grantedAt: number;
-  expiresAt?: number;
-}
 
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
@@ -24,7 +14,7 @@ export function ConnectedAppCard({
   revokeEnabled = false,
   onRevoke,
 }: {
-  app: ConnectedApp;
+  app: Permission;
   revokeEnabled?: boolean;
   onRevoke?: (clientId: string) => void;
 }) {

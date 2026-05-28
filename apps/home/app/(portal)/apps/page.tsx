@@ -4,7 +4,8 @@
 import { useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { whitelabel } from '../../../src/whitelabel/config';
-import { listConnectedApps, type ConnectedAppRecord } from '../../../src/lib/connected-apps';
+import { listConnectedApps } from '../../../src/lib/connected-apps';
+import type { Permission } from '../../../src/home/types';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCard';
@@ -12,7 +13,7 @@ import { LinkIcon } from '../../../src/components/shared/Icons';
 
 export default function AppsPage() {
   const { agentAddress } = useSession();
-  const [apps, setApps] = useState<ConnectedAppRecord[]>([]);
+  const [apps, setApps] = useState<Permission[]>([]);
   useEffect(() => {
     if (agentAddress) setApps(listConnectedApps(agentAddress));
   }, [agentAddress]);

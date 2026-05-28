@@ -1,9 +1,8 @@
-// The active white-label config for this deployment: the FAITH vertical ("Impact").
-// This is the only place faith/vertical copy + the relying-app registry live for
-// the central trust site (ADR-0021 — app level, never packages). The generic
-// Experience Layer (App.tsx) + the OIDC client registry (lib/oidc-clients.ts) read
-// from `whitelabel`; swapping verticals is a new config, not a code change.
-
+// The active white-label config for this deployment: the FAITH vertical ("Impact"). This is
+// the only place faith/vertical copy + the relying-app registry live for the central trust
+// site (ADR-0021 — app level, never packages). The member-facing lexicon is documented in
+// docs/portal-lexicon.md; this config is its single source of truth. Swapping verticals is a
+// new config, not a code change.
 import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
@@ -11,8 +10,8 @@ const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
     name: 'Impact',
-    community: 'Impact community',
-    tagline: 'Your trusted home in the Impact community',
+    community: 'missional community',
+    tagline: 'Your home in the missional community',
   },
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
@@ -20,66 +19,66 @@ const faithImpact: WhiteLabelConfig = {
     credentialMethods: ['passkey', 'wallet'],
   },
   services: { devices: true, connectedApps: true },
+  // The stewardship hub: what the member helps oversee / manage / protect from their home.
   manageableAgents: [
-    { id: 'person', label: 'You', blurb: 'Your personal agent — the home you sign in as.', status: 'live' },
-    {
-      id: 'organization',
-      label: 'Organizations',
-      blurb: 'Ministries, churches, and teams you govern.',
-      status: 'soon',
-    },
-    { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving your agents steward.', status: 'soon' },
-    {
-      id: 'data-source',
-      label: 'Data sources',
-      blurb: 'Records and feeds your agents can share, with your consent.',
-      status: 'soon',
-    },
+    { id: 'person', label: 'You', blurb: 'Your personal home — the you the community knows.', status: 'live' },
+    { id: 'organization', label: 'Organizations', blurb: 'Ministries, churches, and teams you help oversee.', status: 'soon', verb: 'oversee' },
+    { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving you help manage.', status: 'soon', verb: 'manage' },
+    { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
   relyingApps: [
     {
       client_id: 'demo-org',
+      name: 'Impact',
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
-      // logo intentionally omitted → consent shows an initial badge (no spoofable logo).
+      // logo omitted → consent shows an initial badge (no spoofable logo).
     },
   ],
-  // Consent disclosure per template — the human-readable can/cannot shown at the app-grant
+  // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
   delegationTemplates: {
     'site-login': {
-      canDo: ['Sign in as you in the community', 'Read your community profile'],
+      canDo: ['Sign in as you in the missional community', 'Read your community profile'],
       cannotDo: ['Move your funds', 'Add new sign-in methods', 'Change your recovery'],
       expiryDays: 365,
     },
     'org-create': {
-      canDo: ['Create approved workspaces under your identity', 'View approved org records for this session'],
+      canDo: ['Set up an organization under your name', 'View approved org records for this session'],
       cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
       expiryDays: 365,
     },
   },
+  // Member-facing copy — the lexicon (docs/portal-lexicon.md). {name} = the member's name;
+  // {app} = the missional-community app asking for permission.
   copy: {
-    arrivalTitle: 'Welcome to your Impact community portal',
-    arrivalBody: 'This is your own secure home in the Impact community — you own it, you control it.',
-    overviewTitle: "Here's what you're setting up",
-    portalStepTitle: 'Your own Portal',
-    portalStepValue: 'A Smart Agent that is yours — your private command center. No password to lose.',
-    portalStepCta: 'Set up my Portal',
-    portalStepBusy: 'Creating your Portal on Base Sepolia…',
-    portalStepReceipt: 'Your Portal is live',
-    communityStepTitle: 'Your place in the Impact community',
-    communityStepValue: 'A name others can find and trust — your identity in the community.',
-    communityStepReceipt: "You're {name} in the Impact community",
-    authorizeStepTitle: 'Give {app} access',
-    authorizeStepValue: 'A scoped, revocable permission for {app}. You stay in control and can revoke anytime.',
-    authorizeStepCta: 'Authorize {app}',
-    authorizeStepBusy: 'Connecting {app}…',
-    authorizeStepReceipt: 'Connected — returning you to {app}',
-    portalTitle: '{name} · Impact portal',
-    portalWelcome: 'Welcome to your Impact community portal',
+    // Arrival into your home.
+    arrivalTitle: 'Welcome to your home',
+    arrivalBody:
+      "A place of your own in the missional community — where you oversee what you help lead, manage what you steward, and protect what's entrusted to you.",
+    overviewTitle: "Here's how you'll get set up",
+    // ① Secure your home (passkey + found it).
+    portalStepTitle: 'Secure your home',
+    portalStepValue: 'A home of your own — so only you can open it. Your passkey (your device) is the only way in; no password to lose.',
+    portalStepCta: 'Secure my home',
+    portalStepBusy: 'Securing your home…',
+    portalStepReceipt: 'Your home is secured — only you can open it',
+    // ② Register your name (rides with ①).
+    communityStepTitle: 'Register your name',
+    communityStepValue: 'Your name in the missional community — so the community and its apps can find you.',
+    communityStepReceipt: "You're registered as {name} — the missional community can find you",
+    // ③ Give an app permission to your resources.
+    authorizeStepTitle: 'Give {app} permission',
+    authorizeStepValue: 'A specific, revocable permission for {app} to act for you. You decide what it can touch — and can take it back anytime.',
+    authorizeStepCta: 'Give {app} permission',
+    authorizeStepBusy: 'Granting permission to {app}…',
+    authorizeStepReceipt: 'Permission granted — {app} can do only what you allowed',
+    // Your home (signed in).
+    portalTitle: '{name} · your home',
+    portalWelcome: 'Welcome to your home',
     portalYouLabel: 'This is you',
-    portalManageHeading: 'Agents you manage',
+    portalManageHeading: 'What you steward',
   },
 };
 

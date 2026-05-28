@@ -1,36 +1,26 @@
-// A LOCAL mirror of the site delegations this portal has issued, keyed by agent address.
-// The canonical record lives on-chain / at the relying app; this lets the Connected Apps
-// section show {app, can/cannot, granted, expiry} for grants made FROM this portal on this
-// browser. Surfaced honestly in the UI as such (not a complete authority list).
+// A LOCAL mirror of the permissions this home has given, keyed by home address. The canonical
+// record lives on-chain / at the app; this lets the Connected Apps section show what the
+// member granted FROM this home on this browser (surfaced honestly as such, not a complete
+// authority list). The shape is the domain `Permission` (src/home/types).
 import type { Address } from '@agenticprimitives/types';
+import type { Permission } from '../home/types';
 
-export interface ConnectedAppRecord {
-  clientId: string;
-  appName: string;
-  appDomain: string;
-  logo?: string;
-  canDo: string[];
-  cannotDo: string[];
-  grantedAt: number;
-  expiresAt?: number;
-}
+const key = (home: Address) => `agenticprimitives:demo-sso:permissions:${home.toLowerCase()}`;
 
-const key = (agent: Address) => `agenticprimitives:demo-sso:connected-apps:${agent.toLowerCase()}`;
-
-export function recordConnectedApp(agent: Address, rec: ConnectedAppRecord): void {
+export function recordConnectedApp(home: Address, grant: Permission): void {
   try {
-    const list = listConnectedApps(agent).filter((a) => a.clientId !== rec.clientId);
-    list.unshift(rec);
-    localStorage.setItem(key(agent), JSON.stringify(list));
+    const list = listConnectedApps(home).filter((p) => p.clientId !== grant.clientId);
+    list.unshift(grant);
+    localStorage.setItem(key(home), JSON.stringify(list));
   } catch {
     /* storage blocked — Connected Apps just won't reflect this grant locally */
   }
 }
 
-export function listConnectedApps(agent: Address): ConnectedAppRecord[] {
+export function listConnectedApps(home: Address): Permission[] {
   try {
-    const raw = localStorage.getItem(key(agent));
-    return raw ? (JSON.parse(raw) as ConnectedAppRecord[]) : [];
+    const raw = localStorage.getItem(key(home));
+    return raw ? (JSON.parse(raw) as Permission[]) : [];
   } catch {
     return [];
   }

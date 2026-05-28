@@ -4,7 +4,7 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { connectWithName, createChildAgentForSite } from '../../connect-client';
+import { openHome, createOrganization } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName } from '../../lib/domain';
@@ -178,7 +178,7 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
     setBusy(true);
     setErr('');
     try {
-      const out = await connectWithName(name, via);
+      const out = await openHome(name, via);
       if (out.ok) await onSession(out.token, via);
       else setErr(out.error);
     } catch (e) {
@@ -216,12 +216,9 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     if (!api.enroll) return;
     setPhase('busy');
     try {
-      const created = await createChildAgentForSite(personAgent, orgBase, api.enroll.delegate, () => {});
+      const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, api.enroll.delegate);
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
-      const r = created.result;
-      const code = await api.submitGrant(api.enroll.name, r.delegation, {
-        orgAgent: r.childAgent, orgName: r.childName, edgeId: r.edgeId, governed: r.governed,
-      });
+      const code = await api.submitGrant(api.enroll.name, created.grant, created.org);
       setPhase('connected');
       setTimeout(() => api.deliverCode(code), 1100);
     } catch (e) {

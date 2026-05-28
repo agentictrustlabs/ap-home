@@ -17,6 +17,9 @@ export interface RelyingApp {
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;
+  /** Friendly app name shown at consent (e.g. "Impact"); falls back to the host. From this
+   *  registered config only — never a request param (anti-spoof). */
+  name?: string;
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are
@@ -35,6 +38,8 @@ export interface ManageableAgent {
   label: string;
   blurb: string;
   status: 'live' | 'soon';
+  /** The stewardship verb for this kind ("oversee" | "manage" | "protect"). */
+  verb?: string;
 }
 
 /** Tokenized copy for the Experience Layer. {name} = the user's name; {app} = relying app. */

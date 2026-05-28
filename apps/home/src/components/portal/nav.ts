@@ -56,8 +56,8 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): 
 
   return [
     { items: top },
-    { heading: 'Your agents', items: yourAgents },
-    { heading: 'Portal', items: portal },
+    { heading: 'What you steward', items: yourAgents },
+    { heading: 'Your home', items: portal },
   ].filter((g) => g.items.length > 0);
 }
 

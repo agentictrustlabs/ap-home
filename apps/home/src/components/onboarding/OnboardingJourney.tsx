@@ -1,26 +1,22 @@
 'use client';
-// The onboarding first-run journey. Three understandable VALUE steps backed by the FEWEST
-// device prompts (value-steps ≠ signatures): the WebAuthn create + the deploy/claim are each
-// button-gated (a fresh user gesture per prompt — never two back-to-back); the deploy/claim is
-// ONE batched userOp that yields TWO receipts (Portal live + community name). App-grant is the
-// one separate consent. Wraps the preserved primitives (createSecureHomePasskey →
-// deployAndClaimAgent → issueSiteDelegation → submitGrant → deliverCode).
+// The onboarding first-run journey, composed from the home ACTIVITIES (src/home/onboarding):
+// secure → register → permit. Three understandable activities backed by the fewest device
+// prompts: createHomeKey (your device becomes your key) + secureHome (found your home AND
+// register your name — one tap, two outcomes) + givePermission (the one separate consent).
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createSecureHomePasskey, deployAndClaimAgent, connectWithName, passkeySignHash } from '../../connect-client';
-import { issueSiteDelegation, toWire } from '../../lib/delegation';
+import { createHomeKey, secureHome, openHome, givePermission } from '../../home/onboarding';
+import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import type { DemoPasskey } from '../../lib/passkey';
-import type { EnrollApi, EnrollReq } from './useEnrollReq';
+import type { EnrollApi } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ValueStepList, type ValueStep } from '../shared/ValueStepList';
 import { OnboardingProgress } from '../shared/OnboardingProgress';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
-
-const EXPLORER = 'https://sepolia.basescan.org/address/';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
@@ -33,22 +29,23 @@ export function OnboardingJourney({
   existingAgent,
 }: {
   variant: JourneyVariant;
-  name: string; // full or label form
-  api?: EnrollApi; // present for enroll-* variants
-  existingAgent?: Address; // present for enroll-existing (skip setup → grant)
+  name: string;
+  api?: EnrollApi;
+  existingAgent?: Address;
 }) {
   const { openSession } = useSession();
   const c = whitelabel.copy;
   const community = whitelabel.brand.community;
   const appHost = api?.host ?? '';
+  const relyingApp = api?.enroll ? whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) : undefined;
+  const appName = relyingApp?.name ?? appHost; // friendly name (anti-spoof: from registered config)
   const hasApp = variant !== 'self-serve';
-  const base = name.replace(/\.demo\.agent$/, '');
+  const base = homeLabel(name);
 
   const [screen, setScreen] = useState<Screen>(variant === 'enroll-existing' ? 'grant' : 'arrival');
   const [busy, setBusy] = useState<string | null>(null);
-  const [passkey, setPasskey] = useState<DemoPasskey | null>(null);
-  const [agent, setAgent] = useState<Address | null>(existingAgent ?? null);
-  const [claimedName, setClaimedName] = useState<string>(name);
+  const [key, setKey] = useState<DemoPasskey | null>(null);
+  const [home, setHome] = useState<Home | null>(existingAgent ? { address: existingAgent, name } : null);
   const [error, setError] = useState<string>('');
   const failBack = useRef<Screen>('overview');
 
@@ -59,12 +56,11 @@ export function OnboardingJourney({
     setScreen('error');
   };
 
-  // ① create the secure key (prompt 1) — gated behind the Overview CTA (user gesture).
+  // ①a — your device becomes your key (gated behind the Overview CTA = a user gesture).
   async function onCreateKey() {
-    setBusy('Creating your secure key…');
+    setBusy('Setting up your key on this device…');
     try {
-      const pk = await createSecureHomePasskey(name);
-      setPasskey(pk);
+      setKey(await createHomeKey(name));
       setBusy(null);
       setScreen('key-ready');
     } catch (e) {
@@ -72,15 +68,14 @@ export function OnboardingJourney({
     }
   }
 
-  // ① + ② deploy the Portal + claim the community name in ONE userOp (prompt 2).
-  async function onCreatePortal() {
-    if (!passkey) return;
+  // ① + ② — secure your home + register your name (one signed step, two outcomes).
+  async function onSecureHome() {
+    if (!key) return;
     setBusy(c.portalStepBusy);
     try {
-      const res = await deployAndClaimAgent(passkey, base);
+      const res = await secureHome(key, name);
       if (!res.ok) return fail(res.error, 'key-ready');
-      setAgent(res.agent);
-      setClaimedName(res.name);
+      setHome(res.home);
       setBusy(null);
       setScreen('receipts');
     } catch (e) {
@@ -88,16 +83,16 @@ export function OnboardingJourney({
     }
   }
 
-  // After the receipts: relying-app → grant consent; self-serve → sign in + land in portal.
-  async function onContinueFromReceipts() {
+  // After the receipts: relying-app → permission consent; self-serve → open your home.
+  async function onContinue() {
     if (hasApp) {
       setScreen('grant');
       return;
     }
-    // self-serve: prove control → open a portal session (the gate swaps to the PortalShell).
-    setBusy('Signing you in…');
+    if (!home) return;
+    setBusy('Opening your home…');
     try {
-      const out = await connectWithName(claimedName, 'passkey'); // prompt 3 (self-serve)
+      const out = await openHome(home.name);
       if (!out.ok) return fail(out.error, 'receipts');
       await openSession(out.token, 'passkey', true);
     } catch (e) {
@@ -105,21 +100,21 @@ export function OnboardingJourney({
     }
   }
 
-  // ③ authorize the relying app: sign the scoped delegation (prompt 3) → grant → deliver code.
-  async function onAuthorize() {
-    if (!api?.enroll || !agent) return;
-    setBusy(fmt(c.authorizeStepBusy, { app: appHost }));
-    api.postToOpener?.({ type: 'AC_PROGRESS', msg: 'Connecting the app…' });
+  // ③ — give the app permission to your resources (the one separate consent + signature).
+  async function onGivePermission() {
+    if (!api?.enroll || !home) return;
+    setBusy(fmt(c.authorizeStepBusy, { app: appName }));
+    api.postToOpener?.({ type: 'AC_PROGRESS', msg: 'Granting permission…' });
     try {
-      const delegation = await issueSiteDelegation(agent, api.enroll.delegate, passkeySignHash);
-      const code = await api.submitGrant(claimedName, toWire(delegation));
-      // Mirror the grant locally so Connected Apps can show it (canonical record is on-chain).
+      const granted = await givePermission(home, api.enroll.delegate);
+      if (!granted.ok) return fail(granted.error, 'grant');
+      const code = await api.submitGrant(home.name, granted.grant);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
-      recordConnectedApp(agent, {
+      recordConnectedApp(home.address, {
         clientId: api.enroll.aud,
-        appName: appHost,
+        appName,
         appDomain: appHost,
-        logo: whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud)?.logo,
+        logo: relyingApp?.logo,
         canDo: tpl?.canDo ?? [],
         cannotDo: tpl?.cannotDo ?? [],
         grantedAt: Date.now(),
@@ -127,13 +122,12 @@ export function OnboardingJourney({
       });
       setBusy(null);
       setScreen('connected');
-      setTimeout(() => api.deliverCode(code), 1100); // hold the receipt, then hand back
+      setTimeout(() => api.deliverCode(code), 1100);
     } catch (e) {
       fail(e, 'grant');
     }
   }
 
-  // ── Busy overlay (a device prompt / on-chain op in flight) ──
   if (busy) {
     return (
       <Frame>
@@ -166,7 +160,7 @@ export function OnboardingJourney({
         <p className="onboarding-sub">{c.arrivalBody}</p>
         <div className="name-chip">
           <span className="name-chip-label">{base}</span>
-          <span className="name-chip-full">{whitelabel.domains.nameParent ? `${base}.${whitelabel.domains.nameParent}` : base}</span>
+          <span className="name-chip-full">your name in the {community}</span>
         </div>
         <button className="btn-primary" onClick={() => setScreen('overview')}>Get started</button>
       </Frame>
@@ -175,17 +169,17 @@ export function OnboardingJourney({
 
   if (screen === 'overview') {
     const steps: ValueStep[] = [
-      { id: 'portal', title: c.portalStepTitle, body: c.portalStepValue, status: 'active' },
-      { id: 'community', title: c.communityStepTitle, body: c.communityStepValue, status: 'pending' },
+      { id: 'secure', title: c.portalStepTitle, body: c.portalStepValue, status: 'active' },
+      { id: 'register', title: c.communityStepTitle, body: c.communityStepValue, status: 'pending' },
       ...(hasApp
-        ? [{ id: 'authorize', title: fmt(c.authorizeStepTitle, { app: appHost }), body: fmt(c.authorizeStepValue, { app: appHost }), status: 'pending' as const }]
-        : [{ id: 'later', title: 'Apps you authorize later', body: `Connect apps to your portal anytime from Connected Apps.`, status: 'pending' as const }]),
+        ? [{ id: 'permit', title: fmt(c.authorizeStepTitle, { app: appName }), body: fmt(c.authorizeStepValue, { app: appName }), status: 'pending' as const }]
+        : [{ id: 'later', title: 'Give apps permission later', body: `From your home you can give missional community apps permission anytime.`, status: 'pending' as const }]),
     ];
     return (
       <Frame>
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
-        <p className="onboarding-note">Steps ① and ② happen together — one confirmation, two milestones.</p>
+        <p className="onboarding-note">Securing your home registers your name too — one confirmation.</p>
         <button className="btn-primary" onClick={onCreateKey}>{c.portalStepCta}</button>
       </Frame>
     );
@@ -195,49 +189,45 @@ export function OnboardingJourney({
     return (
       <Frame>
         <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepTitle} />
-        <ReceiptCard title="Secure key created on this device" />
+        <ReceiptCard title="Your key is ready on this device" body="Only your device can use it — no password." />
         <h1 className="onboarding-h1">{c.portalStepTitle}</h1>
         <p className="onboarding-sub">
-          {c.portalStepValue} One confirmation brings <strong>{base}</strong> to life and claims your place in the {community}.
+          One confirmation secures <strong>{base}</strong> as your home and registers your name so the {community} can find you.
         </p>
-        <button className="btn-primary" onClick={onCreatePortal}>Create my Portal</button>
+        <button className="btn-primary" onClick={onSecureHome}>{c.portalStepCta}</button>
       </Frame>
     );
   }
 
   if (screen === 'receipts') {
+    const registered = home ? homeLabel(home.name) : base;
     return (
       <Frame>
         <OnboardingProgress total={hasApp ? 3 : 2} current={2} label={c.communityStepTitle} />
         <div className="celebrate">
           <BrandShield size={52} />
-          <h1 className="onboarding-h1">Your portal is ready</h1>
+          <h1 className="onboarding-h1">Your home is ready</h1>
         </div>
-        <ReceiptCard
-          title={c.portalStepReceipt}
-          body="Deployed on Base Sepolia"
-          detail={agent ?? undefined}
-          explorerUrl={agent ? EXPLORER + agent : undefined}
-        />
-        <ReceiptCard title={fmt(c.communityStepReceipt, { name: claimedName })} body={claimedName} />
-        <button className="btn-primary" onClick={onContinueFromReceipts}>Continue</button>
+        <ReceiptCard title={c.portalStepReceipt} body="Secured ✓ · yours alone" />
+        <ReceiptCard title={fmt(c.communityStepReceipt, { name: registered })} body={`You're known as ${registered}`} />
+        <button className="btn-primary" onClick={onContinue}>Continue</button>
       </Frame>
     );
   }
 
   if (screen === 'grant' && api?.enroll) {
-    const tpl = whitelabel.delegationTemplates?.[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] };
+    const tpl = whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] };
     return (
       <Frame wide>
-        <OnboardingProgress total={3} current={3} label="Authorize the app" />
+        <OnboardingProgress total={3} current={3} label="Give permission" />
         <ConsentSheet
-          title={fmt(c.authorizeStepTitle, { app: appHost })}
-          appName={appHost}
+          title={fmt(c.authorizeStepTitle, { app: appName })}
+          appName={appName}
           appDomain={appHost}
-          appLogo={whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud)?.logo}
+          appLogo={relyingApp?.logo}
           template={tpl}
-          authorizeLabel={fmt(c.authorizeStepCta, { app: appHost })}
-          onAuthorize={onAuthorize}
+          authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
+          onAuthorize={onGivePermission}
           onDecline={api.denyEnroll}
         />
       </Frame>
@@ -249,10 +239,10 @@ export function OnboardingJourney({
       <Frame>
         <div className="celebrate">
           <BrandShield size={64} />
-          <h1 className="onboarding-h1">Connected</h1>
+          <h1 className="onboarding-h1">Permission granted</h1>
         </div>
-        <ReceiptCard title={fmt(c.authorizeStepReceipt, { app: appHost })} />
-        <p className="onboarding-sub">Returning you to {appHost}…</p>
+        <ReceiptCard title={fmt(c.authorizeStepReceipt, { app: appName })} />
+        <p className="onboarding-sub">Returning you to {appName}…</p>
       </Frame>
     );
   }
