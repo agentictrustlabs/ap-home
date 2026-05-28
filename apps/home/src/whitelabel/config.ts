@@ -42,8 +42,23 @@ const faithImpact: WhiteLabelConfig = {
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
+      // logo intentionally omitted → consent shows an initial badge (no spoofable logo).
     },
   ],
+  // Consent disclosure per template — the human-readable can/cannot shown at the app-grant
+  // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
+  delegationTemplates: {
+    'site-login': {
+      canDo: ['Sign in as you in the community', 'Read your community profile'],
+      cannotDo: ['Move your funds', 'Add new sign-in methods', 'Change your recovery'],
+      expiryDays: 365,
+    },
+    'org-create': {
+      canDo: ['Create approved workspaces under your identity', 'View approved org records for this session'],
+      cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
+      expiryDays: 365,
+    },
+  },
   copy: {
     arrivalTitle: 'Welcome to your Impact community portal',
     arrivalBody: 'This is your own secure home in the Impact community — you own it, you control it.',
@@ -76,4 +91,4 @@ export function fmt(template: string, vars: Record<string, string | undefined> =
   return template.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m);
 }
 
-export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent } from './schema';
+export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent, DelegationTemplate } from './schema';

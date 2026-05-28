@@ -14,6 +14,19 @@ export interface RelyingApp {
   allowed_scopes: string[];
   /** Delegation caveat templates this client may request (the template fixes the caveats). */
   allowed_delegation_templates: string[];
+  /** App logo for the consent screen — comes from THIS registered config, never a request
+   *  param (anti-spoof). Optional; falls back to an initial badge. */
+  logo?: string;
+}
+
+/** Human-readable consent disclosure for a delegation template. The caveats themselves are
+ *  contract-enforced (spec 230); this is the presentational can/cannot shown at consent. */
+export interface DelegationTemplate {
+  canDo: string[];
+  /** Required, ≥1 — honest disclosure. <ConsentSheet> throws in dev if empty. */
+  cannotDo: string[];
+  /** Drives "Permission expires in N days" (omit → "ongoing until you revoke"). */
+  expiryDays?: number;
 }
 
 /** An agent kind the Portal lets the user manage. Person is live; others preview. */
@@ -75,5 +88,7 @@ export interface WhiteLabelConfig {
   manageableAgents: ManageableAgent[];
   /** Relying apps (the configured OIDC client registry). */
   relyingApps: RelyingApp[];
+  /** Consent disclosure per delegation template (the human-readable can/cannot at consent). */
+  delegationTemplates: Record<string, DelegationTemplate>;
   copy: WhiteLabelCopy;
 }
