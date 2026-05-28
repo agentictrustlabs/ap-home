@@ -620,6 +620,82 @@ export async function enrollSitePasskey(
   return { ok: true, agent: info.agent, name: info.name ?? name };
 }
 
+// ── Cross-device: link a device (spec 233 P2) ───────────────────────────────
+// A NEW browser/device with no passkey for this agent (its passkey RP differs)
+// creates its OWN local passkey and posts a short-lived REQUEST; the ORIGINAL
+// device (which holds the agent's existing passkey) approves by signing
+// addPasskey via the ROOT — no self-add (the request is not a grant). Once the
+// key lands on-chain, the new device discoverable-signs-in.
+
+export interface DeviceLinkRequest {
+  agent: Address;
+  name: string;
+  credentialIdDigest: Hex;
+  x: string;
+  y: string;
+  label: string;
+}
+
+/** NEW DEVICE: create a fresh local passkey at this origin (RP = this host) +
+ *  post a link request. Returns a short code to read to the original device. */
+export async function requestDeviceLink(
+  name: string,
+  label?: string,
+): Promise<{ ok: true; code: string; agent: Address; credentialIdDigest: Hex } | { ok: false; error: string }> {
+  const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json()) as {
+    exists?: boolean;
+    name?: string;
+    agent?: Address;
+  };
+  if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
+  const pk = await registerPasskey(label ?? `${name} (new device)`); // fresh passkey, stored on THIS device
+  const resp = await fetch('/connect/link/request', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      agent: info.agent,
+      name: info.name ?? name,
+      credentialIdDigest: pk.credentialIdDigest,
+      x: pk.pubKeyX.toString(),
+      y: pk.pubKeyY.toString(),
+      label: label ?? 'New device',
+    }),
+  });
+  const body = (await resp.json()) as { code?: string; error?: string };
+  if (!resp.ok || !body.code) return { ok: false, error: body.error ?? 'link request failed' };
+  return { ok: true, code: body.code, agent: info.agent, credentialIdDigest: pk.credentialIdDigest };
+}
+
+/** ORIGINAL DEVICE: fetch a pending link request by code (to show + approve). */
+export async function lookupDeviceLink(
+  code: string,
+): Promise<{ ok: true; req: DeviceLinkRequest } | { ok: false; error: string }> {
+  const r = await fetch(`/connect/link/lookup?code=${encodeURIComponent(code.trim())}`);
+  const body = (await r.json()) as DeviceLinkRequest & { error?: string };
+  if (!r.ok || !body.agent) return { ok: false, error: body.error ?? 'invalid or expired code' };
+  return { ok: true, req: body };
+}
+
+/** ORIGINAL DEVICE: approve — the ROOT passkey signs addPasskey for the new key. */
+export async function approveDeviceLink(
+  req: DeviceLinkRequest,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await enrollSitePasskey(
+    req.name,
+    { credentialIdDigest: req.credentialIdDigest, x: BigInt(req.x), y: BigInt(req.y) },
+    onStep,
+  );
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
+/** NEW DEVICE: poll until the new key is a registered passkey on-chain. */
+export async function pollDeviceLink(agent: Address, credentialIdDigest: Hex): Promise<boolean> {
+  const r = await fetch(`/connect/link/status?agent=${agent}&digest=${credentialIdDigest}`);
+  if (!r.ok) return false;
+  return ((await r.json()) as { enrolled?: boolean }).enrolled === true;
+}
+
 /** Step a Google (login-grade) session UP to custody-grade for the SAME bound agent.
  *  The target agent is the googleToken's sub (server-enforced) — so a Google login can
  *  only ever step up into its one bound workspace; the credential must be a custodian of it. */
