@@ -19,7 +19,7 @@ import {
 } from './connect-client';
 import { issueSiteDelegation, toWire } from './lib/delegation';
 import { loadPasskey, type DemoPasskey } from './lib/passkey';
-import { hasWallet } from './lib/wallet';
+import { hasWallet, connectWallet, personalSign } from './lib/wallet';
 import { startGoogleSignIn, exchangeCode } from './server-client';
 import { CENTRAL_AUTH_DOMAIN, subdomainHandle } from './lib/host';
 import { NewDevice, ApproveDevice } from './components/device-link';
@@ -253,6 +253,8 @@ export function App() {
   // Does the requested name already have an agent on-chain? null = checking.
   // New user (no agent) → create the account here first (E1); existing → enroll-only (E2).
   const [enrollExists, setEnrollExists] = useState<boolean | null>(enrollReq ? null : false);
+  // Which custodians the enroll target has → which "Approve with…" buttons to show.
+  const [enrollCustody, setEnrollCustody] = useState<{ hasEoa: boolean; hasPasskey: boolean }>({ hasEoa: false, hasPasskey: false });
 
   const openSession = useCallback(async (token: string, via: string, fresh: boolean) => {
     setSession({ token, via, fresh });
@@ -270,8 +272,9 @@ export function App() {
     void (async () => {
       try {
         const r = await fetch(`/connect/name-info?name=${encodeURIComponent(enrollReq.name)}`);
-        const b = (await r.json()) as { exists?: boolean };
+        const b = (await r.json()) as { exists?: boolean; hasEoa?: boolean; hasPasskey?: boolean };
         setEnrollExists(!!b.exists);
+        setEnrollCustody({ hasEoa: !!b.hasEoa, hasPasskey: !!b.hasPasskey });
       } catch {
         setEnrollExists(false); // treat as new; the on-chain claim is still forced-unique
       }
@@ -678,7 +681,9 @@ export function App() {
   }
 
   // Final step (new + existing) — approve the app: issue the scoped grant + mint the OIDC code.
-  async function onApproveApp() {
+  // `via` chooses which custodian signs the site delegation: the ROOT passkey (default) or a
+  // wallet (EOA) custodian — both are custodians of the person SA, so either can sign (ADR-0019).
+  async function onApproveApp(via: 'passkey' | 'wallet' = 'passkey') {
     if (!enrollReq) return;
     const approvingStep = ceremony.agent ? 3 : 1;
     setCeremony((c) => ({ ...c, step: 'busy', busyStep: approvingStep, busyMsg: 'Connecting the app…' }));
@@ -695,7 +700,12 @@ export function App() {
         agent = info.agent;
         name = enrollReq.name;
       }
-      const delegation = await issueSiteDelegation(agent, enrollReq.delegate, passkeySignHash);
+      let signHash = passkeySignHash;
+      if (via === 'wallet') {
+        const addr = await connectWallet(); // an EOA custodian of the person SA signs the delegation
+        signHash = (h) => personalSign(addr, h);
+      }
+      const delegation = await issueSiteDelegation(agent, enrollReq.delegate, signHash);
       const code = await submitGrant(name, toWire(delegation));
       setCeremony((c) => ({ ...c, step: 'connected' }));
       setTimeout(() => deliverCode(code), 1000); // hold the "✓ Connected" receipt briefly, then hand back
@@ -1058,7 +1068,7 @@ export function App() {
             <div className="privacy-footer">🔒 Permission for this app only. Revoke anytime.</div>
           </div>
           <div className="popup-actions">
-            <button className="cta" onClick={onApproveApp}>Approve with your device</button>
+            <button className="cta" onClick={() => onApproveApp('passkey')}>Approve with your device</button>
             <button className="cta ghost" onClick={denyEnroll}>Deny</button>
           </div>
         </div>
@@ -1128,9 +1138,19 @@ export function App() {
           <div className="privacy-footer">🔒 Permission for this app only. Revoke anytime.</div>
         </div>
         <div className="popup-actions">
-          <button className="cta" onClick={isNew ? onCreateKey : onApproveApp}>
-            {isNew ? 'Set up my secure home' : 'Approve with your device'}
-          </button>
+          {isNew ? (
+            <button className="cta" onClick={onCreateKey}>Set up my secure home</button>
+          ) : (
+            <>
+              {/* Approve with whichever custodian(s) this agent has (spec 230 / ADR-0019). */}
+              {(enrollCustody.hasPasskey || !enrollCustody.hasEoa) && (
+                <button className="cta" onClick={() => onApproveApp('passkey')}>Approve with passkey</button>
+              )}
+              {enrollCustody.hasEoa && (
+                <button className="cta ghost" onClick={() => onApproveApp('wallet')}>Approve with wallet</button>
+              )}
+            </>
+          )}
           <button className="cta ghost" onClick={denyEnroll}>{isNew ? 'Cancel' : 'Deny'}</button>
         </div>
         {/* New device arriving from a relying site with no passkey for this agent?
