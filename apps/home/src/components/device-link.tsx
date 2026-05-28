@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address, Hex } from '@agenticprimitives/types';
 import {
+  addThisDevicePasskey,
   requestDeviceLink,
   lookupDeviceLink,
   approveDeviceLink,
@@ -19,6 +20,7 @@ import {
 export function NewDevice({ prefillName = '', onLinked }: { prefillName?: string; onLinked?: () => void }) {
   const [name, setName] = useState(prefillName);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const [linked, setLinked] = useState(false);
@@ -37,7 +39,27 @@ export function NewDevice({ prefillName = '', onLinked }: { prefillName?: string
     return () => clearInterval(t);
   }, [code, linked, onLinked]);
 
-  const start = useCallback(async () => {
+  // PRIMARY: do it all on this screen — create the passkey here + approve with your
+  // existing passkey (the browser offers "use another device" if it's not here).
+  const setup = useCallback(async () => {
+    setErr(null);
+    setStep(null);
+    setBusy(true);
+    try {
+      const out = await addThisDevicePasskey(name.trim(), setStep);
+      if (!out.ok) return setErr(out.error);
+      setLinked(true);
+      onLinked?.();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'failed');
+    } finally {
+      setBusy(false);
+      setStep(null);
+    }
+  }, [name, onLinked]);
+
+  // FALLBACK: can't approve on this device → post a code to approve elsewhere.
+  const startCode = useCallback(async () => {
     setErr(null);
     setBusy(true);
     try {
@@ -86,19 +108,35 @@ export function NewDevice({ prefillName = '', onLinked }: { prefillName?: string
   return (
     <div className="scard" style={{ marginTop: '.75rem' }}>
       <p style={{ fontSize: '.85rem', margin: '0 0 .5rem' }}>
-        No passkey for this agent on <b>this</b> device? Create one here, then approve it from your original device.
+        No passkey for this agent on <b>this</b> device? Create one here and approve it with your existing passkey.
       </p>
       <input
         value={name}
         onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ''))}
         placeholder="your agent name"
         aria-label="Agent name"
+        readOnly={!!prefillName}
         style={{ marginBottom: '.5rem' }}
       />
-      <button disabled={busy || !name.trim()} onClick={start} style={{ fontSize: '.85rem' }}>
-        {busy ? 'Creating passkey…' : 'Set up this device'}
+      <button disabled={busy || !name.trim()} onClick={setup} style={{ fontSize: '.85rem' }}>
+        {busy ? (step ?? 'Working…') : 'Set up this device'}
       </button>
-      {err && <p role="alert" style={{ fontSize: '.8rem', color: 'var(--c-danger)', margin: '.5rem 0 0' }}>{err}</p>}
+      <p className="muted" style={{ fontSize: '.75rem', margin: '.5rem 0 0' }}>
+        When asked to approve, choose <b>“use a passkey from another device”</b> and scan with the device that has yours —
+        no code, same screen.
+      </p>
+      {err && (
+        <>
+          <p role="alert" style={{ fontSize: '.8rem', color: 'var(--c-danger)', margin: '.5rem 0 .25rem' }}>{err}</p>
+          <button
+            onClick={startCode}
+            disabled={busy}
+            style={{ fontSize: '.75rem', background: 'none', border: 'none', color: 'var(--c-g500)', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+          >
+            Can’t approve here? Use a code from another device instead →
+          </button>
+        </>
+      )}
     </div>
   );
 }

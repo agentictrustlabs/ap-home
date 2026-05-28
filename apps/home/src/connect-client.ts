@@ -696,6 +696,38 @@ export async function pollDeviceLink(agent: Address, credentialIdDigest: Hex): P
   return ((await r.json()) as { enrolled?: boolean }).enrolled === true;
 }
 
+/** SINGLE-DEVICE add (spec 233 P2, the smooth path): on THIS device, create a new
+ *  local passkey AND immediately enroll it by signing `addPasskey` with your
+ *  EXISTING passkey via a DISCOVERABLE assertion. When this device holds no local
+ *  passkey, the browser's discoverable prompt offers "use a passkey from another
+ *  device" (WebAuthn hybrid / QR) — so you approve with the phone/computer that has
+ *  it, right here, no code + no second tab. Still ROOT-authorized (the hybrid
+ *  assertion IS the existing custodian approving — no self-add). Requires the
+ *  approving device to be reachable for the QR; falls back to the code flow if not. */
+export async function addThisDevicePasskey(
+  name: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; credentialIdDigest: Hex } | { ok: false; error: string }> {
+  const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json()) as {
+    exists?: boolean;
+    name?: string;
+    agent?: Address;
+  };
+  if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
+  onStep?.('Creating a passkey on this device…');
+  const pk = await registerPasskey(`${name} (this device)`);
+  const inner = encodeFunctionData({
+    abi: ADD_PASSKEY_ABI,
+    functionName: 'addPasskey',
+    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY],
+  });
+  const callData = buildExecuteCallData({ to: info.agent, value: 0n, data: inner });
+  onStep?.('Approve with your existing passkey — choose “another device” if asked, and scan with the device that has it.');
+  const res = await executeCall(info.agent, passkeySignHash, callData, { attempts: 6 });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, credentialIdDigest: pk.credentialIdDigest };
+}
+
 /** Step a Google (login-grade) session UP to custody-grade for the SAME bound agent.
  *  The target agent is the googleToken's sub (server-enforced) — so a Google login can
  *  only ever step up into its one bound workspace; the credential must be a custodian of it. */
