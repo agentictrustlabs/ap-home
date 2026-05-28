@@ -60,12 +60,21 @@ export function NewDevice({ prefillName = '', onLinked }: { prefillName?: string
     );
   }
   if (code) {
+    const home = typeof window !== 'undefined' ? window.location.origin : '';
+    const homeShort = home.replace(/^https?:\/\//, '');
     return (
       <div className="scard" style={{ marginTop: '.75rem' }}>
         <p style={{ fontSize: '.85rem', margin: '0 0 .5rem' }}>
-          On a device that already has your passkey, open this site → <b>Add a device</b> and enter:
+          On the device that <b>already has your passkey</b>:
         </p>
-        <div style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '.2em', textAlign: 'center', margin: '.5rem 0' }}>
+        <ol style={{ fontSize: '.82rem', margin: '0 0 .6rem', paddingLeft: '1.15rem', lineHeight: 1.5 }}>
+          <li>
+            Open <a href={home} style={{ fontWeight: 700 }}>{homeShort}</a> and sign in.
+          </li>
+          <li>Choose <b>“Add another device”</b>.</li>
+          <li>Enter this code:</li>
+        </ol>
+        <div style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '.2em', textAlign: 'center', margin: '.25rem 0 .5rem' }}>
           {code}
         </div>
         <p className="muted" style={{ fontSize: '.78rem', margin: 0 }}>

@@ -212,6 +212,19 @@ export function App() {
   // sign-in card (new device) + "add a device" in the signed-in view (original).
   const [showSetupDevice, setShowSetupDevice] = useState(false);
   const [showApproveDevice, setShowApproveDevice] = useState(false);
+  // Host→handle context (spec 229 P5): the handle this page serves when on a
+  // personal subdomain (<handle>.impact-agent.me) — null on the apex / pages.dev /
+  // localhost. This IS that agent's home: prefill the name + hide generic signup.
+  const personalHandle = subdomainHandle();
+
+  // On a personal subdomain, prefill the sign-in + claim name with the handle so
+  // the user never retypes it (the name-info / availability effects then resolve).
+  useEffect(() => {
+    if (!personalHandle) return;
+    setConnectName((p) => p || personalHandle);
+    setDesiredName((p) => p || personalHandle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [nameInfo, setNameInfo] = useState<{
     status: 'idle' | 'checking' | 'none' | 'found';
@@ -1120,6 +1133,22 @@ export function App() {
           </button>
           <button className="cta ghost" onClick={denyEnroll}>{isNew ? 'Cancel' : 'Deny'}</button>
         </div>
+        {/* New device arriving from a relying site with no passkey for this agent?
+            Set one up here + link it from a device that has yours (spec 233 P2). */}
+        {!isNew && (
+          <div style={{ padding: '0 1.25rem 1rem' }}>
+            {showSetupDevice ? (
+              <NewDevice prefillName={enrollReq.name} />
+            ) : (
+              <button
+                onClick={() => setShowSetupDevice(true)}
+                style={{ fontSize: '.78rem', background: 'none', border: 'none', color: 'var(--c-g500)', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+              >
+                No passkey on this device? Set up this device →
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -1192,13 +1221,20 @@ export function App() {
               {/* Sign-in card */}
               <div className="scard accent">
                 <h2>Sign in</h2>
-                <p className="muted" style={{ fontSize: '.875rem' }}>Enter your agent name to sign in.</p>
+                <p className="muted" style={{ fontSize: '.875rem' }}>
+                  {personalHandle ? (
+                    <>This is <b>{personalHandle}</b>’s secure home.</>
+                  ) : (
+                    'Enter your agent name to sign in.'
+                  )}
+                </p>
                 <div style={{ marginBottom: '.625rem' }}>
                   <input
                     value={connectName}
                     onChange={(e) => setConnectName(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ''))}
                     placeholder="bob.demo.agent"
                     aria-label="Agent name"
+                    readOnly={!!personalHandle}
                   />
                 </div>
                 {nameInfo.status === 'checking' && (
@@ -1207,11 +1243,21 @@ export function App() {
                     Checking…
                   </p>
                 )}
-                {nameInfo.status === 'none' && (
-                  <p style={{ fontSize: '.8rem', color: 'var(--c-g400)', margin: '0 0 .5rem' }}>
-                    No agent with that name — sign up below.
-                  </p>
-                )}
+                {nameInfo.status === 'none' &&
+                  (personalHandle ? (
+                    <div style={{ margin: '0 0 .5rem' }}>
+                      <p style={{ fontSize: '.8rem', color: 'var(--c-g500)', margin: '0 0 .45rem' }}>
+                        <b>{personalHandle}</b> isn’t claimed yet — make this your secure home.
+                      </p>
+                      <button disabled={busy || signupAvail !== 'available'} onClick={() => onSignup('passkey')} style={{ fontSize: '.875rem' }}>
+                        Create {personalHandle} with a passkey
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '.8rem', color: 'var(--c-g400)', margin: '0 0 .5rem' }}>
+                      No agent with that name — sign up below.
+                    </p>
+                  ))}
                 {nameInfo.status === 'found' && (
                   <p style={{ fontSize: '.8rem', color: 'var(--c-success)', fontWeight: 700, margin: '0 0 .5rem' }}>
                     ✓ Found {nameInfo.name}
@@ -1250,7 +1296,10 @@ export function App() {
                   ))}
               </div>
 
-              {/* Sign-up card */}
+              {/* Sign-up card — hidden on a personal subdomain (spec 229 P5: this
+                  page IS that agent's home; you don't create a different name here —
+                  claiming the subdomain's own name is offered in the sign-in card). */}
+              {!personalHandle && (
               <div className="scard">
                 <h2>New here?</h2>
                 <p className="muted" style={{ fontSize: '.875rem' }}>Choose an agent name and create your Smart Agent.</p>
@@ -1312,6 +1361,7 @@ export function App() {
                   </button>
                 </p>
               </div>
+              )}
 
             </div>
           </>
