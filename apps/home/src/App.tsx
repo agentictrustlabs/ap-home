@@ -23,6 +23,16 @@ import { hasWallet, connectWallet, personalSign } from './lib/wallet';
 import { startGoogleSignIn, exchangeCode } from './server-client';
 import { CENTRAL_AUTH_DOMAIN, subdomainHandle } from './lib/host';
 import { NewDevice, ApproveDevice } from './components/device-link';
+import { whitelabel, fmt } from './whitelabel/config';
+
+/** The relying app's host (its domain) — the honest identity shown in consent + {app} copy. */
+function hostOf(redirectUri: string): string {
+  try {
+    return new URL(redirectUri).host;
+  } catch {
+    return redirectUri;
+  }
+}
 
 interface Session {
   token: string;
@@ -656,7 +666,7 @@ export function App() {
   // NEW USER · Step 1 — create the secure-home key (one prompt).
   async function onCreateKey() {
     if (!enrollReq) return;
-    setCeremony({ step: 'busy', busyStep: 1, busyMsg: 'Creating your sign-in key…' });
+    setCeremony({ step: 'busy', busyStep: 1, busyMsg: 'Creating your secure key…' });
     try {
       const passkey = await createSecureHomePasskey(enrollReq.name);
       setCeremony({ step: 'key-ready', passkey });
@@ -669,7 +679,7 @@ export function App() {
   async function onSetupAgent() {
     if (!enrollReq || !ceremony.passkey) return;
     const passkey = ceremony.passkey;
-    setCeremony((c) => ({ ...c, step: 'busy', busyStep: 2, busyMsg: 'Setting up your Smart Agent on Base Sepolia…' }));
+    setCeremony((c) => ({ ...c, step: 'busy', busyStep: 2, busyMsg: whitelabel.copy.portalStepBusy }));
     try {
       const base = enrollReq.name.replace(/\.demo\.agent$/, '');
       const res = await deployAndClaimAgent(passkey, base);
@@ -686,8 +696,9 @@ export function App() {
   async function onApproveApp(via: 'passkey' | 'wallet' = 'passkey') {
     if (!enrollReq) return;
     const approvingStep = ceremony.agent ? 3 : 1;
-    setCeremony((c) => ({ ...c, step: 'busy', busyStep: approvingStep, busyMsg: 'Connecting the app…' }));
-    if (popupMode) postToOpener({ type: 'AC_PROGRESS', msg: 'Connecting the app…' });
+    const authorizeBusy = fmt(whitelabel.copy.authorizeStepBusy, { app: hostOf(enrollReq.redirectUri) });
+    setCeremony((c) => ({ ...c, step: 'busy', busyStep: approvingStep, busyMsg: authorizeBusy }));
+    if (popupMode) postToOpener({ type: 'AC_PROGRESS', msg: authorizeBusy });
     try {
       let agent = ceremony.agent;
       let name = ceremony.name ?? enrollReq.name;
@@ -788,7 +799,7 @@ export function App() {
       <div className="popup-topbar" role="banner">
         <div className="popup-brand">
           <ShieldLogo size={20} />
-          <span>Agentic Connect</span>
+          <span>{whitelabel.brand.name}</span>
           <span className="popup-brand-sub">· your secure home</span>
         </div>
       </div>
@@ -1026,16 +1037,16 @@ export function App() {
           <Topbar />
           <div className="popup-scroll">
             <StepBadge n={2} />
-            <div className="popup-heading"><h1>Set up your Smart Agent</h1></div>
-            <Receipt>Sign-in key created on this device</Receipt>
+            <div className="popup-heading"><h1>{whitelabel.copy.portalStepTitle}</h1></div>
+            <Receipt>Secure key created on this device</Receipt>
             <p style={{ fontSize: '.875rem', color: 'var(--c-g500)', margin: '.5rem 0 0', lineHeight: 1.55 }}>
-              Next, we'll set up <strong>{enrollReq.name}</strong> as your own Smart Agent.
-              One quick confirmation keeps it anchored to your secure home.
+              {whitelabel.copy.portalStepValue} One confirmation brings <strong>{enrollReq.name}</strong> to
+              life as your Portal — and claims your place in the {whitelabel.brand.community}.
             </p>
             <div className="privacy-footer">🔒 You're in control. Your data stays private.</div>
           </div>
           <div className="popup-actions">
-            <button className="cta" onClick={onSetupAgent}>Set up my Smart Agent</button>
+            <button className="cta" onClick={onSetupAgent}>Create my Portal</button>
             <button className="cta ghost" onClick={denyEnroll}>Cancel</button>
           </div>
         </div>
@@ -1049,16 +1060,21 @@ export function App() {
           <Topbar />
           <div className="popup-scroll">
             <StepBadge n={3} />
-            <div className="popup-heading"><h1>Approve this app</h1></div>
+            <div className="popup-heading"><h1>{fmt(whitelabel.copy.authorizeStepTitle, { app: host })}</h1></div>
             <div className="agent-badge-card">
               <div className="agent-badge-shield"><ShieldLogo size={64} gradient /></div>
-              <div className="agent-badge-kicker">Smart Agent ready</div>
+              <div className="agent-badge-kicker">Your Portal is live</div>
               <div className="agent-badge-name">{ceremony.name ?? enrollReq.name}</div>
-              <div className="agent-badge-sub">Your personal agent now has a secure home.</div>
+              <div className="agent-badge-sub">You're now part of the {whitelabel.brand.community}.</div>
             </div>
-            <Receipt>{host} is asking to become a connected app</Receipt>
+            {/* Value steps ① + ② just completed — two receipts off the single setup confirmation. */}
+            <Receipt>{whitelabel.copy.portalStepReceipt}</Receipt>
+            <Receipt>{fmt(whitelabel.copy.communityStepReceipt, { name: ceremony.name ?? enrollReq.name })}</Receipt>
+            <p style={{ fontSize: '.8375rem', color: 'var(--c-g500)', margin: '.75rem 0 .5rem', lineHeight: 1.55 }}>
+              {fmt(whitelabel.copy.authorizeStepValue, { app: host })}
+            </p>
             <div className="perm-card can">
-              <div className="perm-card-title">This app can:</div>
+              <div className="perm-card-title">{host} can:</div>
               <ul className="perm-list">
                 <li><span className="perm-icon ok" aria-hidden="true">✓</span>Sign you in as <strong>{ceremony.name ?? enrollReq.name}</strong></li>
                 <li><span className="perm-icon ok" aria-hidden="true">✓</span>Create approved workspaces and read approved profile data</li>
@@ -1068,7 +1084,7 @@ export function App() {
             <div className="privacy-footer">🔒 Permission for this app only. Revoke anytime.</div>
           </div>
           <div className="popup-actions">
-            <button className="cta" onClick={() => onApproveApp('passkey')}>Approve with your device</button>
+            <button className="cta" onClick={() => onApproveApp('passkey')}>{fmt(whitelabel.copy.authorizeStepCta, { app: host })}</button>
             <button className="cta ghost" onClick={denyEnroll}>Deny</button>
           </div>
         </div>
@@ -1107,11 +1123,9 @@ export function App() {
                 <ShieldLogo size={70} gradient />
                 <div className="agent-home-url">{personalUrl}</div>
               </div>
-              <div className="agent-grant-label">Your personal sign-in page</div>
+              <div className="agent-grant-label">{whitelabel.copy.arrivalTitle}</div>
               <div className="agent-grant-name">{enrollReq.name}</div>
-              <div className="agent-grant-sub">
-                This is your secure home for signing in, managing your Smart Agent, and approving connected apps.
-              </div>
+              <div className="agent-grant-sub">{whitelabel.copy.arrivalBody}</div>
             </div>
           ) : (
             <div className="agent-home-card">
@@ -1119,17 +1133,48 @@ export function App() {
                 <ShieldLogo size={58} gradient />
                 <div className="agent-home-url">{personalUrl}</div>
               </div>
-              <div className="agent-grant-label">Welcome back to your secure home</div>
+              <div className="agent-grant-label">Welcome back to your {whitelabel.brand.name} portal</div>
               <div className="agent-grant-name">{enrollReq.name}</div>
               <div className="agent-grant-sub">{host} is asking to connect as an approved app.</div>
             </div>
           )}
 
+          {/* New user: preview the three value steps up front (value ≠ signatures —
+              comprehension first). They're set up with the fewest device prompts. */}
+          {isNew && (
+            <div className="value-overview">
+              <div className="value-overview-title">{whitelabel.copy.overviewTitle}</div>
+              <ol className="value-steps">
+                <li>
+                  <span className="value-step-n">1</span>
+                  <div>
+                    <div className="value-step-title">{whitelabel.copy.portalStepTitle}</div>
+                    <div className="value-step-value">{whitelabel.copy.portalStepValue}</div>
+                  </div>
+                </li>
+                <li>
+                  <span className="value-step-n">2</span>
+                  <div>
+                    <div className="value-step-title">{whitelabel.copy.communityStepTitle}</div>
+                    <div className="value-step-value">{whitelabel.copy.communityStepValue}</div>
+                  </div>
+                </li>
+                <li>
+                  <span className="value-step-n">3</span>
+                  <div>
+                    <div className="value-step-title">{fmt(whitelabel.copy.authorizeStepTitle, { app: host })}</div>
+                    <div className="value-step-value">{fmt(whitelabel.copy.authorizeStepValue, { app: host })}</div>
+                  </div>
+                </li>
+              </ol>
+            </div>
+          )}
+
           <div className="first-step-note">
-            <strong>{isNew ? 'First, create your secure sign-in key.' : 'Review this connected app request.'}</strong>
+            <strong>{isNew ? 'First, create your secure key.' : 'Review this connected app request.'}</strong>
             <span>
               {isNew
-                ? 'Your device will ask you to confirm. After that, we will set up your Smart Agent and ask which permission this app gets.'
+                ? `Your device confirms once to make this Portal yours. ${host} only gets the access you approve at the end.`
                 : `${host} only gets the permission you approve here.`}
             </span>
           </div>
@@ -1139,7 +1184,7 @@ export function App() {
         </div>
         <div className="popup-actions">
           {isNew ? (
-            <button className="cta" onClick={onCreateKey}>Set up my secure home</button>
+            <button className="cta" onClick={onCreateKey}>{whitelabel.copy.portalStepCta}</button>
           ) : (
             <>
               {/* Approve with whichever custodian(s) this agent has (spec 230 / ADR-0019). */}
@@ -1189,7 +1234,7 @@ export function App() {
             <ShieldLogo size={26} />
             {session && session.via !== 'Google' && profile?.name
               ? profile.name
-              : 'Agentic Connect'}
+              : whitelabel.brand.name}
           </div>
           {session && (
             <button
@@ -1226,8 +1271,8 @@ export function App() {
           <>
             {/* Hero */}
             <div className="standalone-hero">
-              <h1>Your secure home</h1>
-              <p>Your portable Smart Agent — created once, reachable from any app.</p>
+              <h1>Your home in the {whitelabel.brand.community}</h1>
+              <p>Your own Portal — a Smart Agent you own, created once and reachable from any app.</p>
             </div>
 
             {googleNotice && (
@@ -1410,7 +1455,14 @@ export function App() {
         {/* ── Signed in (custody-grade) ────────────────────────────── */}
         {session && session.via !== 'Google' && (
           <>
-            {/* Welcome card + reward chips */}
+            {/* Portal hero — arrival into "your community portal" (belonging + ownership). */}
+            <div className="portal-hero">
+              <div className="portal-hero-kicker">{whitelabel.copy.portalWelcome}</div>
+              <h1>{profile?.name ?? 'Your Portal'}</h1>
+              <p>Manage your agents, devices, and connected apps — all from your secure home.</p>
+            </div>
+
+            {/* Welcome card + reward chips — your person agent (the default context). */}
             <div className="scard accent" style={{ marginBottom: '1rem' }}>
               {session.fresh ? (
                 <>
@@ -1472,6 +1524,29 @@ export function App() {
                 >
                   Link Google
                 </button>
+              </div>
+            </div>
+
+            {/* Agents you manage — Person is live (this agent); the rest preview what's next. */}
+            <div className="scard">
+              <h2>{whitelabel.copy.portalManageHeading}</h2>
+              <div className="manage-grid">
+                {whitelabel.manageableAgents.map((a) => {
+                  const isYou = a.id === 'person';
+                  return (
+                    <div key={a.id} className={`manage-card ${a.status}`}>
+                      <div className="manage-card-head">
+                        <span className="manage-card-label">
+                          {isYou && profile?.name ? profile.name : a.label}
+                        </span>
+                        <span className={`manage-card-badge ${a.status}`}>
+                          {a.status === 'live' ? (isYou ? whitelabel.copy.portalYouLabel : '✓ Live') : 'Coming next'}
+                        </span>
+                      </div>
+                      <p className="manage-card-blurb">{a.blurb}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1608,14 +1683,14 @@ export function App() {
                   <ShieldLogo size={52} gradient />
                 </div>
                 <h2 id="signup-modal-title" style={{ margin: 0, color: 'var(--c-success)', fontSize: '1.125rem' }}>
-                  Smart Agent ready
+                  Your {whitelabel.brand.name} portal is ready
                 </h2>
               </div>
             ) : (
               <h2 id="signup-modal-title">
                 {signup.phase === 'error'
                   ? "Couldn't finish"
-                  : 'Creating your Smart Agent…'}
+                  : `Setting up your ${whitelabel.brand.name} portal…`}
               </h2>
             )}
 
@@ -1624,11 +1699,11 @@ export function App() {
               <div className="reward-row" aria-label="What you earned" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
                 <span className="reward-chip">
                   <span className="reward-chip-icon" aria-hidden="true">✓</span>
-                  {desiredName}.demo.agent — owned by you
+                  {desiredName}.demo.agent — in the {whitelabel.brand.community}
                 </span>
                 <span className="reward-chip primary">
                   <span className="reward-chip-icon" aria-hidden="true">✓</span>
-                  Smart Agent — yours
+                  Your Portal — yours
                 </span>
               </div>
             )}

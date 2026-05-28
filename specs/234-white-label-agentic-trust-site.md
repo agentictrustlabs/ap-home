@@ -127,3 +127,47 @@ Each registered relying app's `delegationTemplate` + caveats come from §5 confi
 - Runtime/remote white-label config (W4; build-time only now).
 - Any vertical content in `packages/*` (ADR-0021 — hard error).
 - New custody/delegation primitives (reuse the existing wave).
+
+## 11. Onboarding ceremony + the personal Portal (W1/W2 realization)
+
+The Experience Layer's first concrete surface. A user is onboarded into the
+ecosystem through three **value steps** and lands in their **Portal**.
+
+**Entry — the relying app is the gateway.** Onboarding may be initiated by any
+relying app (first: `demo-org`, the Faith App) OR self-serve. The gateway is a
+name-first field whose CTA segues by name state:
+
+- new name → **"Join Impact community as '<name>'"** → sign-up.
+- known name → **"Connect to Impact community"** → connect/sign-in.
+
+Entering with a `<name>` routes to the user's **Home** at `<name>.<connect-domain>`
+(name-derived, ADR-0013), where the ceremony runs and *becomes* the Portal.
+Arriving should **feel like entering your own community portal** — belonging +
+ownership, not a login page. (Self-serve = visiting the Home subdomain directly.)
+
+**Three value steps (decoupled from signatures).** The steps exist for
+comprehension + perceived value; they are NOT one-signature-each. Device prompts
+are minimized — batch on-chain ops, one confirmation can yield multiple receipts:
+
+1. **Your own Portal** — deploy the person Smart Agent (passkey = ROOT custodian).
+2. **Your place in the Impact community** — register the name. *Batched with (1) —
+   no extra prompt; one setup confirmation, two receipts.*
+3. **Access for the app** — issue the scoped `site-login` delegation. A separate,
+   deliberate confirmation (granting authority to a third party is a distinct
+   consent; an EIP-712 delegation can't share the userOp assertion). Skipped for
+   self-serve (apps authorized later from the Portal).
+
+Net device gestures for a new app-initiated user: **passkey-create + ≤1 setup sign
++ 1 authorize sign** — never more than today. Where the naming/factory contracts
+allow relayer-sponsored deploy + register (owner = SA, no SA signature), setup
+drops to **zero** signatures and the only gesture is the passkey create.
+
+**The Portal (signed-in).** Reframe the signed-in view as *the user's Impact
+community portal*: a welcoming header, the **person agent as default context**
+(name + address — "this is you"), and **"agents you manage"** — Person (live) plus
+Organizations / Treasuries / Data Sources as **previews** ("coming next", gated by
+`trustServices` config). Working surfaces: sign-in & devices (add device/credential,
+spec 233), connected apps (the issued delegations). The Portal is where additional
+agents are later created (each ROOT-passkey-custodied via `createChildAgentForSite`).
+
+All copy/branding above is **white-label config** (§5), app-level only (ADR-0021).

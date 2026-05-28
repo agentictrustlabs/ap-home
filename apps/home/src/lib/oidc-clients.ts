@@ -1,26 +1,19 @@
-// Static OIDC client registry (spec 230 §6). client_id → allowed redirect_uris, scopes,
+// OIDC client registry (spec 230 §6). client_id → allowed redirect_uris, scopes,
 // and delegation templates. Authoritative server-side gate at the grant endpoint + /token:
 // redirect_uri MUST exact-match (CN-1 / open-redirect defense); the requested
 // delegation_template MUST be allowed (the template fixes the caveat set — the client
-// cannot widen it). Static first; KV/D1-backed later (dynamic registration is out of scope).
+// cannot widen it). The registry is SOURCED FROM the white-label config (spec 234 §5 /
+// W1) — a deployment configures its relying apps there, not in this generic gate.
 
-export interface OidcClient {
-  client_id: string;
-  /** Exact-match redirect URIs (no substring/prefix). */
-  redirect_uris: string[];
-  allowed_scopes: string[];
-  /** Delegation caveat templates this client may request (spec 230 §6 / §7). */
-  allowed_delegation_templates: string[];
-}
+import { whitelabel } from '../whitelabel/config';
+import type { RelyingApp } from '../whitelabel/config';
 
-const CLIENTS: Record<string, OidcClient> = {
-  'demo-org': {
-    client_id: 'demo-org',
-    redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
-    allowed_scopes: ['openid', 'agent'],
-    allowed_delegation_templates: ['site-login', 'org-create'],
-  },
-};
+/** An OIDC client = a configured relying app (spec 234). */
+export type OidcClient = RelyingApp;
+
+const CLIENTS: Record<string, OidcClient> = Object.fromEntries(
+  whitelabel.relyingApps.map((c) => [c.client_id, c]),
+);
 
 export function getClient(clientId: string): OidcClient | null {
   return CLIENTS[clientId] ?? null;

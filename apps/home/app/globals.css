@@ -101,6 +101,39 @@
         line-height: 1.5;
       }
 
+      /* ── Portal hero (signed-in "your community portal" arrival) ──────── */
+      .portal-hero { padding: 1.5rem 0 1rem; }
+      .portal-hero-kicker {
+        font-size: .72rem; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .07em; color: var(--c-primary); margin-bottom: .35rem;
+      }
+      .portal-hero h1 {
+        font-size: 1.6rem; font-weight: 900; color: var(--c-g900);
+        letter-spacing: -.035em; margin: 0 0 .3rem; line-height: 1.15;
+        word-break: break-word;
+      }
+      .portal-hero p { font-size: .875rem; color: var(--c-g500); margin: 0; line-height: 1.5; }
+
+      /* ── "Agents you manage" grid ──────────────────────────────────────── */
+      .manage-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .5rem;
+      }
+      @media (max-width: 560px) { .manage-grid { grid-template-columns: 1fr; } }
+      .manage-card {
+        border: 1px solid var(--c-g200); border-radius: var(--r-md);
+        padding: .75rem .875rem; background: #fff;
+      }
+      .manage-card.soon { background: var(--c-g50, #fafafa); border-style: dashed; }
+      .manage-card-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .25rem; }
+      .manage-card-label { font-size: .875rem; font-weight: 700; color: var(--c-g900); word-break: break-word; }
+      .manage-card-badge {
+        flex: 0 0 auto; font-size: .65rem; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .05em; padding: .12rem .4rem; border-radius: 999px; white-space: nowrap;
+      }
+      .manage-card-badge.live { background: var(--c-success-bg, #e8f6ee); color: var(--c-success); }
+      .manage-card-badge.soon { background: var(--c-g100, #eee); color: var(--c-g400); }
+      .manage-card-blurb { font-size: .78rem; color: var(--c-g500); margin: 0; line-height: 1.45; }
+
       /* ── Standalone two-column grid ─────────────────────────────────── */
       .standalone-grid {
         display: grid;
@@ -460,6 +493,31 @@
         font-size: .8rem;
         line-height: 1.45;
       }
+
+      /* ── Value-step overview (onboarding "here's what you're setting up") ── */
+      .value-overview {
+        background: #fff;
+        border: 1px solid var(--c-g200);
+        border-radius: var(--r-md);
+        padding: .875rem .875rem .75rem;
+        margin-bottom: .625rem;
+      }
+      .value-overview-title {
+        font-size: .72rem; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .07em; color: var(--c-g400); margin-bottom: .625rem;
+      }
+      .value-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+      .value-steps li { display: flex; gap: .625rem; align-items: flex-start; }
+      .value-step-n {
+        flex: 0 0 auto;
+        width: 1.4rem; height: 1.4rem; border-radius: 999px;
+        background: var(--c-primary); color: #fff;
+        font-size: .75rem; font-weight: 800;
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-top: .05rem;
+      }
+      .value-step-title { font-size: .875rem; font-weight: 700; color: var(--c-g900); }
+      .value-step-value { font-size: .8rem; color: var(--c-g500); line-height: 1.45; margin-top: .1rem; }
 
       /* ── Spinner ────────────────────────────────────────────────────── */
       .spinner {
