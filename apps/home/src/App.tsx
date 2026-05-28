@@ -22,6 +22,7 @@ import { loadPasskey, type DemoPasskey } from './lib/passkey';
 import { hasWallet } from './lib/wallet';
 import { startGoogleSignIn, exchangeCode } from './server-client';
 import { CENTRAL_AUTH_DOMAIN, subdomainHandle } from './lib/host';
+import { NewDevice, ApproveDevice } from './components/device-link';
 
 interface Session {
   token: string;
@@ -207,6 +208,10 @@ export function App() {
   // Subdomain-isolated passkey resume (spec 229 P5): set when we land on a
   // personal subdomain carrying a `passkey_signup`/`passkey_connect` intent.
   const [resume, setResume] = useState<{ intent: 'signup' | 'connect'; label: string } | null>(null);
+  // Cross-device passkey (spec 233 P2) inline toggles: "set up this device" on the
+  // sign-in card (new device) + "add a device" in the signed-in view (original).
+  const [showSetupDevice, setShowSetupDevice] = useState(false);
+  const [showApproveDevice, setShowApproveDevice] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [nameInfo, setNameInfo] = useState<{
     status: 'idle' | 'checking' | 'none' | 'found';
@@ -1229,6 +1234,20 @@ export function App() {
                     </button>
                   )}
                 </div>
+                {/* Cross-device (spec 233 P2): the agent exists, but THIS device may
+                    not hold a passkey for it. Offer to set this device up + link it. */}
+                {nameInfo.status === 'found' &&
+                  (showSetupDevice ? (
+                    <NewDevice prefillName={connectName} />
+                  ) : (
+                    <button
+                      className="ghost"
+                      onClick={() => setShowSetupDevice(true)}
+                      style={{ fontSize: '.78rem', marginTop: '.5rem', background: 'none', border: 'none', color: 'var(--c-g500)', textDecoration: 'underline', cursor: 'pointer', padding: 0, minHeight: 'auto' }}
+                    >
+                      On a new device? Set up this device →
+                    </button>
+                  ))}
               </div>
 
               {/* Sign-up card */}
@@ -1472,6 +1491,29 @@ export function App() {
                         {addCred.error}
                       </p>
                     )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Cross-device (spec 233 P2): approve a passkey created on another device.
+                Your existing passkey (ROOT) signs addPasskey for the new device's key. */}
+            {session.via !== 'Google' && (
+              <div className="scard">
+                <h2>Add another device</h2>
+                {showApproveDevice ? (
+                  <ApproveDevice />
+                ) : (
+                  <>
+                    <p className="muted" style={{ fontSize: '.875rem' }}>
+                      Create a passkey on another device (its sign-in screen → “Set up this device”), then approve it here
+                      by entering the code it shows. Your passkey signs to add it; your agent address never changes.
+                    </p>
+                    <div className="standalone-actions">
+                      <button onClick={() => setShowApproveDevice(true)} style={{ fontSize: '.875rem' }}>
+                        Add a device
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
