@@ -3,5 +3,4 @@ export const dynamic = 'force-dynamic';
 import { onRequestPost } from '../../server/authorize';
 import { makeEnv } from '../_lib/env';
 
-
 export const POST = (request: Request) => onRequestPost({ request, env: makeEnv() });
