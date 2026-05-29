@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Address } from '@agenticprimitives/types';
 import { AUD, fetchProfile, type BasicProfile } from '../connect-client';
 import { exchangeCode } from '../server-client';
+import { nameLabel } from '../lib/domain';
 
 export interface Session {
   token: string;
@@ -26,7 +27,7 @@ interface SessionCtx {
   /** A Google return / link notice to surface in the UI (auto-cleared on dismiss). */
   notice: string | null;
   clearNotice(): void;
-  openSession(token: string, via: string, fresh: boolean): Promise<void>;
+  openSession(token: string, via: string, fresh: boolean): Promise<BasicProfile | null>;
   signOut(): void;
   refreshProfile(): Promise<void>;
 }
@@ -68,15 +69,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const ran = useRef(false);
 
-  const openSession = useCallback(async (token: string, via: string, fresh: boolean) => {
+  const openSession = useCallback(async (token: string, via: string, fresh: boolean): Promise<BasicProfile | null> => {
     setSession({ token, via, fresh });
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // survive refresh
     } catch {
       /* storage blocked (private mode) — session just won't persist */
     }
-    setProfile(await fetchProfile(token));
+    const p = await fetchProfile(token);
+    setProfile(p);
     setPhase('authed');
+    return p;
   }, []);
 
   const signOut = useCallback(() => {
@@ -129,7 +132,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (code && !url.searchParams.has('delegate')) {
         try {
           const token = await exchangeCode(code, AUD);
-          await openSession(token, 'Google', true);
+          const prof = await openSession(token, 'Google', true);
+          // Google is one-account-one-home: if it resolved to an EXISTING home that differs from
+          // the name the member just asked for, tell them (their Google account is already bound).
+          // A brand-new member (no home yet) keeps `pendingHomeName` for the secure-home step.
+          if (prof?.name) {
+            const pending = sessionStorage.getItem('pendingHomeName');
+            const want = pending ? nameLabel(pending) : '';
+            if (want && nameLabel(prof.name) !== want) {
+              setNotice(
+                `Your Google account already opens ${prof.name}. Signing in with Google always brings you ` +
+                  `here — to set up a separate “${want}”, secure it with a passkey or wallet instead.`,
+              );
+            }
+            try {
+              sessionStorage.removeItem('pendingHomeName');
+            } catch {
+              /* ignore */
+            }
+          }
         } catch {
           setPhase('anon');
         } finally {

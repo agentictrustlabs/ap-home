@@ -108,7 +108,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <OrgConsent personAgent={view.agent} api={api} />;
   }
   if (view.k === 'signin') {
-    return <SignInView name={view.name} onSession={(t, via) => openSession(t, via, false)} />;
+    return <SignInView name={view.name} onSession={async (t, via) => { await openSession(t, via, false); }} />;
   }
   // Self-serve name-first start.
   return <NameStart onStart={(name, exists) => {

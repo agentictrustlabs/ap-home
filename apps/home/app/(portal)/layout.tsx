@@ -25,7 +25,7 @@ function hasEnrollParams(): boolean {
 }
 
 function Gate({ children }: { children: ReactNode }) {
-  const { phase, session, agentName } = useSession();
+  const { phase, session, agentName, notice, clearNotice } = useSession();
   const [mounted, setMounted] = useState(false);
   const [enroll, setEnroll] = useState(false);
   useEffect(() => {
@@ -33,14 +33,27 @@ function Gate({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  if (!mounted) return <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)
-  if (enroll) return <EntryExperience mode="enroll" />;
-  if (phase === 'restoring') return <FullBleedSpinner />;
-  if (phase === 'anon') return <EntryExperience mode="entry" />;
+  let content: ReactNode;
+  if (!mounted) content = <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)
+  else if (enroll) content = <EntryExperience mode="enroll" />;
+  else if (phase === 'restoring') content = <FullBleedSpinner />;
+  else if (phase === 'anon') content = <EntryExperience mode="entry" />;
   // A Google member returns ALREADY in a custody session but with no home yet (counterfactual,
   // unnamed SA) — claim their name before entering the portal (spec 235 P2.4).
-  if (session?.via === 'Google' && !agentName) return <GoogleSecureHome />;
-  return <PortalShell>{children}</PortalShell>;
+  else if (session?.via === 'Google' && !agentName) content = <GoogleSecureHome />;
+  else content = <PortalShell>{children}</PortalShell>;
+
+  return (
+    <>
+      {notice && (
+        <div className="notice-banner" role="status" aria-live="polite">
+          <span className="notice-banner-text">{notice}</span>
+          <button className="notice-banner-close" onClick={clearNotice} aria-label="Dismiss">×</button>
+        </div>
+      )}
+      {content}
+    </>
+  );
 }
 
 export default function PortalLayout({ children }: { children: ReactNode }) {

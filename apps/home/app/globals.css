@@ -1173,3 +1173,19 @@
       .method-or::before, .method-or::after {
         content: ''; flex: 1; height: 1px; background: var(--stone-200, #e7e5e4);
       }
+
+      /* Dismissible notice banner (Google-already-linked, bootstrap notices, etc.) */
+      .notice-banner {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: flex-start; gap: .75rem;
+        padding: .7rem 1rem;
+        background: var(--amber-50, #fffbeb);
+        border-bottom: 1px solid var(--amber-200, #fde68a);
+        color: var(--stone-700, #44403c);
+        font-size: .875rem; line-height: 1.45;
+      }
+      .notice-banner-text { flex: 1; }
+      .notice-banner-close {
+        flex: 0 0 auto; background: none; border: none; cursor: pointer;
+        font-size: 1.15rem; line-height: 1; color: var(--stone-500, #78716c); padding: 0 .25rem;
+      }
