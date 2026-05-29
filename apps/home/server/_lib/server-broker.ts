@@ -48,6 +48,20 @@ export interface Env {
   /** Must EXACTLY match the redirect URI registered in Google Cloud Console,
    *  e.g. https://<your-connect-origin>/oidc/google/callback */
   GOOGLE_REDIRECT_URI?: string;
+
+  // ─── Google × KMS custody (spec 235) ───────────────────────────────
+  /** demo-a2a base URL for the server-to-server custody RESOLVE call (e.g.
+   *  `https://<a2a-worker>`). The broker can't hold the master, so during the
+   *  OIDC callback it asks demo-a2a to derive the member's KMS-custodied SA.
+   *  When unset, Google stays login-grade only (no custody path). */
+  A2A_CUSTODY_URL?: string;
+  /** Shared secret for the resolve call — must match demo-a2a's
+   *  `A2A_CUSTODY_BRIDGE_SECRET`. */
+  A2A_CUSTODY_BRIDGE_SECRET?: string;
+  /** The Personal-Home `aud` for which Google sign-in mints a CUSTODY-grade,
+   *  KMS-custodied session. Defaults to `'demo-sso'`. Relying-app auds stay
+   *  login-grade (they onboard members through the Personal Home). */
+  DEMO_SSO_AUD?: string;
 }
 
 /** Pages Function context (the subset these handlers use). */

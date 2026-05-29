@@ -10,9 +10,36 @@
 // is RESOLVED via the directory; it is not derived from the email.
 import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
-import type { CredentialPrincipal } from '@agenticprimitives/types';
+import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
 import { recordOidcFacet, readOidcFacet } from '../../../src/lib/kv-indexer';
-import { getServer, json, type FnContext } from '../../_lib/server-broker';
+import { getServer, json, type Env, type FnContext } from '../../_lib/server-broker';
+
+/**
+ * Ask demo-a2a (the master holder) for this Google subject's KMS-custodied SA
+ * (spec 235 §5). Derive-only, server-to-server, bridge-secret authenticated.
+ * Returns the CAIP-10 agent id. The broker can't derive it itself (no master).
+ */
+async function resolveKmsAgent(
+  env: Env,
+  oidcIss: string,
+  oidcSub: string,
+): Promise<{ ok: true; agentId: CanonicalAgentId } | { ok: false; reason: string }> {
+  if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
+    return { ok: false, reason: 'custody not configured' };
+  }
+  try {
+    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.A2A_CUSTODY_BRIDGE_SECRET}` },
+      body: JSON.stringify({ iss: oidcIss, sub: oidcSub }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agentId?: string; error?: string };
+    if (!res.ok || !body.ok || !body.agentId) return { ok: false, reason: body.error ?? `resolve HTTP ${res.status}` };
+    return { ok: true, agentId: body.agentId as CanonicalAgentId };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : 'resolve failed' };
+  }
+}
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {
@@ -80,15 +107,41 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     return back('linked', { email: result.principal.email ?? '' });
   }
 
-  // OIDC LOGIN: resolve the (iss,sub)->agent facet DIRECTLY from the indexer (it was
-  // recorded at link-time, P0-C). OIDC has no on-chain presence, so it does NOT go
-  // through the directory's on-chain confirmCandidates (which would drop it, P0-B) —
-  // it resolves at `asserted` and issues a LOGIN-GRADE session (ADR-0017 / spec 227 §5).
-  const agent = await readOidcFacet(env.AUTH_CODES, result.principal.iss, result.principal.sub);
-  if (!agent) {
-    // No agent linked to this Google subject yet → bootstrap. Redirect BACK to the app
-    // with a status (never dead-end on a JSON page) so the UI can explain "create a
-    // workspace with a wallet/passkey, then link Google".
+  // OIDC LOGIN: resolve the (iss,sub)->agent facet from the indexer (recorded at
+  // link-time P0-C, or at KMS-custody bootstrap below). OIDC has no on-chain presence,
+  // so it does NOT go through the directory's on-chain confirmCandidates.
+  const oidcIss = result.principal.iss;
+  const oidcSub = result.principal.sub;
+  const custodyAud = env.DEMO_SSO_AUD ?? 'demo-sso';
+  // Google × KMS custody is offered ONLY for the Personal-Home aud (spec 235).
+  // Relying-app auds stay login-grade — their members onboard via the Personal Home.
+  const custodyEligible = stash.aud === custodyAud;
+  // The member's KMS-custodied SA is DETERMINISTIC (demo-a2a derives it from
+  // (iss,sub)); resolve it so we can (a) decide if an existing facet is the one WE
+  // custody, and (b) bootstrap a new KMS member. Derive-only — no on-chain effect.
+  const derived = custodyEligible
+    ? await resolveKmsAgent(env, oidcIss, oidcSub)
+    : ({ ok: false, reason: 'not eligible' } as const);
+
+  let agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
+  let custodyGrade = false;
+
+  if (agent) {
+    // EXISTING FACET WINS (spec 235 §5): the linked SA is canonical. Google is
+    // custody-grade ONLY when that SA is the one WE custody (a passkey/wallet SA
+    // stays login-grade — step-up needs the real credential).
+    custodyGrade = derived.ok && derived.agentId.toLowerCase() === agent.toLowerCase();
+  } else if (custodyEligible && derived.ok) {
+    // NEW KMS-custodied member: record the facet + issue a custody-grade session.
+    // (The SA is counterfactual until the client runs bootstrap-and-claim; the
+    // custody relationship is cryptographically fixed by CREATE2 + factory init,
+    // so it's custody-grade now — demo-a2a's gate re-verifies on every call.)
+    await recordOidcFacet(env.AUTH_CODES, oidcIss, oidcSub, derived.agentId);
+    agent = derived.agentId;
+    custodyGrade = true;
+  } else {
+    // No agent + not a custody bootstrap → bootstrap notice. Redirect BACK to the
+    // app with a status (never dead-end on a JSON page).
     if (stash.rpRedirect) {
       const dest = new URL(stash.rpRedirect);
       dest.searchParams.set('connect_status', 'bootstrap');
@@ -99,9 +152,20 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     return json({ status: 'bootstrap', oidcSubject: principal.id, email: result.principal.email });
   }
 
-  // Linked → mint a LOGIN-GRADE session for the agent (assurance 'asserted').
+  // Mint the session. Custody-grade (onchain-confirmed) for a KMS-custodied SA;
+  // login-grade (asserted) otherwise (ADR-0017 / spec 227 §5).
+  const sessionPrincipal: CredentialPrincipal = custodyGrade
+    ? { kind: 'oidc', id: oidcFacetId(oidcIss, oidcSub), assurance: 'onchain-confirmed', role: 'custody-grade' }
+    : principal;
   const token = await mintAgentSession(
-    { sub: agent, principal, assurance: 'asserted', aud: stash.aud, iss, ttlSeconds: 3600 },
+    {
+      sub: agent,
+      principal: sessionPrincipal,
+      assurance: custodyGrade ? 'onchain-confirmed' : 'asserted',
+      aud: stash.aud,
+      iss,
+      ttlSeconds: 3600,
+    },
     signer,
   );
 
