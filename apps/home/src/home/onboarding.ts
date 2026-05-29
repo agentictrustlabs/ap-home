@@ -8,12 +8,12 @@
 import type { Address } from '@agenticprimitives/types';
 import {
   createSecureHomePasskey,
-  deployAndClaimAgent,
   connectWithName,
   createChildAgentForSite,
   passkeySignHash,
 } from '../connect-client';
 import { issueSiteDelegation, toWire } from '../lib/delegation';
+import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
@@ -26,14 +26,52 @@ export async function createHomeKey(name: string): Promise<DemoPasskey> {
 }
 
 /**
- * ① + ② — Secure a home with your name. One signed step that founds your home (locked to
- * your key) AND registers your name so the missional community can find you. Two outcomes:
- * `home.secured` and `home.registered` (the name). (Deploy + register batched — one tap.)
+ * ① + ② — Secure a home with your name. SPONSORED: the relayer founds the home (deploys the
+ * SA, locked to your key) and registers your name — so the member's ONLY device gesture is
+ * the passkey create (createHomeKey). No deploy/claim signature. Reserves a free name, deploys
+ * via the direct-factory path, then registers it (owner = the home). Two outcomes, zero taps.
  */
 export async function secureHome(key: DemoPasskey, name: string): Promise<Result<{ home: Home }>> {
-  const res = await deployAndClaimAgent(key, homeLabel(name));
-  if (!res.ok) return res;
-  return { ok: true, home: { address: res.agent, name: res.name } };
+  await ensureCsrfToken();
+  // Reserve a free name in the community registry (forced-unique).
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(homeLabel(name))}`)).json().catch(() => ({}))) as {
+    label?: string;
+    name?: string;
+    error?: string;
+  };
+  if (!picked.label || !picked.name) return { ok: false, error: picked.error ?? 'could not reserve a name' };
+
+  // Found the home — relayer deploys the SA with the passkey as custodian (no user signature).
+  const depRes = await fetch('/a2a/session/direct-deploy', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({
+      mode: 0,
+      initialPasskeyCredentialIdDigest: key.credentialIdDigest,
+      initialPasskeyX: key.pubKeyX.toString(),
+      initialPasskeyY: key.pubKeyY.toString(),
+      salt: '0',
+    }),
+  });
+  const dep = (await depRes.json().catch(() => ({}))) as { ok?: boolean; deployedAddress?: Address; error?: string; detail?: string };
+  if (!depRes.ok || !dep.ok || !dep.deployedAddress) {
+    return { ok: false, error: dep.detail ?? dep.error ?? `securing your home failed (HTTP ${depRes.status})` };
+  }
+
+  // Register the name in the community — relayer-sponsored, owner = the home (no signature).
+  const regRes = await fetch('/a2a/session/register-name', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ label: picked.label, owner: dep.deployedAddress }),
+  });
+  const reg = (await regRes.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string };
+  if (!regRes.ok || !reg.ok) {
+    return { ok: false, error: reg.detail ?? reg.error ?? `registering your name failed (HTTP ${regRes.status})` };
+  }
+
+  return { ok: true, home: { address: dep.deployedAddress, name: picked.name } };
 }
 
 /** Open your home from this device (prove it's you → a session). Used for sign-in + the

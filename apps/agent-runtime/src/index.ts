@@ -108,6 +108,10 @@ export interface Env {
   // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
   AGENT_NAME_REGISTRY?: string;
   AGENT_NAME_UNIVERSAL_RESOLVER?: string;
+  /** Permissionless `.agent` subregistry (spec 234 W2). When set, /session/register-name
+   *  registers a name with owner = the new SA, sponsored by the relayer (no user signature)
+   *  — so onboarding's "secure your home" is a single device gesture (the passkey create). */
+  PERMISSIONLESS_SUBREGISTRY?: string;
   /** Public registrable base domain for personal A2A endpoints (spec 231).
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
    *  Defaults to `impact-agent.io`. */
@@ -1425,6 +1429,68 @@ app.post('/session/direct-deploy', async (c) => {
       { ok: false, error: 'direct_deploy_failed', detail: e instanceof Error ? e.message : String(e) },
       500,
     );
+  }
+});
+
+// ─── Sponsored name registration (spec 234 W2 — "secure your home" = one gesture) ───
+//
+// The permissionless subregistry's `register(label, newOwner)` accepts ANY caller and sets
+// the child name's owner to `newOwner` (the contract is permissionless by design). So the
+// worker registers the just-deployed SA's name from the deployer EOA — no passkey signature.
+// This lets onboarding secure a home (deploy + register) with a SINGLE device gesture (the
+// WebAuthn create) instead of an extra deploy/claim signature. The relayer is constrained to
+// the configured subregistry's `register` only — it can't be used as a general relay.
+//
+// (Reverse lookup address → name needs the SA to call setPrimaryName itself, which defers to
+// the member's first signed action; forward lookup name → SA works immediately via the
+// registry's owner fallback. ADR-0013: forward resolution has one mechanism.)
+const SUBREGISTRY_REGISTER_ABI = [
+  {
+    type: 'function',
+    name: 'register',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'label', type: 'string' },
+      { name: 'newOwner', type: 'address' },
+    ],
+    outputs: [{ name: 'node', type: 'bytes32' }],
+  },
+] as const;
+
+app.post('/session/register-name', async (c) => {
+  try {
+    if (!c.env.DEPLOYER_PRIVATE_KEY) {
+      return c.json({ ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for sponsored registration' }, 503);
+    }
+    if (!c.env.PERMISSIONLESS_SUBREGISTRY) {
+      return c.json({ ok: false, error: 'subregistry_missing', detail: 'PERMISSIONLESS_SUBREGISTRY not configured' }, 503);
+    }
+    const body = (await c.req.json().catch(() => null)) as { label?: unknown; owner?: unknown } | null;
+    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
+
+    const label = typeof body.label === 'string' ? body.label.toLowerCase() : '';
+    const owner = typeof body.owner === 'string' ? body.owner : '';
+    if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) return c.json({ ok: false, error: 'bad_owner' }, 400);
+
+    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
+      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
+      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
+    const deployer = privateKeyToAccount(pkInput);
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+
+    const hash = await wallet.writeContract({
+      address: c.env.PERMISSIONLESS_SUBREGISTRY as Address,
+      abi: SUBREGISTRY_REGISTER_ABI,
+      functionName: 'register',
+      args: [label, owner as Address],
+    });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    return c.json({ ok: true, transactionHash: hash, status: receipt.status, label });
+  } catch (e) {
+    console.error('[demo-a2a] register-name failed:', e);
+    return c.json({ ok: false, error: 'register_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
