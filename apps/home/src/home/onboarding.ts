@@ -14,6 +14,8 @@ import {
   createChildAgentForSite,
   signupWithName,
   passkeySignHash,
+  googleSignHash,
+  secureHomeWithGoogle,
   type SignHash,
 } from '../connect-client';
 import { connectWallet, personalSign } from '../lib/wallet';
@@ -23,6 +25,8 @@ import type { Home } from './types';
 import { homeLabel } from './types';
 
 export type Via = 'passkey' | 'wallet' | 'google';
+/** Extra auth a `google` op needs: the custody session token demo-a2a verifies. */
+export type Auth = { token: string };
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
 
 /** ①a — your device becomes your key (passkey path only; wallet/Google have no create step). */
@@ -38,12 +42,22 @@ export async function createHomeKey(name: string): Promise<DemoPasskey> {
  *   wallet  → deploy (EOA-custodied) + claim signed by the EOA (signupWithName).
  *   google  → handled by the server (the per-subject KMS custodian signs) — wired in spec 235.
  */
-export async function secureHome(key: DemoPasskey | null, name: string, via: Via = 'passkey'): Promise<Result<{ home: Home }>> {
+export async function secureHome(
+  key: DemoPasskey | null,
+  name: string,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ home: Home }>> {
+  if (via === 'google') {
+    // Server custody: demo-a2a derives C_sub + deploys + claims, gated by the custody session.
+    if (!auth?.token) return { ok: false, error: 'no custody session' };
+    const out = await secureHomeWithGoogle(auth.token, homeLabel(name));
+    return out.ok ? { ok: true, home: { address: out.agent, name: out.name } } : { ok: false, error: out.error };
+  }
   if (via === 'wallet') {
     const out = await signupWithName(homeLabel(name), 'wallet', undefined, false);
     return out.ok ? { ok: true, home: { address: out.agent, name: out.name } } : { ok: false, error: out.error };
   }
-  // passkey (Google's server-custody secure path is added in spec 235's client wiring)
   if (!key) return { ok: false, error: 'no key for this device' };
   const res = await deployAndClaimAgent(key, homeLabel(name));
   return res.ok ? { ok: true, home: { address: res.agent, name: res.name } } : { ok: false, error: res.error };
@@ -55,13 +69,17 @@ export async function openHome(name: string, via: 'passkey' | 'wallet' = 'passke
   return out.ok ? { ok: true, token: out.token } : { ok: false, error: out.error };
 }
 
-/** The signer for an on-behalf action (delegation / userOp), chosen by credential. */
-async function signHashFor(via: Via): Promise<SignHash> {
+/** The signer for an on-behalf action (delegation / userOp), chosen by credential. `sender` is
+ *  the SA the signature is for (needed by the Google server-signer to derive + scope C_sub). */
+async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
   if (via === 'wallet') {
     const addr = await connectWallet();
     return (h: Hex) => personalSign(addr, h);
   }
-  // passkey (Google's server-side signHash is wired in spec 235's client wiring)
+  if (via === 'google') {
+    if (!sender || !auth?.token) throw new Error('granting with Google needs a custody session');
+    return googleSignHash(sender, auth.token); // demo-a2a signs with the per-subject custodian
+  }
   return passkeySignHash;
 }
 
@@ -89,9 +107,9 @@ export async function createOrganization(
  * revocable). The delegation is signed by YOUR custodian (passkey or the wallet EOA), so the
  * signer is chosen by `via`. Returns the signed grant to hand to the app.
  */
-export async function givePermission(home: Home, delegate: Address, via: Via = 'passkey'): Promise<Result<{ grant: unknown }>> {
+export async function givePermission(home: Home, delegate: Address, via: Via = 'passkey', auth?: Auth): Promise<Result<{ grant: unknown }>> {
   try {
-    const signHash = await signHashFor(via);
+    const signHash = await signHashFor(via, home.address, auth);
     const delegation = await issueSiteDelegation(home.address, delegate, signHash);
     return { ok: true, grant: toWire(delegation) };
   } catch (e) {

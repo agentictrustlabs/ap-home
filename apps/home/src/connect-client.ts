@@ -226,6 +226,62 @@ export type PasskeyOutcome =
  *  is retained for callers that already hold the local passkey object.) */
 export const passkeySignHash: SignHash = (hash) => signWithDiscoverablePasskey(hash);
 
+// ── Google × KMS custody (spec 235): the server signs with the per-subject custodian ──
+//
+// A Google-only member never holds a key. demo-a2a derives their per-(iss,sub) custodian
+// C_sub and signs on their behalf, gated by the custody session (verified vs the broker
+// JWKS). So securing a home + giving permission are SERVER round-trips, not device gestures —
+// their only gesture was signing in with Google.
+
+/** A SignHash that has demo-a2a sign a digest with the member's KMS custodian. The custody
+ *  session proves the member; demo-a2a derives C_sub + signs for `sender` (their SA). */
+export function googleSignHash(sender: Address, sessionToken: string): SignHash {
+  return async (hash: Hex): Promise<Hex> => {
+    await ensureCsrfToken();
+    const res = await fetch('/a2a/custody/google/sign', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeaders() },
+      body: JSON.stringify({ session: sessionToken, hash, sender }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; signature?: Hex; error?: string; detail?: string };
+    if (!res.ok || !body.ok || !body.signature) {
+      throw new Error([body.error, body.detail].filter(Boolean).join(' — ') || `custody sign failed (HTTP ${res.status})`);
+    }
+    return body.signature;
+  };
+}
+
+/** Secure a home for a Google-only member: pick a free name, then have demo-a2a deploy their
+ *  KMS-custodied SA + claim the name in ONE server-signed, sponsored userOp. */
+export async function secureHomeWithGoogle(
+  sessionToken: string,
+  base: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
+  onStep?.('Finding a free name…');
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+    label?: string;
+    name?: string;
+    node?: Hex;
+    error?: string;
+  };
+  if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
+  onStep?.('Securing your home on the network…');
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/bootstrap-and-claim', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; name?: string; error?: string; detail?: string };
+  if (!res.ok || !body.ok || !body.agent) {
+    return { ok: false, error: [body.error, body.detail].filter(Boolean).join(' — ') || `secure-home failed (HTTP ${res.status})` };
+  }
+  return { ok: true, agent: body.agent, name: body.name ?? picked.name };
+}
+
 /** Sign in with a passkey (registering one first if none on this device), then resolve. */
 export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOutcome> {
   let passkey = loadPasskey();

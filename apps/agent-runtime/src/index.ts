@@ -1601,7 +1601,9 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY);
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+    });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     // INVARIANT (spec 235 §5.4): act ONLY for the SA the session proves.
     if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
@@ -1693,7 +1695,9 @@ app.post('/custody/google/sign', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY);
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+    });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     // INVARIANT (spec 235 §5.4): only sign for the SA the session proves.
     if ((body.sender as string).toLowerCase() !== sa.toLowerCase()) {

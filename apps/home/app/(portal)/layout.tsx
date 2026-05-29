@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { SessionProvider, useSession } from '../../src/context/session';
 import { PortalShell } from '../../src/components/portal/PortalShell';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
+import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
 import { parseEnrollReq } from '../../src/components/onboarding/useEnrollReq';
 
 function FullBleedSpinner() {
@@ -24,7 +25,7 @@ function hasEnrollParams(): boolean {
 }
 
 function Gate({ children }: { children: ReactNode }) {
-  const { phase } = useSession();
+  const { phase, session, agentName } = useSession();
   const [mounted, setMounted] = useState(false);
   const [enroll, setEnroll] = useState(false);
   useEffect(() => {
@@ -36,6 +37,9 @@ function Gate({ children }: { children: ReactNode }) {
   if (enroll) return <EntryExperience mode="enroll" />;
   if (phase === 'restoring') return <FullBleedSpinner />;
   if (phase === 'anon') return <EntryExperience mode="entry" />;
+  // A Google member returns ALREADY in a custody session but with no home yet (counterfactual,
+  // unnamed SA) — claim their name before entering the portal (spec 235 P2.4).
+  if (session?.via === 'Google' && !agentName) return <GoogleSecureHome />;
   return <PortalShell>{children}</PortalShell>;
 }
 

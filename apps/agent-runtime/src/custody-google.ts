@@ -20,6 +20,7 @@
 import { verifyAgentSession, importJwks, type VerifyKey } from '@agenticprimitives/connect';
 import { deriveSubjectSigner, type KmsBackend } from '@agenticprimitives/key-custody';
 import { createKmsViemAccount } from '@agenticprimitives/key-custody/kms-viem';
+import type { AuditSink } from '@agenticprimitives/audit';
 import type { Address, Hex } from '@agenticprimitives/types';
 
 export interface OidcSubject {
@@ -143,12 +144,13 @@ export interface SubjectCustodian {
 export async function deriveSubjectCustodian(
   subject: OidcSubject,
   masterHex: string,
-  backend: KmsBackend = 'local-aes',
+  opts: { backend?: KmsBackend; auditSink?: AuditSink } = {},
 ): Promise<SubjectCustodian> {
   const signerBackend = deriveSubjectSigner({
     subject: { iss: subject.iss, sub: subject.sub },
-    backend,
+    backend: opts.backend ?? 'local-aes',
     config: { derivationSecretHex: masterHex },
+    auditSink: opts.auditSink, // G-2: every C_sub signature emits key-custody.sign
   });
   const acct = await createKmsViemAccount(signerBackend);
   return {
