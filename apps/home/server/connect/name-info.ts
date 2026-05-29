@@ -9,7 +9,7 @@ import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 function fullName(name: string): string {
   const n = name.trim().toLowerCase();
-  return n.endsWith('.demo.agent') ? n : `${n.replace(/\.+$/, '')}.demo.agent`;
+  return n.endsWith('.impact') ? n : `${n.replace(/\.+$/, '')}.impact`;
 }
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {

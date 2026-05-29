@@ -925,8 +925,8 @@ export async function connectWithName(
 
 /** Step 1 — create the person's secure-home passkey (ONE WebAuthn create). Stored on this device. */
 export async function createSecureHomePasskey(name: string): Promise<DemoPasskey> {
-  const base = name.replace(/\.demo\.agent$/, '');
-  return registerPasskey(`${base}.demo.agent`);
+  const base = name.replace(/\.(impact|demo\.agent)$/, '');
+  return registerPasskey(`${base}.impact`);
 }
 
 /** Step 2 — deploy the person's Smart Agent + claim its name in ONE userOp (ONE WebAuthn sign). */
@@ -954,7 +954,7 @@ export async function signupWithName(
 ): Promise<{ ok: true; token: string; name: string; agent: Address } | { ok: false; error: string }> {
   if (via === 'passkey') {
     onStep?.('Creating your passkey…');
-    const pk = await registerPasskey(`${base}.demo.agent`); // FRESH passkey for this workspace
+    const pk = await registerPasskey(`${base}.impact`); // FRESH passkey for this workspace
     // Deploy + claim the name in ONE userOp (one device prompt): derive the SA address, build
     // the claim calldata (newOwner = that SA), and deploy with it attached.
     const sa = await derivePasskeySa(pk, 0n);
