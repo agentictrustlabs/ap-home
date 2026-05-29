@@ -41,15 +41,26 @@ export default function YouPage() {
 
       <div className="dash-section" style={{ marginTop: '1.5rem' }}>
         <h2>Your profile</h2>
-        <a className="manage-card link" href="/profile" style={{ display: 'block' }}>
-          <div className="manage-card-head">
-            <span className="manage-card-label"><UserIcon size={16} /> Contact details</span>
-            <span className="manage-card-badge live">✓ Live</span>
-          </div>
-          <p className="manage-card-blurb">
-            Email, phone, country, organization. Stored at your home, re-used across every community app you trust.
-          </p>
-        </a>
+        <div className="manage-grid">
+          <a className="manage-card link" href="/profile">
+            <div className="manage-card-head">
+              <span className="manage-card-label"><UserIcon size={16} /> Contact details</span>
+              <span className="manage-card-badge live">✓ Live</span>
+            </div>
+            <p className="manage-card-blurb">
+              Name, email, phone, country, organization. Stored at your home, re-used across every community app you trust.
+            </p>
+          </a>
+          <a className="manage-card link" href="/wea-sign">
+            <div className="manage-card-head">
+              <span className="manage-card-label">📜 WEA Statement of Faith</span>
+              <span className="manage-card-badge live">✓ Live</span>
+            </div>
+            <p className="manage-card-blurb">
+              Affirm the WEA Statement of Faith once at your home — every faith-aligned community app that needs it gets the attestation receipt automatically.
+            </p>
+          </a>
+        </div>
       </div>
     </SectionShell>
   );

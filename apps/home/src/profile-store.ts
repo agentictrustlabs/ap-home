@@ -8,6 +8,11 @@
 import type { Address } from '@agenticprimitives/types';
 
 export interface ImpactContactProfile {
+  /** Display name — first/last let community apps render a friendly header like
+   *  "Rich Pedersen" instead of the handle. Identity-level; the handle remains the
+   *  canonical id. Held at Impact, re-used across every community app. */
+  firstName?: string;
+  lastName?: string;
   email?: string;
   phone?: string;
   country?: string;
@@ -18,14 +23,29 @@ export interface ImpactContactProfile {
   organizationCountry?: string;
 }
 
+export interface StoredAttestation {
+  docHash: string;
+  docId: string;
+  signedAt: number;
+  consentBoundTo: string;
+}
+
 export interface ImpactStoredProfile {
   v: 1;
   contact?: ImpactContactProfile;
+  /** Community-wide attestations the member has signed at their home, re-used across
+   *  relying apps. WEA Statement of Faith is the canonical example (signed once at
+   *  Impact, every faith-aligned community app gets the same attestation receipt). */
+  attestations?: {
+    wea?: StoredAttestation;
+  };
 }
 
 export type ImpactProfileFieldKey = keyof ImpactContactProfile;
 
 export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 'email' | 'tel' | 'text'; placeholder: string; help: string }[] = [
+  { key: 'firstName',           label: 'First name',            type: 'text',  placeholder: 'Rich',                     help: 'Used to greet you across community apps.' },
+  { key: 'lastName',            label: 'Last name',             type: 'text',  placeholder: 'Pedersen',                 help: 'Used together with your first name to render a friendly display name.' },
   { key: 'email',               label: 'Email',                 type: 'email', placeholder: 'you@example.com',          help: 'How community apps reach you. Shared on your terms.' },
   { key: 'phone',               label: 'Phone',                 type: 'tel',   placeholder: '+1 555 0100',              help: 'Optional. Shared only when you explicitly grant the scope.' },
   { key: 'country',             label: 'Country',               type: 'text',  placeholder: 'United States',            help: 'Where you live.' },

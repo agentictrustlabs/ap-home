@@ -199,6 +199,8 @@ export default function ProfilePage() {
 
 function autoCompleteFor(k: ImpactProfileFieldKey): string {
   switch (k) {
+    case 'firstName': return 'given-name';
+    case 'lastName': return 'family-name';
     case 'email': return 'email';
     case 'phone': return 'tel';
     case 'country': return 'country-name';
