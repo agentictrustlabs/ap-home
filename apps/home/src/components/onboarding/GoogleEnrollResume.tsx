@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { secureHome, givePermission } from '../../home/onboarding';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
+import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
@@ -36,7 +37,7 @@ export function readPendingEnroll(): PendingEnroll | null {
   }
 }
 
-type Phase = 'securing' | 'consent' | 'granting' | 'connected' | 'error';
+type Phase = 'securing' | 'mismatch' | 'consent' | 'granting' | 'connected' | 'error';
 
 export function GoogleEnrollResume() {
   const { session, agentAddress, agentName } = useSession();
@@ -72,8 +73,12 @@ export function GoogleEnrollResume() {
     ran.current = true;
     void (async () => {
       if (agentName && agentAddress) {
+        // Existing Google home. If it differs from the name the app asked to connect as, STOP and
+        // explain (one Google account = one home) before granting — don't silently connect the
+        // wrong home.
         setHome({ address: agentAddress, name: agentName });
-        setPhase('consent');
+        const requested = nameLabel(pending.enroll.name);
+        setPhase(requested && nameLabel(agentName) !== requested ? 'mismatch' : 'consent');
         return;
       }
       const res = await secureHome(null, pending.name, 'google', { token });
@@ -124,6 +129,28 @@ export function GoogleEnrollResume() {
           <p className="onboarding-busy-msg">Securing your home in the {community}…</p>
         </div>
         <p className="onboarding-sub">Signed in with Google — no extra step. This takes a few seconds.</p>
+      </Shell>
+    );
+  }
+
+  if (phase === 'mismatch' && home) {
+    const requested = nameLabel(enroll.name);
+    return (
+      <Shell>
+        <BrandShield size={52} />
+        <h1 className="onboarding-h1">You already have a home</h1>
+        <p className="onboarding-sub">
+          This Google account already opens <strong>{home.name}</strong>. You started connecting as{' '}
+          <strong>{requested}</strong> — but signing in with Google always brings you to the home it first created
+          (one Google account, one home). It can&apos;t be used to make a second.
+        </p>
+        <button className="btn-primary" onClick={() => setPhase('consent')}>
+          Connect {appName} to {home.name}
+        </button>
+        <button className="btn-ghost onboarding-secondary" onClick={onDecline}>Cancel</button>
+        <p className="onboarding-note">
+          To use the name “{requested}”, go back to {appName} and secure it with a passkey or wallet instead.
+        </p>
       </Shell>
     );
   }
