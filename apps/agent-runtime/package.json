@@ -14,6 +14,7 @@
     "@agenticprimitives/agent-account": "workspace:*",
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
+    "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",

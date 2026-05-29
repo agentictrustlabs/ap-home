@@ -38,8 +38,14 @@ import {
 } from './validate';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
-import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { AgentAccountClient, buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
+import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
+import {
+  verifyCustodySession,
+  deriveSubjectCustodian,
+  timingSafeEqual,
+  caip10,
+} from './custody-google';
 import { originAllowed, hostnameAllowed } from './origins';
 import { resolveAgentHost, buildA2aAgentCard } from './host-context';
 import {
@@ -199,6 +205,24 @@ export interface Env {
    *  signing key; needs roles/cloudkms.cryptoKeyEncrypterDecrypter on
    *  GCP_KMS_ENCRYPT_KEY_NAME. */
   GCP_SERVICE_ACCOUNT_JSON?: string;
+
+  // ─── Google × KMS custody (spec 235) ────────────────────────────────────
+  /** The Connect broker's published JWKS (ES256). The custody gate fetches +
+   *  caches this to verify Google custody sessions. e.g.
+   *  `https://<broker-origin>/jwks`. Required for /custody/google/{sign,
+   *  bootstrap-and-claim}. Fail-closed when unreachable. */
+  BROKER_JWKS_URL?: string;
+  /** Expected `iss` of broker-minted sessions — the Connect origin. Pinned by
+   *  the gate (rejects alien issuers). */
+  BROKER_ISS?: string;
+  /** Expected `aud` of custody sessions — demo-sso's own client_id (the
+   *  Personal Trust Home). Pinned by the gate. */
+  DEMO_SSO_AUD?: string;
+  /** Shared secret authenticating the broker → /custody/google/resolve
+   *  server-to-server call (the broker can't hold the master, so it asks
+   *  demo-a2a to derive SA_expected during the OIDC callback). Constant-time
+   *  compared; the user's Google authn already happened at the broker. */
+  A2A_CUSTODY_BRIDGE_SECRET?: string;
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -362,6 +386,10 @@ app.use('*', async (c, next) => {
   // /api/a2a is the machine-to-machine A2A endpoint (spec 231) — no browser
   // cookie/CSRF; authorization is per the A2A protocol, not double-submit.
   if (c.req.path === '/api/a2a') return next();
+  // /custody/google/resolve is a server-to-server call from the Connect broker
+  // (no browser cookie). It's authenticated by the bridge secret, not CSRF.
+  // (bootstrap-and-claim + sign ARE browser-facing and KEEP CSRF.)
+  if (c.req.path === '/custody/google/resolve') return next();
   // Header double-submit + HMAC.
   const headerToken = c.req.header(CSRF_HEADER);
   const cookieToken = getCookie(c, CSRF_COOKIE);
@@ -1491,6 +1519,194 @@ app.post('/session/register-name', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] register-name failed:', e);
     return c.json({ ok: false, error: 'register_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// ─── Google × KMS custody (spec 235) — THE GATE lives in ./custody-google.ts ─
+//
+// Three endpoints let a member whose ONLY credential is Google get + use a
+// real Smart Agent. demo-a2a holds the master, so it is the only party that
+// can derive the member's per-subject custodian C_sub and sign for their SA.
+//
+//   resolve            broker → a2a (bridge secret). Derive-only: returns
+//                      SA_expected so the broker can mint a custody session
+//                      (sub = SA) WITHOUT waiting on-chain. No deploy.
+//   bootstrap-and-claim client → a2a (custody session). Deploy SA + claim the
+//                      name in one C_sub-signed, paymaster-sponsored userOp.
+//   sign               client → a2a (custody session). Sign a userOp /
+//                      delegation digest with C_sub (e.g. givePermission).
+//
+// The SA we act for is always DERIVED from the verified (iss,sub) — never
+// client-supplied — and cross-checked against the session's claimed `sub`.
+
+/** Gate config for the client-facing custody endpoints (JWKS + pinned iss/aud). */
+function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: string; expectedAud: string } | null {
+  if (!env.BROKER_JWKS_URL || !env.BROKER_ISS || !env.DEMO_SSO_AUD) return null;
+  return { jwksUrl: env.BROKER_JWKS_URL, expectedIss: env.BROKER_ISS, expectedAud: env.DEMO_SSO_AUD };
+}
+
+/**
+ * POST /custody/google/resolve  (broker → a2a, bridge-secret authenticated)
+ * Body: { iss, sub }  → { ok, agent, agentId (CAIP-10), custodian }
+ *
+ * Derive-only: the OIDC callback can't hold the master, so it asks demo-a2a
+ * for SA_expected to mint a custody session + record the facet. No on-chain
+ * effect — fast. Authenticated by the shared bridge secret (the user's Google
+ * authn already happened at the broker).
+ */
+app.post('/custody/google/resolve', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const auth = c.req.header('authorization') ?? '';
+  const presented = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!timingSafeEqual(presented, secret)) return c.json({ ok: false, error: 'unauthorized' }, 401);
+
+  const body = (await c.req.json().catch(() => null)) as { iss?: string; sub?: string } | null;
+  if (!body?.iss || !body?.sub) return c.json({ ok: false, error: 'iss + sub required' }, 400);
+  try {
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY);
+    const agent = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    return c.json({ ok: true, agent, agentId: caip10(Number(c.env.CHAIN_ID), agent), custodian: cSub });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/resolve failed:', e);
+    return c.json({ ok: false, error: 'resolve_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/google/bootstrap-and-claim  (client → a2a, custody session)
+ * Body: { session, label, node }  → { ok, agent, agentId, name, transactionHash }
+ *
+ * Deploy SA_expected (custodians:[C_sub], salt 0) + claim `<label>` +
+ * setPrimary(node) in ONE C_sub-signed, paymaster-sponsored userOp. The
+ * member's only gesture was signing in with Google.
+ */
+app.post('/custody/google/bootstrap-and-claim', async (c) => {
+  if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
+  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
+    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
+  }
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as { session?: string; label?: string; node?: Hex } | null;
+  if (!body?.session || !body?.label || !body?.node) {
+    return c.json({ ok: false, error: 'session + label + node required' }, 400);
+  }
+  const label = body.label.toLowerCase();
+  if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(body.node)) return c.json({ ok: false, error: 'bad_node' }, 400);
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY);
+    const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    // INVARIANT (spec 235 §5.4): act ONLY for the SA the session proves.
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived SA' }, 403);
+    }
+
+    // Idempotent: if already deployed, the atomic deploy+claim already ran.
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const code = await pub.getBytecode({ address: sa });
+    if (code && code !== '0x') {
+      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.demo.agent`, alreadyDeployed: true });
+    }
+
+    const register = buildSubregistryRegisterCall({
+      subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address,
+      label,
+      newOwner: sa,
+    });
+    const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
+    const callData = buildExecuteBatchCallData([register, setPrimary]);
+
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForAgentAccount({
+      spec: { custodians: [cSub], salt: 0n },
+      callData,
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
+    if (sender.toLowerCase() !== sa.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'built userOp sender ≠ derived SA' }, 500);
+    }
+
+    // C_sub signs the userOpHash (65-byte ECDSA — AgentAccount._verifyEcdsa accepts it).
+    const signature = await sign(userOpHash);
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    if (!inner.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: 'userop_reverted',
+          detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted',
+          transactionHash: receipt.transactionHash,
+        },
+        500,
+      );
+    }
+    return c.json({
+      ok: true,
+      agent: deployedAddress ?? sa,
+      agentId: caip10(Number(c.env.CHAIN_ID), sa),
+      name: `${label}.demo.agent`,
+      transactionHash: receipt.transactionHash,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/bootstrap-and-claim failed:', e);
+    return c.json({ ok: false, error: 'bootstrap_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/google/sign  (client → a2a, custody session)
+ * Body: { session, hash, sender }  → { ok, signature, custodian }
+ *
+ * Sign a 32-byte userOp / delegation digest with C_sub — for post-onboarding
+ * actions (e.g. givePermission's EIP-712 delegation, future userOps), with no
+ * device gesture. Only ever signs for the SA the session proves.
+ */
+app.post('/custody/google/sign', async (c) => {
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as { session?: string; hash?: Hex; sender?: Address } | null;
+  if (!body?.session || !body?.hash || !body?.sender) {
+    return c.json({ ok: false, error: 'session + hash + sender required' }, 400);
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(body.hash)) return c.json({ ok: false, error: 'bad_hash (need 32-byte digest)' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.sender)) return c.json({ ok: false, error: 'bad_sender' }, 400);
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY);
+    const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    // INVARIANT (spec 235 §5.4): only sign for the SA the session proves.
+    if ((body.sender as string).toLowerCase() !== sa.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'requested sender ≠ session SA' }, 403);
+    }
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch' }, 403);
+    }
+    const signature = await sign(body.hash);
+    return c.json({ ok: true, signature, custodian: cSub });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/sign failed:', e);
+    return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
