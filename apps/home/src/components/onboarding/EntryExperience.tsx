@@ -231,6 +231,8 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
           <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Create it with Google</button>
         </>
       ) : (
+        // A named-home sign-in uses THIS home's own credential(s). Google is NOT shown — it
+        // resolves the member's separate Google home, not this named one.
         <>
           {showPasskey && (
             <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
@@ -239,9 +241,6 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
             <button className={onlyWallet ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => go('wallet')}>
               Continue with wallet
             </button>
-          )}
-          {googleEnabled && (
-            <button className="btn-ghost onboarding-secondary" onClick={() => continueWithGoogle()}>Continue with Google</button>
           )}
         </>
       )}
