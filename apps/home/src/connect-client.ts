@@ -11,7 +11,8 @@ import {
   type RelationshipType,
 } from '@agenticprimitives/agent-relationships';
 import type { Address, Hex } from '@agenticprimitives/types';
-import { encodeFunctionData } from 'viem';
+import { encodeFunctionData, createPublicClient, http } from 'viem';
+import { baseSepolia } from 'viem/chains';
 import { connectWallet, personalSign } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
@@ -605,6 +606,59 @@ const ADD_PASSKEY_ABI = [
     outputs: [],
   },
 ] as const;
+
+// Removal is the symmetric `onlySelf` op: the CURRENT credential signs `execute(self, removeX)`.
+// The contract refuses to remove the LAST credential (CannotRemoveLastCustodian), so you can't
+// lock yourself out. (ADR-0011: credentials rotate; the SA address never changes.)
+const REMOVE_CREDENTIAL_ABI = [
+  { type: 'function', name: 'removeCustodian', stateMutability: 'nonpayable', inputs: [{ name: 'owner', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'removePasskey', stateMutability: 'nonpayable', inputs: [{ name: 'credentialIdDigest', type: 'bytes32' }], outputs: [] },
+] as const;
+const CREDENTIAL_READ_ABI = [
+  { type: 'function', name: 'custodianCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'passkeyCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
+] as const;
+
+/** Live credential counts (custodians = EOA + passkey-identity addresses; passkeys = WebAuthn keys).
+ *  A view call through the demo-a2a /rpc proxy — never a log scan (ADR-0012). */
+export async function readCredentialCounts(personAgent: Address): Promise<{ custodians: number; passkeys: number }> {
+  const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+  const [c, p] = await Promise.all([
+    pub.readContract({ address: personAgent, abi: CREDENTIAL_READ_ABI, functionName: 'custodianCount' }) as Promise<bigint>,
+    pub.readContract({ address: personAgent, abi: CREDENTIAL_READ_ABI, functionName: 'passkeyCount' }) as Promise<bigint>,
+  ]);
+  return { custodians: Number(c), passkeys: Number(p) };
+}
+
+/** The signer for an on-behalf op using the CURRENT credential (the one this session signed in with). */
+export async function currentCredentialSignHash(via: 'passkey' | 'wallet'): Promise<SignHash> {
+  if (via === 'wallet') {
+    const addr = await connectWallet();
+    return (h: Hex) => personalSign(addr, h);
+  }
+  return passkeySignHash;
+}
+
+/** Remove a WALLET (EOA) custodian. The current credential signs `execute(self, removeCustodian)`. */
+export async function removeWalletCredential(
+  personAgent: Address,
+  owner: Address,
+  signHash: SignHash,
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const inner = encodeFunctionData({ abi: REMOVE_CREDENTIAL_ABI, functionName: 'removeCustodian', args: [owner] });
+  return executeCall(personAgent, signHash, buildExecuteCallData({ to: personAgent, value: 0n, data: inner }), { attempts: 5 });
+}
+
+/** Remove a PASSKEY by its credentialIdDigest. The current credential signs `execute(self, removePasskey)`. */
+export async function removePasskeyCredential(
+  personAgent: Address,
+  credentialIdDigest: Hex,
+  signHash: SignHash,
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const inner = encodeFunctionData({ abi: REMOVE_CREDENTIAL_ABI, functionName: 'removePasskey', args: [credentialIdDigest] });
+  return executeCall(personAgent, signHash, buildExecuteCallData({ to: personAgent, value: 0n, data: inner }), { attempts: 5 });
+}
 
 /** Add a WALLET (EOA) custodian to an agent currently controlled by a PASSKEY.
  *  Connects the wallet to add + proves control of it (personal_sign), then the
