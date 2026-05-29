@@ -54,7 +54,7 @@ const faithImpact: WhiteLabelConfig = {
   // {app} = the missional-community app asking for permission.
   copy: {
     // Arrival into your home.
-    arrivalTitle: 'Welcome to your home',
+    arrivalTitle: 'Welcome to your Impact Community Home',
     arrivalBody:
       "A place of your own in the missional community — where you oversee what you help lead, manage what you steward, and protect what's entrusted to you.",
     overviewTitle: "Here's how you'll get set up",

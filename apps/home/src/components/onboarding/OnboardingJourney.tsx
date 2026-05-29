@@ -6,6 +6,7 @@
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { createHomeKey, secureHome, openHome, givePermission } from '../../home/onboarding';
+import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -19,7 +20,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
-type Screen = 'arrival' | 'overview' | 'securing' | 'receipts' | 'grant' | 'connected' | 'error';
+type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'grant' | 'connected' | 'error';
 
 export function OnboardingJourney({
   variant,
@@ -44,32 +45,47 @@ export function OnboardingJourney({
   const [screen, setScreen] = useState<Screen>(variant === 'enroll-existing' ? 'grant' : 'arrival');
   const [busy, setBusy] = useState<string | null>(null);
   const [securingMsg, setSecuringMsg] = useState<string>('');
+  const [key, setKey] = useState<DemoPasskey | null>(null);
   const [home, setHome] = useState<Home | null>(existingAgent ? { address: existingAgent, name } : null);
   const [error, setError] = useState<string>('');
   const failBack = useRef<Screen>('overview');
 
+  // Surface the real reason — secureHome/etc. return error STRINGS, not Error objects.
   const fail = (e: unknown, back: Screen) => {
     setBusy(null);
-    setError(e instanceof Error ? e.message : 'Something went wrong');
+    setError(e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong');
     failBack.current = back;
     setScreen('error');
   };
 
-  // ① + ② — Secure your home, in ONE gesture. The Overview CTA click is the single device
-  // interaction: it creates your key (WebAuthn) — then the relayer founds your home + registers
-  // your name on your behalf (sponsored, no extra signature). The member just watches.
-  async function onSecure() {
-    setSecuringMsg('Confirm with your device to create your key…');
+  // Securing your home is two confirmations (the subregistry registers your name from YOUR
+  // Smart Agent — one-name-per-caller — so a relayer can't do it for you). Gesture 1 mints
+  // your key; gesture 2 founds your home + claims your name in one userOp.
+
+  // Gesture 1 — create your key (the Overview CTA; a user gesture for WebAuthn create).
+  async function onCreateKey() {
+    setBusy('Confirm with your device…');
+    try {
+      setKey(await createHomeKey(name));
+      setBusy(null);
+      setScreen('key-ready');
+    } catch (e) {
+      fail(e, 'overview');
+    }
+  }
+
+  // Gesture 2 — found your home + register your name in one signed userOp (rich wait screen).
+  async function onSecureHome() {
+    if (!key) return;
+    setSecuringMsg(`Founding ${base} as your home and registering your name in the ${community}…`);
     setScreen('securing');
     try {
-      const k = await createHomeKey(name); // the one device gesture
-      setSecuringMsg(`Securing ${base} as your home and registering your name…`);
-      const res = await secureHome(k, name); // sponsored — no gesture
-      if (!res.ok) return fail(res.error, 'overview');
+      const res = await secureHome(key, name);
+      if (!res.ok) return fail(res.error, 'key-ready');
       setHome(res.home);
       setScreen('receipts');
     } catch (e) {
-      fail(e, 'overview');
+      fail(e, 'key-ready');
     }
   }
 
@@ -149,8 +165,8 @@ export function OnboardingJourney({
         <h1 className="onboarding-h1">{c.arrivalTitle}</h1>
         <p className="onboarding-sub">{c.arrivalBody}</p>
         <div className="name-chip">
-          <span className="name-chip-label">{base}</span>
-          <span className="name-chip-full">your name in the {community}</span>
+          <span className="name-chip-full">{whitelabel.brand.name} Community</span>
+          <span className="name-chip-label">{base} home</span>
         </div>
         <button className="btn-primary" onClick={() => setScreen('overview')}>Get started</button>
       </Frame>
@@ -169,8 +185,22 @@ export function OnboardingJourney({
       <Frame>
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
-        <p className="onboarding-note">One confirmation does it all — securing your home registers your name too.</p>
-        <button className="btn-primary" onClick={onSecure}>{c.portalStepCta}</button>
+        <p className="onboarding-note">Securing your home takes two quick confirmations — your key, then your home + name.</p>
+        <button className="btn-primary" onClick={onCreateKey}>Get started</button>
+      </Frame>
+    );
+  }
+
+  if (screen === 'key-ready') {
+    return (
+      <Frame>
+        <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepTitle} />
+        <ReceiptCard title="Your key is ready on this device" body="Only your device can use it — no password." />
+        <h1 className="onboarding-h1">{c.portalStepTitle}</h1>
+        <p className="onboarding-sub">
+          One more confirmation founds <strong>{base}</strong> as your home and registers your name so the {community} can find you.
+        </p>
+        <button className="btn-primary" onClick={onSecureHome}>{c.portalStepCta}</button>
       </Frame>
     );
   }
