@@ -16,8 +16,10 @@ import {
   passkeySignHash,
   googleSignHash,
   secureHomeWithGoogle,
+  AUD,
   type SignHash,
 } from '../connect-client';
+import { startGoogleSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { issueSiteDelegation, toWire } from '../lib/delegation';
 import type { DemoPasskey } from '../lib/passkey';
@@ -32,6 +34,21 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
 /** ①a — your device becomes your key (passkey path only; wallet/Google have no create step). */
 export async function createHomeKey(name: string): Promise<DemoPasskey> {
   return createSecureHomePasskey(name);
+}
+
+/**
+ * Begin Google sign-in for the Personal Home (a full-page redirect out to the broker, then back
+ * to `?code`). A preferred name is stashed so the post-redirect secure-home step (GoogleSecureHome)
+ * can offer it — the SA itself is derived from the Google identity, not the name. Used by both the
+ * entry screen and the onboarding journey, so it lives here (no component cycle).
+ */
+export function continueWithGoogle(preferredName?: string): void {
+  try {
+    if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
+  } catch {
+    /* storage blocked — the secure-home step will just ask for a name */
+  }
+  startGoogleSignIn(AUD, window.location.origin + '/');
 }
 
 /**

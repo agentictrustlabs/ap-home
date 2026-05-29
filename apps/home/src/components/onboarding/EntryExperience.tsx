@@ -4,26 +4,12 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization } from '../../home/onboarding';
-import { AUD } from '../../connect-client';
-import { startGoogleSignIn } from '../../server-client';
+import { openHome, createOrganization, continueWithGoogle } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
-
-/** Begin Google sign-in for the Personal Home. A preferred name (for new members) is stashed
- *  so the post-redirect secure-home step can offer it; the SA itself is derived from the Google
- *  identity, not the name. Returning members already have a home → straight to it. */
-export function continueWithGoogle(preferredName?: string): void {
-  try {
-    if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
-  } catch {
-    /* storage blocked — the secure-home step will just ask for a name */
-  }
-  startGoogleSignIn(AUD, window.location.origin + '/');
-}
 import { useEnrollReq } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { BrandShield } from '../shared/BrandShield';

@@ -5,7 +5,7 @@
 // register your name — one tap, two outcomes) + givePermission (the one separate consent).
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, type Via } from '../../home/onboarding';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
@@ -50,7 +50,8 @@ export function OnboardingJourney({
   const [via, setVia] = useState<Via>('passkey'); // the credential the member secures/opens with
   const [home, setHome] = useState<Home | null>(existingAgent ? { address: existingAgent, name } : null);
   // Credential methods offered for securing a home: config-enabled ∩ device capability.
-  const methods = whitelabel.onboarding.credentialMethods.filter((m) => (m === 'wallet' ? hasWallet() : m === 'passkey'));
+  // passkey + google are always available; wallet needs an injected provider.
+  const methods = whitelabel.onboarding.credentialMethods.filter((m) => (m === 'wallet' ? hasWallet() : true));
   const [error, setError] = useState<string>('');
   const failBack = useRef<Screen>('overview');
 
@@ -212,6 +213,13 @@ export function OnboardingJourney({
           )}
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
+          )}
+          {methods.includes('google') && (
+            // Google redirects out to the broker, then returns to the secure-home step
+            // (GoogleSecureHome). The server custodies the home — no device gesture.
+            <button className="btn-ghost onboarding-secondary" onClick={() => continueWithGoogle(name)}>
+              Continue with Google
+            </button>
           )}
         </div>
       </Frame>
