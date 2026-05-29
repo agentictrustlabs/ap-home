@@ -214,9 +214,12 @@ export function OnboardingJourney({
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
           )}
-          {methods.includes('google') && (
-            // Google redirects out to the broker, then returns to the secure-home step
-            // (GoogleSecureHome). The server custodies the home — no device gesture.
+          {methods.includes('google') && !hasApp && (
+            // Self-serve ONLY: Google redirects out to the broker, then returns to the secure-home
+            // step (GoogleSecureHome). We must NOT offer it mid relying-app enrollment — the
+            // redirect would abandon the enrollment (popup channel + enroll params lost), so the
+            // relying app never gets its code. Google custody onboarding lives at the Personal Home;
+            // a member onboards there first, then connects the app.
             <button className="btn-ghost onboarding-secondary" onClick={() => continueWithGoogle(name)}>
               Continue with Google
             </button>
