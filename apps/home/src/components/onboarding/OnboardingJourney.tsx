@@ -5,7 +5,8 @@
 // register your name — one tap, two outcomes) + givePermission (the one separate consent).
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, type Via } from '../../home/onboarding';
+import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -46,7 +47,10 @@ export function OnboardingJourney({
   const [busy, setBusy] = useState<string | null>(null);
   const [securingMsg, setSecuringMsg] = useState<string>('');
   const [key, setKey] = useState<DemoPasskey | null>(null);
+  const [via, setVia] = useState<Via>('passkey'); // the credential the member secures/opens with
   const [home, setHome] = useState<Home | null>(existingAgent ? { address: existingAgent, name } : null);
+  // Credential methods offered for securing a home: config-enabled ∩ device capability.
+  const methods = whitelabel.onboarding.credentialMethods.filter((m) => (m === 'wallet' ? hasWallet() : m === 'passkey'));
   const [error, setError] = useState<string>('');
   const failBack = useRef<Screen>('overview');
 
@@ -62,8 +66,9 @@ export function OnboardingJourney({
   // Smart Agent — one-name-per-caller — so a relayer can't do it for you). Gesture 1 mints
   // your key; gesture 2 founds your home + claims your name in one userOp.
 
-  // Gesture 1 — create your key (the Overview CTA; a user gesture for WebAuthn create).
+  // Passkey, gesture 1 — create your key (a user gesture for WebAuthn create).
   async function onCreateKey() {
+    setVia('passkey');
     setBusy('Confirm with your device…');
     try {
       setKey(await createHomeKey(name));
@@ -74,18 +79,33 @@ export function OnboardingJourney({
     }
   }
 
-  // Gesture 2 — found your home + register your name in one signed userOp (rich wait screen).
+  // Passkey, gesture 2 — found your home + register your name in one signed userOp (rich wait).
   async function onSecureHome() {
     if (!key) return;
     setSecuringMsg(`Founding ${base} as your home and registering your name in the ${community}…`);
     setScreen('securing');
     try {
-      const res = await secureHome(key, name);
+      const res = await secureHome(key, name, 'passkey');
       if (!res.ok) return fail(res.error, 'key-ready');
       setHome(res.home);
       setScreen('receipts');
     } catch (e) {
       fail(e, 'key-ready');
+    }
+  }
+
+  // Wallet — no key-create step; the wallet prompts (SIWE + deploy/claim) ARE the gestures.
+  async function onSecureWithWallet() {
+    setVia('wallet');
+    setSecuringMsg(`Securing ${base} as your home with your wallet…`);
+    setScreen('securing');
+    try {
+      const res = await secureHome(null, name, 'wallet');
+      if (!res.ok) return fail(res.error, 'overview');
+      setHome(res.home);
+      setScreen('receipts');
+    } catch (e) {
+      fail(e, 'overview');
     }
   }
 
@@ -98,9 +118,9 @@ export function OnboardingJourney({
     if (!home) return;
     setBusy('Opening your home…');
     try {
-      const out = await openHome(home.name);
+      const out = await openHome(home.name, via === 'wallet' ? 'wallet' : 'passkey');
       if (!out.ok) return fail(out.error, 'receipts');
-      await openSession(out.token, 'passkey', true);
+      await openSession(out.token, via, true);
     } catch (e) {
       fail(e, 'receipts');
     }
@@ -112,7 +132,7 @@ export function OnboardingJourney({
     setBusy(fmt(c.authorizeStepBusy, { app: appName }));
     api.postToOpener?.({ type: 'AC_PROGRESS', msg: 'Granting permission…' });
     try {
-      const granted = await givePermission(home, api.enroll.delegate);
+      const granted = await givePermission(home, api.enroll.delegate, via);
       if (!granted.ok) return fail(granted.error, 'grant');
       const code = await api.submitGrant(home.name, granted.grant);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
@@ -185,8 +205,15 @@ export function OnboardingJourney({
       <Frame>
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
-        <p className="onboarding-note">Two quick confirmations: first that only you can act, then your home + name come to life.</p>
-        <button className="btn-primary" onClick={onCreateKey}>Get started</button>
+        <p className="onboarding-note">Choose how to secure your home — only you will be able to open it.</p>
+        <div className="method-choice">
+          {methods.includes('passkey') && (
+            <button className="btn-primary" onClick={onCreateKey}>Secure with a passkey</button>
+          )}
+          {methods.includes('wallet') && (
+            <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
+          )}
+        </div>
       </Frame>
     );
   }
