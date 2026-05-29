@@ -21,7 +21,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   });
   for (let i = 1; i < 50; i++) {
     const candidate = i === 1 ? base : `${base}${i}`;
-    const name = `${candidate}.demo.agent`;
+    const name = `${candidate}.impact`;
     if (!(await naming.resolveName(name))) {
       return json({ label: candidate, name, node: namehash(name) });
     }

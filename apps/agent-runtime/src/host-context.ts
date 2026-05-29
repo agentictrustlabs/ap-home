@@ -13,10 +13,10 @@
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
-/** The demo subregistry under the `.agent` TLD. `alice` → `alice.demo.agent`.
- *  (Deployment convention — the package owns `.agent`; the `demo.` parent is an
- *  app concern, so it lives here, not in agent-naming.) */
-export const AGENT_NAME_PARENT = 'demo.agent';
+/** The TLD names are claimed under. `alice` → `alice.impact`. (Deployment convention — the
+ *  package owns naming primitives; the concrete TLD is an app concern, so it lives here, not in
+ *  agent-naming.) */
+export const AGENT_NAME_PARENT = 'impact';
 
 /** The public registrable base domain for personal endpoints. */
 export const DEFAULT_PUBLIC_BASE_DOMAIN = 'impact-agent.io';

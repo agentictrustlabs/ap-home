@@ -47,7 +47,7 @@ import {
   caip10,
 } from './custody-google';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, buildA2aAgentCard } from './host-context';
+import { resolveAgentHost, buildA2aAgentCard, AGENT_NAME_PARENT } from './host-context';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -1614,7 +1614,7 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
     const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
-      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.demo.agent`, alreadyDeployed: true });
+      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
     }
 
     const register = buildSubregistryRegisterCall({
@@ -1663,7 +1663,7 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
       ok: true,
       agent: deployedAddress ?? sa,
       agentId: caip10(Number(c.env.CHAIN_ID), sa),
-      name: `${label}.demo.agent`,
+      name: `${label}.${AGENT_NAME_PARENT}`,
       transactionHash: receipt.transactionHash,
     });
   } catch (e) {

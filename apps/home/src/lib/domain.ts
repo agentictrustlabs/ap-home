@@ -12,8 +12,8 @@
 export const CONNECT_DOMAIN = 'impact-agent.me';
 /** Registrable A2A domain (served by demo-a2a, not this app) — for display/links. */
 export const A2A_DOMAIN = 'impact-agent.io';
-/** The permissionless `.agent` subregistry names are claimed under. */
-export const AGENT_NAME_PARENT = 'demo.agent';
+/** The TLD names are claimed under (the `.impact` permissionless subregistry). */
+export const AGENT_NAME_PARENT = 'impact';
 
 /** Alias kept for existing imports. */
 export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
