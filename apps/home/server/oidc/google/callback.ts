@@ -11,7 +11,7 @@
 import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
-import { recordOidcFacet, readOidcFacet } from '../../../src/lib/kv-indexer';
+import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { getServer, json, type Env, type FnContext } from '../../_lib/server-broker';
 
@@ -48,6 +48,7 @@ async function resolveKmsAgent(
   env: Env,
   oidcIss: string,
   oidcSub: string,
+  rotation: number,
 ): Promise<{ ok: true; agentId: CanonicalAgentId } | { ok: false; reason: string }> {
   if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
     return { ok: false, reason: 'custody not configured' };
@@ -56,7 +57,7 @@ async function resolveKmsAgent(
     const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/resolve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.A2A_CUSTODY_BRIDGE_SECRET}` },
-      body: JSON.stringify({ iss: oidcIss, sub: oidcSub }),
+      body: JSON.stringify({ iss: oidcIss, sub: oidcSub, rotation }),
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agentId?: string; error?: string };
     if (!res.ok || !body.ok || !body.agentId) return { ok: false, reason: body.error ?? `resolve HTTP ${res.status}` };
@@ -141,40 +142,38 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // Google × KMS custody is offered ONLY for the Personal-Home aud (spec 235).
   // Relying-app auds stay login-grade — their members onboard via the Personal Home.
   const custodyEligible = stash.aud === custodyAud;
-  // The member's KMS-custodied SA is DETERMINISTIC (demo-a2a derives it from
-  // (iss,sub)); resolve it so we can (a) decide if an existing facet is the one WE
-  // custody, and (b) bootstrap a new KMS member. Derive-only — no on-chain effect.
+  // Per-subject rotation (spec 235 §5b): which KMS home this Google account opens now. demo-a2a
+  // derives `SA(iss,sub,rotation)` deterministically — derive-only here, no on-chain effect.
+  const rotation = await readRotation(env.AUTH_CODES, oidcIss, oidcSub);
   const derived = custodyEligible
-    ? await resolveKmsAgent(env, oidcIss, oidcSub)
+    ? await resolveKmsAgent(env, oidcIss, oidcSub, rotation)
     : ({ ok: false, reason: 'not eligible' } as const);
 
-  let agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
+  let agent: CanonicalAgentId | null = null;
   let custodyGrade = false;
 
-  if (agent) {
-    // EXISTING FACET WINS (spec 235 §5): the linked SA is canonical. Google is
-    // custody-grade ONLY when that SA is the one WE custody (a passkey/wallet SA
-    // stays login-grade — step-up needs the real credential).
-    custodyGrade = derived.ok && derived.agentId.toLowerCase() === agent.toLowerCase();
-  } else if (custodyEligible && derived.ok) {
-    // NEW KMS-custodied member: record the facet + issue a custody-grade session.
-    // (The SA is counterfactual until the client runs bootstrap-and-claim; the
-    // custody relationship is cryptographically fixed by CREATE2 + factory init,
-    // so it's custody-grade now — demo-a2a's gate re-verifies on every call.)
+  if (custodyEligible && derived.ok) {
+    // Personal-Home Google = the KMS-custodied home at the CURRENT rotation. Record/refresh the
+    // facet to it (idempotent; after a rotation bump the old facet is stale → this points at the
+    // new home). Custody-grade: C_sub is a real on-chain custodian (demo-a2a's gate re-verifies).
     await recordOidcFacet(env.AUTH_CODES, oidcIss, oidcSub, derived.agentId);
     agent = derived.agentId;
     custodyGrade = true;
   } else {
-    // No agent + not a custody bootstrap → bootstrap notice. Redirect BACK to the
-    // app with a status (never dead-end on a JSON page).
-    if (stash.rpRedirect) {
-      const dest = new URL(stash.rpRedirect);
-      dest.searchParams.set('connect_status', 'bootstrap');
-      dest.searchParams.set('via', 'google');
-      if (result.principal.email) dest.searchParams.set('email', result.principal.email);
-      return new Response(null, { status: 302, headers: { location: dest.toString() } });
+    // Relying-app (login-grade) path, OR custody unconfigured/unreachable: resolve the existing
+    // (iss,sub)->agent facet (passkey/wallet-linked or a prior KMS home). Login-grade; bootstrap
+    // notice if there's no linked agent yet.
+    agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
+    if (!agent) {
+      if (stash.rpRedirect) {
+        const dest = new URL(stash.rpRedirect);
+        dest.searchParams.set('connect_status', 'bootstrap');
+        dest.searchParams.set('via', 'google');
+        if (result.principal.email) dest.searchParams.set('email', result.principal.email);
+        return new Response(null, { status: 302, headers: { location: dest.toString() } });
+      }
+      return json({ status: 'bootstrap', oidcSubject: principal.id, email: result.principal.email });
     }
-    return json({ status: 'bootstrap', oidcSubject: principal.id, email: result.principal.email });
   }
 
   // Mint the session. Custody-grade (onchain-confirmed) for a KMS-custodied SA;

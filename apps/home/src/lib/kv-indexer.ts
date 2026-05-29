@@ -18,6 +18,7 @@ export interface KvLike {
 
 const oidcKey = (iss: string, sub: string): string => `facet:oidc:${iss}#${sub}`;
 const credKey = (kind: string, id: string): string => `facet:cred:${kind}:${id}`;
+const rotationKey = (iss: string, sub: string): string => `rotation:${iss}#${sub}`;
 
 async function readLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
   const raw = await kv.get(key);
@@ -51,6 +52,22 @@ export async function recordOidcFacet(
 ): Promise<void> {
   const link: EvidenceLink = { agent, assurance: 'asserted', ref: 'kv-oidc' };
   await kv.put(oidcKey(iss, sub), JSON.stringify(link));
+}
+
+/** Read the per-(iss,sub) Google × KMS custody rotation (spec 235 §5b). Default 0 — the first
+ *  home. The custody gate derives `C_sub(iss,sub,rotation)`, so the broker + demo-a2a must agree. */
+export async function readRotation(kv: KvLike, iss: string, sub: string): Promise<number> {
+  const raw = await kv.get(rotationKey(iss, sub));
+  const n = raw ? Number.parseInt(raw, 10) : 0;
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/** Bump the rotation → the next Google sign-in derives a FRESH home ("use Google for a new home").
+ *  Returns the new rotation. The old home is left behind (still server-custodied), per spec 235 §5b. */
+export async function bumpRotation(kv: KvLike, iss: string, sub: string): Promise<number> {
+  const next = (await readRotation(kv, iss, sub)) + 1;
+  await kv.put(rotationKey(iss, sub), String(next));
+  return next;
 }
 
 /** Record a credential->agent link the indexer PROPOSES (the on-chain port confirms). */

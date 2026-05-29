@@ -1561,10 +1561,11 @@ app.post('/custody/google/resolve', async (c) => {
   const presented = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!timingSafeEqual(presented, secret)) return c.json({ ok: false, error: 'unauthorized' }, 401);
 
-  const body = (await c.req.json().catch(() => null)) as { iss?: string; sub?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as { iss?: string; sub?: string; rotation?: number } | null;
   if (!body?.iss || !body?.sub) return c.json({ ok: false, error: 'iss + sub required' }, 400);
+  const rotation = typeof body.rotation === 'number' && body.rotation >= 0 ? body.rotation : 0;
   try {
-    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY);
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY, { rotation });
     const agent = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     return c.json({ ok: true, agent, agentId: caip10(Number(c.env.CHAIN_ID), agent), custodian: cSub });
   } catch (e) {
@@ -1603,6 +1604,7 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+      rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     // INVARIANT (spec 235 §5.4): act ONLY for the SA the session proves.
@@ -1697,6 +1699,7 @@ app.post('/custody/google/sign', async (c) => {
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+      rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     // INVARIANT (spec 235 §5.4): only sign for the SA the session proves.

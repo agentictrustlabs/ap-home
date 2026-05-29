@@ -84,7 +84,7 @@ async function brokerKeys(jwksUrl: string): Promise<VerifyKey[]> {
 }
 
 export type GateResult =
-  | { ok: true; subject: OidcSubject; sessionSub: string }
+  | { ok: true; subject: OidcSubject; sessionSub: string; rotation: number }
   | { ok: false; status: number; error: string };
 
 export interface VerifyCustodySessionOpts {
@@ -121,7 +121,9 @@ export async function verifyCustodySession(token: string, opts: VerifyCustodySes
   if (s.assurance !== 'onchain-confirmed') return { ok: false, status: 403, error: 'session is not onchain-confirmed' };
   const subject = parseOidcPrincipalId(s.principal.id);
   if (!subject) return { ok: false, status: 400, error: 'malformed oidc principal id' };
-  return { ok: true, subject, sessionSub: s.sub };
+  // Rotation (spec 235 §5b) is a broker-signed derivation input — derive the matching key.
+  const rotation = typeof s.rotation === 'number' && s.rotation >= 0 ? s.rotation : 0;
+  return { ok: true, subject, sessionSub: s.sub, rotation };
 }
 
 // ─── Per-subject custodian ─────────────────────────────────────────────────
@@ -144,10 +146,10 @@ export interface SubjectCustodian {
 export async function deriveSubjectCustodian(
   subject: OidcSubject,
   masterHex: string,
-  opts: { backend?: KmsBackend; auditSink?: AuditSink } = {},
+  opts: { backend?: KmsBackend; auditSink?: AuditSink; rotation?: number } = {},
 ): Promise<SubjectCustodian> {
   const signerBackend = deriveSubjectSigner({
-    subject: { iss: subject.iss, sub: subject.sub },
+    subject: { iss: subject.iss, sub: subject.sub, rotation: opts.rotation },
     backend: opts.backend ?? 'local-aes',
     config: { derivationSecretHex: masterHex },
     auditSink: opts.auditSink, // G-2: every C_sub signature emits key-custody.sign
