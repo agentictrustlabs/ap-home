@@ -7,7 +7,7 @@ import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, continueWithGoogle } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
-import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName } from '../../lib/domain';
+import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
 import { useEnrollReq } from './useEnrollReq';
@@ -63,6 +63,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       const signin = p.get('signin');
       if (start) return { k: 'journey', variant: 'self-serve', name: start };
       if (signin) return { k: 'signin', name: signin };
+      // A per-handle home subdomain (<label>.impact-agent.me) IS that member's home — recognize
+      // them from the host and go straight to "welcome back, sign in", pre-filled (not a generic
+      // create screen). www/apex fall through to the name chooser.
+      const subLabel = parseAgentSubdomain(window.location.hostname);
+      if (subLabel) return { k: 'signin', name: toAgentName(subLabel) };
     }
     return { k: 'name' };
   });
@@ -186,6 +191,11 @@ function NameStart({ onStart }: { onStart: (name: string, exists: boolean) => vo
 function SignInView({ name, onSession }: { name: string; onSession: (token: string, via: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState<NameInfo | null>(null);
+  useEffect(() => {
+    nameInfo(name).then(setInfo).catch(() => setInfo({}));
+  }, []);
+
   async function go(via: 'passkey' | 'wallet') {
     if (via === 'passkey' && redirectForPasskey('signin', name)) return;
     setBusy(true);
@@ -200,17 +210,36 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
       setBusy(false);
     }
   }
+
+  // Show the credentials this home ACTUALLY has (until name-info loads, show passkey+wallet).
+  // Google stays available (a Google-custodied home re-derives via Google).
+  const showPasskey = info ? !!info.hasPasskey : true;
+  const showWallet = info ? !!info.hasEoa : true;
+  const onlyWallet = info ? !!info.hasEoa && !info.hasPasskey : false;
+  const notFound = info ? info.exists === false : false;
+
   return (
     <Shell>
       <BrandShield size={56} />
       <h1 className="onboarding-h1">Welcome back</h1>
       <p className="onboarding-sub">Sign in to <strong>{name}</strong> — your home in the {whitelabel.brand.community}.</p>
       {busy ? (
-        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming with your device…</p></div>
+        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming…</p></div>
+      ) : notFound ? (
+        <>
+          <p className="onboarding-hint taken">No home named <strong>{nameLabel(name)}</strong> yet.</p>
+          <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Create it with Google</button>
+        </>
       ) : (
         <>
-          <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
-          <button className="btn-ghost onboarding-secondary" onClick={() => go('wallet')}>Continue with wallet</button>
+          {showPasskey && (
+            <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
+          )}
+          {showWallet && (
+            <button className={onlyWallet ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => go('wallet')}>
+              Continue with wallet
+            </button>
+          )}
           {googleEnabled && (
             <button className="btn-ghost onboarding-secondary" onClick={() => continueWithGoogle()}>Continue with Google</button>
           )}
