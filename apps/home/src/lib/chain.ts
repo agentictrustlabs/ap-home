@@ -18,7 +18,7 @@ export const CONTRACTS = {
   agentNameRegistry: '0xE9Bf4f67701Ba6eD7843b9848c3fe0C6e0212427',
   agentNameUniversalResolver: '0xb66a4829606C4E1C5eB424314b681343c747b4B2',
   custodyPolicy: '0xfdbCB192182712C996a1Ed2FB74D0FE6e7d9db26',
-  permissionlessSubregistry: '0xAF6cA36De55296C12F2f7462645c3282f7bc1eeD',
+  permissionlessSubregistry: '0xC5060624c6C8Ed9E453b6693111eC8f40eDe8110', // .impact subregistry (was demo.agent)
   agentRelationship: '0xB85BA211d6528BE2561a41b629537e5054B648DF',
   // ERC-7710 delegation (ADR-0019: relying site = scoped delegate of the person SA).
   delegationManager: '0xaEb6191FFa086a0288A6367eC5D816344A6089f2',
