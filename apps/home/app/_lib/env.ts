@@ -23,5 +23,10 @@ export function makeEnv(): Env {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
+    // Google × KMS custody (spec 235): the callback asks demo-a2a to derive the member's
+    // KMS-custodied SA. Without these the callback degrades to login-grade (no custody).
+    A2A_CUSTODY_URL: process.env.A2A_CUSTODY_URL,
+    A2A_CUSTODY_BRIDGE_SECRET: process.env.A2A_CUSTODY_BRIDGE_SECRET,
+    DEMO_SSO_AUD: process.env.DEMO_SSO_AUD,
   };
 }
