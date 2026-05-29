@@ -7,7 +7,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Address } from '@agenticprimitives/types';
 import { AUD, fetchProfile, type BasicProfile } from '../connect-client';
 import { exchangeCode } from '../server-client';
-import { nameLabel } from '../lib/domain';
+import { nameLabel, parseAgentSubdomain } from '../lib/domain';
+import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
 
 export interface Session {
   token: string;
@@ -43,7 +44,8 @@ function shouldRestore(): boolean {
     if (u.searchParams.has('code') || u.searchParams.has('connect_status') || u.searchParams.has('delegate')) {
       return false;
     }
-    return !!localStorage.getItem(SESSION_KEY);
+    // A per-origin session OR the parent-domain SSO cookie (cross-subdomain) means "restore".
+    return !!localStorage.getItem(SESSION_KEY) || !!readSsoCookie();
   } catch {
     return false;
   }
@@ -72,10 +74,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const openSession = useCallback(async (token: string, via: string, fresh: boolean): Promise<BasicProfile | null> => {
     setSession({ token, via, fresh });
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // survive refresh
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // survive refresh (this origin)
     } catch {
       /* storage blocked (private mode) — session just won't persist */
     }
+    setSsoCookie(token, via); // share across *.impact-agent.me (parent-domain SSO)
     const p = await fetchProfile(token);
     setProfile(p);
     setPhase('authed');
@@ -91,6 +94,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
+    clearSsoCookie(); // sign out across *.impact-agent.me
     setPhase('anon');
   }, []);
 
@@ -167,22 +171,52 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
+        // Prefer the per-origin localStorage session; else fall back to the parent-domain SSO
+        // cookie (signed in once on another *.impact-agent.me origin).
         const raw = localStorage.getItem(SESSION_KEY);
         const stored = raw ? (JSON.parse(raw) as { token?: string; via?: string }) : null;
-        if (!stored?.token || !stored.via) {
+        let token = stored?.token;
+        let via = stored?.via;
+        let fromCookie = false;
+        if (!token) {
+          const c = readSsoCookie();
+          if (c) {
+            token = c.token;
+            via = c.via;
+            fromCookie = true;
+          }
+        }
+        if (!token || !via) {
           localStorage.removeItem(SESSION_KEY);
           setPhase('anon');
           return;
         }
-        const p = await fetchProfile(stored.token);
+        const p = await fetchProfile(token);
         if (!p) {
           localStorage.removeItem(SESSION_KEY);
+          if (fromCookie) clearSsoCookie();
           setPhase('anon');
           return;
         }
-        setSession({ token: stored.token, via: stored.via, fresh: false });
+        // A cookie session landing on a DIFFERENT home's subdomain must NOT impersonate that home
+        // here — let them sign in as THIS subdomain's home (keep the cookie for its own home).
+        if (fromCookie) {
+          const sub = parseAgentSubdomain(window.location.hostname);
+          if (sub && p.name && nameLabel(p.name) !== sub) {
+            setPhase('anon');
+            return;
+          }
+        }
+        setSession({ token, via, fresh: false });
         setProfile(p);
         setPhase('authed');
+        if (fromCookie) {
+          try {
+            localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // cache on this origin
+          } catch {
+            /* ignore */
+          }
+        }
       } catch {
         setPhase('anon');
       }
