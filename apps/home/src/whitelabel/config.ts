@@ -35,6 +35,18 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login', 'org-create'],
       // logo omitted → consent shows an initial badge (no spoofable logo).
     },
+    // spec 236 — "JP Adopt" relying app (demo prototype): JP runs the adoption program;
+    // Impact Community holds the data (PII, signed MOU/WEA) in the member's vault and
+    // delegates scoped, revocable access. The consent screen reads "JP Adopt is asking
+    // to connect" — JP is the program, not a sub-brand of Impact. The literal name of
+    // the real underlying organization is NOT used on the live site (demo disclaimer).
+    {
+      client_id: 'demo-jp',
+      name: 'JP Adopt',
+      redirect_uris: ['https://agenticprimitives-demo-jp.pages.dev/', 'http://localhost:5573/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.

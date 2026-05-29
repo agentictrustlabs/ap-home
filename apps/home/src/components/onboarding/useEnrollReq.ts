@@ -19,7 +19,10 @@ export interface EnrollReq {
 }
 
 /** Relying sites permitted to start an authorization (demo gate — spec 230 §6 + §8). */
-const ALLOWED_RELYING_ORIGINS = ['https://agenticprimitives-demo-org.pages.dev'];
+const ALLOWED_RELYING_ORIGINS = [
+  'https://agenticprimitives-demo-org.pages.dev',
+  'https://agenticprimitives-demo-jp.pages.dev', // demo-jp (spec 236 — Joshua Project ADOPT)
+];
 
 export function parseEnrollReq(): EnrollReq | null {
   try {
