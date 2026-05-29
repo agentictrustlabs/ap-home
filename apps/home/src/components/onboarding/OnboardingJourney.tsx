@@ -185,7 +185,7 @@ export function OnboardingJourney({
       <Frame>
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
-        <p className="onboarding-note">Securing your home takes two quick confirmations — your key, then your home + name.</p>
+        <p className="onboarding-note">Two quick confirmations: first that only you can act, then your home + name come to life.</p>
         <button className="btn-primary" onClick={onCreateKey}>Get started</button>
       </Frame>
     );
@@ -195,10 +195,10 @@ export function OnboardingJourney({
     return (
       <Frame>
         <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepTitle} />
-        <ReceiptCard title="Your key is ready on this device" body="Only your device can use it — no password." />
+        <ReceiptCard title="Now only you can sign in or approve" body="Just this device confirms it's you — no password to lose." />
         <h1 className="onboarding-h1">{c.portalStepTitle}</h1>
         <p className="onboarding-sub">
-          One more confirmation founds <strong>{base}</strong> as your home and registers your name so the {community} can find you.
+          One more confirmation brings <strong>{base}</strong> to life as your home and claims your name so the {community} can find you.
         </p>
         <button className="btn-primary" onClick={onSecureHome}>{c.portalStepCta}</button>
       </Frame>
@@ -222,7 +222,7 @@ export function OnboardingJourney({
           <ul className="securing-points">
             <li><span aria-hidden="true">✓</span> Yours alone — only your device can open it</li>
             <li><span aria-hidden="true">✓</span> A name others in the {community} can find and trust</li>
-            <li><span aria-hidden="true">✓</span> No password, nothing to lose — your device is the key</li>
+            <li><span aria-hidden="true">✓</span> No password, nothing to lose — just this device confirms it's you</li>
           </ul>
           <p className="securing-wait">This usually takes about 15 seconds — you can stay on this page.</p>
         </div>

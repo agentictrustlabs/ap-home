@@ -60,7 +60,7 @@ const faithImpact: WhiteLabelConfig = {
     overviewTitle: "Here's how you'll get set up",
     // ① Secure your home (passkey + found it).
     portalStepTitle: 'Secure your home',
-    portalStepValue: 'A home of your own — so only you can open it. Your passkey (your device) is the only way in; no password to lose.',
+    portalStepValue: 'A home of your own that only you can open — using just this device, no password to lose.',
     portalStepCta: 'Secure my home',
     portalStepBusy: 'Securing your home…',
     portalStepReceipt: 'Your home is secured — only you can open it',
