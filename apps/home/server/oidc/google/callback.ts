@@ -12,7 +12,32 @@ import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/goog
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
 import { recordOidcFacet, readOidcFacet } from '../../../src/lib/kv-indexer';
+import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { getServer, json, type Env, type FnContext } from '../../_lib/server-broker';
+
+/**
+ * App-layer (ADR-0021) return-URL policy: in addition to the exact-match
+ * REDIRECT_URI_ALLOWLIST (CN-1, the generic broker primitive), trust THIS site's own portal
+ * homes — the apex and per-handle `https://<label>.<CONNECT_DOMAIN>/` homes (spec 232) — so
+ * Google onboarding works from any of our subdomains without enumerating each. Strict: https
+ * only, a SINGLE DNS label (no dots), root path, no query/fragment — the suffix is our own
+ * registrable domain, so this is not an open redirect.
+ */
+function isOwnPortalReturn(rpRedirect: string): boolean {
+  try {
+    const u = new URL(rpRedirect);
+    if (u.protocol !== 'https:') return false;
+    if (u.pathname !== '/' && u.pathname !== '') return false;
+    if (u.search || u.hash) return false;
+    const h = u.hostname.toLowerCase();
+    if (h === CONNECT_DOMAIN) return true;
+    const suffix = '.' + CONNECT_DOMAIN;
+    if (h.endsWith(suffix)) return /^[a-z0-9-]+$/.test(h.slice(0, -suffix.length));
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Ask demo-a2a (the master holder) for this Google subject's KMS-custodied SA
@@ -175,7 +200,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   if (stash.rpRedirect) {
     const allow = (env.REDIRECT_URI_ALLOWLIST ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (allow.length && !validateRedirectUri(allow, stash.rpRedirect)) {
+    if (allow.length && !validateRedirectUri(allow, stash.rpRedirect) && !isOwnPortalReturn(stash.rpRedirect)) {
       return json({ error: 'redirect_uri not allowed (CN-1)' }, 400);
     }
     const dest = new URL(stash.rpRedirect);
