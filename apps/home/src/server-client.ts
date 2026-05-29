@@ -33,6 +33,18 @@ export async function exchangeCode(code: string, aud: string): Promise<string> {
   return body.agentSession;
 }
 
+/** "Use Google for a new home" (spec 235 §5b): bump the per-subject rotation, authorized by the
+ *  current Google custody session. After this, sign out + sign back in with Google → a fresh home. */
+export async function rotateGoogleHome(token: string): Promise<void> {
+  const res = await fetch('/oidc/google/rotate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ session: token }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!res.ok || !body.ok) throw new Error(body.error ?? `rotate failed (${res.status})`);
+}
+
 /** Verify a server-issued AgentSession against the broker's published JWKS. */
 export async function verifyServerSession(token: string, aud: string): Promise<VerifyResult> {
   const res = await fetch('/jwks');

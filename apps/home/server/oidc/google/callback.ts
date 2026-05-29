@@ -189,6 +189,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       aud: stash.aud,
       iss,
       ttlSeconds: 3600,
+      // Carry the rotation so demo-a2a's gate derives the matching per-subject key (spec 235 §5b).
+      ...(custodyGrade ? { rotation } : {}),
     },
     signer,
   );

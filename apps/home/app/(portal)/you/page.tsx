@@ -1,6 +1,9 @@
 'use client';
 // "You" — the person agent (default context). Identity card + facts; profile is coming soon.
+import { useState } from 'react';
 import { useSession } from '../../../src/context/session';
+import { rotateGoogleHome } from '../../../src/server-client';
+import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentIdentityCard } from '../../../src/components/portal/AgentIdentityCard';
@@ -35,6 +38,8 @@ export default function YouPage() {
         </dl>
       </div>
 
+      <GoogleHomeSection />
+
       <div className="dash-section" style={{ marginTop: '1.5rem' }}>
         <h2>Your profile</h2>
         <ComingSoonState
@@ -44,5 +49,42 @@ export default function YouPage() {
         />
       </div>
     </SectionShell>
+  );
+}
+
+/** For a Google-custodied home: "use Google for a new home" (spec 235 §5b rotation). Bumps the
+ *  per-subject rotation, then re-runs Google sign-in → a fresh home; this one is left as-is. */
+function GoogleHomeSection() {
+  const { session } = useSession();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  if (session?.via !== 'Google') return null;
+
+  async function newHome() {
+    if (!session) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await rotateGoogleHome(session.token);
+      continueWithGoogle(); // redirect to Google → returns at the new rotation → name the new home
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'could not start a new home');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="dash-section" style={{ marginTop: '1.5rem' }}>
+      <h2>Sign-in method</h2>
+      <p className="onboarding-sub">This home opens with Google.</p>
+      <button className="btn-ghost onboarding-secondary" disabled={busy} onClick={newHome}>
+        {busy ? 'Starting…' : 'Use Google for a new home'}
+      </button>
+      <p className="onboarding-note">
+        Creates a separate home from this same Google account — this home stays as it is. (To keep
+        this home without Google, add a passkey or wallet on the Security page.)
+      </p>
+      {err && <p className="onboarding-hint taken">{err}</p>}
+    </div>
   );
 }
