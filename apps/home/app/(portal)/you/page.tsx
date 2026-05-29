@@ -7,7 +7,6 @@ import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentIdentityCard } from '../../../src/components/portal/AgentIdentityCard';
-import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { AddressChip } from '../../../src/components/shared/AddressChip';
 import { UserIcon } from '../../../src/components/shared/Icons';
 
@@ -42,11 +41,15 @@ export default function YouPage() {
 
       <div className="dash-section" style={{ marginTop: '1.5rem' }}>
         <h2>Your profile</h2>
-        <ComingSoonState
-          icon={<UserIcon size={40} />}
-          title="Your public profile"
-          body={`Your bio, photo, and contact details for the ${whitelabel.brand.community} — shared on your terms.`}
-        />
+        <a className="manage-card link" href="/profile" style={{ display: 'block' }}>
+          <div className="manage-card-head">
+            <span className="manage-card-label"><UserIcon size={16} /> Contact details</span>
+            <span className="manage-card-badge live">✓ Live</span>
+          </div>
+          <p className="manage-card-blurb">
+            Email, phone, country, organization. Stored at your home, re-used across every community app you trust.
+          </p>
+        </a>
       </div>
     </SectionShell>
   );
