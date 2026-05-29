@@ -67,6 +67,61 @@ export function relyingAllowed(redirectUri: string): boolean {
   }
 }
 
+// ── Standalone grant + delivery (used by the hook AND the Google-resume path) ──────────────
+// The Google enrollment path redirects out to the broker, so on return the enroll request is
+// no longer in the URL — it's restored from a sessionStorage stash. These module-level helpers
+// let that resumed flow finish the ceremony with the SAME wire behavior as the in-page hook.
+
+/** Post to the opener ONLY at the validated relying origin (audit F3 — exact targetOrigin). */
+export function postEnrollToOpener(enroll: EnrollReq, msg: Record<string, unknown>): void {
+  if (typeof window === 'undefined' || !window.opener || !relyingAllowed(enroll.redirectUri)) return;
+  try {
+    window.opener.postMessage(msg, new URL(enroll.redirectUri).origin);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Turn the verified ceremony into an OIDC authorization code (spec 230 §4.2). */
+export async function submitEnrollGrant(
+  enroll: EnrollReq,
+  resolvedName: string,
+  delegationWire: unknown,
+  org?: unknown,
+): Promise<string> {
+  const r = await fetch('/oidc/grant', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_id: enroll.aud,
+      redirect_uri: enroll.redirectUri,
+      nonce: enroll.nonce,
+      code_challenge: enroll.codeChallenge,
+      agent_name: resolvedName,
+      delegation_template: enroll.template,
+      delegation: delegationWire,
+      org,
+    }),
+  });
+  const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
+  if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);
+  return b.code;
+}
+
+/** Deliver the code back: popup → postMessage (exact origin) + close; else full-page ?code&state.
+ *  Falls back to a redirect if the popup lost its opener (cross-origin OAuth round-trip). */
+export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: string): void {
+  if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
+    postEnrollToOpener(enroll, { type: 'AC_SUCCESS', state: enroll.state, code });
+    window.close();
+    return;
+  }
+  const url = new URL(enroll.redirectUri);
+  url.searchParams.set('code', code);
+  url.searchParams.set('state', enroll.state);
+  window.location.href = url.toString();
+}
+
 export interface EnrollApi {
   enroll: EnrollReq | null;
   popupMode: boolean;
@@ -88,12 +143,7 @@ export function useEnrollReq(): EnrollApi {
   // Post to the opener ONLY at the validated relying origin (audit F3 — exact targetOrigin).
   const postToOpener = useCallback(
     (msg: Record<string, unknown>) => {
-      if (!enroll || !window.opener || !relyingAllowed(enroll.redirectUri)) return;
-      try {
-        window.opener.postMessage(msg, new URL(enroll.redirectUri).origin);
-      } catch {
-        /* ignore */
-      }
+      if (enroll) postEnrollToOpener(enroll, msg);
     },
     [enroll],
   );
@@ -103,23 +153,7 @@ export function useEnrollReq(): EnrollApi {
   const submitGrant = useCallback(
     async (resolvedName: string, delegationWire: unknown, org?: unknown): Promise<string> => {
       if (!enroll) throw new Error('no request');
-      const r = await fetch('/oidc/grant', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          client_id: enroll.aud,
-          redirect_uri: enroll.redirectUri,
-          nonce: enroll.nonce,
-          code_challenge: enroll.codeChallenge,
-          agent_name: resolvedName,
-          delegation_template: enroll.template,
-          delegation: delegationWire,
-          org,
-        }),
-      });
-      const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
-      if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);
-      return b.code;
+      return submitEnrollGrant(enroll, resolvedName, delegationWire, org);
     },
     [enroll],
   );
@@ -128,18 +162,9 @@ export function useEnrollReq(): EnrollApi {
   // token never travels in the URL — only the code.
   const deliverCode = useCallback(
     (code: string) => {
-      if (!enroll) return;
-      if (popupMode) {
-        postToOpener({ type: 'AC_SUCCESS', state: enroll.state, code });
-        window.close();
-        return;
-      }
-      const url = new URL(enroll.redirectUri);
-      url.searchParams.set('code', code);
-      url.searchParams.set('state', enroll.state);
-      window.location.href = url.toString();
+      if (enroll) deliverEnrollCode(enroll, popupMode, code);
     },
-    [enroll, popupMode, postToOpener],
+    [enroll, popupMode],
   );
 
   const denyEnroll = useCallback(() => {

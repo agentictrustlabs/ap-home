@@ -95,6 +95,17 @@ export function OnboardingJourney({
     }
   }
 
+  // Google — redirects out to the broker, then returns (?code) to the secure-home step. In a
+  // relying-app enrollment we stash the enroll request so the post-redirect resume can finish the
+  // grant + deliver the code back to the app (the URL params are lost across the Google redirect).
+  function onGoogle() {
+    const stash =
+      hasApp && api?.enroll
+        ? JSON.stringify({ enroll: api.enroll, popupMode: api.popupMode, name })
+        : undefined;
+    continueWithGoogle(name, stash);
+  }
+
   // Wallet — no key-create step; the wallet prompts (SIWE + deploy/claim) ARE the gestures.
   async function onSecureWithWallet() {
     setVia('wallet');
@@ -214,13 +225,10 @@ export function OnboardingJourney({
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
           )}
-          {methods.includes('google') && !hasApp && (
-            // Self-serve ONLY: Google redirects out to the broker, then returns to the secure-home
-            // step (GoogleSecureHome). We must NOT offer it mid relying-app enrollment — the
-            // redirect would abandon the enrollment (popup channel + enroll params lost), so the
-            // relying app never gets its code. Google custody onboarding lives at the Personal Home;
-            // a member onboards there first, then connects the app.
-            <button className="btn-ghost onboarding-secondary" onClick={() => continueWithGoogle(name)}>
+          {methods.includes('google') && (
+            // Self-serve → returns to GoogleSecureHome. Relying-app enrollment → onGoogle stashes
+            // the enroll request so the post-redirect resume finishes the grant + returns the code.
+            <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
               Continue with Google
             </button>
           )}

@@ -42,9 +42,13 @@ export async function createHomeKey(name: string): Promise<DemoPasskey> {
  * can offer it — the SA itself is derived from the Google identity, not the name. Used by both the
  * entry screen and the onboarding journey, so it lives here (no component cycle).
  */
-export function continueWithGoogle(preferredName?: string): void {
+export function continueWithGoogle(preferredName?: string, enrollStashJson?: string): void {
   try {
     if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
+    // Relying-app enrollment stashes its request here so the post-redirect resume can finish +
+    // return the code; self-serve CLEARS any stale stash so it doesn't hijack a plain sign-in.
+    if (enrollStashJson) sessionStorage.setItem('pendingEnroll', enrollStashJson);
+    else sessionStorage.removeItem('pendingEnroll');
   } catch {
     /* storage blocked — the secure-home step will just ask for a name */
   }
