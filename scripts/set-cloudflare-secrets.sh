@@ -33,7 +33,7 @@ wrangler whoami >/dev/null 2>&1 || { echo "ERROR: not logged into Cloudflare. Ru
 
 echo "Setting demo-a2a Worker secrets (env=$ENV)…"
 
-# 1. SESSION_JWT_SECRETS  ("kid:hex" format expected by identity-auth.sessions)
+# 1. SESSION_JWT_SECRETS  ("kid:hex" format expected by connect-auth.sessions)
 KID="prodkid$(openssl rand -hex 4)"
 printf '%s:%s' "$KID" "$(openssl rand -hex 32)" \
   | (cd "$APP_DIR" && wrangler secret put SESSION_JWT_SECRETS --env "$ENV") >/dev/null
