@@ -1,5 +1,5 @@
 // Base Sepolia (chain 84532) config for the REAL Connect directory (spec 227).
-// Addresses are the deployed contracts in apps/contracts/deployments-base-sepolia.json
+// Addresses are the deployed contracts in packages/contracts/deployments-base-sepolia.json
 // (public on-chain addresses — safe to inline; that file remains the source of truth).
 // Spec 227 F2/P1-D: the real experience runs on 84532, NOT the old broker-core CHAIN=8453.
 

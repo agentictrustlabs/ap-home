@@ -1,7 +1,7 @@
 /**
  * gen-dev-vars.ts
  *
- * Reads apps/contracts/deployments-<network>.json (written by the forge
+ * Reads packages/contracts/deployments-<network>.json (written by the forge
  * deploy script) and emits .dev.vars files for the demo Workers so
  * `wrangler dev` picks up the right contract addresses + secrets without
  * hand-editing files.

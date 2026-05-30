@@ -19,7 +19,7 @@ proxies selected MCP requests during local demos.
 - MCP middleware primitives → `packages/mcp-runtime`.
 - MCP tool implementation → `apps/demo-mcp`.
 - Browser UX → `apps/demo-web*`.
-- Contract source → `apps/contracts`.
+- Contract source → `packages/contracts`.
 
 ## Read These First
 

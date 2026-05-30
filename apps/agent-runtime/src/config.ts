@@ -1,5 +1,5 @@
 // Demo-a2a config loader. Reads env vars + the deployments JSON written by
-// apps/contracts/script/Deploy.s.sol. Fails fast at boot if required env is
+// packages/contracts/script/Deploy.s.sol. Fails fast at boot if required env is
 // missing.
 
 import { readFileSync, existsSync } from 'node:fs';

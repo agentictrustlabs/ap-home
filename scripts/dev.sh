@@ -36,11 +36,11 @@ ANVIL_PID=$!
 sleep 1
 
 # 2. Deploy contracts
-if [ -d apps/contracts/lib ] && [ "$(ls -A apps/contracts/src 2>/dev/null)" ]; then
+if [ -d packages/contracts/lib ] && [ "$(ls -A packages/contracts/src 2>/dev/null)" ]; then
   echo "[2/5] Deploying contracts to Anvil…"
-  (cd apps/contracts && pnpm deploy:anvil)
+  (cd packages/contracts && pnpm deploy:anvil)
 else
-  echo "[2/5] Contracts not built. Run: cd apps/contracts && bash setup.sh && pnpm build"
+  echo "[2/5] Contracts not built. Run: cd packages/contracts && bash setup.sh && pnpm build"
   exit 1
 fi
 
