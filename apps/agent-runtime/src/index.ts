@@ -69,6 +69,33 @@ import {
 } from '@agenticprimitives/audit';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
+import { verifyBridgeCall, type NonceStore } from './bridge-hmac';
+
+// SEC-010: in-memory single-use nonce store for the custody-bridge HMAC envelope.
+// Bounded by the freshness window — a worker recycle clears the store, which is
+// acceptable since the freshness window already bounds replay risk. Production
+// deployments should swap this for a KV/D1-backed store for cross-instance defense.
+let _bridgeNonces: Map<string, number> | null = null;
+function getInMemoryNonceStore(): NonceStore {
+  if (!_bridgeNonces) _bridgeNonces = new Map();
+  const store = _bridgeNonces;
+  return {
+    has: async (nonce) => {
+      const exp = store.get(nonce);
+      if (exp == null) return false;
+      if (exp < Date.now()) { store.delete(nonce); return false; }
+      return true;
+    },
+    record: async (nonce, ttlSec) => {
+      store.set(nonce, Date.now() + ttlSec * 1000);
+      // Opportunistic GC: keep the Map bounded.
+      if (store.size > 4096) {
+        const now = Date.now();
+        for (const [k, exp] of store) if (exp < now) store.delete(k);
+      }
+    },
+  };
+}
 
 /**
  * Audit sink for demo-a2a (C3 pass 5b). Console-only for now — demo-a2a has
@@ -1557,11 +1584,20 @@ function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: string; ex
 app.post('/custody/google/resolve', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
-  const auth = c.req.header('authorization') ?? '';
-  const presented = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!timingSafeEqual(presented, secret)) return c.json({ ok: false, error: 'unauthorized' }, 401);
 
-  const body = (await c.req.json().catch(() => null)) as { iss?: string; sub?: string; rotation?: number } | null;
+  // SEC-010: verify HMAC envelope. Replaces the bearer-secret authn so a
+  // compromise yields short-window replay only — bounded by freshness + nonce.
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({
+    request: c.req.raw,
+    rawBody,
+    secret,
+    expectedAudience: 'custody.google.resolve',
+    nonces: getInMemoryNonceStore(),
+  });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { iss?: string; sub?: string; rotation?: number } | null;
   if (!body?.iss || !body?.sub) return c.json({ ok: false, error: 'iss + sub required' }, 400);
   const rotation = typeof body.rotation === 'number' && body.rotation >= 0 ? body.rotation : 0;
   try {

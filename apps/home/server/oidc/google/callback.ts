@@ -12,6 +12,7 @@ import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/goog
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
+import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { getServer, json, type Env, type FnContext } from '../../_lib/server-broker';
 
@@ -54,10 +55,18 @@ async function resolveKmsAgent(
     return { ok: false, reason: 'custody not configured' };
   }
   try {
+    // SEC-010: per-call HMAC envelope replaces the bearer secret. A compromise of the
+    // shared key now yields short-window replay only — bounded by BRIDGE_FRESHNESS_MS
+    // at the receiver, with single-use nonces preventing intra-window replay.
+    const envelope = await signBridgeCall({
+      secret: env.A2A_CUSTODY_BRIDGE_SECRET,
+      audience: 'custody.google.resolve',
+      payload: { iss: oidcIss, sub: oidcSub, rotation },
+    });
     const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/resolve`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.A2A_CUSTODY_BRIDGE_SECRET}` },
-      body: JSON.stringify({ iss: oidcIss, sub: oidcSub, rotation }),
+      headers: envelope.headers,
+      body: envelope.body,
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agentId?: string; error?: string };
     if (!res.ok || !body.ok || !body.agentId) return { ok: false, reason: body.error ?? `resolve HTTP ${res.status}` };

@@ -125,8 +125,16 @@ export async function signWithPasskey(digest: Hex): Promise<Hex> {
  *  this RP (including platform-synced ones on other devices); we read the chosen
  *  credentialId from `rawId`. The returned blob carries the credentialIdDigest,
  *  so the server verifies it on-chain via `getPasskey`/`isValidSignature` against
- *  the (name-resolved) agent SA — no client-supplied pubkey, no device cache. */
-export async function signWithDiscoverablePasskey(digest: Hex): Promise<Hex> {
+ *  the (name-resolved) agent SA — no client-supplied pubkey, no device cache.
+ *
+ *  SEC-015: when the caller knows which passkey SHOULD sign (e.g. an active session
+ *  has a known custodian), pass `expectedCredentialIdDigest` and we'll reject any
+ *  assertion whose rawId hash doesn't match. Catches the "platform offered a
+ *  different passkey" UX confusion BEFORE the server round-trip + chain check. */
+export async function signWithDiscoverablePasskey(
+  digest: Hex,
+  expectedCredentialIdDigest?: Hex,
+): Promise<Hex> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
@@ -139,8 +147,21 @@ export async function signWithDiscoverablePasskey(digest: Hex): Promise<Hex> {
     },
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error('no passkey available on this device');
+  if (expectedCredentialIdDigest) {
+    const offered = await sha256Hex(new Uint8Array(credential.rawId));
+    if (offered.toLowerCase() !== expectedCredentialIdDigest.toLowerCase()) {
+      throw new Error('passkey offered by the platform does not match the expected credential (SEC-015)');
+    }
+  }
   // The platform tells us which credential signed — use its rawId, not a cache.
   return signAssertionFromCredential(credential);
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
+  let hex = '0x';
+  for (const b of new Uint8Array(digest)) hex += b.toString(16).padStart(2, '0');
+  return hex as Hex;
 }
 
 async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
@@ -153,6 +174,12 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
     },
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error('passkey signing cancelled');
+  // SEC-015 defensive: even with allowCredentials, verify the rawId matches what we
+  // asked for. Catches a platform that would (incorrectly) ignore the allowlist.
+  const offered = new Uint8Array(credential.rawId);
+  if (offered.length !== credentialIdBytes.length || !offered.every((b, i) => b === credentialIdBytes[i])) {
+    throw new Error('passkey offered by the platform does not match the registered credential (SEC-015)');
+  }
   return signAssertionFromCredential(credential);
 }
 

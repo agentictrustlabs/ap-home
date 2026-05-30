@@ -10,9 +10,24 @@
 
 import type { AgentSession } from '@agenticprimitives/types';
 
-/** Sensitive PII requires a custody-grade session (the on-chain-confirmed floor). */
+/** SEC-014: defense-in-depth namespace gate. PII reads NEVER derive a key from
+ *  parsing `session.sub` as an address unless the sub is in a custodied namespace
+ *  (CAIP-10 eip155). A non-custodied namespace coming through would be a bug
+ *  upstream (canIssueSession enforces it at issuance), but the PII handler keys data
+ *  on `sub` so the secondary check here ensures a future regression doesn't open a
+ *  cross-namespace data leak. */
+function isCustodiedSubject(sub: string | undefined | null): boolean {
+  if (!sub) return false;
+  // CAIP-10: `<namespace>:<reference>:<address>` — we accept eip155 with a 0x-prefixed 20-byte address.
+  return /^eip155:\d+:0x[0-9a-fA-F]{40}$/.test(sub);
+}
+
+/** Sensitive PII requires a custody-grade session (the on-chain-confirmed floor)
+ *  AND a CAIP-10 sub in a custodied namespace (SEC-014 defense-in-depth). */
 export function canReadSensitivePii(session: AgentSession): boolean {
-  return session.assurance === 'onchain-confirmed';
+  if (session.assurance !== 'onchain-confirmed') return false;
+  if (!isCustodiedSubject(session.sub)) return false;
+  return true;
 }
 
 export interface BasicProfile {
@@ -38,9 +53,12 @@ export function basicProfile(session: AgentSession, name: string | null): BasicP
 }
 
 /** Sensitive PII — custody-grade only; null = denied (caller returns step-up). PII is
- *  keyed on the canonical agent id (never email, CN-3). Demo store; prod = KV/D1. */
+ *  keyed on the canonical agent id (never email, CN-3). Demo store; prod = KV/D1.
+ *  SEC-014: re-asserts the namespace + custody gate at the call site (the helper
+ *  above is the load-bearing version, but we never trust an upstream check alone). */
 export function sensitivePii(session: AgentSession): SensitivePiiFields | null {
-  if (!canReadSensitivePii(session)) return null; // default-deny
+  if (!canReadSensitivePii(session)) return null; // default-deny — re-asserts namespace + custody
+  if (!isCustodiedSubject(session.sub)) return null; // belt-and-suspenders before address parsing
   const addr = session.sub.split(':').pop() ?? 'agent';
   return { email: `${addr.slice(0, 8).toLowerCase()}@demo.agent`, phone: '+1 415 555 0123' };
 }
