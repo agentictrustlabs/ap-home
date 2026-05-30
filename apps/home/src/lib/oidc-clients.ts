@@ -31,14 +31,35 @@ export function clientAllowsTemplate(client: OidcClient, template: string): bool
 /** Is `origin` the origin of a registered client's redirect_uri? (CORS allowlist for the
  *  cross-origin OIDC endpoints — /token, /jwks — called by the relying-site SPA.) */
 export function isAllowedClientOrigin(origin: string): boolean {
-  for (const c of Object.values(CLIENTS)) {
-    for (const r of c.redirect_uris) {
-      try {
-        if (new URL(r).origin === origin) return true;
-      } catch {
-        /* ignore */
-      }
-    }
+  return ALLOWED_RELYING_ORIGINS.has(origin);
+}
+
+/** SEC-005: the single source of truth for "which relying-app origins this broker trusts"
+ *  is the whitelabel `relyingApps` registry. Derived at module init from
+ *  `relyingApps[].redirect_uris`. Replaces the previously hardcoded
+ *  `ALLOWED_RELYING_ORIGINS` list in `useEnrollReq.ts` so the two can't drift. */
+export const ALLOWED_RELYING_ORIGINS: ReadonlySet<string> = new Set(
+  whitelabel.relyingApps.flatMap((c) =>
+    c.redirect_uris
+      .map((u) => {
+        try { return new URL(u).origin; } catch { return null; }
+      })
+      .filter((s): s is string => !!s),
+  ),
+);
+
+/** True iff `redirectUri`'s origin is in the derived allowlist. Used by relying-app
+ *  handoff endpoints (/profile, /wea-sign) for the audit-F3 origin gate. */
+export function isAllowedRelyingOrigin(redirectUri: string): boolean {
+  try {
+    return ALLOWED_RELYING_ORIGINS.has(new URL(redirectUri).origin);
+  } catch {
+    return false;
   }
-  return false;
+}
+
+/** SEC-001 closure helper: the relying-app config IS the authoritative source for the
+ *  delegate SA. URL-supplied `delegate` is treated as untrusted hint. */
+export function getClientDelegate(client: OidcClient): `0x${string}` {
+  return client.delegate;
 }

@@ -36,10 +36,13 @@ export const onRequestOptions = ({ request }: FnContext): Response => preflight(
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => ({}))) as TokenBody;
 
-  // ── Delegation grant — silent re-auth (spec 230 / ADR-0019) ──
-  // A relying site that already HOLDS a live, in-window delegation gets a fresh id_token with NO
-  // popup/passkey: the OP verifies the delegation (ERC-1271 against the delegator + window) and
-  // mints sub = delegator. This is the returning-sign-in path (0 prompts).
+  // ── Delegation grant — silent re-auth (spec 230 / ADR-0019; SEC-002 closure) ──
+  // A relying site that already HOLDS a live, in-window delegation gets a fresh id_token
+  // with NO popup/passkey ceremony. The broker verifies (a) the delegation ERC-1271s
+  // against the delegator + is in window, (b) its `delegate` matches the registered
+  // delegate for the requested client_id, AND (c) the delegation was ORIGINALLY granted
+  // for THIS client (the `oidc-deleg:<digest>` binding written at /oidc/grant time —
+  // closes cross-client replay).
   if ((body.grant_type === 'delegation' || (body.delegation && !body.code)) && body.client_id) {
     const client = getClient(body.client_id);
     if (!client) return jsonCors({ error: `unknown client_id "${body.client_id}"` }, request, 400);
@@ -47,14 +50,45 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ error: 'redirect_uri not allowed for client' }, request, 400);
     }
     if (!body.delegation) return jsonCors({ error: 'delegation required' }, request, 400);
+
+    // (b) Delegate binding: cheap reject before the on-chain ERC-1271 round-trip.
+    if (body.delegation.delegate.toLowerCase() !== client.delegate.toLowerCase()) {
+      return jsonCors({ error: 'delegation delegate does not match the registered client delegate' }, request, 401);
+    }
+
+    // (a) ERC-1271 + window.
     const v = await verifyDelegation(env, body.delegation);
     if (!v.ok) return jsonCors({ error: `delegation invalid: ${v.reason}` }, request, 400);
-    const iss = resolveOrigin(request, env); // subdomain-correct OP issuer behind the router (spec 231)
+
+    // (c) Client binding (SEC-002): the canonical EIP-712 digest must map to THIS client.
+    const bindKey = `oidc-deleg:${v.digest.toLowerCase()}`;
+    const bindRaw = await env.AUTH_CODES.get(bindKey);
+    if (!bindRaw) {
+      // This delegation was never minted through /oidc/grant on this broker (or the
+      // binding has expired). Force the client to re-enroll instead of silently
+      // accepting an unknown delegation.
+      return jsonCors({ error: 'no enrollment binding for this delegation; re-enroll required' }, request, 401);
+    }
+    const bind = JSON.parse(bindRaw) as { client_id: string; agent_name?: string };
+    if (bind.client_id !== body.client_id) {
+      return jsonCors({ error: 'delegation was issued for a different client; re-enroll required' }, request, 401);
+    }
+
+    const iss = resolveOrigin(request, env);
     const { signer } = await getServer(env);
     const idToken = await mintIdToken(
-      { iss, sub: toCanonicalAgentId(CHAIN_ID, body.delegation.delegator), aud: body.client_id, agentName: body.agent_name, ttlSeconds: ID_TOKEN_TTL },
+      {
+        iss,
+        sub: toCanonicalAgentId(CHAIN_ID, body.delegation.delegator),
+        aud: body.client_id,
+        agentName: body.agent_name ?? bind.agent_name,
+        ttlSeconds: ID_TOKEN_TTL,
+      },
       signer,
     );
+    // Refresh the binding window so a steadily-used delegation doesn't fall off the
+    // cliff mid-session (same TTL semantics as the id_token).
+    await env.AUTH_CODES.put(bindKey, bindRaw, { expirationTtl: ID_TOKEN_TTL });
     return jsonCors({ id_token: idToken, token_type: 'Bearer', expires_in: ID_TOKEN_TTL, delegation: body.delegation }, request);
   }
 

@@ -144,9 +144,14 @@ export function OnboardingJourney({
     setBusy(fmt(c.authorizeStepBusy, { app: appName }));
     api.postToOpener?.({ type: 'AC_PROGRESS', msg: 'Granting permission…' });
     try {
-      const granted = await givePermission(home, api.enroll.delegate, via);
+      // SEC-001: server-mint the enrollment grant FIRST so the ceremony runs against the
+      // registry-derived delegate (not the URL-supplied `api.enroll.delegate`, which is
+      // attacker-controllable). The supplied delegation's `delegate` MUST equal what the
+      // server bound — /oidc/grant rejects otherwise.
+      const { grant_id, delegate } = await api.beginGrant(home.name);
+      const granted = await givePermission(home, delegate, via);
       if (!granted.ok) return fail(granted.error, 'grant');
-      const code = await api.submitGrant(home.name, granted.grant);
+      const code = await api.submitGrant(grant_id, granted.grant);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,

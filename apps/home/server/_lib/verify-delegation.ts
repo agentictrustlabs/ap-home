@@ -17,11 +17,19 @@ export interface IncomingDelegation {
   signature: Hex;
 }
 
-/** Verify a delegation was signed by `delegator` (ERC-1271) and is in its timestamp window. */
+/** Verify a delegation was signed by `delegator` (ERC-1271) and is in its timestamp window.
+ *
+ *  Returns the canonical EIP-712 digest on success — same bytes the on-chain
+ *  DelegationManager computes. Callers use the digest as a lookup key for binding
+ *  the delegation to its originally-authorized client (silent-reauth gate; SEC-002).
+ *
+ *  SEC-011: `isDeployed` is checked ONCE, not polled. A just-enrolled SA may briefly
+ *  lag the RPC view; the relying app retries the silent re-auth instead of tying up
+ *  a server worker for 12–15s per request. Fail-closed if not visible. */
 export async function verifyDelegation(
   env: { RPC_URL?: string },
   d: IncomingDelegation,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true; digest: Hex } | { ok: false; reason: string }> {
   if (!d?.delegator || !d.signature || !Array.isArray(d.caveats)) return { ok: false, reason: 'malformed delegation' };
 
   // Timestamp window (TimestampEnforcer terms = abi.encode(uint128 validAfter, uint128 validUntil)).
@@ -59,16 +67,15 @@ export async function verifyDelegation(
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,
   });
-  // ERC-1271 needs the delegator SA deployed + RPC-visible. Just-enrolled users hit post-deploy
-  // lag, so poll briefly (returns immediately once deployed — fast for the common returning case).
-  for (let i = 0; i < 6; i++) {
-    if (await accounts.isDeployed(d.delegator)) break;
-    if (i === 5) return { ok: false, reason: 'delegator account not yet deployed' };
-    await new Promise((r) => setTimeout(r, 2500));
+  // ERC-1271 needs the delegator SA deployed + RPC-visible. SEC-011: ONE check; if a
+  // just-enrolled SA isn't visible yet, fail-closed and let the relying app retry
+  // (don't tie up the worker for 12-15s polling on every request).
+  if (!(await accounts.isDeployed(d.delegator))) {
+    return { ok: false, reason: 'delegator account not yet deployed (retry shortly)' };
   }
   try {
     const ok = await accounts.isValidSignature(d.delegator, digest, d.signature);
-    return ok ? { ok: true } : { ok: false, reason: 'ERC-1271 verification failed against the delegator' };
+    return ok ? { ok: true, digest } : { ok: false, reason: 'ERC-1271 verification failed against the delegator' };
   } catch (e) {
     return { ok: false, reason: `ERC-1271 call failed: ${e instanceof Error ? e.message : String(e)}` };
   }

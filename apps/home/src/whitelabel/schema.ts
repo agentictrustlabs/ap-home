@@ -20,6 +20,11 @@ export interface RelyingApp {
   /** Friendly app name shown at consent (e.g. "Impact"); falls back to the host. From this
    *  registered config only — never a request param (anti-spoof). */
   name?: string;
+  /** The CANONICAL relying-site delegate SA address for this client (ADR-0019). This is the
+   *  ONLY delegate the broker will mint a grant for; the URL-supplied `delegate` is
+   *  treated as untrusted hint and MUST match this. Address format: 0x-prefixed 20-byte hex.
+   *  (SEC-001 closure — the broker no longer accepts attacker-chosen delegates.) */
+  delegate: `0x${string}`;
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

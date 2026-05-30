@@ -33,6 +33,9 @@ const faithImpact: WhiteLabelConfig = {
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
+      // The canonical demo-org delegate SA (ADR-0019). Source of truth — the URL-supplied
+      // `delegate` parameter is rejected if it doesn't equal this.
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // logo omitted → consent shows an initial badge (no spoofable logo).
     },
     // spec 236 — "JP Adopt" relying app (demo prototype): JP runs the adoption program;
@@ -46,6 +49,10 @@ const faithImpact: WhiteLabelConfig = {
       redirect_uris: ['https://agenticprimitives-demo-jp.pages.dev/', 'http://localhost:5573/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
+      // TODO: deploy a JP-specific delegate SA + replace here (SEC-003 follow-up — user has
+      // deferred per-app delegates for now; the broker still enforces "delegate matches
+      // registered" so a future split is a config-only change).
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission

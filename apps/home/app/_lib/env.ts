@@ -33,5 +33,6 @@ export function makeEnv(): Env {
     A2A_CUSTODY_URL: t(process.env.A2A_CUSTODY_URL),
     A2A_CUSTODY_BRIDGE_SECRET: t(process.env.A2A_CUSTODY_BRIDGE_SECRET),
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
+    ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
 }

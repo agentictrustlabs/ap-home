@@ -13,7 +13,7 @@ import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
-import { hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -92,9 +92,11 @@ export function GoogleEnrollResume() {
     if (!enroll || !home) return;
     setPhase('granting');
     try {
-      const granted = await givePermission(home, enroll.delegate, 'google', { token });
+      // SEC-001: server-mint the enrollment grant FIRST; use the registry-derived delegate.
+      const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
+      const granted = await givePermission(home, delegate, 'google', { token });
       if (!granted.ok) return fail(granted.error);
-      const code = await submitEnrollGrant(enroll, home.name, granted.grant);
+      const code = await submitEnrollGrant(grant_id, granted.grant);
       const tpl = whitelabel.delegationTemplates[enroll.template];
       recordConnectedApp(home.address, {
         clientId: enroll.aud,

@@ -62,6 +62,13 @@ export interface Env {
    *  KMS-custodied session. Defaults to `'demo-sso'`. Relying-app auds stay
    *  login-grade (they onboard members through the Personal Home). */
   DEMO_SSO_AUD?: string;
+
+  /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
+   *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
+   *  When unset, defaults to the production patterns (impact-agent.me + its subdomains
+   *  + localhost). A request with a foreign Host is rejected — the broker will never
+   *  sign `iss=<attacker-host>`. */
+  ALLOWED_ISSUER_HOSTS?: string;
 }
 
 /** Pages Function context (the subset these handlers use). */

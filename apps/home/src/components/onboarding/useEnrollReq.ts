@@ -3,8 +3,12 @@
 // code-delivery + popup mechanics. Moved VERBATIM from the old App.tsx (spec 230): the
 // audit-F3 exact-origin postMessage, PKCE code_challenge passthrough, and popup-vs-redirect
 // delivery are load-bearing — do not alter the wire behavior.
+//
+// SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
+// `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
+import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -18,11 +22,9 @@ export interface EnrollReq {
   orgBase?: string; // org_create: the org name to create
 }
 
-/** Relying sites permitted to start an authorization (demo gate — spec 230 §6 + §8). */
-const ALLOWED_RELYING_ORIGINS = [
-  'https://agenticprimitives-demo-org.pages.dev',
-  'https://agenticprimitives-demo-jp.pages.dev', // demo-jp (spec 236 — Joshua Project ADOPT)
-];
+// SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
+// via `isAllowedRelyingOrigin` (imported above). The previously-hardcoded array is removed
+// to prevent drift between the OIDC client registry and the cross-origin postMessage gate.
 
 export function parseEnrollReq(): EnrollReq | null {
   try {
@@ -63,11 +65,7 @@ export function hostOf(redirectUri: string): string {
 }
 
 export function relyingAllowed(redirectUri: string): boolean {
-  try {
-    return ALLOWED_RELYING_ORIGINS.includes(new URL(redirectUri).origin);
-  } catch {
-    return false;
-  }
+  return isAllowedRelyingOrigin(redirectUri);
 }
 
 // ── Standalone grant + delivery (used by the hook AND the Google-resume path) ──────────────
@@ -85,14 +83,16 @@ export function postEnrollToOpener(enroll: EnrollReq, msg: Record<string, unknow
   }
 }
 
-/** Turn the verified ceremony into an OIDC authorization code (spec 230 §4.2). */
-export async function submitEnrollGrant(
+/** Server-minted enrollment-grant ticket (SEC-001). The SPA calls this BEFORE running
+ *  the ROOT-credential ceremony so the server has bound `{client_id, redirect_uri,
+ *  agent_name, delegate (from REGISTRY), code_challenge, nonce, template}` under a
+ *  grant_id. The grant_id + the registry-derived `delegate` come back; the SPA uses
+ *  the latter (NOT the URL-supplied `delegate`) when constructing the delegation. */
+export async function beginEnrollmentGrant(
   enroll: EnrollReq,
   resolvedName: string,
-  delegationWire: unknown,
-  org?: unknown,
-): Promise<string> {
-  const r = await fetch('/oidc/grant', {
+): Promise<{ grant_id: string; delegate: Address }> {
+  const r = await fetch('/oidc/authorize-grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -100,11 +100,31 @@ export async function submitEnrollGrant(
       redirect_uri: enroll.redirectUri,
       nonce: enroll.nonce,
       code_challenge: enroll.codeChallenge,
+      code_challenge_method: 'S256',
       agent_name: resolvedName,
       delegation_template: enroll.template,
-      delegation: delegationWire,
-      org,
     }),
+  });
+  const b = (await r.json().catch(() => ({}))) as { grant_id?: string; delegate?: Address; error?: string };
+  if (!r.ok || !b.grant_id || !b.delegate) {
+    throw new Error(b.error ?? `authorize-grant failed (HTTP ${r.status})`);
+  }
+  return { grant_id: b.grant_id, delegate: b.delegate };
+}
+
+/** Redeem the grant by presenting the signed delegation. The grant is single-use.
+ *  /oidc/grant verifies the delegation's `delegate` matches what was bound at
+ *  /authorize-grant time + verifies ERC-1271 + records `oidc-deleg:<digest> → client_id`
+ *  so silent re-auth can't replay the delegation against a different client (SEC-002). */
+export async function submitEnrollGrant(
+  grantId: string,
+  delegationWire: unknown,
+  org?: unknown,
+): Promise<string> {
+  const r = await fetch('/oidc/grant', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org }),
   });
   const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
   if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);
@@ -131,7 +151,12 @@ export interface EnrollApi {
   allowed: boolean;
   host: string;
   postToOpener(msg: Record<string, unknown>): void;
-  submitGrant(resolvedName: string, delegationWire: unknown, org?: unknown): Promise<string>;
+  /** Server-mint the enrollment grant (SEC-001). Returns the grant_id + the canonical
+   *  delegate the SPA MUST use when building the delegation (which overrides the
+   *  URL-supplied `enroll.delegate` — anti-spoof). Call this BEFORE the ceremony. */
+  beginGrant(resolvedName: string): Promise<{ grant_id: string; delegate: Address }>;
+  /** Redeem a server-minted grant by presenting the signed delegation. */
+  submitGrant(grantId: string, delegationWire: unknown, org?: unknown): Promise<string>;
   deliverCode(code: string): void;
   denyEnroll(): void;
 }
@@ -151,14 +176,22 @@ export function useEnrollReq(): EnrollApi {
     [enroll],
   );
 
-  // Turn the verified ceremony into an OIDC authorization code (spec 230 §4.2): the
-  // just-signed delegation IS the proof-of-possession (the grant verifies it via ERC-1271).
-  const submitGrant = useCallback(
-    async (resolvedName: string, delegationWire: unknown, org?: unknown): Promise<string> => {
+  // Server-mint the enrollment grant (SEC-001 — split from submitGrant so the
+  // ceremony runs against the registry-derived delegate, not the URL-supplied one).
+  const beginGrant = useCallback(
+    async (resolvedName: string): Promise<{ grant_id: string; delegate: Address }> => {
       if (!enroll) throw new Error('no request');
-      return submitEnrollGrant(enroll, resolvedName, delegationWire, org);
+      return beginEnrollmentGrant(enroll, resolvedName);
     },
     [enroll],
+  );
+
+  // Redeem the grant by presenting the signed delegation.
+  const submitGrant = useCallback(
+    async (grantId: string, delegationWire: unknown, org?: unknown): Promise<string> => {
+      return submitEnrollGrant(grantId, delegationWire, org);
+    },
+    [],
   );
 
   // Deliver the code back (popup postMessage exact origin; or full-page ?code&state). The
@@ -189,6 +222,7 @@ export function useEnrollReq(): EnrollApi {
     allowed: enroll ? relyingAllowed(enroll.redirectUri) : false,
     host: enroll ? hostOf(enroll.redirectUri) : '',
     postToOpener,
+    beginGrant,
     submitGrant,
     deliverCode,
     denyEnroll,

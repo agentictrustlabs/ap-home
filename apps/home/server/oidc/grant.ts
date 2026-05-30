@@ -1,62 +1,97 @@
-// POST /oidc/grant — the authorization-endpoint grant (spec 230 §4.2).
+// POST /oidc/grant — redeem a server-minted enrollment grant for an OIDC authorization
+// code (spec 230 §4.2; SEC-001 + SEC-002 closure).
 //
-// The SPA at /authorize runs the ROOT-passkey ceremony + on-chain work + signs the delegation
-// client-side, then calls this to turn the result into an OIDC authorization CODE. We:
-//   1. gate client_id + redirect_uri + delegation_template against the registry (§6),
-//   2. use the SIGNED DELEGATION as proof-of-possession — verify it (ERC-1271 against the
-//      delegator + window). The ROOT passkey just signed it, so it IS a fresh credential proof;
-//      this removes a separate passkey-assertion prompt. sub = the delegator (CAIP-10).
-//   3. mint the OIDC id_token (sub, aud = client_id, nonce echoed),
-//   4. stash {id_token, delegation, org} under a single-use code BOUND to the PKCE
-//      code_challenge + client_id + redirect_uri, and return { code }.
-// The code (not the token) travels back in the redirect/popup; /token does the PKCE exchange.
+// The home SPA at /authorize first POSTs to /oidc/authorize-grant to obtain a `grant_id`
+// bound to the validated client registry + the registered delegate. The SPA then runs
+// the ROOT-credential ceremony to sign a delegation whose `delegate` equals that
+// registered delegate. It POSTs HERE with { grant_id, delegation, org? }. We:
+//
+//   1. enforce same-origin (Origin === iss): non-SPA callers are rejected.
+//   2. look up the bound grant by `grant_id` and DELETE it (single-use).
+//   3. verify the supplied delegation — ERC-1271 against the delegator, the timestamp
+//      window — and reject if its delegate, agent-name resolution, or template don't
+//      match the stored grant.
+//   4. mint the id_token + a single-use authorization code bound to the grant's PKCE
+//      challenge + client_id + redirect_uri, AND record `oidc-deleg:<digest> → client_id`
+//      so the silent-reauth path at /token cannot mint id_tokens for the wrong client
+//      (SEC-002).
+//
+// The OIDC code (not the token) is what travels back in the redirect/popup; /token does
+// the PKCE exchange.
+
 import { mintIdToken, newAuthCode } from '@agenticprimitives/connect';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delegation';
 import { CHAIN_ID } from '../../src/lib/chain';
-import { getClient, clientAllowsRedirect, clientAllowsTemplate } from '../../src/lib/oidc-clients';
+import type { StoredEnrollmentGrant } from './authorize-grant';
 
 const ID_TOKEN_TTL = 3600; // session-usable for the demo (the relying app treats it as the session)
-const CODE_TTL_MS = 300_000; // 5 min exchange window
+const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
+const DELEG_BIND_TTL_SEC = 3600; // matches id_token TTL; renewed on each silent re-auth grant
 
 interface GrantBody {
-  client_id?: string;
-  redirect_uri?: string;
-  nonce?: string;
-  code_challenge?: string;
-  code_challenge_method?: string;
-  agent_name?: string;
-  delegation_template?: string;
-  delegation?: IncomingDelegation; // signed client-side; doubles as the proof-of-possession
-  org?: unknown; // opaque org payload for the org-create template
+  grant_id?: string;
+  delegation?: IncomingDelegation;
+  org?: unknown;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as GrantBody | null;
-  if (!body?.client_id || !body.redirect_uri || !body.code_challenge || !body.delegation_template || !body.delegation) {
-    return json({ error: 'client_id + redirect_uri + code_challenge + delegation_template + delegation required' }, 400);
+  // SEC-001 (origin check): /oidc/grant is reachable ONLY from the home SPA. A
+  // non-browser caller, or a cross-origin browser caller, is rejected here.
+  const iss = resolveOrigin(request, env);
+  const reqOrigin = request.headers.get('origin');
+  if (!reqOrigin || reqOrigin !== iss) {
+    return json({ error: 'grant must be called from the home origin' }, 403);
   }
-  // §8.4: S256 PKCE only.
-  if (body.code_challenge_method && body.code_challenge_method !== 'S256') {
-    return json({ error: 'code_challenge_method must be S256' }, 400);
-  }
-  // §6: client registry — exact redirect + allowed template.
-  const client = getClient(body.client_id);
-  if (!client) return json({ error: `unknown client_id "${body.client_id}"` }, 400);
-  if (!clientAllowsRedirect(client, body.redirect_uri)) return json({ error: 'redirect_uri not allowed for client' }, 400);
-  if (!clientAllowsTemplate(client, body.delegation_template)) return json({ error: `delegation_template "${body.delegation_template}" not allowed` }, 400);
 
-  // Proof-of-possession = the freshly-signed delegation (ERC-1271 against its delegator + window).
+  const body = (await request.json().catch(() => null)) as GrantBody | null;
+  if (!body?.grant_id || !body.delegation) {
+    return json({ error: 'grant_id + delegation required' }, 400);
+  }
+
+  // Look up the server-bound grant (single-use: delete-after-read).
+  const grantKey = `oidc-grant:${body.grant_id}`;
+  const raw = await env.AUTH_CODES.get(grantKey);
+  await env.AUTH_CODES.delete(grantKey);
+  if (!raw) return json({ error: 'invalid or already-used grant_id' }, 400);
+  const grant = JSON.parse(raw) as StoredEnrollmentGrant;
+
+  // Delegate binding: the supplied delegation's `delegate` MUST equal the delegate
+  // recorded at /authorize-grant time (which came from the OIDC client registry, NOT
+  // from the request). This closes the "attacker chooses delegate" attack.
+  if (body.delegation.delegate.toLowerCase() !== grant.delegate.toLowerCase()) {
+    return json({ error: 'delegation delegate does not match the registered client delegate' }, 401);
+  }
+
+  // ERC-1271 + timestamp-window verification. On success returns the canonical EIP-712
+  // digest, which we use as the silent-reauth binding key.
   const v = await verifyDelegation(env, body.delegation);
   if (!v.ok) return json({ error: `delegation proof failed: ${v.reason}` }, 401);
 
-  const iss = resolveOrigin(request, env); // subdomain-correct OP issuer behind the router (spec 231)
+  // Mint the id_token bound to the grant's client + nonce + agent_name.
   const sub = toCanonicalAgentId(CHAIN_ID, body.delegation.delegator);
   const { signer } = await getServer(env);
   const idToken = await mintIdToken(
-    { iss, sub, aud: body.client_id, nonce: body.nonce, agentName: body.agent_name, ttlSeconds: ID_TOKEN_TTL },
+    {
+      iss,
+      sub,
+      aud: grant.client_id,
+      nonce: grant.nonce || undefined,
+      agentName: grant.agent_name,
+      ttlSeconds: ID_TOKEN_TTL,
+    },
     signer,
+  );
+
+  // SEC-002 closure: bind the canonical delegation digest to its originating client.
+  // /token grant_type=delegation re-verifies that any silent-reauth request with this
+  // delegation matches this client_id, so a leaked delegation can't be replayed to
+  // mint id_tokens for a DIFFERENT relying app.
+  await env.AUTH_CODES.put(
+    `oidc-deleg:${v.digest.toLowerCase()}`,
+    JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name }),
+    { expirationTtl: DELEG_BIND_TTL_SEC },
   );
 
   // Stash the grant under a single-use code, BOUND to the PKCE challenge + client + redirect.
@@ -67,9 +102,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       id_token: idToken,
       delegation: body.delegation,
       org: body.org ?? null,
-      code_challenge: body.code_challenge,
-      client_id: body.client_id,
-      redirect_uri: body.redirect_uri,
+      code_challenge: grant.code_challenge,
+      client_id: grant.client_id,
+      redirect_uri: grant.redirect_uri,
     }),
     { expirationTtl: Math.ceil(CODE_TTL_MS / 1000) },
   );
