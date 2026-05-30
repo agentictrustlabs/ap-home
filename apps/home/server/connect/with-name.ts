@@ -11,7 +11,7 @@ import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
-import { getServer, json, type FnContext } from '../_lib/server-broker';
+import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
@@ -33,7 +33,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       }
     | null;
   if (!body?.name || !body.kind || !body.aud) return json({ error: 'name, kind, aud required' }, 400);
-  const iss = new URL(request.url).origin;
+  // SEC-024: gate iss through the Host allowlist.
+  const iss = resolveOrigin(request, env);
   const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
 
   // Resolve the name → its owning agent (on-chain; server-authoritative).

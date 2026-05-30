@@ -13,7 +13,7 @@ import { mintAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
-import { getServer, json, type FnContext } from '../_lib/server-broker';
+import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
@@ -33,7 +33,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!body?.credentialIdDigest || !body.pubKeyX || !body.pubKeyY || !body.challenge || !body.signature || !body.aud) {
     return json({ error: 'credentialIdDigest, pubKeyX, pubKeyY, challenge, signature, aud required' }, 400);
   }
-  const iss = new URL(request.url).origin;
+  // SEC-024: gate iss through the Host allowlist (closes the gap SEC-006 left on the
+  // Connect-auth code path; the broker must NEVER sign sessions with a foreign Host).
+  const iss = resolveOrigin(request, env);
 
   // Single-use challenge.
   const key = `pkchallenge:${body.challenge}`;

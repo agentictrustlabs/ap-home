@@ -14,7 +14,7 @@ import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/t
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
-import { getServer, json, type Env, type FnContext } from '../../_lib/server-broker';
+import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /**
  * App-layer (ADR-0021) return-URL policy: in addition to the exact-match
@@ -119,7 +119,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   };
 
   const { signer, jwks } = await getServer(env);
-  const iss = new URL(request.url).origin; // the Connect origin = this serving origin
+  // SEC-024: gate iss through the Host allowlist (the broker NEVER signs sessions with
+  // a foreign Host — even on the Google callback path).
+  const iss = resolveOrigin(request, env);
 
   // ── LINK this Google subject to an EXISTING agent (P0-C) ────────────
   // Authorized by a custody-grade AgentSession of that agent (stash.linkToken).

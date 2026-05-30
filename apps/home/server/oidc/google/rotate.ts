@@ -7,7 +7,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { bumpRotation } from '../../../src/lib/kv-indexer';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
-import { getServer, json, type FnContext } from '../../_lib/server-broker';
+import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
 
 /** One of THIS site's own Connect origins (apex / per-handle home, spec 232) — a Google session
  *  is minted on the central origin but used on a subdomain (mirrors server/me/handler). */
@@ -32,7 +32,8 @@ function parseOidcId(id: string): { iss: string; sub: string } | null {
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const reqOrigin = new URL(request.url).origin;
+  // SEC-024: gate iss through the Host allowlist.
+  const reqOrigin = resolveOrigin(request, env);
   const aud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const bearer = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
   let token = bearer;
