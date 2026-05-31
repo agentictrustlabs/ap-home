@@ -36,9 +36,13 @@ import {
   parseUint256Decimal,
   parseUint48,
 } from './validate';
-import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
-import { AgentAccountClient, buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
+import {
+  AgentAccountClient,
+  buildExecuteBatchCallData,
+  SaMismatchError,
+} from '@agenticprimitives/agent-account';
+import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
 import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
 import {
   verifyCustodySession,
@@ -189,21 +193,21 @@ export interface Env {
   A2A_SESSION_SECRET: string;
   A2A_MASTER_PRIVATE_KEY: string;
   /**
-   * Optional. When set, the worker's POST /admin/topup-paymaster endpoint
-   * can move ETH from the deployer EOA to the paymaster's EntryPoint
-   * deposit. This is how the operator refills the paymaster without
-   * shelling into the deploy environment to run `cast send`. Off by
-   * default — set via `wrangler secret put DEPLOYER_PRIVATE_KEY --env
-   * production` (or in .dev.vars locally) when you want one-click
-   * topups exposed in the demo UI.
+   * R5.12d — Per-tx cap (in wei) for the paymaster top-up signer.
+   * Defaults to 0.002 ETH when unset (matches the route's documented
+   * "topup ≤ 0.002 ETH" promise). The cap is enforced BEFORE the HSM
+   * round-trip by `createSpendCappedAccount` (R5.12b) so a compromised
+   * app process cannot drain the worker beyond this per-tx limit.
    *
-   * Even when set, the endpoint enforces caps:
-   *   - Each topup ≤ 0.002 ETH
-   *   - Refuses topup if paymaster deposit is already ≥ 0.005 ETH
-   *   - At most one topup per 30 seconds across the worker
-   * so a leaked endpoint cannot drain the deployer.
+   * R5.12d also retired `DEPLOYER_PRIVATE_KEY`. Funded operator ops
+   * (direct deploy, register name, custody relay, paymaster top-up)
+   * now use `getRelayerAccount(env, role, sink)` / `getPaymasterTopupAccount`,
+   * backed by `A2A_KMS_BACKEND` (same env var the UserOp relayer
+   * already uses). Testnet: `local-aes` + `A2A_MASTER_PRIVATE_KEY`.
+   * Production: `gcp-kms` + a managed KMS resource (no raw key in
+   * config).
    */
-  DEPLOYER_PRIVATE_KEY?: string;
+  PAYMASTER_TOPUP_CAP_WEI?: string;
   /**
    * Opt-in flag to allow LocalSecp256k1Signer (the in-memory secp256k1
    * signer backed by A2A_MASTER_PRIVATE_KEY) under NODE_ENV=production.
@@ -978,15 +982,22 @@ app.post('/auth/siwe-verify', async (c) => {
     const r = await siweVerifyOnchain(
       body.message,
       body.signature,
-      async ({ signer, hash, signature }) =>
-        verifyUserSignature({
+      async ({ signer, hash, signature }) => {
+        // R5.12d cleanup: connect-auth's verifyUserSignature returns
+        // a typed result `{ok, reason?}` (PKG-CONNECT-AUTH-001 / H7-B.3
+        // closure); siweVerifyOnchain's callback expects a boolean.
+        // Map the typed result to bool — the SIWE caller's audit row
+        // captures the rejection reason separately.
+        const r = await verifyUserSignature({
           universalValidator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address,
           signer,
           hash,
           signature,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           client: publicClient as any,
-        }),
+        });
+        return r.ok;
+      },
       { allowedDomains },
     );
     verifyResult = r.ok ? { ok: true, address: r.address } : { ok: false, reason: r.reason };
@@ -1359,10 +1370,16 @@ app.post('/account/submit-call-userop', async (c) => {
 // For seats that enrol no passkey (wallet/SIWE only), no signer is
 // available to produce a v=2 WebAuthn signature for the deploy userOp,
 // and MetaMask won't sign a raw 32-byte userOpHash. We bypass ERC-4337
-// entirely: the worker uses DEPLOYER_PRIVATE_KEY (same key that funds
-// paymaster topups) to directly invoke `factory.createAgentAccount(...)`.
-// The factory call is permissionless and registers the EOA as a
-// custodian at proxy init. Worker pays gas — gasless to the user.
+// entirely: the worker uses a KMS-backed relayer
+// (`getRelayerAccount(env, 'direct-deploy')`) to directly invoke
+// `factory.createAgentAccount(...)`. The factory call is permissionless
+// and registers the EOA as a custodian at proxy init. Worker pays gas
+// — gasless to the user.
+//
+// R5.12d / PKG-AGENT-ACCOUNT-005 gate: when the client supplies a
+// `smartAccountAddress` in the body, the worker verifies it matches
+// the canonical derivation from the validated init params via
+// `assertSaMatchesCustodianDerivation` before paying gas.
 //
 // Wave R0 collapsed the previous `/session/direct-deploy` (Person, mode=0)
 // + `/session/direct-deploy-multisig` (mode>0) into one endpoint. Mode
@@ -1438,12 +1455,10 @@ const ZERO_BYTES32: Hex = ('0x' + '00'.repeat(32)) as Hex;
  */
 app.post('/session/direct-deploy', async (c) => {
   try {
-    if (!c.env.DEPLOYER_PRIVATE_KEY) {
-      return c.json(
-        { ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for direct deploy' },
-        503,
-      );
-    }
+    // R5.12d: the relayer factory throws if the local-aes backend is
+    // running in production without an explicit opt-in. No more
+    // DEPLOYER_PRIVATE_KEY env check; the KMS path either resolves or
+    // fails loudly with an actionable message.
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
 
@@ -1487,10 +1502,9 @@ app.post('/session/direct-deploy', async (c) => {
       return badInputResponse(c, e) as Response;
     }
 
-    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
-      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
-      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
-    const deployer = privateKeyToAccount(pkInput);
+    // R5.12d: KMS-backed relayer for funded direct-deploy ops.
+    // Replaces privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY).
+    const deployer = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
 
@@ -1500,6 +1514,47 @@ app.post('/session/direct-deploy', async (c) => {
       functionName: 'getAddressForAgentAccount',
       args: [params, salt],
     })) as Address;
+
+    // R5.12d / R5.12c gate: verify the CLIENT-SUPPLIED target is the
+    // canonical SA derived from the validated init params. The factory
+    // view above already derives the address, so by construction the
+    // assertion holds for the `predicted` address. But: when the
+    // caller-supplied body claims a `smartAccountAddress` field, we
+    // MUST verify that matches `predicted` so the relayer never signs
+    // a deploy for a target the client invented. Use the new
+    // `assertSaMatchesCustodianDerivation` helper.
+    if (typeof body.smartAccountAddress === 'string') {
+      try {
+        const aaClient = new AgentAccountClient({
+          rpcUrl: c.env.RPC_URL,
+          chainId: Number(c.env.CHAIN_ID),
+          entryPoint: c.env.ENTRY_POINT as Address,
+          factory: c.env.AGENT_ACCOUNT_FACTORY as Address,
+        });
+        await aaClient.assertSaMatchesCustodianDerivation({
+          claimed: body.smartAccountAddress as Address,
+          custodians: params.custodians,
+          mode: params.mode,
+          salt,
+          trustees: params.trustees,
+          passkey: params.initialPasskeyX !== 0n || params.initialPasskeyY !== 0n
+            ? {
+                credentialIdDigest: params.initialPasskeyCredentialIdDigest,
+                x: params.initialPasskeyX,
+                y: params.initialPasskeyY,
+              }
+            : undefined,
+        });
+      } catch (e) {
+        if (e instanceof SaMismatchError) {
+          return c.json(
+            { ok: false, error: 'sa_mismatch', detail: e.message },
+            400,
+          );
+        }
+        throw e;
+      }
+    }
 
     const code = await pub.getBytecode({ address: predicted });
     if (code && code !== '0x') {
@@ -1560,9 +1615,6 @@ const SUBREGISTRY_REGISTER_ABI = [
 
 app.post('/session/register-name', async (c) => {
   try {
-    if (!c.env.DEPLOYER_PRIVATE_KEY) {
-      return c.json({ ok: false, error: 'deployer_key_missing', detail: 'DEPLOYER_PRIVATE_KEY required for sponsored registration' }, 503);
-    }
     if (!c.env.PERMISSIONLESS_SUBREGISTRY) {
       return c.json({ ok: false, error: 'subregistry_missing', detail: 'PERMISSIONLESS_SUBREGISTRY not configured' }, 503);
     }
@@ -1574,10 +1626,11 @@ app.post('/session/register-name', async (c) => {
     if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
     if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) return c.json({ ok: false, error: 'bad_owner' }, 400);
 
-    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
-      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
-      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
-    const deployer = privateKeyToAccount(pkInput);
+    // R5.12d: KMS-backed relayer for sponsored name registration.
+    // PermissionlessSubregistry's `register(label, newOwner)` accepts
+    // any caller; the worker only pays gas. The `owner` arg goes to
+    // the user's SA, not the relayer, so identity is preserved.
+    const deployer = await getRelayerAccount(c.env, 'register-name', buildAuditSink(c.env));
     const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
     const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
 
@@ -1833,18 +1886,17 @@ const CUSTODY_POLICY_ABI_REL = [
   },
 ] as const;
 
-function relayDeployer(env: Env) {
-  if (!env.DEPLOYER_PRIVATE_KEY) return null;
-  const pk = env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
-    ? (env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
-    : (`0x${env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
-  return privateKeyToAccount(pk);
+// R5.12d: KMS-backed relayer for custody-policy gas sponsorship. The
+// custody-policy contract validates the quorum sigs over an EIP-712
+// hash; it does NOT constrain msg.sender. The relayer here is paying
+// gas only — identity rests on the quorum sigs in the calldata.
+async function relayDeployer(env: Env, sink: AuditSink) {
+  return getRelayerAccount(env, 'custody-relay', sink);
 }
 
 app.post('/session/custody-schedule', async (c) => {
   try {
-    const deployer = relayDeployer(c.env);
-    if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
+    const deployer = await relayDeployer(c.env, buildAuditSink(c.env));
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
     let custodyPolicy: Address;
@@ -1886,8 +1938,7 @@ app.post('/session/custody-schedule', async (c) => {
 
 app.post('/session/custody-apply', async (c) => {
   try {
-    const deployer = relayDeployer(c.env);
-    if (!deployer) return c.json({ ok: false, error: 'deployer_key_missing' }, 503);
+    const deployer = await relayDeployer(c.env, buildAuditSink(c.env));
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
     let custodyPolicy: Address;
@@ -2238,20 +2289,21 @@ app.post('/mcp/org/sensitive', async (c) => {
 
 // ─── Paymaster top-up (operator-only) ─────────────────────────────────────
 //
-// One-click "send ETH from the deployer EOA to the paymaster's EntryPoint
-// deposit." Used by the demo's top-bar gas readout: when the paymaster
-// runs low, clicking the ⛽ pill calls this endpoint instead of forcing
-// the operator to shell into the deploy env to run `cast send`.
+// One-click "send ETH from the KMS-backed top-up signer to the paymaster's
+// EntryPoint deposit." Used by the demo's top-bar gas readout: when the
+// paymaster runs low, clicking the ⛽ pill calls this endpoint instead of
+// forcing the operator to shell into the deploy env to run `cast send`.
 //
-// Safety caps (the deployer key is hot — this endpoint must NOT be a
-// drain vector):
-//   - Endpoint is OFF unless `DEPLOYER_PRIVATE_KEY` is set as a secret.
-//   - Per-call ≤ 0.002 ETH (TOPUP_MAX_WEI below).
+// R5.12d defence-in-depth:
+//   - Per-call ≤ TOPUP_MAX_WEI (0.002 ETH).
+//   - The signer itself is wrapped in `createSpendCappedAccount` via
+//     `getPaymasterTopupAccount`, so a tx with `value > PAYMASTER_TOPUP_CAP_WEI`
+//     throws BEFORE the HSM round-trip even if the app-layer cap is bypassed.
 //   - Refuses topup when paymaster.balanceOf(EntryPoint) is already
 //     ≥ 0.005 ETH (TOPUP_TARGET_FLOOR — leaves plenty of headroom
 //     before the next refill).
 //   - At most 1 topup per 30s per worker isolate (lastTopupAt).
-// CSRF-protected (the global middleware enforces).
+//   - CSRF-protected (the global middleware enforces).
 
 const TOPUP_MAX_WEI = 2_000_000_000_000_000n;        // 0.002 ETH
 const TOPUP_TARGET_FLOOR_WEI = 5_000_000_000_000_000n; // 0.005 ETH — refuse beyond
@@ -2271,16 +2323,6 @@ app.post('/admin/topup-paymaster', async (c) => {
   // text "Internal Server Error" page. The frontend parses res.json()
   // unconditionally, so we never let it see non-JSON.
   try {
-    if (!c.env.DEPLOYER_PRIVATE_KEY) {
-      return c.json(
-        {
-          ok: false,
-          error: 'topup_disabled',
-          detail: 'DEPLOYER_PRIVATE_KEY is not configured on the worker. Run `wrangler secret put DEPLOYER_PRIVATE_KEY --env production` to enable the one-click topup endpoint.',
-        },
-        503,
-      );
-    }
     if (!c.env.PAYMASTER || !c.env.ENTRY_POINT) {
       return c.json(
         { ok: false, error: 'misconfigured', detail: 'PAYMASTER + ENTRY_POINT env required' },
@@ -2341,11 +2383,11 @@ app.post('/admin/topup-paymaster', async (c) => {
       return c.json({ ok: false, error: 'bad_amount', detail: 'amount must be > 0' }, 400);
     }
 
-    // Deployer EOA must have enough ETH + a bit for gas.
-    const pkInput = c.env.DEPLOYER_PRIVATE_KEY.startsWith('0x')
-      ? (c.env.DEPLOYER_PRIVATE_KEY as `0x${string}`)
-      : (`0x${c.env.DEPLOYER_PRIVATE_KEY}` as `0x${string}`);
-    const deployerAcct = privateKeyToAccount(pkInput);
+    // R5.12d: KMS-backed top-up signer, wrapped in createSpendCappedAccount.
+    // The cap is enforced BEFORE the HSM round-trip (R5.12b), so even
+    // if the app-layer TOPUP_MAX_WEI clamp is somehow bypassed, the
+    // signer wrapper itself refuses any tx beyond the cap.
+    const deployerAcct = await getPaymasterTopupAccount(c.env, buildAuditSink(c.env));
     let deployerBal: bigint;
     try {
       deployerBal = await pub.getBalance({ address: deployerAcct.address });
