@@ -2,5 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
-  "buildCommand": "cd ../.. && pnpm -r --filter './packages/*' build && pnpm --filter @agenticprimitives-demo/sso-next build"
+  "//buildCommand": "R1.6: exclude @agenticprimitives/contracts from the recursive build — its build script invokes `forge` (Foundry), which is not present in the Vercel build environment. No TS package imports @agenticprimitives/contracts (verified via `grep -r '@agenticprimitives/contracts' packages/*/src`), so the SA wiring demo-sso-next depends on works fine without the Solidity ABI re-emit.",
+  "buildCommand": "cd ../.. && pnpm -r --filter './packages/*' --filter '!@agenticprimitives/contracts' build && pnpm --filter @agenticprimitives-demo/sso-next build"
 }
