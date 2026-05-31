@@ -1,6 +1,6 @@
 {
   "name": "@agenticprimitives-demo/mcp",
-  "version": "0.0.2-alpha.1",
+  "version": "0.0.2-alpha.2",
   "private": true,
   "description": "Demo MCP server: Cloudflare Worker + D1 for profiles + JTI replay. Person-repository with delegation-verified get_profile tool.",
   "type": "module",
