@@ -445,7 +445,23 @@ app.use('*', async (c, next) => {
   if (reqOrigin && originAllowed(reqOrigin, allowed) && !allowed.includes(reqOrigin)) {
     allowed.push(reqOrigin);
   }
-  if (!verifyCsrf(headerToken, allowed)) {
+  // R5.11 (PKG-CONNECT-AUTH-004 / external audit P1-2) — verifyCsrf
+  // now requires `actualOrigin` explicitly. The token's signed origin
+  // must equal the inbound Origin header (HMAC tampering would already
+  // fail, but this closes the cross-origin replay vector). Demo-a2a's
+  // double-submit cookie pattern already rejects requests with no
+  // Origin / Referer earlier in the middleware; this is the second
+  // gate.
+  if (
+    !verifyCsrf(headerToken, {
+      actualOrigin: reqOrigin ?? '',
+      allowedOrigins: allowed,
+      // Optional method/path/sessionSid bindings are intentionally not
+      // wired here — spec 227 (Real-Connect) will add per-route binding
+      // for high-risk endpoints once the route taxonomy is locked.
+      developmentMode: true, // testnet demo; spec 227 replaces with real prod gate
+    })
+  ) {
     return c.json({ error: 'csrf invalid' }, 403);
   }
   return next();
@@ -464,7 +480,10 @@ app.get('/auth/csrf', (c) => {
   } catch {
     return c.json({ error: 'malformed origin' }, 400);
   }
-  const token = csrfTokenFor(parsedOrigin);
+  // R5.11 — csrfTokenFor now takes an opts object. Demo-a2a doesn't
+  // bind to method/path/sessionSid yet; spec 227 (Real-Connect) will
+  // tighten that for high-risk endpoints.
+  const token = csrfTokenFor({ origin: parsedOrigin });
   // SameSite=None is required for cross-origin clients (demo-web-pro
   // hits demo-a2a directly cross-site; demo-web proxies same-origin
   // via Pages Functions). 'None' requires Secure=true, which we get on
