@@ -21,7 +21,7 @@
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
     "hono": "^4.6.0",
-    "viem": "^2.21.0"
+    "viem": "^2.50.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
