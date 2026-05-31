@@ -123,6 +123,13 @@ export interface Env {
   CHAIN_ID: string;
   ALLOWED_ORIGINS: string;
   MCP_URL: string;
+  /**
+   * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
+   * Used as `iss` (and currently `aud`, until spec 227 splits them)
+   * when minting session JWTs. Falls back to `https://demo-a2a.local`
+   * when unset for the testnet demo path.
+   */
+  CONNECT_BROKER_ORIGIN?: string;
   /** Service binding to demo-mcp (production only; not set in local dev).
    *  Use env.MCP.fetch(...) instead of fetch(MCP_URL/...) — sibling
    *  Worker calls via workers.dev hit Cloudflare error 1042. */
@@ -881,7 +888,14 @@ function smartAccountFromCookie(c: { req: { raw: Request }; env?: unknown }): Ad
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cookieValue = getCookie(c as any, SESSION_COOKIE);
   if (!cookieValue) return null;
-  const claims = verifySession(cookieValue);
+  // R5.10 (PKG-CONNECT-AUTH-003 / external audit P1-1) — connect-auth's
+  // verifySession now REQUIRES expectedIss + expectedAud in production
+  // and ALSO checks them when supplied in any mode. demo-a2a is the
+  // testnet demo broker; the move to a proper iss/aud binding here is
+  // tracked separately under the Real-Connect experience work (spec 227 /
+  // memory project_real_connect_experience). For now, opt out of the
+  // strict gate so the testnet demo keeps booting.
+  const claims = verifySession(cookieValue, { developmentMode: true });
   return (claims?.smartAccountAddress as Address | undefined) ?? null;
 }
 
@@ -991,6 +1005,17 @@ app.post('/auth/siwe-verify', async (c) => {
   const isDeployed = await accountClient(c.env).isDeployed(smartAccountAddress).catch(() => false);
 
   const name = typeof body.name === 'string' && body.name.length > 0 ? body.name : 'Demo User';
+  // R5.10 (PKG-CONNECT-AUTH-003 / external audit P1-1) — connect-auth's
+  // mintSession now requires `iss` (issuer URI) and `aud` (relying app
+  // audience id) so verifiers can bind both. For the demo-a2a testnet
+  // broker we derive both from the worker's CONNECT_BROKER_ORIGIN env
+  // (set in wrangler.toml / dev.vars) and fall back to a clearly-marked
+  // demo string when unset. The Real-Connect experience work (spec 227)
+  // will replace these with bound origin values.
+  const brokerOrigin =
+    typeof c.env.CONNECT_BROKER_ORIGIN === 'string' && c.env.CONNECT_BROKER_ORIGIN.length > 0
+      ? c.env.CONNECT_BROKER_ORIGIN
+      : 'https://demo-a2a.local';
   const cookie = mintSession({
     sub: `did:ethr:${c.env.CHAIN_ID}:${smartAccountAddress}`,
     walletAddress,
@@ -999,6 +1024,8 @@ app.post('/auth/siwe-verify', async (c) => {
     email: null,
     via: 'siwe',
     kind: 'session',
+    iss: brokerOrigin,
+    aud: brokerOrigin, // same-origin demo; spec 227 will split iss != aud
   });
 
   setCookie(c, SESSION_COOKIE, cookie, {
