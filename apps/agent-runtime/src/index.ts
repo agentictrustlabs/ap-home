@@ -1071,6 +1071,29 @@ app.post('/auth/siwe-verify', async (c) => {
 // ─── STEP 1.5 (optional): deploy smart account via paymaster-sponsored UserOp ─────
 
 /**
+ * sha256 of the host portion of the inbound Origin header. The WebAuthn
+ * RP-ID defaults to the registrable host of the calling page when the
+ * frontend doesn't set `publicKey.rp.id` explicitly — so the rpIdHash
+ * the authenticator binds against is sha256(origin.hostname). Fallback
+ * is sha256("impact-agent.me") when origin parsing fails (cross-origin
+ * call without an Origin header).
+ *
+ * H7-C.1 / CON-WEBAUTHN-001: this MUST match the rpIdHash the on-chain
+ * AgentAccount stores. The factory stores whatever we pass in
+ * initialPasskeyRpIdHash.
+ */
+async function _deriveRpIdHashFromOrigin(origin: string | undefined): Promise<Hex> {
+  let hostname = 'impact-agent.me';
+  try {
+    if (origin) hostname = new URL(origin).hostname;
+  } catch { /* fall through */ }
+  const enc = new TextEncoder().encode(hostname);
+  const buf = await globalThis.crypto.subtle.digest('SHA-256', enc);
+  const arr = Array.from(new Uint8Array(buf));
+  return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
+}
+
+/**
  * POST /session/deploy
  *
  * EOA path (legacy):
@@ -1100,13 +1123,14 @@ app.post('/session/deploy', async (c) => {
     // New polymorphic shape: any combination of external custodians + a passkey.
     // The factory's createPersonAgent accepts mixed seeds in one shot.
     custodians?: Address[];
-    passkey?: { credentialIdDigest: Hex; pubKeyX: string; pubKeyY: string };
+    passkey?: { credentialIdDigest: Hex; pubKeyX: string; pubKeyY: string; rpIdHash?: Hex };
     // Back-compat: legacy fields from the single-method era.
     initMethod?: 'eoa' | 'passkey';
     owner?: Address;
     credentialIdDigest?: Hex;
     pubKeyX?: string;
     pubKeyY?: string;
+    rpIdHash?: Hex;
     salt?: string;
     // Optional: calldata the freshly-deployed account executes in the SAME userOp (deploy +
     // execute atomically, e.g. claim its name) — one signature instead of deploy-then-claim.
@@ -1125,6 +1149,10 @@ app.post('/session/deploy', async (c) => {
           credentialIdDigest: body.credentialIdDigest,
           pubKeyX: body.pubKeyX,
           pubKeyY: body.pubKeyY,
+          // H7-C.1 / CON-WEBAUTHN-001: client supplies rpIdHash (sha256
+          // of the WebAuthn RP-ID it registered against). Required by
+          // the on-chain factory when a passkey is initialized.
+          rpIdHash: body.rpIdHash,
         }
       : null);
   if (custodians.length === 0 && !passkeyInput) {
@@ -1163,6 +1191,14 @@ app.post('/session/deploy', async (c) => {
               credentialIdDigest: passkeyInput.credentialIdDigest,
               x: BigInt(passkeyInput.pubKeyX),
               y: BigInt(passkeyInput.pubKeyY),
+              // H7-C.1 / CON-WEBAUTHN-001: on-chain factory rejects a
+              // zero rpIdHash when passkey is initialized. Use client-
+              // supplied rpIdHash if available; otherwise derive it from
+              // the request Origin's hostname (which is what the browser
+              // would have used as the WebAuthn RP-ID by default).
+              rpIdHash:
+                (passkeyInput.rpIdHash as Hex | undefined) ??
+                (await _deriveRpIdHashFromOrigin(c.req.header('origin'))),
             }
           : undefined,
         salt,
@@ -1181,7 +1217,10 @@ app.post('/session/deploy', async (c) => {
         preVerificationGas: userOp.preVerificationGas.toString(),
       },
     });
-  } catch (e) {
+  } catch (e: any) {
+    // Surface the failure to wrangler tail so production diagnostics
+    // don't require client-side DevTools access.
+    console.error('[/session/deploy] buildDeployUserOp failed:', String(e), e?.stack);
     return c.json({ error: 'buildDeployUserOp failed', detail: String(e) }, 500);
   }
 });
@@ -2091,10 +2130,105 @@ async function verifyDelegation(
       args: [digest, delegation.signature],
     })) as Hex;
     if (magic.toLowerCase() !== ERC1271_MAGIC) {
+      // Diagnostics: parse the WebAuthn assertion to compare what the SA
+      // STORES vs. what the signature CARRIES (rpIdHash, credentialIdDigest,
+      // pubkey).
+      try {
+        const sig = delegation.signature as Hex;
+        const tag = sig.slice(0, 4); // '0x01'
+        let credIdDigest: Hex | null = null;
+        let assertionRpIdHash: Hex | null = null;
+        if (tag === '0x01') {
+          try {
+            const { decodeAbiParameters } = await import('viem');
+            const tail = ('0x' + sig.slice(4)) as Hex;
+            const decoded = decodeAbiParameters(
+              [
+                {
+                  type: 'tuple',
+                  components: [
+                    { name: 'authenticatorData', type: 'bytes' },
+                    { name: 'clientDataJSON', type: 'string' },
+                    { name: 'challengeIndex', type: 'uint256' },
+                    { name: 'typeIndex', type: 'uint256' },
+                    { name: 'r', type: 'uint256' },
+                    { name: 's', type: 'uint256' },
+                    { name: 'credentialIdDigest', type: 'bytes32' },
+                  ],
+                },
+              ],
+              tail,
+            ) as unknown as [{ authenticatorData: Hex; credentialIdDigest: Hex }];
+            credIdDigest = decoded[0].credentialIdDigest;
+            // rpIdHash is the FIRST 32 bytes of authenticatorData.
+            const ad = decoded[0].authenticatorData;
+            assertionRpIdHash = ('0x' + ad.slice(2, 2 + 64)) as Hex;
+          } catch (parseErr) {
+            console.error('[verifyDelegation] could not parse assertion:', String(parseErr));
+          }
+        }
+        // What the SA stores for that credential.
+        let saHasPasskey: boolean | null = null;
+        let saStoredX: bigint | null = null;
+        let saStoredY: bigint | null = null;
+        let saRpIdHash: Hex | null = null;
+        if (credIdDigest) {
+          try {
+            saHasPasskey = (await pub.readContract({
+              address: delegation.delegator,
+              abi: [
+                { name: 'hasPasskey', type: 'function', stateMutability: 'view', inputs: [{ name: 'd', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+              ] as const,
+              functionName: 'hasPasskey',
+              args: [credIdDigest],
+            })) as boolean;
+            if (saHasPasskey) {
+              const [x, y] = (await pub.readContract({
+                address: delegation.delegator,
+                abi: [
+                  { name: 'getPasskey', type: 'function', stateMutability: 'view', inputs: [{ name: 'd', type: 'bytes32' }], outputs: [{ name: 'x', type: 'uint256' }, { name: 'y', type: 'uint256' }] },
+                ] as const,
+                functionName: 'getPasskey',
+                args: [credIdDigest],
+              })) as readonly [bigint, bigint];
+              saStoredX = x;
+              saStoredY = y;
+            }
+            // rpIdHashOf is an internal mapping; read its slot directly.
+            // PasskeyStorage uses ERC-7201 namespaced storage. Hard to compute
+            // off-the-cuff — skip slot read; we'll diagnose by event log or
+            // a future view function.
+          } catch (saErr) {
+            console.error('[verifyDelegation] SA view failed:', String(saErr));
+          }
+        }
+        const code = await pub.getBytecode({ address: delegation.delegator });
+        const hasCode = code != null && code !== '0x';
+        console.error(
+          `[verifyDelegation] ERC-1271 mismatch:`,
+          JSON.stringify({
+            delegator: delegation.delegator,
+            hasCode,
+            digest,
+            sigLen: delegation.signature?.length,
+            sigTag: tag,
+            credIdDigest,
+            assertionRpIdHash,
+            saHasPasskey,
+            saStoredX: saStoredX?.toString(),
+            saStoredY: saStoredY?.toString(),
+            saRpIdHash,
+            magicReturned: magic,
+          }),
+        );
+      } catch (diagErr) {
+        console.error('[verifyDelegation] diag failed:', String(diagErr));
+      }
       return { ok: false, reason: `ERC-1271 returned ${magic} (expected ${ERC1271_MAGIC})` };
     }
     return { ok: true };
   } catch (e) {
+    console.error('[verifyDelegation] ERC-1271 call threw:', delegation.delegator, String(e));
     return {
       ok: false,
       reason: `ERC-1271 call to delegator failed: ${e instanceof Error ? e.message : String(e)}`,
