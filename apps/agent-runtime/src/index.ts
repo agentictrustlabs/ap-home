@@ -1272,6 +1272,53 @@ app.post('/session/deploy/submit', async (c) => {
         500,
       );
     }
+    // **Receipt-bound deploy verification.** Receipt `status: 0x1` alone is
+    // not sufficient — a bundler tx can resolve "success" without the inner
+    // deploy actually landing (e.g. the bundled userOp validated but the
+    // initCode is a no-op, or detectInnerOpFailure missed a non-canonical
+    // FailedOp shape). The authoritative signal is an `AccountDeployed`
+    // event from EntryPoint v0.7 in the SAME receipt:
+    //   event AccountDeployed(bytes32 indexed userOpHash, address indexed sender,
+    //                         address factory, address paymaster);
+    //   topic0 = keccak256("AccountDeployed(bytes32,address,address,address)")
+    //          = 0xd51a9c61267aa6196961883ecf5ff2da6619c37dac0fa92122513fb32c032d2d
+    // Checking receipt logs (not a follow-up getCode) avoids RPC read-replica
+    // lag — the bundler returned this receipt from the node that included
+    // the tx, but a fresh eth_getCode against `latest` can hit a replica
+    // that hasn't surfaced the block yet, producing a false `deploy_not_
+    // landed`. Receipt logs are bound to the receipt itself, no race.
+    // Closes both the silent-success window AND the false-positive flagged
+    // 2026-06-01 during the live debug session.
+    const ACCOUNT_DEPLOYED_TOPIC =
+      '0xd51a9c61267aa6196961883ecf5ff2da6619c37dac0fa92122513fb32c032d2d';
+    const expectedSenderTopic = `0x000000000000000000000000${deployedAddress
+      .toLowerCase()
+      .slice(2)}`;
+    const accountDeployedLog = (receipt.logs ?? []).find(
+      (log) =>
+        log.topics?.[0]?.toLowerCase() === ACCOUNT_DEPLOYED_TOPIC &&
+        log.topics?.[2]?.toLowerCase() === expectedSenderTopic,
+    );
+    if (!accountDeployedLog) {
+      console.error(
+        `[demo-a2a] submitDeployUserOp completed status=${receipt.status} but no AccountDeployed(sender=${deployedAddress}) event in receipt. tx=${receipt.transactionHash}`,
+      );
+      return c.json(
+        {
+          ok: false,
+          error: 'deploy_not_landed',
+          detail:
+            `deploy userOp returned receipt status=${receipt.status} but no ` +
+            `EntryPoint AccountDeployed event was emitted for sender=${deployedAddress} ` +
+            `in the same tx. Inspect ${receipt.transactionHash} for the actual ` +
+            `EntryPoint revert reason (typical: validation failed silently, ` +
+            `paymaster rejected, initCode wrong, or the account was already ` +
+            `deployed with different init params).`,
+          transactionHash: receipt.transactionHash,
+        },
+        500,
+      );
+    }
     return c.json({
       ok: true,
       deployedAddress,

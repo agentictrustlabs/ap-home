@@ -23,9 +23,16 @@ export interface IncomingDelegation {
  *  DelegationManager computes. Callers use the digest as a lookup key for binding
  *  the delegation to its originally-authorized client (silent-reauth gate; SEC-002).
  *
- *  SEC-011: `isDeployed` is checked ONCE, not polled. A just-enrolled SA may briefly
- *  lag the RPC view; the relying app retries the silent re-auth instead of tying up
- *  a server worker for 12–15s per request. Fail-closed if not visible. */
+ *  SEC-011 (revised 2026-06-01): `isDeployed` is BOUNDED-retried, not polled. A
+ *  just-enrolled SA briefly lags multi-node RPC views (the bundler-included node
+ *  surfaces the deploy receipt + AccountDeployed event before read replicas catch
+ *  up), so up to 4 retries × 500ms is the "bounded retry of the same call" allowed
+ *  by ADR-0013. This is well below the 12–15s polling SEC-011's original wording
+ *  was concerned about and avoids surfacing a `retry shortly` UX error for what is
+ *  actually a replica-lag race during /oidc/grant (mid-onboarding, no relying-app
+ *  retry loop present). At /token time the SA SHOULD already be visible, so the
+ *  same bounded budget there is cheap (almost always satisfied on the first call).
+ *  Fail-closed if not visible after the retry budget. */
 export async function verifyDelegation(
   env: { RPC_URL?: string },
   d: IncomingDelegation,
@@ -67,10 +74,20 @@ export async function verifyDelegation(
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,
   });
-  // ERC-1271 needs the delegator SA deployed + RPC-visible. SEC-011: ONE check; if a
-  // just-enrolled SA isn't visible yet, fail-closed and let the relying app retry
-  // (don't tie up the worker for 12-15s polling on every request).
-  if (!(await accounts.isDeployed(d.delegator))) {
+  // ERC-1271 needs the delegator SA deployed + RPC-visible. SEC-011 (revised):
+  // bounded retry of the SAME `isDeployed` call to ride out brief multi-node read-
+  // replica lag (the bundler returns the receipt from the included node before
+  // every replica has the block). Budget: 4 attempts × 500ms = max 2s, well below
+  // the 12-15s polling the original wording rejected.
+  let deployed = false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (await accounts.isDeployed(d.delegator)) {
+      deployed = true;
+      break;
+    }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!deployed) {
     return { ok: false, reason: 'delegator account not yet deployed (retry shortly)' };
   }
   try {
