@@ -1074,29 +1074,6 @@ app.post('/auth/siwe-verify', async (c) => {
 // ─── STEP 1.5 (optional): deploy smart account via paymaster-sponsored UserOp ─────
 
 /**
- * sha256 of the host portion of the inbound Origin header. The WebAuthn
- * RP-ID defaults to the registrable host of the calling page when the
- * frontend doesn't set `publicKey.rp.id` explicitly — so the rpIdHash
- * the authenticator binds against is sha256(origin.hostname). Fallback
- * is sha256("impact-agent.me") when origin parsing fails (cross-origin
- * call without an Origin header).
- *
- * H7-C.1 / CON-WEBAUTHN-001: this MUST match the rpIdHash the on-chain
- * AgentAccount stores. The factory stores whatever we pass in
- * initialPasskeyRpIdHash.
- */
-async function _deriveRpIdHashFromOrigin(origin: string | undefined): Promise<Hex> {
-  let hostname = 'impact-agent.me';
-  try {
-    if (origin) hostname = new URL(origin).hostname;
-  } catch { /* fall through */ }
-  const enc = new TextEncoder().encode(hostname);
-  const buf = await globalThis.crypto.subtle.digest('SHA-256', enc);
-  const arr = Array.from(new Uint8Array(buf));
-  return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
-}
-
-/**
  * POST /session/deploy
  *
  * EOA path (legacy):
@@ -1164,6 +1141,29 @@ app.post('/session/deploy', async (c) => {
       400,
     );
   }
+  // **Orphan-registry guard (ADR-0013 single mechanism, 2026-06-01).** The
+  // on-chain factory mixes `rpIdHash` into the CREATE2 salt for passkey-direct
+  // SAs, so the address derived client-side (predict step, used as the
+  // `register` callData's `newOwner`) MUST be computed with the SAME
+  // `rpIdHash` the server uses for the deploy userOp. Historically the server
+  // fell back to `sha256(originHostname)` when the client omitted `rpIdHash` —
+  // but the client's `derivePasskeySa` defaulted to `ZERO_BYTES32`, so the
+  // predicted address and the actually-deployed address diverged, registering
+  // the name to an address that never received code (orphan). Fail-closed:
+  // require the client to send the exact `rpIdHash` it used for prediction.
+  if (passkeyInput && !passkeyInput.rpIdHash) {
+    return c.json(
+      {
+        error: 'rpIdHash required when passkey is supplied',
+        detail:
+          'Client MUST send the exact `rpIdHash` it used to derive the SA ' +
+          'address (the value passed as `newOwner` in any bundled name-claim ' +
+          'executeBatch). Computing it server-side via Origin fallback caused ' +
+          'orphan name-registry entries — closed 2026-06-01.',
+      },
+      400,
+    );
+  }
 
   try {
     // Audit C2: when PAYMASTER_VERIFYING_SIGNER env is set (production
@@ -1195,13 +1195,11 @@ app.post('/session/deploy', async (c) => {
               x: BigInt(passkeyInput.pubKeyX),
               y: BigInt(passkeyInput.pubKeyY),
               // H7-C.1 / CON-WEBAUTHN-001: on-chain factory rejects a
-              // zero rpIdHash when passkey is initialized. Use client-
-              // supplied rpIdHash if available; otherwise derive it from
-              // the request Origin's hostname (which is what the browser
-              // would have used as the WebAuthn RP-ID by default).
-              rpIdHash:
-                (passkeyInput.rpIdHash as Hex | undefined) ??
-                (await _deriveRpIdHashFromOrigin(c.req.header('origin'))),
+              // zero rpIdHash when passkey is initialized. The orphan-registry
+              // guard above ensures this is non-null and matches what the
+              // client used to derive the SA address (no Origin fallback —
+              // ADR-0013 single mechanism).
+              rpIdHash: passkeyInput.rpIdHash as Hex,
             }
           : undefined,
         salt,

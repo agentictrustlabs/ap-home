@@ -316,6 +316,27 @@ export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOut
 // newOwner) — derived deterministically from the passkey + salt (a factory view, no signature).
 
 /** Deterministic passkey-direct SA address (mode 0, no custodians, the passkey, given salt). */
+/** SHA-256 of `window.location.hostname` as a 32-byte hex string. The on-chain
+ *  factory mixes `rpIdHash` into the CREATE2 salt for passkey-direct SAs, so
+ *  predicting the SA address client-side MUST use the SAME value the server uses
+ *  for the deploy userOp. The server defaults to `sha256(originHostname)` when
+ *  the client doesn't pass an `rpIdHash` — historically the client passed
+ *  nothing, the prediction used `ZERO_BYTES32`, and the deploy used
+ *  `sha256(hostname)` → derived address mismatch → register fired on the
+ *  predicted address while the deploy created an SA at a different address
+ *  (orphan registry entry root cause, live-debug 2026-06-01).
+ *
+ *  By passing this value on every prediction AND every deploy POST body, both
+ *  computations use the same `rpIdHash` and the SA address that gets registered
+ *  is the SA address that actually deploys. (No fallback — ADR-0013 single
+ *  mechanism: one consistent value end-to-end.) */
+async function derivePasskeyRpIdHash(): Promise<Hex> {
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : 'impact-agent.me';
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hostname));
+  const arr = Array.from(new Uint8Array(buf));
+  return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
+}
+
 async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
   const accounts = new AgentAccountClient({
     rpcUrl: DEFAULT_RPC_URL,
@@ -323,9 +344,15 @@ async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Addr
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,
   });
+  const rpIdHash = await derivePasskeyRpIdHash();
   return accounts.getAddressForAgentAccount({
     custodians: [],
-    passkey: { credentialIdDigest: passkey.credentialIdDigest, x: passkey.pubKeyX, y: passkey.pubKeyY },
+    passkey: {
+      credentialIdDigest: passkey.credentialIdDigest,
+      x: passkey.pubKeyX,
+      y: passkey.pubKeyY,
+      rpIdHash,
+    },
     salt,
   });
 }
@@ -359,6 +386,11 @@ export async function bootstrapWithPasskey(
 ): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
   await ensureCsrfToken();
   onStep?.('Preparing your workspace…');
+  // `rpIdHash` MUST match the value used in `derivePasskeySa` (sha256(hostname)).
+  // The server's `/session/deploy` accepts an explicit `rpIdHash`; passing it
+  // here removes the server's Origin-based fallback path so both sides use the
+  // same value end-to-end (closes the orphan-registry root cause 2026-06-01).
+  const rpIdHash = await derivePasskeyRpIdHash();
   const buildRes = await fetch('/a2a/session/deploy', {
     method: 'POST',
     credentials: 'include',
@@ -368,6 +400,7 @@ export async function bootstrapWithPasskey(
       credentialIdDigest: passkey.credentialIdDigest,
       pubKeyX: passkey.pubKeyX.toString(),
       pubKeyY: passkey.pubKeyY.toString(),
+      rpIdHash,
       ...(callData ? { callData } : {}),
     }),
   });
@@ -547,12 +580,17 @@ export async function createChildAgentForSite(
   if (!claim.ok) return { ok: false, error: claim.error };
 
   onStep?.('Deploying the agent + claiming its name…');
+  // rpIdHash must match `derivePasskeySa`'s value (sha256(hostname)) — passed
+  // explicitly so the server doesn't fall back to Origin derivation. Closes the
+  // orphan-registry root cause (live-debug 2026-06-01).
+  const rpIdHash = await derivePasskeyRpIdHash();
   const dep = await deployAgent(
     {
       initMethod: 'passkey',
       credentialIdDigest: pk.credentialIdDigest,
       pubKeyX: pk.pubKeyX.toString(),
       pubKeyY: pk.pubKeyY.toString(),
+      rpIdHash,
       salt: salt.toString(),
       callData: claim.callData, // deploy + claim atomically
     },
