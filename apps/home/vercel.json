@@ -2,5 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
-  "buildCommand": "cd ../.. && pnpm -r --filter './packages/*' --filter '!@agenticprimitives/contracts' build && pnpm --filter @agenticprimitives-demo/sso-next build"
+  "buildCommand": "cd ../.. && pnpm --filter @agenticprimitives/contracts run build:deployments && pnpm -r --filter './packages/*' --filter '!@agenticprimitives/contracts' build && pnpm --filter @agenticprimitives-demo/sso-next build"
 }
