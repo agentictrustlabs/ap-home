@@ -1,7 +1,7 @@
 // Inline SVG icon set (Lucide-derived) — zero runtime deps. 24px viewBox, stroke icons
 // inherit `currentColor`. Used across the portal nav + sections. (If the team later adds
 // lucide-react, these can be swapped 1:1.)
-import type { SVGProps } from 'react';
+import type { SVGProps, JSX } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
