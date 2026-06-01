@@ -118,6 +118,12 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
       allowedTargets: env.ALLOWED_TARGETS_ENFORCER as Address,
       allowedMethods: env.ALLOWED_METHODS_ENFORCER as Address,
     },
+    // MCP reads are off-chain; the on-chain action caveats (Value /
+    // AllowedTargets / AllowedMethods) are conceptually inert for them.
+    // Opt the evaluator into "treat inert-without-context as allowed"
+    // so the same site-delegation works for both on-chain redemption
+    // AND off-chain read calls.
+    enforceOnChain: true,
     jtiStore: createD1JtiStore(env.DB),
     // requireDeployed defaults to true (fail-closed). The demo deploys smart
     // accounts via paymaster-sponsored UserOp in Step 1.5 before any
@@ -281,7 +287,7 @@ app.post('/tools/get_profile', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
@@ -340,7 +346,7 @@ app.post('/tools/get_pii', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
@@ -397,10 +403,22 @@ app.post('/tools/get_org_sensitive', async (c) => {
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof McpAuthError) return c.json({ error: 'auth failed' }, 401);
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });
+
+// R7.4: pre-declare update_profile so the preflight (N10.2) doesn't flag
+// the route as unclassified. The handler itself is still a 501 stub for
+// the demo; when it gets implemented, the classification is already in
+// place so withDelegation's production-strict default won't block the
+// first real request.
+const UPDATE_PROFILE_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'medium',
+} as const;
+declareTool({ name: 'update_profile' }, UPDATE_PROFILE_CLASSIFICATION);
 
 app.post('/tools/update_profile', (c) => c.json({ error: 'not implemented in demo step 3' }, 501));
 

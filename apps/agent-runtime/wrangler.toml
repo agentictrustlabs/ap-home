@@ -48,6 +48,14 @@ MCP_URL = "http://127.0.0.1:8788"
 #   wrangler secret put CSRF_SECRET            --env production
 #   wrangler secret put A2A_SESSION_SECRET     --env production
 #   wrangler secret put A2A_MASTER_PRIVATE_KEY --env production
+#   wrangler secret put A2A_MAC_SECRET         --env production   # R7.4 — shared with demo-mcp
+#
+# A2A_MAC_SECRET is the HMAC key that binds the a2a→mcp service envelope
+# (audience + service + route + nonce + timestamp + body digest). demo-mcp
+# rejects every call when this is unset on the producer side. The SAME
+# value must be set on demo-mcp via the same `wrangler secret put` command.
+# The preflight (scripts/check-production-deploy.ts N10.1) refuses deploys
+# when this declaration is absent.
 #
 # Non-inheritable keys (vars, durable_objects, kv, d1, etc.) must be
 # re-declared per environment — that's why this block repeats the DO binding.
