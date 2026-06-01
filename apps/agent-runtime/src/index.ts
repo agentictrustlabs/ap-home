@@ -1515,24 +1515,32 @@ app.post('/account/submit-call-userop', async (c) => {
 // Wave R0 collapsed the previous `/session/direct-deploy` (Person, mode=0)
 // + `/session/direct-deploy-multisig` (mode>0) into one endpoint. Mode
 // on the request body picks the shape — same axis the factory uses.
+// **R10 / 2026-06-01 follow-up.** The on-chain factory's
+// `AgentAccountInitParams` struct gained `initialPasskeyRpIdHash` (H7-C.1 /
+// CON-WEBAUTHN-001) but this local ABI mirror was left at 6 fields, so every
+// viem call against the live factory reverted with a tuple-shape mismatch.
+// Mirroring `packages/agent-account/src/abis.ts` — single source of truth is
+// that package; this local ABI exists only to keep this Worker self-contained.
+const DIRECT_DEPLOY_INIT_PARAMS_TUPLE = {
+  name: 'params',
+  type: 'tuple',
+  components: [
+    { name: 'mode', type: 'uint8' },
+    { name: 'custodians', type: 'address[]' },
+    { name: 'trustees', type: 'address[]' },
+    { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
+    { name: 'initialPasskeyX', type: 'uint256' },
+    { name: 'initialPasskeyY', type: 'uint256' },
+    { name: 'initialPasskeyRpIdHash', type: 'bytes32' },
+  ],
+} as const;
 const DIRECT_DEPLOY_FACTORY_ABI = [
   {
     type: 'function',
     name: 'createAgentAccount',
     stateMutability: 'nonpayable',
     inputs: [
-      {
-        name: 'params',
-        type: 'tuple',
-        components: [
-          { name: 'mode', type: 'uint8' },
-          { name: 'custodians', type: 'address[]' },
-          { name: 'trustees', type: 'address[]' },
-          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
-          { name: 'initialPasskeyX', type: 'uint256' },
-          { name: 'initialPasskeyY', type: 'uint256' },
-        ],
-      },
+      DIRECT_DEPLOY_INIT_PARAMS_TUPLE,
       { name: 'timelockOverrides', type: 'uint32[7]' },
       { name: 'salt', type: 'uint256' },
     ],
@@ -1543,18 +1551,7 @@ const DIRECT_DEPLOY_FACTORY_ABI = [
     name: 'getAddressForAgentAccount',
     stateMutability: 'view',
     inputs: [
-      {
-        name: 'params',
-        type: 'tuple',
-        components: [
-          { name: 'mode', type: 'uint8' },
-          { name: 'custodians', type: 'address[]' },
-          { name: 'trustees', type: 'address[]' },
-          { name: 'initialPasskeyCredentialIdDigest', type: 'bytes32' },
-          { name: 'initialPasskeyX', type: 'uint256' },
-          { name: 'initialPasskeyY', type: 'uint256' },
-        ],
-      },
+      DIRECT_DEPLOY_INIT_PARAMS_TUPLE,
       { name: 'salt', type: 'uint256' },
     ],
     outputs: [{ name: 'account', type: 'address' }],
@@ -1600,6 +1597,7 @@ app.post('/session/direct-deploy', async (c) => {
       initialPasskeyCredentialIdDigest: Hex;
       initialPasskeyX: bigint;
       initialPasskeyY: bigint;
+      initialPasskeyRpIdHash: Hex;
     };
     let timelockOverrides: readonly [number, number, number, number, number, number, number];
     let salt: bigint;
@@ -1615,6 +1613,21 @@ app.post('/session/direct-deploy', async (c) => {
         : parseBytes32('initialPasskeyCredentialIdDigest', body.initialPasskeyCredentialIdDigest);
       const passkeyX = body.initialPasskeyX === undefined ? 0n : parseUint256Decimal('initialPasskeyX', body.initialPasskeyX);
       const passkeyY = body.initialPasskeyY === undefined ? 0n : parseUint256Decimal('initialPasskeyY', body.initialPasskeyY);
+      const rpIdHash = body.initialPasskeyRpIdHash === undefined
+        ? ZERO_BYTES32
+        : parseBytes32('initialPasskeyRpIdHash', body.initialPasskeyRpIdHash);
+      // Orphan-registry guard (mirrors `/session/deploy`, 2026-06-01). The
+      // on-chain factory mixes rpIdHash into the CREATE2 salt for passkey-direct
+      // SAs. If a passkey is supplied (X or Y non-zero) the rpIdHash MUST be
+      // non-zero — and MUST match what the client used to predict the SA
+      // address — or the predicted address ≠ the deployed address, orphaning
+      // any bundled name-claim. Fail-closed.
+      if ((passkeyX !== 0n || passkeyY !== 0n) && rpIdHash === ZERO_BYTES32) {
+        throw new BadInputError(
+          'initialPasskeyRpIdHash',
+          'rpIdHash required when passkey is supplied — client MUST send the exact value used in its SA-address prediction (sha256(window.location.hostname)). Zero rpIdHash with a non-zero passkey caused orphan registry entries before 2026-06-01.',
+        );
+      }
       const overrideSrc = Array.isArray(body.timelockOverrides) ? body.timelockOverrides : [];
       timelockOverrides = [0, 1, 2, 3, 4, 5, 6].map((i) => {
         const v = overrideSrc[i];
@@ -1628,6 +1641,7 @@ app.post('/session/direct-deploy', async (c) => {
         initialPasskeyCredentialIdDigest: credId,
         initialPasskeyX: passkeyX,
         initialPasskeyY: passkeyY,
+        initialPasskeyRpIdHash: rpIdHash,
       };
     } catch (e) {
       return badInputResponse(c, e) as Response;
@@ -1673,6 +1687,7 @@ app.post('/session/direct-deploy', async (c) => {
                 credentialIdDigest: params.initialPasskeyCredentialIdDigest,
                 x: params.initialPasskeyX,
                 y: params.initialPasskeyY,
+                rpIdHash: params.initialPasskeyRpIdHash,
               }
             : undefined,
         });
