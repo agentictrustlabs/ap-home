@@ -10,20 +10,23 @@ export const CHAIN_ID = 84532;
 /** Public Base Sepolia RPC. Override with RPC_URL (server) / VITE_RPC_URL (browser). */
 export const DEFAULT_RPC_URL = 'https://sepolia.base.org';
 
-/** Deployed Base Sepolia contracts (from deployments-base-sepolia.json). */
+/** Deployed Base Sepolia contracts (from deployments-base-sepolia.json).
+ *  REFRESHED after the R6 contracts hardening wave (R6.5/R6.6/R6.8 pause
+ *  + naming governance redeploy on 2026-06-01).
+ *  Source of truth: packages/contracts/deployments-base-sepolia.json. */
 export const CONTRACTS = {
-  entryPoint: '0x094700EB9F743F462b0E59a68084d6be56F3Ed96',
-  agentAccountFactory: '0x7Aac638824014210349497440D3CE631A95b466c',
-  agentAccountImplementation: '0x235FD455040874B224A671456DA06221868a9CA1',
-  agentNameRegistry: '0xE9Bf4f67701Ba6eD7843b9848c3fe0C6e0212427',
-  agentNameUniversalResolver: '0xb66a4829606C4E1C5eB424314b681343c747b4B2',
-  custodyPolicy: '0xfdbCB192182712C996a1Ed2FB74D0FE6e7d9db26',
-  permissionlessSubregistry: '0xC5060624c6C8Ed9E453b6693111eC8f40eDe8110', // .impact subregistry (was demo.agent)
-  agentRelationship: '0xB85BA211d6528BE2561a41b629537e5054B648DF',
+  entryPoint: '0x30F0cC9C7d71033e85A0b073beF24F4aE8735024',
+  agentAccountFactory: '0x47CC94C4600cb4b7EAb12316f6827ba5b242D34E',
+  agentAccountImplementation: '0x5916d980413ff28333b02a77a0aCAc8eb63Bebd9',
+  agentNameRegistry: '0xc8651c926CAEb10495d36A60979D1eE1b4CF3356',
+  agentNameUniversalResolver: '0x47E76fd861392c0Ac9Fc340065EAF8E18398Ac58',
+  custodyPolicy: '0xb40e4cBEe5c6F4AB4db632051Db0dc897706a040',
+  permissionlessSubregistry: '0x4e501D08c4Ca5C982e06e833E28c20e1709E2B54',
+  agentRelationship: '0x65c627ACc4d64528D3a1944b5f2904eacA02e374',
   // ERC-7710 delegation (ADR-0019: relying site = scoped delegate of the person SA).
-  delegationManager: '0xaEb6191FFa086a0288A6367eC5D816344A6089f2',
-  timestampEnforcer: '0xb164Cc23A37b7EB84b2788F8906C506b12EFEc99',
-  allowedTargetsEnforcer: '0xe16f0185348283574500a6721A91526ec27da83f',
-  allowedMethodsEnforcer: '0x0229763ACb6AAaC5e99DFf20d0c44B6E34D5503D',
-  valueEnforcer: '0xeC1365428bbF42Ab8dEE80a3C1aba21Fc3014f60',
+  delegationManager: '0x3C78c80EBbCEF219CF4D5E6e275782455D4831AF',
+  timestampEnforcer: '0x703b752B0d68944ed1fBdD5509751E02841125B9',
+  allowedTargetsEnforcer: '0x9a01D29bA6C538d38FD8e8Dd5B68B6EcD87C0159',
+  allowedMethodsEnforcer: '0xBdcc46831841b5194769DF6fae050fFc0afD85A3',
+  valueEnforcer: '0x7579da6575F8b8657b3DF98E216709c6A8bF65F4',
 } as const satisfies Record<string, Address>;
