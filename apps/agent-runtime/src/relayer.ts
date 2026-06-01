@@ -72,8 +72,16 @@ export interface RelayerEnv {
  */
 export const DEFAULT_PAYMASTER_TOPUP_CAP_WEI = 2_000_000_000_000_000n; // 0.002 ETH
 
-function resolveBackend(env: RelayerEnv): KmsBackend {
-  return (env.A2A_KMS_BACKEND as KmsBackend | undefined) ?? 'local-aes';
+function resolveBackend(env: RelayerEnv): KmsBackend | undefined {
+  // Empty-string is a misconfiguration, not a default. Pass `undefined`
+  // through to `buildSignerBackend` so the package-level fail-closed
+  // guard in @agenticprimitives/key-custody (factories.ts:backendOrEnv)
+  // owns the production-vs-dev decision — no silent fallback at this
+  // layer (ADR-0013 / feedback_no_silent_fallbacks). The wrangler.toml
+  // EXPLICIT default for testnet is `A2A_KMS_BACKEND = "local-aes"`.
+  const raw = env.A2A_KMS_BACKEND;
+  if (!raw) return undefined;
+  return raw as KmsBackend;
 }
 
 /**

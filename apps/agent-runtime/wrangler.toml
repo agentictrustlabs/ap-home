@@ -86,12 +86,16 @@ CHAIN_ID = "84532"
 # blank so a misconfigured deploy fails closed (no CORS allowed, no MCP).
 ALLOWED_ORIGINS = ""
 MCP_URL = ""
-# Signer backend selection. Empty default → factory falls back to 'local-aes'
-# (which reads A2A_MASTER_PRIVATE_KEY secret). Override per-deploy with
-# A2A_KMS_BACKEND=gcp-kms GCP_KMS_KEY_NAME=projects/... pnpm deploy:cloudflare
-# — the deploy script passes both via --var, and GCP_SERVICE_ACCOUNT_JSON
-# is set via `wrangler secret put`.
-A2A_KMS_BACKEND = ""
+# Signer backend selection. EXPLICIT default — there is NO silent fallback
+# inside @agenticprimitives/key-custody (ADR-0013 / feedback_no_silent_fallbacks),
+# so an empty string here means "misconfigured" and the topup / relayer /
+# custody routes WILL throw `[key-custody] No backend specified for production`
+# at first signing op. `local-aes` is the testnet default (reads the
+# A2A_MASTER_PRIVATE_KEY secret); production stacks override per-deploy with
+#   A2A_KMS_BACKEND=gcp-kms GCP_KMS_KEY_NAME=projects/... pnpm deploy:cloudflare
+# (the deploy script passes both via --var; GCP_SERVICE_ACCOUNT_JSON is set
+# via `wrangler secret put`).
+A2A_KMS_BACKEND = "local-aes"
 GCP_KMS_KEY_NAME = ""
 # A2A_ALLOW_LOCAL_MASTER_KEY: opt-in for the dev-only LocalSecp256k1Signer
 # (which loads A2A_MASTER_PRIVATE_KEY into worker memory) to run in
