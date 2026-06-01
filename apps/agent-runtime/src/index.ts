@@ -320,15 +320,42 @@ interface InnerOpResult {
   revertReason?: `0x${string}`;
 }
 
-function detectInnerOpFailure(receipt: {
-  logs?: ReadonlyArray<{ address?: string; topics?: ReadonlyArray<string>; data?: string }>;
-}): InnerOpResult {
+function detectInnerOpFailure(
+  receipt: {
+    logs?: ReadonlyArray<{ address?: string; topics?: ReadonlyArray<string>; data?: string }>;
+  },
+  // Optional filter: when the bundler is shared (e.g. Alchemy/Pimlico), a
+  // single handleOps tx can carry several users' userOps. Without this
+  // filter, ANY `success=0` UserOperationEvent in the receipt would mark
+  // our op as failed (live-debug 2026-06-01: AddPasskey false-positive
+  // chasing). Pass the userOp's sender (topic2 of UserOperationEvent is
+  // `indexed sender`) and/or userOpHash (topic1) to restrict matching to
+  // our op only.
+  filter?: { sender?: `0x${string}`; userOpHash?: `0x${string}` },
+): InnerOpResult {
   const logs = receipt.logs ?? [];
   let success = true;
   let revertReason: `0x${string}` | undefined;
+  let matchedAny = false;
+  const wantSender = filter?.sender?.toLowerCase();
+  const wantHash = filter?.userOpHash?.toLowerCase();
+  const matchesFilter = (topics: ReadonlyArray<string> | undefined): boolean => {
+    if (!topics) return false;
+    // UserOperationEvent / UserOperationRevertReason both have userOpHash at
+    // topics[1] and sender at topics[2] (both indexed).
+    if (wantHash && topics[1]?.toLowerCase() !== wantHash) return false;
+    if (wantSender) {
+      // topics[2] is the 32-byte left-padded sender.
+      const t2 = topics[2]?.toLowerCase();
+      if (!t2 || !t2.endsWith(wantSender.slice(2))) return false;
+    }
+    return true;
+  };
   for (const log of logs) {
     const topic0 = log.topics?.[0]?.toLowerCase();
     if (topic0 === USER_OP_EVENT_TOPIC) {
+      if (filter && !matchesFilter(log.topics)) continue;
+      matchedAny = true;
       // data = (nonce, success, actualGasCost, actualGasUsed)
       // success is the second 32-byte word.
       const d = log.data ?? '0x';
@@ -338,16 +365,28 @@ function detectInnerOpFailure(receipt: {
         if (BigInt('0x' + successWord) === 0n) success = false;
       }
     } else if (topic0 === USER_OP_REVERT_REASON_TOPIC) {
-      // data = abi.encode(bytes revertReason). Skip 32-byte offset + 32-byte length, read body.
+      if (filter && !matchesFilter(log.topics)) continue;
+      // data = abi.encode(uint256 nonce, bytes revertReason). The bytes is
+      // encoded as (offset, length, body). Skip 32-byte nonce + 32-byte
+      // offset + 32-byte length, read body. (Prior version off-by-one only
+      // worked when nonce was emitted via topics rather than data — wrong
+      // for v0.7. Fix 2026-06-01.)
       const d = log.data ?? '0x';
-      if (d.length >= 2 + 64 * 2) {
-        const lengthHex = d.slice(2 + 64, 2 + 64 * 2);
+      if (d.length >= 2 + 64 * 3) {
+        const lengthHex = d.slice(2 + 64 * 2, 2 + 64 * 3);
         const length = Number(BigInt('0x' + lengthHex));
         if (Number.isFinite(length) && length > 0) {
-          revertReason = ('0x' + d.slice(2 + 64 * 2, 2 + 64 * 2 + length * 2)) as `0x${string}`;
+          revertReason = ('0x' + d.slice(2 + 64 * 3, 2 + 64 * 3 + length * 2)) as `0x${string}`;
         }
       }
     }
+  }
+  // If a filter was supplied but NO UserOperationEvent matched, the userOp
+  // wasn't actually in this receipt — surface as failure (the caller's tx
+  // hash points at the bundler tx, not our op). Without a filter, legacy
+  // behavior: assume success unless we saw a 0-success word.
+  if (filter && !matchedAny) {
+    return { ok: false, revertReason: undefined };
   }
   return { ok: success, revertReason };
 }
@@ -1259,6 +1298,7 @@ app.post('/session/deploy/submit', async (c) => {
     );
     const inner = detectInnerOpFailure(
       receipt as unknown as Parameters<typeof detectInnerOpFailure>[0],
+      { sender: signedUserOp.sender as `0x${string}` },
     );
     if (!inner.ok) {
       return c.json(
@@ -1267,7 +1307,7 @@ app.post('/session/deploy/submit', async (c) => {
           error: 'userop_reverted',
           detail: inner.revertReason
             ? `inner userOp reverted with ${inner.revertReason}`
-            : 'inner userOp reverted (no revertReason emitted)',
+            : 'inner userOp reverted (no revertReason emitted for sender=' + signedUserOp.sender + ')',
           transactionHash: receipt.transactionHash,
         },
         500,
@@ -1471,6 +1511,7 @@ app.post('/account/submit-call-userop', async (c) => {
     }
     const inner = detectInnerOpFailure(
       receipt as unknown as Parameters<typeof detectInnerOpFailure>[0],
+      { sender: signedUserOp.sender as `0x${string}` },
     );
     if (!inner.ok) {
       return c.json(
@@ -1479,7 +1520,7 @@ app.post('/account/submit-call-userop', async (c) => {
           error: 'userop_reverted',
           detail: inner.revertReason
             ? `inner userOp reverted with ${inner.revertReason}`
-            : 'inner userOp reverted (no revertReason emitted)',
+            : 'inner userOp reverted (no revertReason emitted for sender=' + signedUserOp.sender + ')',
           transactionHash: receipt.transactionHash,
         },
         500,
