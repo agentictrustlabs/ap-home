@@ -1423,7 +1423,51 @@ app.post('/account/submit-call-userop', async (c) => {
     const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
     const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
     const relayerAccount = await createKmsViemAccount(kmsBackend);
-    const { receipt } = await accountClient(c.env).submitCallUserOp(signedUserOp, relayerAccount);
+
+    // **Bounded retry on AA20 (replica lag).** When the SA was just deployed
+    // moments ago, the bundler's eth_call to `handleOps` may run against a
+    // read replica that hasn't surfaced the deploy block yet, producing
+    // `FailedOp(0, "AA20 account not deployed")` for a sender that IS in
+    // fact deployed on the included-block node. This is a "bounded retry of
+    // the same call" per ADR-0013 — same signed userOp, same bundler RPC,
+    // brief backoff. Budget: 5 attempts × {0,750,1500,2500,4000}ms = max
+    // ~8.75s before fail. Real AA20 (sender genuinely never deployed) will
+    // still surface after the budget exhausts.
+    const AA20_PATTERN = /AA20 account not deployed/;
+    const backoffMs: readonly number[] = [0, 750, 1500, 2500, 4000];
+    type SubmitResult = Awaited<ReturnType<ReturnType<typeof accountClient>['submitCallUserOp']>>;
+    let receipt: SubmitResult['receipt'] | null = null;
+    let lastErr: unknown = null;
+    for (let i = 0; i < backoffMs.length; i++) {
+      const delay = backoffMs[i] ?? 0;
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+      try {
+        const out = await accountClient(c.env).submitCallUserOp(signedUserOp, relayerAccount);
+        receipt = out.receipt;
+        break;
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!AA20_PATTERN.test(msg)) throw e; // non-AA20 → fail fast (real error)
+        console.warn(
+          `[demo-a2a] submitCallUserOp AA20 retry ${i + 1}/${backoffMs.length} for sender=${signedUserOp.sender}`,
+        );
+      }
+    }
+    if (!receipt) {
+      console.error('[demo-a2a] submitCallUserOp AA20 retry budget exhausted:', lastErr);
+      return c.json(
+        {
+          error: 'submitCallUserOp failed',
+          detail:
+            `AA20 account not deployed (replica lag) persisted past ${backoffMs.length} retries ` +
+            `(~${backoffMs.reduce((a, b) => a + b, 0)}ms). Either the sender ${signedUserOp.sender} ` +
+            `is genuinely undeployed, or the bundler's RPC is severely lagged. ` +
+            `Underlying error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+        },
+        500,
+      );
+    }
     const inner = detectInnerOpFailure(
       receipt as unknown as Parameters<typeof detectInnerOpFailure>[0],
     );
