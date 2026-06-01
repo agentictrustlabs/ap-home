@@ -152,9 +152,12 @@ export interface Env {
   // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
   AGENT_NAME_REGISTRY?: string;
   AGENT_NAME_UNIVERSAL_RESOLVER?: string;
-  /** Permissionless `.agent` subregistry (spec 234 W2). When set, /session/register-name
-   *  registers a name with owner = the new SA, sponsored by the relayer (no user signature)
-   *  — so onboarding's "secure your home" is a single device gesture (the passkey create). */
+  /** Permissionless `.agent` subregistry (spec 234 W2). Address is consumed by
+   *  clients (`apps/demo-sso-next/src/connect-client.ts::buildClaimCallData`) to
+   *  build the `register + setPrimary` `executeBatch` inside the deploy userOp —
+   *  one signature, atomic deploy + claim. (The standalone relayer-paid
+   *  `/session/register-name` was removed 2026-06-01: it allowed orphan name
+   *  registrations against undeployed SAs.) */
   PERMISSIONLESS_SUBREGISTRY?: string;
   /** Public registrable base domain for personal A2A endpoints (spec 231).
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
@@ -1730,53 +1733,27 @@ app.post('/session/direct-deploy', async (c) => {
 // (Reverse lookup address → name needs the SA to call setPrimaryName itself, which defers to
 // the member's first signed action; forward lookup name → SA works immediately via the
 // registry's owner fallback. ADR-0013: forward resolution has one mechanism.)
-const SUBREGISTRY_REGISTER_ABI = [
-  {
-    type: 'function',
-    name: 'register',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'label', type: 'string' },
-      { name: 'newOwner', type: 'address' },
-    ],
-    outputs: [{ name: 'node', type: 'bytes32' }],
-  },
-] as const;
-
-app.post('/session/register-name', async (c) => {
-  try {
-    if (!c.env.PERMISSIONLESS_SUBREGISTRY) {
-      return c.json({ ok: false, error: 'subregistry_missing', detail: 'PERMISSIONLESS_SUBREGISTRY not configured' }, 503);
-    }
-    const body = (await c.req.json().catch(() => null)) as { label?: unknown; owner?: unknown } | null;
-    if (!body) return c.json({ ok: false, error: 'bad_body' }, 400);
-
-    const label = typeof body.label === 'string' ? body.label.toLowerCase() : '';
-    const owner = typeof body.owner === 'string' ? body.owner : '';
-    if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
-    if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) return c.json({ ok: false, error: 'bad_owner' }, 400);
-
-    // R5.12d: KMS-backed relayer for sponsored name registration.
-    // PermissionlessSubregistry's `register(label, newOwner)` accepts
-    // any caller; the worker only pays gas. The `owner` arg goes to
-    // the user's SA, not the relayer, so identity is preserved.
-    const deployer = await getRelayerAccount(c.env, 'register-name', buildAuditSink(c.env));
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
-
-    const hash = await wallet.writeContract({
-      address: c.env.PERMISSIONLESS_SUBREGISTRY as Address,
-      abi: SUBREGISTRY_REGISTER_ABI,
-      functionName: 'register',
-      args: [label, owner as Address],
-    });
-    const receipt = await pub.waitForTransactionReceipt({ hash });
-    return c.json({ ok: true, transactionHash: hash, status: receipt.status, label });
-  } catch (e) {
-    console.error('[demo-a2a] register-name failed:', e);
-    return c.json({ ok: false, error: 'register_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
-  }
-});
+//
+// **`/session/register-name` (REMOVED 2026-06-01).**
+//
+// Historically this endpoint accepted `(label, owner)` and called the
+// `PermissionlessSubregistry`'s register() with the relayer as msg.sender, owner
+// as the user's predicted SA address. The owner-is-deployed invariant was NOT
+// enforced (the registry contract accepts any address), so if the deploy of the
+// owner SA later failed, an **orphan registry entry** persisted: name → predicted
+// address that never had code. Re-onboarding with the same name then routed the
+// flow through that orphan and surfaced as `AA20 account not deployed` deep in
+// the org-create call chain (live-debug 2026-06-01).
+//
+// Pre-`af17ea8` clients called this endpoint. Post-`af17ea8` clients bundle the
+// `register + setPrimary` into the same `executeBatch` callData inside the deploy
+// userOp itself (see `apps/demo-sso-next/src/connect-client.ts::buildClaimCallData`
+// + `bootstrapWithPasskey`) — register and deploy are now atomic: if the deploy
+// reverts, the register reverts with it, no orphan possible.
+//
+// No current client calls this endpoint. Deleting it closes the orphan-creation
+// surface entirely; the registry path that all live code uses (SA-signed
+// `executeBatch` inside a deploy userOp) is the single mechanism per ADR-0013.
 
 // ─── Google × KMS custody (spec 235) — THE GATE lives in ./custody-google.ts ─
 //

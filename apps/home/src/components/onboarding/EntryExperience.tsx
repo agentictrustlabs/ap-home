@@ -16,7 +16,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 
-interface NameInfo { exists?: boolean; agent?: Address; hasEoa?: boolean; hasPasskey?: boolean }
+interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean }
 async function nameInfo(name: string): Promise<NameInfo> {
   try {
     return (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json()) as NameInfo;
@@ -45,6 +45,11 @@ function redirectForPasskey(intent: 'start' | 'signin', name: string): boolean {
 type View =
   | { k: 'checking' }
   | { k: 'blocked' }
+  // `incomplete` = the requested name resolves to an SA that has no code on-chain
+  // (orphan registry entry — historic relayer-paid /session/register-name from an
+  // attempt whose deploy later failed). Surface this clearly instead of routing the
+  // user into a flow that will revert with AA20 several steps later.
+  | { k: 'incomplete'; name: string }
   | { k: 'name' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
   | { k: 'enroll-existing'; name: string; agent: Address }
@@ -81,6 +86,15 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     }
     void (async () => {
       const info = await nameInfo(api.enroll!.name);
+      // Orphan-registry guard: the name resolves to an SA but that SA has no
+      // code on-chain. Refuse to use it — every downstream `executeCall` would
+      // revert with AA20. Route to a dedicated 'incomplete' view that tells the
+      // user to pick a different name. (Older `name-info` responses without the
+      // `deployed` field fall through to legacy routing — undefined !== false.)
+      if (info.exists && info.agent && info.deployed === false) {
+        setView({ k: 'incomplete', name: api.enroll!.name });
+        return;
+      }
       if (api.enroll!.orgBase) {
         // org-create assumes an existing member; resolve their person agent.
         if (info.agent) setView({ k: 'org', name: api.enroll!.name, agent: info.agent });
@@ -100,6 +114,27 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       <Shell>
         <h1 className="onboarding-h1">Request blocked</h1>
         <p className="onboarding-sub">For your safety this request was blocked. Only start setup from a site you trust.</p>
+      </Shell>
+    );
+  }
+  if (view.k === 'incomplete') {
+    return (
+      <Shell>
+        <h1 className="onboarding-h1">This name was set up partway, then stopped.</h1>
+        <p className="onboarding-sub">
+          The name <strong>{view.name}</strong> was reserved before, but its setup didn't finish, so it can't be used. Please pick a fresh name to start clean.
+        </p>
+        <button
+          type="button"
+          className="onboarding-primary"
+          onClick={() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/';
+            }
+          }}
+        >
+          Pick a different name
+        </button>
       </Shell>
     );
   }
