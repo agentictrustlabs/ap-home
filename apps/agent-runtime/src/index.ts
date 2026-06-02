@@ -332,11 +332,12 @@ function detectInnerOpFailure(
   // `indexed sender`) and/or userOpHash (topic1) to restrict matching to
   // our op only.
   filter?: { sender?: `0x${string}`; userOpHash?: `0x${string}` },
-): InnerOpResult {
+): InnerOpResult & { sendersSeen?: string[] } {
   const logs = receipt.logs ?? [];
   let success = true;
   let revertReason: `0x${string}` | undefined;
   let matchedAny = false;
+  const sendersSeen: string[] = [];
   const wantSender = filter?.sender?.toLowerCase();
   const wantHash = filter?.userOpHash?.toLowerCase();
   const matchesFilter = (topics: ReadonlyArray<string> | undefined): boolean => {
@@ -354,6 +355,10 @@ function detectInnerOpFailure(
   for (const log of logs) {
     const topic0 = log.topics?.[0]?.toLowerCase();
     if (topic0 === USER_OP_EVENT_TOPIC) {
+      // Capture ALL senders seen for diagnostic output; only filter for the
+      // success-bit reading.
+      const t2 = log.topics?.[2];
+      if (t2 && t2.length >= 26) sendersSeen.push('0x' + t2.slice(-40));
       if (filter && !matchesFilter(log.topics)) continue;
       matchedAny = true;
       // data = (nonce, success, actualGasCost, actualGasUsed)
@@ -386,9 +391,9 @@ function detectInnerOpFailure(
   // hash points at the bundler tx, not our op). Without a filter, legacy
   // behavior: assume success unless we saw a 0-success word.
   if (filter && !matchedAny) {
-    return { ok: false, revertReason: undefined };
+    return { ok: false, revertReason: undefined, sendersSeen };
   }
-  return { ok: success, revertReason };
+  return { ok: success, revertReason, sendersSeen };
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -1307,7 +1312,7 @@ app.post('/session/deploy/submit', async (c) => {
           error: 'userop_reverted',
           detail: inner.revertReason
             ? `inner userOp reverted with ${inner.revertReason}`
-            : 'inner userOp reverted (no revertReason emitted for sender=' + signedUserOp.sender + ')',
+            : 'inner userOp reverted (no UserOperationEvent for sender=' + signedUserOp.sender + ' — sendersSeen=' + JSON.stringify(inner.sendersSeen ?? []) + ' tx=' + receipt.transactionHash + ')',
           transactionHash: receipt.transactionHash,
         },
         500,
@@ -1520,7 +1525,7 @@ app.post('/account/submit-call-userop', async (c) => {
           error: 'userop_reverted',
           detail: inner.revertReason
             ? `inner userOp reverted with ${inner.revertReason}`
-            : 'inner userOp reverted (no revertReason emitted for sender=' + signedUserOp.sender + ')',
+            : 'inner userOp reverted (no UserOperationEvent for sender=' + signedUserOp.sender + ' — sendersSeen=' + JSON.stringify(inner.sendersSeen ?? []) + ' tx=' + receipt.transactionHash + ')',
           transactionHash: receipt.transactionHash,
         },
         500,
