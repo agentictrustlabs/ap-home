@@ -1195,6 +1195,11 @@ export interface MyOrg {
   /** The scoped org→site delegation the person granted (absent for self-governed orgs).
    *  Carries the full wire struct so /you can revoke it (revokeGrantedDelegation). */
   delegation?: DelegationWire;
+  /** spec 246 person↔org read delegations. stewardship = org→person: the person presents
+   *  it to the vault to READ this org's data (the person oversees the org). membership =
+   *  person→org: the org reads its member's data. */
+  membershipDelegation?: DelegationWire;
+  stewardshipDelegation?: DelegationWire;
 }
 
 /** An inbound grant one of the person's orgs RECEIVED (spec 247). org↔org only — no

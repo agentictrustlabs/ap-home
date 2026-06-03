@@ -4,6 +4,7 @@
 // only see what the person delegates. Used by /you and /organizations.
 import { useEffect, useState } from 'react';
 import { listMyOrgs, type MyOrg } from '../../connect-client';
+import { vaultListWithDelegation, vaultReadWithDelegation, type VaultRecordRef } from '../../lib/vault-client';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon } from '../shared/Icons';
 
@@ -13,6 +14,91 @@ export function purposeLabel(p: string): string {
   if (p === 'jp-adopter-org') return 'Adopter org';
   if (p === 'jp-facilitator-org') return 'Facilitator org';
   return p.replace(/-/g, ' ');
+}
+
+/** Read this org's vault using the STEWARDSHIP delegation (org→person) the person holds
+ *  (spec 246): the person oversees the org, so they can list + read its records. The owner
+ *  of the data is the org (the delegator); the read goes through demo-a2a → demo-mcp. */
+function OrgVaultView({ org }: { org: MyOrg }) {
+  const d = org.stewardshipDelegation;
+  const [open, setOpen] = useState(false);
+  const [records, setRecords] = useState<VaultRecordRef[] | null>(null);
+  const [bodies, setBodies] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!d) return null; // older / operator-registered orgs have no stewardship delegation
+
+  async function load() {
+    setOpen(true);
+    if (records) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      setRecords(await vaultListWithDelegation(d!));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'read failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function show(rt: string) {
+    if (bodies[rt]) return;
+    try {
+      const data = await vaultReadWithDelegation(d!, rt);
+      setBodies((b) => ({ ...b, [rt]: JSON.stringify(data, null, 2) }));
+    } catch (e) {
+      setBodies((b) => ({ ...b, [rt]: `(error: ${e instanceof Error ? e.message : 'read failed'})` }));
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="btn-ghost"
+        style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }}
+        onClick={() => void load()}
+      >
+        View org data ↗
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: '.5rem', borderTop: '1px solid var(--c-g100, #eee)', paddingTop: '.5rem' }}>
+      <div style={{ fontSize: '.72rem', color: 'var(--c-g500, #64748b)', marginBottom: '.35rem' }}>
+        Read with your stewardship delegation — you oversee this org.
+      </div>
+      {busy ? (
+        <p className="manage-card-blurb">Reading {org.orgName || 'this org'}&rsquo;s vault…</p>
+      ) : err ? (
+        <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read: {err}</p>
+      ) : !records || records.length === 0 ? (
+        <p className="manage-card-blurb">This org&rsquo;s vault is empty.</p>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '.78rem' }}>
+          {records.map((r) => (
+            <li key={r.record_type} style={{ marginBottom: '.3rem' }}>
+              <code>{r.record_type}</code>{' '}
+              <button
+                type="button"
+                onClick={() => void show(r.record_type)}
+                style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', fontSize: '.76rem', padding: 0 }}
+              >
+                show
+              </button>
+              {bodies[r.record_type] && (
+                <pre style={{ background: 'var(--c-g50, #f8fafc)', padding: '.4rem .55rem', borderRadius: 6, overflowX: 'auto', fontSize: '.72rem', margin: '.25rem 0 0' }}>
+                  {bodies[r.record_type]}
+                </pre>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function OrgList({ token, heading = true }: { token: string | null; heading?: boolean }) {
@@ -51,6 +137,7 @@ export function OrgList({ token, heading = true }: { token: string | null; headi
                 Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
                 delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a>
               </p>
+              <OrgVaultView org={o} />
             </div>
           ))}
         </div>
