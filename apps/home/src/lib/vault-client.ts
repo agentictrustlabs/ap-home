@@ -13,7 +13,7 @@ import type { DelegationWire } from './delegation';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
 async function postVault(
-  path: 'get' | 'list',
+  path: 'get' | 'list' | 'set',
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   await ensureCsrfToken();
@@ -48,4 +48,16 @@ export async function vaultReadWithDelegation<T = unknown>(
 ): Promise<T | null> {
   const j = await postVault('get', { delegation: d, requester: d.delegate, recordType });
   return (j.data ?? null) as T | null;
+}
+
+/** Upsert a record in the DELEGATOR's vault. `data === null` soft-deletes (tombstone).
+ *  With the stewardship delegation (delegator = org) this is how a steward MANAGES the
+ *  org's own data: the relayer mints a token with sub = org, so the write lands in the
+ *  org's vault. No new signing — the already-signed delegation authorizes the write. */
+export async function vaultWriteWithDelegation(
+  d: DelegationWire,
+  recordType: string,
+  data: unknown,
+): Promise<void> {
+  await postVault('set', { delegation: d, requester: d.delegate, recordType, data });
 }
