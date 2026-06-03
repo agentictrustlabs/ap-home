@@ -28,6 +28,9 @@ import {
   getPii,
   upsertDemoOrgSensitive,
   getOrgSensitive,
+  getVaultRecord,
+  setVaultRecord,
+  listVaultRecords,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
@@ -394,6 +397,132 @@ app.post('/tools/get_org_sensitive', async (c) => {
       correlationId: getCorrelationId(c),
       // Hard-gate at wrapper construction: missing classification or
       // auditSink throws BEFORE the handler is registered (audit P0-2).
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+// ─── Generic per-agent vault (spec 247) ─────────────────────────────────
+//
+// get/set/list arbitrary JSON for the caller's OWN agent. The principal
+// recovered by withDelegation IS the delegator, so every handler keys by
+// `principal` — an agent can only touch its own namespace. record_type +
+// data shapes are the consuming app's vocabulary (ADR-0021); the tools are
+// generic. Reads are T1 (low); writes are T2 (medium) — medium adds no
+// quorum/on-chain gate (UV is enforced at the signer), so EOA-custodied
+// org agents can write.
+
+const GET_VAULT_RECORD_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'low',
+} as const;
+declareTool({ name: 'get_vault_record' }, GET_VAULT_RECORD_CLASSIFICATION);
+
+app.post('/tools/get_vault_record', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: { recordType?: string } };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal, args }) => {
+      const recordType = args?.recordType;
+      if (!recordType) return { ok: false, error: 'recordType required' };
+      const data = await getVaultRecord(c.env.DB, principal, recordType);
+      return { ok: true, owner: principal, recordType, data, served_by: 'demo-mcp:get_vault_record' };
+    },
+    {
+      toolName: 'get_vault_record',
+      classification: GET_VAULT_RECORD_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+const SET_VAULT_RECORD_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'medium',
+} as const;
+declareTool({ name: 'set_vault_record' }, SET_VAULT_RECORD_CLASSIFICATION);
+
+app.post('/tools/set_vault_record', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: { recordType?: string; data?: unknown } };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal, args }) => {
+      const recordType = args?.recordType;
+      if (!recordType) return { ok: false, error: 'recordType required' };
+      // `data === null` is a soft-delete (tombstone) by contract.
+      await setVaultRecord(c.env.DB, principal, recordType, args?.data ?? null);
+      return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
+    },
+    {
+      toolName: 'set_vault_record',
+      classification: SET_VAULT_RECORD_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        ? 'production'
+        : 'development'),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+const LIST_VAULT_RECORD_CLASSIFICATION = {
+  '@sa-tool': 'delegation-verified',
+  '@sa-auth': 'session-token',
+  '@sa-risk-tier': 'low',
+} as const;
+declareTool({ name: 'list_vault_record' }, LIST_VAULT_RECORD_CLASSIFICATION);
+
+app.post('/tools/list_vault_record', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: Record<string, unknown> };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal }) => {
+      const records = await listVaultRecords(c.env.DB, principal);
+      return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
+    },
+    {
+      toolName: 'list_vault_record',
+      classification: LIST_VAULT_RECORD_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
       environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
         ? 'production'
         : 'development'),

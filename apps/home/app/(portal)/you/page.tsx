@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { OrgList } from '../../../src/components/portal/OrgList';
+import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
@@ -39,6 +40,8 @@ export default function YouPage() {
       </div>
 
       <OrgList token={session?.token ?? null} />
+
+      <DelegationsList token={session?.token ?? null} />
 
       <GoogleHomeSection />
 
