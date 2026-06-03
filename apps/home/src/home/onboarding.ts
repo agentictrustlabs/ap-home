@@ -153,3 +153,22 @@ export async function givePermission(home: Home, delegate: Address, via: Via = '
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
   }
 }
+
+/**
+ * ④ — Consent to a specific agreement. Sign a FIXED consent digest with YOUR credential
+ * (passkey / wallet / Google KMS) so a relying app can prove ON CHAIN (ERC-1271) that you —
+ * or an org you steward, given as `party` — agreed to this exact agreement. Unlike a delegation,
+ * this is a one-shot signature over a digest the relying app supplies; nothing is granted, scoped,
+ * or revocable. `party` is the SA the signature must validate under: your home address for a
+ * personal agreement, or a stewarded org SA you custody (same credential). The contract recomputes
+ * the digest and verifies this signature via the party SA's ERC-1271 (AttestationRegistry RW1-1).
+ */
+export async function signConsent(party: Address, digest: Hex, via: Via = 'passkey', auth?: Auth): Promise<Result<{ signature: Hex }>> {
+  try {
+    const signHash = await signHashFor(via, party, auth);
+    const signature = await signHash(digest);
+    return { ok: true, signature };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'could not sign consent' };
+  }
+}
