@@ -13,9 +13,25 @@ import { mintAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
-import { getServer, json, type FnContext } from '../_lib/server-broker';
+import { getServer, type FnContext } from '../_lib/server-broker';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+
+// CORS-enabled (spec 247) so a relying app (demo-jp) can drive a one-click SIWE
+// handoff cross-origin — only for registered relying-app origins.
+function cors(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') ?? '';
+  return origin && isAllowedClientOrigin(origin)
+    ? { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'content-type', vary: 'Origin' }
+    : {};
+}
+function json(body: unknown, request: Request, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...cors(request) } });
+}
+
+export const onRequestOptions = async ({ request }: FnContext): Promise<Response> =>
+  new Response(null, { status: 204, headers: cors(request) });
 
 /** Poll isDeployed a few times to ride out Base Sepolia's post-deploy RPC lag
  *  (returns immediately when already deployed — no cost for the reconnect case). */
@@ -32,7 +48,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     | { message?: string; signature?: string; aud?: string }
     | null;
   if (!body?.message || !body.signature || !body.aud) {
-    return json({ error: 'message, signature, aud required' }, 400);
+    return json({ error: 'message, signature, aud required' }, request, 400);
   }
   const url = new URL(request.url);
   const iss = url.origin;
@@ -42,17 +58,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   try {
     parsedNonce = parseMessage(body.message).nonce;
   } catch {
-    return json({ error: 'malformed SIWE message' }, 400);
+    return json({ error: 'malformed SIWE message' }, request, 400);
   }
   const nonceKey = `nonce:${parsedNonce}`;
-  if (!(await env.AUTH_CODES.get(nonceKey))) return json({ error: 'unknown or expired nonce' }, 400);
+  if (!(await env.AUTH_CODES.get(nonceKey))) return json({ error: 'unknown or expired nonce' }, request, 400);
   await env.AUTH_CODES.delete(nonceKey);
 
   const v = verifySiwe(body.message, body.signature as Hex, {
     allowedDomains: [url.host],
     expectedNonce: parsedNonce,
   });
-  if (!v.ok) return json({ error: `SIWE verify failed: ${v.reason}` }, 401);
+  if (!v.ok) return json({ error: `SIWE verify failed: ${v.reason}` }, request, 401);
 
   const eoa = v.address;
   const principal: CredentialPrincipal = {
@@ -74,7 +90,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   try {
     sa = await accounts.getAddressForAgentAccount({ mode: 0, custodians: [eoa], salt: 0n });
   } catch (e) {
-    return json({ error: 'SA address derivation failed', detail: String(e) }, 502);
+    return json({ error: 'SA address derivation failed', detail: String(e) }, request, 502);
   }
 
   if ((await isDeployedSoon(accounts, sa)) && (await accounts.isCustodian(sa, eoa))) {
@@ -86,9 +102,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       signer,
     );
     await recordCredentialFacet(env.AUTH_CODES, principal, sub); // future resolves + reverse-name
-    return json({ status: 'issued', token, agent: sa });
+    return json({ status: 'issued', token, agent: sa }, request);
   }
 
   // No SA yet for this EOA → bootstrap (deploy a fresh person SA).
-  return json({ status: 'bootstrap', address: eoa });
+  return json({ status: 'bootstrap', address: eoa }, request);
 };
