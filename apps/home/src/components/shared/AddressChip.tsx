@@ -1,6 +1,10 @@
 'use client';
 // Truncated agent address with copy-to-clipboard + brief "Copied" feedback.
-import { useState } from 'react';
+// With `withName`, reverse-resolves the agent's primary name and shows it as the
+// label (the chip still copies the address; the hex remains the aria/title).
+import { useEffect, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
+import { reverseAgentName } from '../../lib/reverse-name';
 import { CopyIcon, CheckIcon } from './Icons';
 
 function short(addr: string): string {
@@ -31,12 +35,22 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export function AddressChip({ address, size = 'md' }: { address: string; size?: 'sm' | 'md' }) {
+export function AddressChip({ address, size = 'md', withName = false }: { address: string; size?: 'sm' | 'md'; withName?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!withName) return;
+    let cancelled = false;
+    void reverseAgentName(address as Address).then((n) => { if (!cancelled) setName(n); });
+    return () => { cancelled = true; };
+  }, [withName, address]);
+
+  const label = name ?? short(address);
   return (
     <button
       type="button"
       className={`address-chip ${size}`}
+      title={name ? `${name} · ${address}` : address}
       aria-label={`Copy address ${short(address)}`}
       onClick={async () => {
         if (await copy(address)) {
@@ -45,7 +59,7 @@ export function AddressChip({ address, size = 'md' }: { address: string; size?: 
         }
       }}
     >
-      <span className="address-chip-text">{short(address)}</span>
+      <span className="address-chip-text">{label}</span>
       {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
       {copied && <span className="address-chip-copied">Copied</span>}
     </button>
