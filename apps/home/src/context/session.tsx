@@ -110,6 +110,20 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       const url = new URL(window.location.href);
 
+      // One-click SIWE handoff (spec 247): a relying app (e.g. demo-jp) signed the operator
+      // in with their key and opened us at `…/you#session=<token>`. Establish the session
+      // straight from the fragment, then strip it so the token never lingers in history.
+      const handoff = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('session');
+      if (handoff) {
+        window.history.replaceState({}, '', url.pathname + url.search);
+        try {
+          await openSession(handoff, 'Wallet', true);
+        } catch {
+          setPhase('anon');
+        }
+        return;
+      }
+
       // Google bootstrap notice (the callback redirects back with a status, not a dead JSON page).
       const connectStatus = url.searchParams.get('connect_status');
       if (connectStatus) {
