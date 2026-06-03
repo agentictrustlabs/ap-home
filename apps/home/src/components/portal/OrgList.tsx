@@ -101,7 +101,7 @@ function OrgVaultView({ org }: { org: MyOrg }) {
   );
 }
 
-export function OrgList({ token, heading = true }: { token: string | null; heading?: boolean }) {
+export function OrgList({ token, heading = true, onSelect }: { token: string | null; heading?: boolean; onSelect?: (org: MyOrg) => void }) {
   const [orgs, setOrgs] = useState<MyOrg[]>([]);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
@@ -137,7 +137,18 @@ export function OrgList({ token, heading = true }: { token: string | null; headi
                 Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
                 delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a>
               </p>
-              <OrgVaultView org={o} />
+              {onSelect ? (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }}
+                  onClick={() => onSelect(o)}
+                >
+                  View details →
+                </button>
+              ) : (
+                <OrgVaultView org={o} />
+              )}
             </div>
           ))}
         </div>
