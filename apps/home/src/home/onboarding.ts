@@ -132,6 +132,8 @@ export async function createOrganization(
       proofHash: x.proofHash,
       credential: x.credential,
       brokerDelegation: x.brokerDelegation ?? null,
+      membershipDelegation: x.membershipDelegation,   // person→org (org reads member)
+      stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
     },
     grant: x.delegation,
   };

@@ -101,6 +101,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const orgPayload = body.org as {
     orgAgent?: string; orgName?: string; person?: string; purpose?: string;
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
+    membershipDelegation?: unknown; stewardshipDelegation?: unknown;
   } | null;
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
@@ -112,6 +113,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       requestedBy: grant.client_id,
       siteDelegation: body.delegation,
       brokerDelegation: orgPayload.brokerDelegation ?? null,
+      // spec 246 — person↔org read delegations: membership (person→org, org reads its
+      // member) + stewardship (org→person, person reads/oversees the org).
+      membershipDelegation: orgPayload.membershipDelegation ?? null,
+      stewardshipDelegation: orgPayload.stewardshipDelegation ?? null,
       proofHash: orgPayload.proofHash ?? null,
       credential: orgPayload.credential ?? null,
       createdAt: Date.now(),

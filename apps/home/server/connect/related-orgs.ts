@@ -55,6 +55,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const link = JSON.parse(raw) as {
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
       siteDelegation: unknown; proofHash: string | null; createdAt?: number;
+      membershipDelegation?: unknown; stewardshipDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
     orgs.push({
@@ -65,6 +66,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       createdAt: link.createdAt ?? null,
       delegation: link.siteDelegation,
       proofHash: link.proofHash,
+      // spec 246 person↔org read delegations: membership = person→org (org reads its
+      // member); stewardship = org→person (person reads/oversees the org).
+      membershipDelegation: link.membershipDelegation ?? null,
+      stewardshipDelegation: link.stewardshipDelegation ?? null,
     });
   }
   return jsonCors({ orgs }, request);
