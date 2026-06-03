@@ -564,9 +564,11 @@ export interface CreatedAgent {
   brokerDelegation?: DelegationWire;
   /** spec 246 — person↔org scoped read delegations, both signed by the ROOT (custodian
    *  of BOTH SAs). membership = person→org (the created ORG can read the MEMBER person's
-   *  data); stewardship = org→person (the PERSON can read / oversee the org's data). */
-  membershipDelegation: DelegationWire;
-  stewardshipDelegation: DelegationWire;
+   *  data); stewardship = org→person (the PERSON can read / oversee the org's data).
+   *  Best-effort: each is a separate signing ceremony, so a cancelled prompt leaves them
+   *  undefined rather than orphaning the (already-deployed) org — see createChildAgentForSite. */
+  membershipDelegation?: DelegationWire;
+  stewardshipDelegation?: DelegationWire;
 }
 
 export interface CreateChildOpts {
@@ -664,11 +666,23 @@ export async function createChildAgentForSite(
   // spec 246 — the person↔org read delegations. Both are signed by the ROOT passkey,
   // which custodies BOTH the person SA and the org SA (the org is custodied by the
   // person's ROOT), so each side's ERC-1271 validates the same credential.
-  onStep?.('Linking you and your organization…');
-  // membership: person → org — the created ORG can read the MEMBER person's data.
-  const membershipDelegation = toWire(await issueSiteDelegation(personAgent, childAgent, passkeySignHash));
-  // stewardship: org → person — the PERSON can read / oversee the org's data.
-  const stewardshipDelegation = toWire(await issueSiteDelegation(childAgent, personAgent, passkeySignHash));
+  //
+  // BEST-EFFORT: each is a separate signing ceremony (the org + its site grant are
+  // already in place by now). If a prompt is cancelled, we DON'T throw — that would
+  // orphan an already-deployed org with no vault link. The grant still persists; the
+  // read delegations can be (re)minted later. (Batching the ceremonies into one prompt
+  // is the spec-246 follow-up.)
+  let membershipDelegation: DelegationWire | undefined;
+  let stewardshipDelegation: DelegationWire | undefined;
+  try {
+    onStep?.('Linking you and your organization…');
+    // membership: person → org — the created ORG can read the MEMBER person's data.
+    membershipDelegation = toWire(await issueSiteDelegation(personAgent, childAgent, passkeySignHash));
+    // stewardship: org → person — the PERSON can read / oversee the org's data.
+    stewardshipDelegation = toWire(await issueSiteDelegation(childAgent, personAgent, passkeySignHash));
+  } catch {
+    onStep?.('Skipped the person↔org read delegations — you can add them later.');
+  }
 
   return {
     ok: true,
