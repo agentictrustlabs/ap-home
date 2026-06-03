@@ -759,6 +759,76 @@ export async function removePasskeyCredential(
   return executeCall(personAgent, signHash, buildExecuteCallData({ to: personAgent, value: 0n, data: inner }), { attempts: 5 });
 }
 
+// DelegationManager.revokeDelegationByOwner(Delegation) — authenticated revoke: msg.sender
+// MUST be the delegation's delegator (or delegate). We route it through the DELEGATOR SA's
+// `execute`, so the on-chain msg.sender is the delegator and the gate passes. The contract
+// re-verifies the struct's signature before marking the hash revoked. `args` is excluded
+// from the signed hash (CAVEAT_TYPEHASH = enforcer+terms), so '0x' here is fine.
+const REVOKE_DELEGATION_ABI = [
+  {
+    type: 'function',
+    name: 'revokeDelegationByOwner',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'delegation',
+        type: 'tuple',
+        components: [
+          { name: 'delegator', type: 'address' },
+          { name: 'delegate', type: 'address' },
+          { name: 'authority', type: 'bytes32' },
+          {
+            name: 'caveats',
+            type: 'tuple[]',
+            components: [
+              { name: 'enforcer', type: 'address' },
+              { name: 'terms', type: 'bytes' },
+              { name: 'args', type: 'bytes' },
+            ],
+          },
+          { name: 'salt', type: 'uint256' },
+          { name: 'signature', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/**
+ * Revoke a delegation the person granted (ADR-0019: relying-site authority is a revocable
+ * scoped delegation). The DELEGATOR SA (`d.delegator` — the person SA, or an org the person
+ * custodies) signs `execute(DelegationManager, revokeDelegationByOwner(d))`, so the on-chain
+ * `msg.sender` is the delegator and the authenticated gate passes. After this lands,
+ * `isRevoked(hash)` is true and `verifyDelegationToken` rejects the delegation — the grantee's
+ * access is gone. `signHash` is the person's credential (it custodies both the person SA and
+ * its org SAs as siblings, so the same credential validates either delegator's ERC-1271).
+ */
+export async function revokeGrantedDelegation(
+  d: DelegationWire,
+  signHash: SignHash,
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const onchainDelegation = {
+    delegator: d.delegator,
+    delegate: d.delegate,
+    authority: d.authority,
+    caveats: d.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: c.args ?? '0x' })),
+    salt: BigInt(d.salt),
+    signature: d.signature,
+  } as const;
+  const inner = encodeFunctionData({
+    abi: REVOKE_DELEGATION_ABI,
+    functionName: 'revokeDelegationByOwner',
+    args: [onchainDelegation],
+  });
+  return executeCall(
+    d.delegator,
+    signHash,
+    buildExecuteCallData({ to: CONTRACTS.delegationManager, value: 0n, data: inner }),
+    { attempts: 5 },
+  );
+}
+
 /** Add a WALLET (EOA) custodian to an agent currently controlled by a PASSKEY.
  *  Connects the wallet to add + proves control of it (personal_sign), then the
  *  EXISTING passkey signs `execute(self, addCustodian(newEoa))`. */
@@ -1122,8 +1192,9 @@ export interface MyOrg {
   requestedBy: string;
   createdAt: number | null;
   proofHash?: string;
-  /** The scoped org→site delegation the person granted (null for self-governed orgs). */
-  delegation?: unknown;
+  /** The scoped org→site delegation the person granted (absent for self-governed orgs).
+   *  Carries the full wire struct so /you can revoke it (revokeGrantedDelegation). */
+  delegation?: DelegationWire;
 }
 
 /** An inbound grant one of the person's orgs RECEIVED (spec 247). org↔org only — no

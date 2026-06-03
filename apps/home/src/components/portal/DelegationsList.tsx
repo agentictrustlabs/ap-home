@@ -5,19 +5,58 @@
 //                 the grantor's person identity — ADR-0025). Read from each org's
 //                 own store via the person-session received-delegations query.
 import { useEffect, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
 import {
   listMyOrgs,
   listMyReceivedDelegations,
+  revokeGrantedDelegation,
+  passkeySignHash,
+  googleSignHash,
   type MyOrg,
   type ReceivedDelegation,
+  type SignHash,
 } from '../../connect-client';
+import { connectWallet, personalSign } from '../../lib/wallet';
+import { useSession } from '../../context/session';
 import { AddressChip } from '../shared/AddressChip';
 import { LinkIcon } from '../shared/Icons';
 
+/** The signer for a revoke userOp, chosen by the session credential (mirrors onboarding's
+ *  signHashFor). `delegator` is the SA whose ERC-1271 must validate (person SA or its org). */
+async function signerFor(via: string, delegator: Address, token: string): Promise<SignHash> {
+  const v = via.toLowerCase();
+  if (v === 'wallet') {
+    const addr = await connectWallet();
+    return (h) => personalSign(addr, h);
+  }
+  if (v === 'google') return googleSignHash(delegator, token);
+  return passkeySignHash;
+}
+
 export function DelegationsList({ token, heading = true }: { token: string | null; heading?: boolean }) {
+  const { session } = useSession();
   const [granted, setGranted] = useState<MyOrg[]>([]);
   const [received, setReceived] = useState<ReceivedDelegation[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function revoke(o: MyOrg) {
+    if (!o.delegation || !token) return;
+    if (!window.confirm(`Revoke ${o.requestedBy}'s access to ${o.orgName || 'this organization'}? It loses access immediately.`)) return;
+    setError(null);
+    setRevoking(o.orgAgent);
+    try {
+      const signHash = await signerFor(session?.via ?? 'passkey', o.delegation.delegator, token);
+      const r = await revokeGrantedDelegation(o.delegation, signHash);
+      if (r.ok) setGranted((g) => g.filter((x) => x.orgAgent !== o.orgAgent));
+      else setError(r.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'revoke failed');
+    } finally {
+      setRevoking(null);
+    }
+  }
 
   useEffect(() => {
     if (!token) { setLoaded(true); return; }
@@ -60,10 +99,20 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
                   <p className="manage-card-blurb">
                     You granted <b>{o.requestedBy}</b> scoped access to <b>{o.orgName || 'this org'}</b>.
                   </p>
+                  <button
+                    type="button"
+                    className="btn-danger-outline"
+                    style={{ marginTop: '.6rem', fontSize: '.8rem', padding: '.35rem .7rem' }}
+                    onClick={() => void revoke(o)}
+                    disabled={revoking === o.orgAgent}
+                  >
+                    {revoking === o.orgAgent ? 'Revoking…' : 'Revoke access'}
+                  </button>
                 </div>
               ))}
             </div>
           )}
+          {error && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Revoke failed: {error}</p>}
 
           <h3 style={{ fontSize: '.9rem', margin: '1rem 0 .4rem' }}>Received by your organizations</h3>
           {received.length === 0 ? (
