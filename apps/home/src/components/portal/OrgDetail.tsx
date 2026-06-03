@@ -75,8 +75,8 @@ function DelegationCard({ kind, d }: { kind: 'App access' | 'Membership' | 'Stew
         <span className="manage-card-label">{kind}</span>
         <span className="manage-card-badge live">{d.authority === ROOT_AUTHORITY ? 'root' : 'sub'}</span>
       </div>
-      <Fact label="Delegator"><AddressChip address={d.delegator} size="sm" /></Fact>
-      <Fact label="Delegate"><AddressChip address={d.delegate} size="sm" /></Fact>
+      <Fact label="Delegator"><AddressChip address={d.delegator} size="sm" withName /></Fact>
+      <Fact label="Delegate"><AddressChip address={d.delegate} size="sm" withName /></Fact>
       <Fact label="Caveats">
         {d.caveats.length === 0 ? 'none' : (
           <ul style={{ margin: 0, paddingLeft: '1rem' }}>
@@ -258,7 +258,7 @@ export function OrgDetail({ org, onBack }: { org: MyOrg; onBack: () => void }) {
         <h2><BuildingIcon size={16} /> {org.orgName || '(unnamed org)'}</h2>
         <Fact label="Name"><code>{org.orgName || '—'}</code></Fact>
         <Fact label="Address">
-          <AddressChip address={org.orgAgent} size="sm" />{' '}
+          <AddressChip address={org.orgAgent} size="sm" withName />{' '}
           <a href={EXPLORER + org.orgAgent} target="_blank" rel="noreferrer">explorer ↗</a>
         </Fact>
         <Fact label="Kind">{purposeLabel(org.purpose)}</Fact>
