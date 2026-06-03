@@ -1098,6 +1098,26 @@ export async function fetchProfile(token: string): Promise<BasicProfile | null> 
   return ((await r.json()) as { profile: BasicProfile }).profile;
 }
 
+/** A related org the person holds (spec 246 / ADR-0025) — read from THEIR vault for the
+ *  person's own home view (all orgs, all requesting apps). Carries no person→org graph. */
+export interface MyOrg {
+  orgAgent: Address;
+  orgName: string;
+  purpose: string;
+  requestedBy: string;
+  createdAt: number | null;
+  proofHash?: string;
+}
+
+/** List ALL the connected person's organizations (private vault credentials), for the
+ *  /you portal. Same-origin, authorized by the home session token (aud = the home aud). */
+export async function listMyOrgs(token: string): Promise<MyOrg[]> {
+  const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) return [];
+  const b = (await r.json().catch(() => ({}))) as { orgs?: MyOrg[] };
+  return b.orgs ?? [];
+}
+
 export async function fetchSensitive(
   token: string,
 ): Promise<{ ok: true; email: string; phone: string } | { ok: false; reason: string }> {

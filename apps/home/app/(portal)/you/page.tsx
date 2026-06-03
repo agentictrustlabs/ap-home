@@ -1,19 +1,20 @@
 'use client';
-// "You" — the person agent (default context). Identity card + facts; profile is coming soon.
-import { useState } from 'react';
+// "You" — the person agent (default context). Identity card + facts + your organizations.
+import { useState, useEffect } from 'react';
 import { useSession } from '../../../src/context/session';
+import { listMyOrgs, type MyOrg } from '../../../src/connect-client';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentIdentityCard } from '../../../src/components/portal/AgentIdentityCard';
 import { AddressChip } from '../../../src/components/shared/AddressChip';
-import { UserIcon } from '../../../src/components/shared/Icons';
+import { UserIcon, BuildingIcon } from '../../../src/components/shared/Icons';
 
 const EXPLORER = 'https://sepolia.basescan.org/address/';
 
 export default function YouPage() {
-  const { agentName, agentAddress, profile } = useSession();
+  const { session, agentName, agentAddress, profile } = useSession();
   return (
     <SectionShell
       title="You"
@@ -36,6 +37,8 @@ export default function YouPage() {
           <div><dt>Access</dt><dd>{profile?.access === 'standard' ? 'Standard' : 'Full access'}</dd></div>
         </dl>
       </div>
+
+      <YourOrganizations token={session?.token ?? null} />
 
       <GoogleHomeSection />
 
@@ -99,6 +102,58 @@ function GoogleHomeSection() {
         this home without Google, add a passkey or wallet on the Security page.)
       </p>
       {err && <p className="onboarding-hint taken">{err}</p>}
+    </div>
+  );
+}
+
+function purposeLabel(p: string): string {
+  if (p === 'jp-adopter-org') return 'Adopter org';
+  if (p === 'jp-facilitator-org') return 'Facilitator org';
+  return p.replace(/-/g, ' ');
+}
+
+// Your organizations — read from YOUR private vault (spec 246 / ADR-0025). The person↔org
+// link lives here at your home, never as a public on-chain edge; apps only see what you delegate.
+function YourOrganizations({ token }: { token: string | null }) {
+  const [orgs, setOrgs] = useState<MyOrg[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!token) { setLoaded(true); return; }
+    let cancelled = false;
+    void listMyOrgs(token)
+      .then((o) => { if (!cancelled) { setOrgs(o); setLoaded(true); } })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  return (
+    <div className="dash-section" style={{ marginTop: '1.5rem' }}>
+      <h2>Your organizations</h2>
+      <p style={{ color: 'var(--c-g500, #64748b)', fontSize: '.9rem', marginTop: '-.4rem', marginBottom: '.8rem' }}>
+        Organizations you created — each its own Smart Agent, custodied by you. This link is private to
+        your home; apps only see what you delegate to them.
+      </p>
+      {!loaded ? (
+        <p className="manage-card-blurb">Loading…</p>
+      ) : orgs.length === 0 ? (
+        <p className="manage-card-blurb">No organizations yet — create one from a community app.</p>
+      ) : (
+        <div className="manage-grid">
+          {orgs.map((o) => (
+            <div className="manage-card" key={o.orgAgent}>
+              <div className="manage-card-head">
+                <span className="manage-card-label"><BuildingIcon size={16} /> {o.orgName || '(unnamed org)'}</span>
+                <span className="manage-card-badge live">{purposeLabel(o.purpose)}</span>
+              </div>
+              <div style={{ margin: '.45rem 0' }}><AddressChip address={o.orgAgent} size="sm" /></div>
+              <p className="manage-card-blurb">
+                Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
+                delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

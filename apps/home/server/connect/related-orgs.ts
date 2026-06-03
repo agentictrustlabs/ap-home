@@ -24,15 +24,18 @@ export const onRequestOptions = async ({ request }: FnContext): Promise<Response
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const url = new URL(request.url);
+  // `client_id` present → a RELYING app's scoped view (orgs it requested; token aud = client_id).
+  // `client_id` absent  → the PERSON's OWN home view (ALL their orgs; token aud = the home aud).
   const clientId = url.searchParams.get('client_id');
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : url.searchParams.get('id_token') ?? '';
-  if (!clientId || !token) return jsonCors({ error: 'client_id + id_token required' }, request, 400);
+  if (!token) return jsonCors({ error: 'id_token required' }, request, 400);
 
   const iss = resolveOrigin(request, env);
+  const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: clientId, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: iss });
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
@@ -45,13 +48,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     if (!raw) continue;
     const link = JSON.parse(raw) as {
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
-      siteDelegation: unknown; proofHash: string | null;
+      siteDelegation: unknown; proofHash: string | null; createdAt?: number;
     };
-    if (link.requestedBy !== clientId) continue; // scoped to the calling relying app
+    if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
     orgs.push({
       orgAgent: link.orgAgent,
       orgName: link.orgName,
       purpose: link.purpose,
+      requestedBy: link.requestedBy,
+      createdAt: link.createdAt ?? null,
       delegation: link.siteDelegation,
       proofHash: link.proofHash,
     });
