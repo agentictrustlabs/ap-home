@@ -2390,9 +2390,11 @@ async function verifyDelegation(
  */
 async function callMcpToolViaDelegation(args: {
   env: Env;
-  toolName: 'get_pii' | 'get_org_sensitive';
+  toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
   delegation: IncomingDelegation;
   requester: Address;
+  /** Tool args forwarded to demo-mcp (e.g. vault recordType/data). Default {}. */
+  toolArgs?: Record<string, unknown>;
 }): Promise<Response> {
   // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side
   //    rejection; same proof either way).
@@ -2447,7 +2449,7 @@ async function callMcpToolViaDelegation(args: {
   );
 
   // 5. Service-MAC envelope for the worker-to-worker call.
-  const requestBody = JSON.stringify({ token, args: {} });
+  const requestBody = JSON.stringify({ token, args: args.toolArgs ?? {} });
   const macProvider = buildMacProvider(MCP_AUDIENCE, {
     backend: 'local-aes',
     config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
@@ -2545,6 +2547,79 @@ app.post('/mcp/org/sensitive', async (c) => {
       { ok: false, error: 'org_data_failed', detail: e instanceof Error ? e.message : String(e) },
       500,
     );
+  }
+});
+
+// ─── Generic per-agent vault proxy (spec 247) ─────────────────────────────
+//
+// get/set/list arbitrary JSON in an agent's OWN demo-mcp vault. The caller
+// presents a delegation the OWNER issued (delegator = owner, delegate =
+// requester); callMcpToolViaDelegation verifies it, mints a token with
+// sub = owner, and demo-mcp keys the record by that owner. recordType/data
+// ride in the forwarded tool args.
+
+app.post('/mcp/vault/get', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      delegation: IncomingDelegation;
+      requester: Address;
+      recordType: string;
+    } | null;
+    if (!body?.delegation || !body?.requester || !body?.recordType) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    return await callMcpToolViaDelegation({
+      env: c.env,
+      toolName: 'get_vault_record',
+      delegation: body.delegation,
+      requester: body.requester,
+      toolArgs: { recordType: body.recordType },
+    });
+  } catch (e) {
+    return c.json({ ok: false, error: 'vault_get_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.post('/mcp/vault/set', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      delegation: IncomingDelegation;
+      requester: Address;
+      recordType: string;
+      data: unknown;
+    } | null;
+    if (!body?.delegation || !body?.requester || !body?.recordType) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    return await callMcpToolViaDelegation({
+      env: c.env,
+      toolName: 'set_vault_record',
+      delegation: body.delegation,
+      requester: body.requester,
+      toolArgs: { recordType: body.recordType, data: body.data },
+    });
+  } catch (e) {
+    return c.json({ ok: false, error: 'vault_set_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.post('/mcp/vault/list', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      delegation: IncomingDelegation;
+      requester: Address;
+    } | null;
+    if (!body?.delegation || !body?.requester) {
+      return c.json({ ok: false, error: 'bad_body' }, 400);
+    }
+    return await callMcpToolViaDelegation({
+      env: c.env,
+      toolName: 'list_vault_record',
+      delegation: body.delegation,
+      requester: body.requester,
+    });
+  } catch (e) {
+    return c.json({ ok: false, error: 'vault_list_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

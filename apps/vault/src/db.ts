@@ -269,3 +269,71 @@ export async function getOrgSensitive(
       .first<OrgSensitive>()) ?? undefined
   );
 }
+
+// ─── Generic per-agent vault (spec 247) ───────────────────────────────
+//
+// Arbitrary JSON keyed by (owner_address, record_type). `owner` is always
+// the recovered delegation principal at the call site, so these helpers
+// never key by anything but the agent acting on its OWN namespace.
+
+/** Read one live record; `null` when absent or tombstoned. */
+export async function getVaultRecord(
+  db: D1Database,
+  owner: string,
+  recordType: string,
+): Promise<unknown | null> {
+  const row = await db
+    .prepare(
+      'SELECT data_json FROM vault_records WHERE owner_address = ? AND record_type = ? AND deleted_at IS NULL',
+    )
+    .bind(owner.toLowerCase(), recordType)
+    .first<{ data_json: string }>();
+  if (!row) return null;
+  try {
+    return JSON.parse(row.data_json);
+  } catch {
+    return null;
+  }
+}
+
+/** Upsert a record. `data === null|undefined` soft-deletes (tombstone). */
+export async function setVaultRecord(
+  db: D1Database,
+  owner: string,
+  recordType: string,
+  data: unknown,
+): Promise<void> {
+  if (data === null || data === undefined) {
+    await db
+      .prepare(
+        'UPDATE vault_records SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE owner_address = ? AND record_type = ?',
+      )
+      .bind(owner.toLowerCase(), recordType)
+      .run();
+    return;
+  }
+  await db
+    .prepare(
+      `INSERT INTO vault_records (owner_address, record_type, data_json) VALUES (?, ?, ?)
+       ON CONFLICT(owner_address, record_type) DO UPDATE SET
+         data_json = excluded.data_json,
+         updated_at = CURRENT_TIMESTAMP,
+         deleted_at = NULL`,
+    )
+    .bind(owner.toLowerCase(), recordType, JSON.stringify(data))
+    .run();
+}
+
+/** Enumerate the owner's live record types (no payloads). */
+export async function listVaultRecords(
+  db: D1Database,
+  owner: string,
+): Promise<Array<{ record_type: string; updated_at: string }>> {
+  const res = await db
+    .prepare(
+      'SELECT record_type, updated_at FROM vault_records WHERE owner_address = ? AND deleted_at IS NULL ORDER BY record_type',
+    )
+    .bind(owner.toLowerCase())
+    .all<{ record_type: string; updated_at: string }>();
+  return res.results ?? [];
+}
