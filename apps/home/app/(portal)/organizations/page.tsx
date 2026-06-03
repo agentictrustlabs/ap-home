@@ -28,7 +28,7 @@ export default function OrganizationsPage() {
       }
     >
       {selected ? (
-        <OrgDetail org={selected} onBack={() => setSelected(null)} />
+        <OrgDetail org={selected} token={session?.token ?? null} onBack={() => setSelected(null)} />
       ) : (
         <>
           <OrgList token={session?.token ?? null} heading={false} onSelect={setSelected} />
