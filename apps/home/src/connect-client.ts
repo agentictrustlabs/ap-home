@@ -1223,7 +1223,9 @@ export interface ReceivedDelegation {
   viaOrgName: string;
   orgAgent: Address;
   orgName: string;
-  delegation?: unknown;
+  /** The grantor→viaOrg delegation (delegator = the member org), so the governing person
+   *  can read that member's vault over it (spec 247). */
+  delegation?: DelegationWire;
 }
 
 /** List the inbound delegations the person's orgs received, for the /you delegations

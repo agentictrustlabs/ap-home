@@ -7,7 +7,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { decodeAbiParameters } from 'viem';
 import type { Address } from '@agenticprimitives/types';
-import type { MyOrg } from '../../connect-client';
+import { listMyReceivedDelegations, type MyOrg, type ReceivedDelegation } from '../../connect-client';
 import type { DelegationWire } from '../../lib/delegation';
 import { CONTRACTS } from '../../lib/chain';
 import { vaultListWithDelegation, vaultReadWithDelegation, vaultWriteWithDelegation, type VaultRecordRef } from '../../lib/vault-client';
@@ -245,7 +245,115 @@ function OrgProfileManager({ delegation }: { delegation: DelegationWire }) {
   );
 }
 
-export function OrgDetail({ org, onBack }: { org: MyOrg; onBack: () => void }) {
+/** One member of the org — an agent that delegated to it (org→org broker grant). The
+ *  delegation's delegator IS the member, so we read the member's vault over it. */
+function MemberCard({ m }: { m: ReceivedDelegation }) {
+  const d = m.delegation;
+  const [open, setOpen] = useState(false);
+  const [profile, setProfile] = useState<OrgProfile | null>(null);
+  const [records, setRecords] = useState<VaultRecordRef[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setOpen(true);
+    if (!d || records) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const [p, recs] = await Promise.all([
+        vaultReadWithDelegation<OrgProfile>(d, RT_ORG_PROFILE),
+        vaultListWithDelegation(d),
+      ]);
+      setProfile(p);
+      setRecords(recs);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'read failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="manage-card">
+      <div className="manage-card-head">
+        <span className="manage-card-label">{m.orgName || 'member'}</span>
+        <span className="manage-card-badge live">Member</span>
+      </div>
+      <div style={{ margin: '.45rem 0' }}><AddressChip address={m.orgAgent} size="sm" withName /></div>
+      {!d ? (
+        <p className="manage-card-blurb">No readable delegation for this member.</p>
+      ) : !open ? (
+        <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => void load()}>
+          View member details →
+        </button>
+      ) : busy ? (
+        <p className="manage-card-blurb">Reading {m.orgName || 'member'}&rsquo;s vault…</p>
+      ) : err ? (
+        <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read: {err}</p>
+      ) : (
+        <div style={{ fontSize: '.8rem' }}>
+          {profile && (profile.displayName || profile.description || profile.website || profile.contactEmail || profile.location) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.2rem', marginBottom: '.4rem' }}>
+              {profile.displayName && <div><b>{profile.displayName}</b></div>}
+              {profile.description && <div style={{ color: 'var(--c-g600, #475569)' }}>{profile.description}</div>}
+              {profile.website && <div style={{ color: 'var(--c-g500, #64748b)' }}>{profile.website}</div>}
+              {profile.contactEmail && <div style={{ color: 'var(--c-g500, #64748b)' }}>{profile.contactEmail}</div>}
+              {profile.location && <div style={{ color: 'var(--c-g500, #64748b)' }}>{profile.location}</div>}
+            </div>
+          ) : (
+            <p className="manage-card-blurb">No profile set yet.</p>
+          )}
+          <div style={{ color: 'var(--c-g500, #64748b)', fontSize: '.72rem' }}>
+            {records && records.length > 0 ? `Records: ${records.map((r) => r.record_type).join(', ')}` : 'No vault records.'}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Members of the org = the agents that delegated TO it (the broker pool). Person-session
+ *  authorized via /connect/received-delegations, filtered to this org. Each carries the
+ *  member→org delegation, so we can read each member's details over it. */
+function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
+  const [members, setMembers] = useState<ReceivedDelegation[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!token) { setLoaded(true); return; }
+    let cancelled = false;
+    listMyReceivedDelegations(token)
+      .then((all) => {
+        if (cancelled) return;
+        setMembers(all.filter((r) => r.viaOrg.toLowerCase() === org.orgAgent.toLowerCase()));
+        setLoaded(true);
+      })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [token, org.orgAgent]);
+
+  return (
+    <div className="dash-section" style={{ marginTop: '1.25rem' }}>
+      <h3 style={{ fontSize: '.95rem', margin: '0 0 .2rem' }}>Members</h3>
+      <p style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)', margin: '0 0 .7rem' }}>
+        Agents that delegated to <b>{org.orgName || 'this org'}</b> — its members. Each granted a scoped
+        delegation, so you can read their details over it (their data stays in their own vault).
+      </p>
+      {!loaded ? (
+        <p className="manage-card-blurb">Loading members…</p>
+      ) : members.length === 0 ? (
+        <p className="manage-card-blurb">No members yet — no agent has delegated to this organization.</p>
+      ) : (
+        <div className="manage-grid">
+          {members.map((m, i) => <MemberCard key={`${m.orgAgent}-${i}`} m={m} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | null; onBack: () => void }) {
   const created = org.createdAt ? new Date(org.createdAt).toLocaleString() : '—';
   return (
     <div>
@@ -277,6 +385,9 @@ export function OrgDetail({ org, onBack }: { org: MyOrg; onBack: () => void }) {
           {org.stewardshipDelegation && <DelegationCard kind="Stewardship" d={org.stewardshipDelegation} />}
         </div>
       </div>
+
+      {/* Members — agents that delegated to this org (read each over their grant) */}
+      <OrgMembers org={org} token={token} />
 
       {/* Stewardship — manage + read the org's own vault */}
       {org.stewardshipDelegation ? (
