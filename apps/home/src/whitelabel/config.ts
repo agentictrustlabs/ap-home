@@ -48,7 +48,7 @@ const faithImpact: WhiteLabelConfig = {
       name: 'JP Adopt',
       redirect_uris: ['https://agenticprimitives-demo-jp.pages.dev/', 'http://localhost:5573/'],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'jp-data-access'],
       // TODO: deploy a JP-specific delegate SA + replace here (SEC-003 follow-up — user has
       // deferred per-app delegates for now; the broker still enforces "delegate matches
       // registered" so a future split is a config-only change).
@@ -66,6 +66,22 @@ const faithImpact: WhiteLabelConfig = {
     'org-create': {
       canDo: ['Set up an organization under your name', 'View approved org records for this session'],
       cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
+      expiryDays: 365,
+    },
+    // spec 247 — JP's adoption program reads + writes the data it holds for you (your
+    // profile + program records) in YOUR vault, through this scoped grant. The records
+    // stay in your vault; JP holds the permission, not a copy of your data.
+    'jp-data-access': {
+      canDo: [
+        'Sign in as you in the missional community',
+        'Read your profile + adoption records from your vault',
+        'Record your MOU, adoption, and program updates into your vault, on your behalf',
+      ],
+      cannotDo: [
+        'Move your funds',
+        'Add new sign-in methods or change your recovery',
+        'Share your records with anyone else without a new permission',
+      ],
       expiryDays: 365,
     },
   },
