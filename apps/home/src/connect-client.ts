@@ -562,6 +562,11 @@ export interface CreatedAgent {
   proofHash: Hex;
   /** Optional org → broker-org delegation (so a broker can later list its orgs). */
   brokerDelegation?: DelegationWire;
+  /** spec 246 — person↔org scoped read delegations, both signed by the ROOT (custodian
+   *  of BOTH SAs). membership = person→org (the created ORG can read the MEMBER person's
+   *  data); stewardship = org→person (the PERSON can read / oversee the org's data). */
+  membershipDelegation: DelegationWire;
+  stewardshipDelegation: DelegationWire;
 }
 
 export interface CreateChildOpts {
@@ -656,12 +661,22 @@ export async function createChildAgentForSite(
     brokerDelegation = toWire(await issueSiteDelegation(childAgent, cOpts.grantOrg, passkeySignHash));
   }
 
+  // spec 246 — the person↔org read delegations. Both are signed by the ROOT passkey,
+  // which custodies BOTH the person SA and the org SA (the org is custodied by the
+  // person's ROOT), so each side's ERC-1271 validates the same credential.
+  onStep?.('Linking you and your organization…');
+  // membership: person → org — the created ORG can read the MEMBER person's data.
+  const membershipDelegation = toWire(await issueSiteDelegation(personAgent, childAgent, passkeySignHash));
+  // stewardship: org → person — the PERSON can read / oversee the org's data.
+  const stewardshipDelegation = toWire(await issueSiteDelegation(childAgent, personAgent, passkeySignHash));
+
   return {
     ok: true,
     result: {
       childAgent, childName: claim.name, edgeId, governed: false,
       delegation: toWire(delegation),
       person: personAgent, purpose, requestedBy, credential, proofHash, brokerDelegation,
+      membershipDelegation, stewardshipDelegation,
     },
   };
 }
