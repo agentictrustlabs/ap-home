@@ -105,20 +105,34 @@ async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<Sig
 }
 
 /**
- * Set up an organization you'll help oversee — a home of its own, custodied by you, linked
- * to you on-chain, with a scoped grant for the app. (Wraps createChildAgentForSite.)
+ * Set up an organization you'll help oversee — a home of its own, custodied by you, with a
+ * private vault credential recording the link (ADR-0025) + a scoped grant for the app.
+ * (Wraps createChildAgentForSite.)
  */
 export async function createOrganization(
   home: Home,
   base: string,
   delegate: Address,
-): Promise<Result<{ org: { orgAgent: Address; orgName: string; edgeId: string; governed: boolean }; grant: unknown }>> {
-  const r = await createChildAgentForSite(home.address, base, delegate);
+  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address } = {},
+): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
+  const r = await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
   if (!r.ok) return r;
   const x = r.result;
+  // ADR-0025: the `org` payload carries the private credential + the person SA so the
+  // server's /oidc/grant step can write the vault; the relying app receives only the org
+  // metadata + proofHash + (optional) brokerDelegation back via /token.
   return {
     ok: true,
-    org: { orgAgent: x.childAgent, orgName: x.childName, edgeId: x.edgeId, governed: x.governed },
+    org: {
+      orgAgent: x.childAgent,
+      orgName: x.childName,
+      person: x.person,
+      purpose: x.purpose,
+      requestedBy: x.requestedBy,
+      proofHash: x.proofHash,
+      credential: x.credential,
+      brokerDelegation: x.brokerDelegation ?? null,
+    },
     grant: x.delegation,
   };
 }

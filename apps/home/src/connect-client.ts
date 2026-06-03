@@ -18,6 +18,7 @@ import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, loadPass
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { issueSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
+import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
 /** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
 export type SignHash = (hash: Hex) => Promise<Hex>;
@@ -551,6 +552,25 @@ export interface CreatedAgent {
   edgeId: Hex;
   governed: boolean;
   delegation: DelegationWire; // child → relying site's delegate SA (scoped)
+  /** ADR-0025: the person SA + the private related-agent credential (self-issued,
+   *  unsigned for the demo — the proofHash anchors integrity; the vault store at
+   *  the person's home during the authenticated ceremony provides provenance). */
+  person: Address;
+  purpose: string;
+  requestedBy: string;
+  credential: unknown;
+  proofHash: Hex;
+  /** Optional org → broker-org delegation (so a broker can later list its orgs). */
+  brokerDelegation?: DelegationWire;
+}
+
+export interface CreateChildOpts {
+  /** App-level purpose tag, e.g. `jp-adopter-org` (free string — ADR-0021). */
+  purpose?: string;
+  /** The relying app's OIDC client_id (who requested the link). */
+  requestedBy?: string;
+  /** A broker org SA to also grant scoped read access to (org → broker delegation). */
+  grantOrg?: Address;
 }
 
 /** Deploy a child SA (org / service agent) custodied by the ROOT passkey, claim `<base>.demo.agent`,
@@ -563,6 +583,7 @@ export async function createChildAgentForSite(
   delegateSA: Address,
   onStep?: (s: string) => void,
   relationshipType: RelationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType,
+  cOpts: CreateChildOpts = {},
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
   const pk = loadPasskey();
   if (!pk) return { ok: false, error: 'Your central-auth passkey isn’t on this device — sign in to Agentic Connect first.' };
@@ -610,7 +631,39 @@ export async function createChildAgentForSite(
   // child → relying site's delegate SA, signed by the ROOT passkey (child's custodian).
   const delegation = await issueSiteDelegation(childAgent, delegateSA, passkeySignHash);
 
-  return { ok: true, result: { childAgent, childName: claim.name, edgeId, governed: false, delegation: toWire(delegation) } };
+  // ADR-0025 / spec 246: the private, self-issued related-agent credential — the
+  // person's own vault record of "I have this org, created for this app's flow".
+  // Built unsigned (no extra device prompt); the proofHash anchors integrity and
+  // the vault store happens at the home during this authenticated ceremony.
+  const purpose = cOpts.purpose ?? 'related-org';
+  const requestedBy = cOpts.requestedBy ?? '';
+  const credential = buildRelatedAgentCredential({
+    holder: personAgent,
+    relatedAgent: childAgent,
+    purpose,
+    requestedBy,
+    issuerCaip10: `eip155:${CHAIN_ID}:${personAgent}`,
+    body: { agentName: claim.name },
+    validFrom: new Date().toISOString(),
+  });
+  const proofHash = relatedAgentProofHash(credential);
+
+  // Optional org → broker-org scoped delegation (the broker can later enumerate its
+  // delegated orgs — spec 246 §5). Signed by the ROOT passkey (the org's custodian).
+  let brokerDelegation: DelegationWire | undefined;
+  if (cOpts.grantOrg && cOpts.grantOrg.toLowerCase() !== delegateSA.toLowerCase()) {
+    onStep?.('Granting the broker scoped access…');
+    brokerDelegation = toWire(await issueSiteDelegation(childAgent, cOpts.grantOrg, passkeySignHash));
+  }
+
+  return {
+    ok: true,
+    result: {
+      childAgent, childName: claim.name, edgeId, governed: false,
+      delegation: toWire(delegation),
+      person: personAgent, purpose, requestedBy, credential, proofHash, brokerDelegation,
+    },
+  };
 }
 
 // ── Add a second custody credential to an existing agent (the unification) ──

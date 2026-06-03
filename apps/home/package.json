@@ -2,7 +2,7 @@
   "name": "@agenticprimitives-demo/sso-next",
   "version": "0.0.2-alpha.2",
   "private": true,
-  "description": "Agentic Connect (Next.js / Vercel migration of demo-sso, spec 232): unified per-agent endpoint at <handle>.impact-agent.io \u2014 SSO broker (humans) + A2A agent (machines). V1 = scaffold + the existing SPA mounted; broker Route Handlers land in V2.",
+  "description": "Agentic Connect (Next.js / Vercel migration of demo-sso, spec 232): unified per-agent endpoint at <handle>.impact-agent.io — SSO broker (humans) + A2A agent (machines). V1 = scaffold + the existing SPA mounted; broker Route Handlers land in V2.",
   "type": "module",
   "scripts": {
     "dev": "next dev --port 5373",
@@ -21,7 +21,9 @@
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/identity-directory": "workspace:*",
     "@agenticprimitives/identity-directory-adapters": "workspace:*",
+    "@agenticprimitives/related-agents": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
+    "@agenticprimitives/verifiable-credentials": "workspace:*",
     "@upstash/redis": "^1.34.0",
     "next": "^15.5.16",
     "react": "^19.0.0",

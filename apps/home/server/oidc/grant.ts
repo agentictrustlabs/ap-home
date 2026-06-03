@@ -94,6 +94,43 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     { expirationTtl: DELEG_BIND_TTL_SEC },
   );
 
+  // ADR-0025 / spec 246: persist the private related-agent link into the person's
+  // vault (Connect-home KV) during this authenticated, home-origin-only ceremony.
+  // `requestedBy` is the SERVER-authoritative client_id (not from the request body).
+  // The relying app later reads it back via /connect/related-orgs (person-session-auth).
+  const orgPayload = body.org as {
+    orgAgent?: string; orgName?: string; person?: string; purpose?: string;
+    proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
+  } | null;
+  if (orgPayload?.orgAgent && orgPayload.person) {
+    const person = orgPayload.person.toLowerCase();
+    const org = orgPayload.orgAgent.toLowerCase();
+    const link = {
+      orgAgent: orgPayload.orgAgent,
+      orgName: orgPayload.orgName ?? '',
+      purpose: orgPayload.purpose ?? 'related-org',
+      requestedBy: grant.client_id,
+      siteDelegation: body.delegation,
+      brokerDelegation: orgPayload.brokerDelegation ?? null,
+      proofHash: orgPayload.proofHash ?? null,
+      credential: orgPayload.credential ?? null,
+      createdAt: Date.now(),
+    };
+    await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
+    const idxKey = `related-idx:${person}`;
+    const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
+    if (!idx.includes(org)) { idx.push(org); await env.AUTH_CODES.put(idxKey, JSON.stringify(idx)); }
+    const bd = orgPayload.brokerDelegation;
+    if (bd?.delegate) {
+      const dKey = `delegated-idx:${bd.delegate.toLowerCase()}`;
+      const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; delegation: unknown }>;
+      if (!dIdx.some((x) => x.orgAgent.toLowerCase() === org)) {
+        dIdx.push({ orgAgent: orgPayload.orgAgent, orgName: orgPayload.orgName ?? '', delegation: bd });
+        await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
+      }
+    }
+  }
+
   // Stash the grant under a single-use code, BOUND to the PKCE challenge + client + redirect.
   const code = newAuthCode();
   await env.AUTH_CODES.put(

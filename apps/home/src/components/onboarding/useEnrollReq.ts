@@ -20,6 +20,8 @@ export interface EnrollReq {
   codeChallenge: string; // PKCE S256 challenge
   template: string; // delegation_template: 'site-login' | 'org-create'
   orgBase?: string; // org_create: the org name to create
+  purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
+  grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -50,6 +52,8 @@ export function parseEnrollReq(): EnrollReq | null {
       codeChallenge,
       template,
       orgBase: p.get('org_base') ?? undefined,
+      purpose: p.get('org_purpose') ?? undefined,
+      grantOrg: (p.get('grant_org') as Address) ?? undefined,
     };
   } catch {
     return null;

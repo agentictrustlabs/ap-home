@@ -298,7 +298,11 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       // SEC-001: registry-derived delegate FROM the server-minted grant (the URL's
       // `api.enroll.delegate` is treated as untrusted hint — the server's binding wins).
       const { grant_id, delegate } = await api.beginGrant(api.enroll.name);
-      const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate);
+      const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate, {
+        purpose: api.enroll.purpose,
+        requestedBy: api.enroll.aud,
+        grantOrg: api.enroll.grantOrg,
+      });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
       const code = await api.submitGrant(grant_id, created.grant, created.org);
       setPhase('connected');
