@@ -598,26 +598,19 @@ export async function createChildAgentForSite(
   );
   if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
 
-  const relationships = CONTRACTS.agentRelationship;
+  // ADR-0025: person↔org is a PRIVATE vault credential, NOT a public on-chain edge.
+  // The control relationship is implicit in custody (the org is custodied by the
+  // person's ROOT credential); we do NOT write any AgentRelationship edge. `edgeId`
+  // stays as a deterministic local id for back-compat of the return shape only —
+  // nothing is recorded on-chain. (The private situation credential + the vault
+  // store live in the org-create grant path; see spec 246.)
   const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
-  const propose = buildProposeEdgeCall({ relationships, subject: personAgent, object: childAgent, relationshipType });
-
-  onStep?.('Recording your control on-chain…');
-  // ROOT passkey is the person's custodian → sign the propose directly on the person SA.
-  const p = await executeCall(personAgent, passkeySignHash, buildExecuteCallData(propose), { attempts: 6 });
-  let governed = p.ok;
-  if (governed) {
-    onStep?.('Confirming the link…');
-    const confirm = buildConfirmEdgeCall({ relationships, edgeId });
-    // child = object (confirmer); deploy+claim was the child's nonce 0, so confirm is nonce 1.
-    await executeCall(childAgent, passkeySignHash, buildExecuteCallData(confirm), { minNonce: 1n, attempts: 6 });
-  }
 
   onStep?.('Granting the site scoped access…');
   // child → relying site's delegate SA, signed by the ROOT passkey (child's custodian).
   const delegation = await issueSiteDelegation(childAgent, delegateSA, passkeySignHash);
 
-  return { ok: true, result: { childAgent, childName: claim.name, edgeId, governed, delegation: toWire(delegation) } };
+  return { ok: true, result: { childAgent, childName: claim.name, edgeId, governed: false, delegation: toWire(delegation) } };
 }
 
 // ── Add a second custody credential to an existing agent (the unification) ──
