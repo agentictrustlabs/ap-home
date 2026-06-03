@@ -1107,6 +1107,27 @@ export interface MyOrg {
   requestedBy: string;
   createdAt: number | null;
   proofHash?: string;
+  /** The scoped org→site delegation the person granted (null for self-governed orgs). */
+  delegation?: unknown;
+}
+
+/** An inbound grant one of the person's orgs RECEIVED (spec 247). org↔org only — no
+ *  grantor person identity (ADR-0025). `viaOrg` is the person's org that holds it. */
+export interface ReceivedDelegation {
+  viaOrg: Address;
+  viaOrgName: string;
+  orgAgent: Address;
+  orgName: string;
+  delegation?: unknown;
+}
+
+/** List the inbound delegations the person's orgs received, for the /you delegations
+ *  view. Person-session-authorized (same-origin, the home session token). */
+export async function listMyReceivedDelegations(token: string): Promise<ReceivedDelegation[]> {
+  const r = await fetch('/connect/received-delegations', { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) return [];
+  const b = (await r.json().catch(() => ({}))) as { received?: ReceivedDelegation[] };
+  return b.received ?? [];
 }
 
 /** List ALL the connected person's organizations (private vault credentials), for the

@@ -5,9 +5,15 @@
 // audience to the calling `client_id`, extract the person SA from the session `sub`, and
 // return that person's related-agent links scoped to this client_id — from the private
 // Connect-home vault (KV). person↔org never travels as public graph state.
+import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+
+const ERC1271_MAGIC = '0x1626ba7e';
+const ERC1271_ABI = [
+  { type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'bytes' }], outputs: [{ type: 'bytes4' }] },
+] as const;
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -62,4 +68,57 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     });
   }
   return jsonCors({ orgs }, request);
+};
+
+// POST /connect/related-orgs  (spec 247) — register a person→org link the person
+// already governs (e.g. demo-jp's operator orgs, created outside the Connect
+// org-create ceremony). Authorized by CONTROL OF THE PERSON SA: the caller signs
+// the fixed challenge `keccak256("related-orgs:write:<person>")` with a custodian
+// of the person SA; we verify via ERC-1271. Writes the same KV the GET reads, so
+// the link surfaces in /you's existing related-orgs query — no new data source.
+export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  const body = (await request.json().catch(() => null)) as {
+    person?: string; orgAgent?: string; orgName?: string; purpose?: string;
+    requestedBy?: string; sig?: string; siteDelegation?: unknown; proofHash?: string | null;
+  } | null;
+  const person = (body?.person ?? '').toLowerCase();
+  const org = (body?.orgAgent ?? '').toLowerCase();
+  const sig = (body?.sig ?? '') as Hex;
+  if (!/^0x[0-9a-f]{40}$/.test(person) || !/^0x[0-9a-f]{40}$/.test(org) || !sig.startsWith('0x')) {
+    return jsonCors({ error: 'person, orgAgent (0x…40) + sig required' }, request, 400);
+  }
+
+  // Control-of-person proof (ERC-1271 over the fixed per-person challenge).
+  const challenge = keccak256(toBytes(`related-orgs:write:${person}`));
+  const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
+  let valid = false;
+  try {
+    const r = (await client.readContract({
+      address: person as Hex,
+      abi: ERC1271_ABI,
+      functionName: 'isValidSignature',
+      args: [challenge, sig],
+    })) as string;
+    valid = r === ERC1271_MAGIC;
+  } catch {
+    valid = false;
+  }
+  if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
+
+  const link = {
+    orgAgent: org,
+    orgName: body?.orgName ?? '',
+    purpose: body?.purpose ?? '',
+    requestedBy: body?.requestedBy ?? '',
+    siteDelegation: body?.siteDelegation ?? null,
+    proofHash: body?.proofHash ?? null,
+    createdAt: Date.now(),
+  };
+  await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
+  const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+  if (!idx.includes(org)) {
+    idx.push(org);
+    await env.AUTH_CODES.put(`related-idx:${person}`, JSON.stringify(idx));
+  }
+  return jsonCors({ ok: true }, request);
 };
