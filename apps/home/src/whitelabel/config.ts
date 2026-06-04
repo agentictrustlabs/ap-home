@@ -54,6 +54,18 @@ const faithImpact: WhiteLabelConfig = {
       // registered" so a future split is a config-only change).
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // spec 250/251 — "Global Switchboard" relying app (demo-gs): a skills/expertise broker.
+    // A person signs in (KC individual) or creates a GCO organization (the org holds the GCO
+    // role) — both through the shared Global.Church identity, exactly the Phase-2 "one-tap"
+    // arrival the Switchboard pilot describes. demo-gs holds no PII; site-login + org-create only.
+    {
+      client_id: 'demo-gs',
+      name: 'Global Switchboard',
+      redirect_uris: ['https://agenticprimitives-demo-gs.pages.dev/', 'http://localhost:5673/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
