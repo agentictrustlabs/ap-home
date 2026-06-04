@@ -2178,6 +2178,21 @@ const ERC1271_ABI = [
   },
 ] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
+/** spec 253 — DelegationManager.isRevoked(bytes32) read. revokeDelegationByOwner sets the
+ *  revoked flag but does NOT clear an approved hash, so for an approved-hash (0x03 sentinel)
+ *  delegation revocation is the ONLY kill switch — verifyDelegation must honor it off-chain,
+ *  not just on-chain at redeem. Checked for ALL delegations (the gap exists for signed ones too). */
+const IS_REVOKED_ABI = [
+  {
+    type: 'function',
+    name: 'isRevoked',
+    stateMutability: 'view',
+    inputs: [{ name: 'delegationHash', type: 'bytes32' }],
+    outputs: [{ name: 'revoked', type: 'bool' }],
+  },
+] as const;
+/** spec 253 — the approved-hash sentinel wire signature (validated via the SA's ERC-1271 0x03 branch). */
+const APPROVED_HASH_SENTINEL = '0x03';
 
 interface IncomingCaveat {
   enforcer: Address;
@@ -2249,6 +2264,22 @@ async function verifyDelegation(
     Number(env.CHAIN_ID ?? 84532),
     env.DELEGATION_MANAGER as Address,
   );
+  // spec 253 (auditor P0 #2) — fail closed on revocation BEFORE trusting the signature. For an
+  // approved-hash (0x03 sentinel) delegation the approved hash never expires, so owner revocation
+  // is the only kill switch; it must be honored here off-chain, not only at on-chain redeem. We
+  // check it for ALL delegations (the same gap existed for signature-bearing ones). On any error
+  // we reject (ADR-0013: one mechanism, fail closed — never proceed on unknown revocation state).
+  try {
+    const revoked = (await pub.readContract({
+      address: env.DELEGATION_MANAGER as Address,
+      abi: IS_REVOKED_ABI,
+      functionName: 'isRevoked',
+      args: [digest],
+    })) as boolean;
+    if (revoked) return { ok: false, reason: 'delegation revoked by owner' };
+  } catch (e) {
+    return { ok: false, reason: `revocation check failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
   try {
     const magic = (await pub.readContract({
       address: delegation.delegator,
@@ -2257,6 +2288,16 @@ async function verifyDelegation(
       args: [digest, delegation.signature],
     })) as Hex;
     if (magic.toLowerCase() !== ERC1271_MAGIC) {
+      // spec 253 — approved-hash (0x03 sentinel) delegation: a mismatch means the SA did NOT
+      // have this digest approved (never approved, wrong digest, or the approval is absent). The
+      // WebAuthn diagnostics below don't apply; return a clear, specific reason. (Revocation was
+      // already handled above by the isRevoked gate.)
+      if ((delegation.signature as Hex).toLowerCase() === APPROVED_HASH_SENTINEL) {
+        return {
+          ok: false,
+          reason: `approved-hash not found for digest ${digest} on delegator ${delegation.delegator} (not approved or digest mismatch)`,
+        };
+      }
       // Diagnostics: parse the WebAuthn assertion to compare what the SA
       // STORES vs. what the signature CARRIES (rpIdHash, credentialIdDigest,
       // pubkey).

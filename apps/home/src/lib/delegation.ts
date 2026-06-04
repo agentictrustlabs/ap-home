@@ -47,6 +47,29 @@ function siteCaveats(validUntil: number): Caveat[] {
   ];
 }
 
+/** spec 253 — the approved-hash sentinel signature. A delegation carrying this 1-byte wire
+ *  signature is NOT signed off-chain; instead its delegator SA pre-approved the EIP-712 digest
+ *  in the ApprovedHashRegistry (inside the delegator's own userOp), and the SA's ERC-1271
+ *  `isValidSignature` honors it via the `0x03` branch. Lets an org batch all of its outbound
+ *  grants' approvals into one deploy userOp — one passkey instead of one-per-grant. */
+export const APPROVED_HASH_SENTINEL: Hex = '0x03';
+
+/** Build the unsigned delegation struct (shared by the signed + approved-hash variants). */
+function buildSiteDelegation(delegator: Address, delegateSA: Address, validitySeconds: number): Delegation {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  return {
+    delegator,
+    delegate: delegateSA,
+    authority: ROOT_AUTHORITY,
+    caveats: siteCaveats(validUntil),
+    salt,
+    signature: '0x',
+  };
+}
+
 /** Issue `personAgent → delegateSA` with the default site caveats, signed by the ROOT
  *  credential (`signHash`). `delegate` is the relying site's delegate SA so redemption is
  *  bound to that account (DelegationManager requires `delegate == msg.sender`). */
@@ -56,19 +79,25 @@ export async function issueSiteDelegation(
   signHash: SignHash,
   validitySeconds = 60 * 60 * 24 * 365,
 ): Promise<Delegation> {
-  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let salt = 0n;
-  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
-  const d: Delegation = {
-    delegator: personAgent,
-    delegate: delegateSA,
-    authority: ROOT_AUTHORITY,
-    caveats: siteCaveats(validUntil),
-    salt,
-    signature: '0x',
-  };
+  const d = buildSiteDelegation(personAgent, delegateSA, validitySeconds);
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = await signHash(digest); // ROOT passkey signs the EIP-712 delegation digest
   return d;
+}
+
+/** spec 253 — build a `delegator → delegateSA` site delegation WITHOUT an off-chain signature.
+ *  Returns the delegation (wire signature = the `0x03` sentinel) plus its EIP-712 `digest`, so
+ *  the caller batches `approvedHashRegistry.approveHash(digest)` into the DELEGATOR's own userOp.
+ *  The digest excludes the signature field, so it is identical to what the relayer + on-chain
+ *  redeem recompute. The delegator MUST be the account whose userOp runs the `approveHash`
+ *  (i.e. the org being deployed) — only the org can approve hashes under its own address. */
+export function buildApprovedSiteDelegation(
+  delegator: Address,
+  delegateSA: Address,
+  validitySeconds = 60 * 60 * 24 * 365,
+): { delegation: Delegation; digest: Hex } {
+  const d = buildSiteDelegation(delegator, delegateSA, validitySeconds);
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch
+  return { delegation: d, digest };
 }

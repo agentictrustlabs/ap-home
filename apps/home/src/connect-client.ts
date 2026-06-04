@@ -2,7 +2,12 @@
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
 import { buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
-import { buildExecuteCallData, buildExecuteBatchCallData, AgentAccountClient } from '@agenticprimitives/agent-account';
+import {
+  buildExecuteCallData,
+  buildExecuteBatchCallData,
+  AgentAccountClient,
+  type ContractCall,
+} from '@agenticprimitives/agent-account';
 import {
   buildProposeEdgeCall,
   buildConfirmEdgeCall,
@@ -17,7 +22,7 @@ import { connectWallet, personalSign } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
-import { issueSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
+import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
 /** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
@@ -364,7 +369,7 @@ async function buildClaimCallData(
   base: string,
   sa: Address,
   onStep?: (s: string) => void,
-): Promise<{ ok: true; callData: Hex; name: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string }> {
   onStep?.('Finding a free name…');
   const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
     label?: string;
@@ -375,7 +380,25 @@ async function buildClaimCallData(
   if (!picked.name || !picked.node || !picked.label) return { ok: false, error: picked.error ?? 'no free name' };
   const register = buildSubregistryRegisterCall({ subregistry: CONTRACTS.permissionlessSubregistry, label: picked.label, newOwner: sa });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
-  return { ok: true, callData: buildExecuteBatchCallData([register, setPrimary]), name: picked.name };
+  // `calls` is surfaced so an org-create can EXTEND the batch with approveHash(digest) calls
+  // (spec 253) and still deploy + claim + approve in ONE userOp. `callData` is the standalone
+  // deploy+claim batch for the simpler person-SA bootstrap callers.
+  const calls: ContractCall[] = [register, setPrimary];
+  return { ok: true, callData: buildExecuteBatchCallData(calls), calls, name: picked.name };
+}
+
+/** spec 253 — `ContractCall` for `ApprovedHashRegistry.approveHash(digest)`. Batched into the
+ *  delegator org's deploy userOp so the org pre-approves its outbound grants' digests; each
+ *  grant then validates via the org SA's ERC-1271 `0x03` approved-hash branch. */
+const APPROVE_HASH_ABI = [
+  { type: 'function', name: 'approveHash', stateMutability: 'nonpayable', inputs: [{ name: 'hash', type: 'bytes32' }], outputs: [] },
+] as const;
+function buildApproveHashCall(digest: Hex): ContractCall {
+  return {
+    to: CONTRACTS.approvedHashRegistry,
+    value: 0n,
+    data: encodeFunctionData({ abi: APPROVE_HASH_ABI, functionName: 'approveHash', args: [digest] }),
+  };
 }
 
 /** Bootstrap a passkey-direct person SA (no server custodian ever, P0-A). When `callData` is
@@ -607,7 +630,32 @@ export async function createChildAgentForSite(
   const claim = await buildClaimCallData(base, childAgent, onStep);
   if (!claim.ok) return { ok: false, error: claim.error };
 
-  onStep?.('Deploying the agent + claiming its name…');
+  // spec 253 — ONE PROMPT. The org's outbound grants are built as approved-hash (0x03
+  // sentinel) delegations BEFORE deploy; each grant's approveHash(digest) is batched into
+  // the org's deploy userOp. The org (childAgent) is the delegator of all three, so it can
+  // pre-approve their digests under its own address in the SAME op it deploys — no per-grant
+  // passkey. Build each delegation ONCE and reuse the exact struct on the wire, so the digest
+  // approved on-chain == the digest the relayer + redeem recompute (no salt re-randomization).
+  //   • site grant:  child → relying site's delegate SA
+  //   • broker grant: child → grantOrg (optional)
+  //   • stewardship: child → person (the person can read / oversee the org's data)
+  // MEMBERSHIP (person → org) is the one grant the org CAN'T approve (its delegator is the
+  // PERSON SA), so it is DEFERRED — re-minted later from the person's home or on first need.
+  const siteGrant = buildApprovedSiteDelegation(childAgent, delegateSA);
+  const approveCalls: ContractCall[] = [buildApproveHashCall(siteGrant.digest)];
+
+  let brokerGrant: ReturnType<typeof buildApprovedSiteDelegation> | undefined;
+  if (cOpts.grantOrg && cOpts.grantOrg.toLowerCase() !== delegateSA.toLowerCase()) {
+    brokerGrant = buildApprovedSiteDelegation(childAgent, cOpts.grantOrg);
+    approveCalls.push(buildApproveHashCall(brokerGrant.digest));
+  }
+  const stewardship = buildApprovedSiteDelegation(childAgent, personAgent);
+  approveCalls.push(buildApproveHashCall(stewardship.digest));
+
+  // deploy + claim name + approve every org grant — all in ONE atomic userOp.
+  const deployCallData = buildExecuteBatchCallData([...claim.calls, ...approveCalls]);
+
+  onStep?.('Deploying your organization — name + all access grants…');
   // rpIdHash must match `derivePasskeySa`'s value (sha256(hostname)) — passed
   // explicitly so the server doesn't fall back to Origin derivation. Closes the
   // orphan-registry root cause (live-debug 2026-06-01).
@@ -620,7 +668,7 @@ export async function createChildAgentForSite(
       pubKeyY: pk.pubKeyY.toString(),
       rpIdHash,
       salt: salt.toString(),
-      callData: claim.callData, // deploy + claim atomically
+      callData: deployCallData, // deploy + claim + approve all grants — ONE signature
     },
     passkeySignHash,
   );
@@ -634,9 +682,9 @@ export async function createChildAgentForSite(
   // store live in the org-create grant path; see spec 246.)
   const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
 
-  onStep?.('Granting the site scoped access…');
-  // child → relying site's delegate SA, signed by the ROOT passkey (child's custodian).
-  const delegation = await issueSiteDelegation(childAgent, delegateSA, passkeySignHash);
+  // child → relying site's delegate SA — authorized via the approved hash batched above
+  // (rides the wire with the 0x03 sentinel, validated by the org SA's ERC-1271 branch).
+  const delegation = siteGrant.delegation;
 
   // ADR-0025 / spec 246: the private, self-issued related-agent credential — the
   // person's own vault record of "I have this org, created for this app's flow".
@@ -655,34 +703,18 @@ export async function createChildAgentForSite(
   });
   const proofHash = relatedAgentProofHash(credential);
 
-  // Optional org → broker-org scoped delegation (the broker can later enumerate its
-  // delegated orgs — spec 246 §5). Signed by the ROOT passkey (the org's custodian).
-  let brokerDelegation: DelegationWire | undefined;
-  if (cOpts.grantOrg && cOpts.grantOrg.toLowerCase() !== delegateSA.toLowerCase()) {
-    onStep?.('Granting the broker scoped access…');
-    brokerDelegation = toWire(await issueSiteDelegation(childAgent, cOpts.grantOrg, passkeySignHash));
-  }
+  // org → broker-org scoped grant (spec 246 §5) + org → person stewardship — BOTH were
+  // approved in the deploy batch above (org is the delegator of each), so they ride the wire
+  // with the 0x03 sentinel; no extra prompts.
+  const brokerDelegation: DelegationWire | undefined = brokerGrant ? toWire(brokerGrant.delegation) : undefined;
+  const stewardshipDelegation: DelegationWire = toWire(stewardship.delegation);
 
-  // spec 246 — the person↔org read delegations. Both are signed by the ROOT passkey,
-  // which custodies BOTH the person SA and the org SA (the org is custodied by the
-  // person's ROOT), so each side's ERC-1271 validates the same credential.
-  //
-  // BEST-EFFORT: each is a separate signing ceremony (the org + its site grant are
-  // already in place by now). If a prompt is cancelled, we DON'T throw — that would
-  // orphan an already-deployed org with no vault link. The grant still persists; the
-  // read delegations can be (re)minted later. (Batching the ceremonies into one prompt
-  // is the spec-246 follow-up.)
-  let membershipDelegation: DelegationWire | undefined;
-  let stewardshipDelegation: DelegationWire | undefined;
-  try {
-    onStep?.('Linking you and your organization…');
-    // membership: person → org — the created ORG can read the MEMBER person's data.
-    membershipDelegation = toWire(await issueSiteDelegation(personAgent, childAgent, passkeySignHash));
-    // stewardship: org → person — the PERSON can read / oversee the org's data.
-    stewardshipDelegation = toWire(await issueSiteDelegation(childAgent, personAgent, passkeySignHash));
-  } catch {
-    onStep?.('Skipped the person↔org read delegations — you can add them later.');
-  }
+  // spec 253 — MEMBERSHIP (person → org, so the org can read the MEMBER person's data) is
+  // DEFERRED. Its delegator is the PERSON SA, which can't pre-approve inside the ORG's deploy
+  // op; minting it now would cost a second passkey, defeating the one-prompt goal. The org is
+  // fully functional without it (site + broker + stewardship grants are all live from the one
+  // deploy op); membership is re-minted later from the person's home or on first need.
+  const membershipDelegation: DelegationWire | undefined = undefined;
 
   return {
     ok: true,
