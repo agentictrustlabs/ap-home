@@ -80,17 +80,33 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   }
   const challenge = new Uint8Array(32);
   crypto.getRandomValues(challenge);
-  const userId = new Uint8Array(16);
-  crypto.getRandomValues(userId);
+
+  // The WebAuthn userHandle (`user.id`) MUST be STABLE for a given identity, NOT random. An
+  // authenticator keys resident (discoverable) credentials by (rpId, userHandle): registering
+  // with a userHandle that already exists REPLACES that passkey, but a fresh random handle each
+  // time stacks a brand-new credential — so the OS picker lists the SAME name (e.g. `gco-v1.impact`)
+  // once per signup attempt. Deriving the handle deterministically from (rpId, label) means a repeat
+  // signup of the same identity overwrites its passkey instead of duplicating it.
+  //
+  // This is independent of the Smart Agent address: the SA derives from the passkey PUBLIC KEY
+  // (credentialIdDigest / x,y) per ADR-0010 — the userHandle NEVER feeds the CREATE2 salt — so a
+  // stable handle changes only the OS's credential bookkeeping, not the identity.
+  const rpId = window.location.hostname;
+  const userId = hexToBytes(keccak256(new TextEncoder().encode(`${rpId}|${label}`))).slice(0, 16);
 
   const credential = (await navigator.credentials.create({
     publicKey: {
       challenge,
-      rp: { id: window.location.hostname, name: 'Agentic Connect' },
+      rp: { id: rpId, name: 'Agentic Connect' },
       user: { id: userId, name: label, displayName: label },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256 / P-256 ONLY (custody needs it; F9)
       // userVerification REQUIRED: the ROOT/primary passkey is custody-grade (security audit F9).
-      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+      // residentKey REQUIRED: the passkey must be discoverable so (a) the stable-userHandle overwrite
+      // applies (a repeat signup REPLACES this identity's passkey instead of stacking a duplicate),
+      // and (b) name-only / cross-device sign-in can find it (spec 233). We deliberately do NOT set
+      // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
+      // cleanly overwriting — the stable userHandle is what dedupes.
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       attestation: 'none',
       timeout: 60_000,
     },
