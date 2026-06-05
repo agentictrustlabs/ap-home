@@ -1,6 +1,6 @@
 {
   "name": "@agenticprimitives-demo/sso-next",
-  "version": "0.0.2-alpha.2",
+  "version": "0.0.2-alpha.3",
   "private": true,
   "description": "Agentic Connect (Next.js / Vercel migration of demo-sso, spec 232): unified per-agent endpoint at <handle>.impact-agent.io — SSO broker (humans) + A2A agent (machines). V1 = scaffold + the existing SPA mounted; broker Route Handlers land in V2.",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@agenticprimitives-demo/a2a",
-  "version": "0.0.2-alpha.2",
+  "version": "0.0.2-alpha.3",
   "private": true,
   "description": "Demo a2a-agent: Cloudflare Worker with Durable Object for sessions. SIWE verify, session lifecycle, mints delegation tokens for MCP.",
   "type": "module",
