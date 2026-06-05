@@ -9,6 +9,7 @@ import { passkeyLogin, fetchProfile, siweLogin } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
+import { readSsoCookie } from '../../lib/sso-cookie';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
@@ -514,11 +515,18 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   const orgBase = api.enroll?.orgBase ?? '';
   // spec 256 — the org inherits the member's ACTUAL custody. A Google member's org is deployed by
   // their KMS C_sub server-side (zero device prompts); passkey/wallet members sign on device. The
-  // credential is the one they're signed in with (session.via is 'passkey' | 'wallet' | 'Google').
-  const via: Via = (session?.via ?? 'passkey').toLowerCase() === 'google'
-    ? 'google'
-    : session?.via === 'wallet' ? 'wallet' : 'passkey';
-  const auth: Auth | undefined = session?.token ? { token: session.token } : undefined;
+  // credential is the one they're signed in with (via is 'passkey' | 'wallet' | 'Google').
+  //
+  // BUT org-create arrives with `?delegate`, which makes `shouldRestore()` SKIP session restoration, so
+  // `useSession()` is null here for a Google/wallet member. Their custody token still lives in the
+  // cross-subdomain SSO cookie (set at Google sign-in — GoogleEnrollResume / openSession). Recover it as
+  // a fallback so we route to the Google KMS path instead of erroring "your passkey isn't on this device."
+  // A passkey member has no reusable token; they fall through to `via='passkey'` and the ambient passkey,
+  // which is correct.
+  const cred = session ?? readSsoCookie();
+  const credVia = (cred?.via ?? 'passkey').toLowerCase();
+  const via: Via = credVia === 'google' ? 'google' : credVia === 'wallet' ? 'wallet' : 'passkey';
+  const auth: Auth | undefined = cred?.token ? { token: cred.token } : undefined;
 
   async function authorize() {
     if (!api.enroll) return;

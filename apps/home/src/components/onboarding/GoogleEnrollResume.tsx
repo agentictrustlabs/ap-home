@@ -13,6 +13,7 @@ import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
+import { setSsoCookie } from '../../lib/sso-cookie';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -104,6 +105,13 @@ export function GoogleEnrollResume() {
       const granted = await givePermission(home, delegate, 'google', { token });
       if (!granted.ok) return fail(granted.error);
       const code = await submitEnrollGrant(grant_id, granted.grant);
+      // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
+      // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
+      // means a follow-on home operation — e.g. org-create at `<handle>.impact-agent.me`, which arrives
+      // with `?delegate` and therefore SKIPS session restore — can custody the new org with the member's
+      // ACTUAL Google credential (server-side KMS deploy) instead of falling through to the passkey path
+      // and erroring "your central-auth passkey isn't on this device." Passkey enrolls never reach here.
+      setSsoCookie(token, 'Google');
       const tpl = whitelabel.delegationTemplates[enroll.template];
       recordConnectedApp(home.address, {
         clientId: enroll.aud,
