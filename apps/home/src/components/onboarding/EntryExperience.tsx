@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, continueWithGoogle, type Via, type Auth } from '../../home/onboarding';
+import { passkeyLogin } from '../../connect-client';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
@@ -50,6 +51,7 @@ type View =
   // attempt whose deploy later failed). Surface this clearly instead of routing the
   // user into a flow that will revert with AA20 several steps later.
   | { k: 'incomplete'; name: string }
+  | { k: 'credential' } // spec 257 W1 — the credential-first front door (default; name demoted)
   | { k: 'name' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
   | { k: 'enroll-existing'; name: string; agent: Address }
@@ -74,7 +76,9 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       const subLabel = parseAgentSubdomain(window.location.hostname);
       if (subLabel) return { k: 'signin', name: toAgentName(subLabel) };
     }
-    return { k: 'name' };
+    // spec 257 W1 — the www/apex self-serve default is CREDENTIAL-FIRST, not name-first. The name
+    // is a public handle, not a login key; social/passkey resolve the home without it.
+    return { k: 'credential' };
   });
 
   // Enroll mode: resolve the requested name → new vs existing vs org-create.
@@ -150,7 +154,17 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   if (view.k === 'signin') {
     return <SignInView name={view.name} onSession={async (t, via) => { await openSession(t, via, false); }} />;
   }
-  // Self-serve name-first start.
+  // spec 257 W1 — credential-first front door (the self-serve default). Social/passkey resolve the
+  // home with no name; "Use my Impact name" demotes to the name-first fallback.
+  if (view.k === 'credential') {
+    return (
+      <CredentialFirstStart
+        onUseName={() => setView({ k: 'name' })}
+        onSession={async (t, via) => { await openSession(t, via, false); }}
+      />
+    );
+  }
+  // Name-first fallback (reached via "Use my Impact name").
   return <NameStart onStart={(name, exists) => {
     if (exists) {
       if (!redirectForPasskey('signin', name)) setView({ k: 'signin', name });
@@ -218,6 +232,64 @@ function NameStart({ onStart }: { onStart: (name: string, exists: boolean) => vo
           </button>
         </>
       )}
+    </Shell>
+  );
+}
+
+// ── spec 257 W1: credential-first front door ──────────────────────────────────
+// Social/passkey is the way in; the Impact name is a public handle, not a login key. Google
+// resolves the home server-side with NO name (spec 235); passkeys are subdomain-isolated (RP =
+// <label>.impact-agent.me) so a discoverable assertion here only succeeds for a home reachable
+// from this origin — otherwise we route to the name path (which hops to the right subdomain).
+function CredentialFirstStart({ onUseName, onSession }: {
+  onUseName: () => void;
+  onSession: (token: string, via: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<'passkey' | null>(null);
+  const [err, setErr] = useState('');
+
+  async function withPasskey() {
+    setBusy('passkey');
+    setErr('');
+    try {
+      // registerIfMissing=false: never silently mint a key here — a fresh user takes the named/
+      // bootstrap path. A discoverable assertion that resolves an existing home → straight in.
+      const out = await passkeyLogin(false);
+      if (out.status === 'issued' && out.token) { await onSession(out.token, 'passkey'); return; }
+      // No discoverable home at this origin (subdomain isolation / new user) → name path.
+      onUseName();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'passkey sign-in failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Shell>
+      <BrandShield size={56} />
+      <h1 className="onboarding-h1">{whitelabel.copy.arrivalTitle}</h1>
+      <p className="onboarding-sub">
+        Sign in or get started. Your {whitelabel.brand.name} name is how others find your agent —
+        not something you need to remember to get back in.
+      </p>
+      {googleEnabled && (
+        <button className="btn-primary" onClick={() => continueWithGoogle()}>
+          Continue with Google
+        </button>
+      )}
+      <button
+        className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
+        onClick={withPasskey}
+        disabled={busy !== null}
+      >
+        {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
+      </button>
+      <div className="method-or">or</div>
+      <button className="btn-ghost onboarding-secondary" onClick={onUseName}>
+        Use my {whitelabel.brand.name} name
+      </button>
+      {err && <p className="onboarding-hint taken">{err}</p>}
     </Shell>
   );
 }
