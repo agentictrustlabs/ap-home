@@ -400,26 +400,44 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           Continue with Google
         </button>
       )}
-      <button
-        className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-        onClick={enrollApi ? onUseName : withPasskey}
-        disabled={busy !== null}
-      >
-        {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
-      </button>
-      {walletAvail && (
+      {enrollApi ? (
+        // Relying-app popup enroll (spec 257 §11 / spec 259): passkey + wallet BOTH lead to name entry
+        // here — a new passkey home is subdomain-bound (its WebAuthn RP ID is the handle's home origin),
+        // so a handle is needed and is collected on the NEXT screen (NameStart), inside this home popup,
+        // never on the relying app. One accurate button instead of two that both route to the name path
+        // plus a redundant "use my name" link.
         <button
-          className="btn-ghost onboarding-secondary"
-          onClick={enrollApi ? onUseName : withWallet}
-          disabled={busy !== null}
+          className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
+          onClick={onUseName}
         >
-          {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
+          Continue with a passkey or wallet
         </button>
+      ) : (
+        <>
+          {/* Self-serve: real device login. A discoverable passkey / existing wallet home resolves
+              straight in; a brand-new credential falls through to the name path. */}
+          <button
+            className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
+            onClick={withPasskey}
+            disabled={busy !== null}
+          >
+            {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
+          </button>
+          {walletAvail && (
+            <button
+              className="btn-ghost onboarding-secondary"
+              onClick={withWallet}
+              disabled={busy !== null}
+            >
+              {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
+            </button>
+          )}
+          <div className="method-or">or</div>
+          <button className="btn-ghost onboarding-secondary" onClick={onUseName}>
+            Use my {whitelabel.brand.name} name
+          </button>
+        </>
       )}
-      <div className="method-or">or</div>
-      <button className="btn-ghost onboarding-secondary" onClick={onUseName}>
-        Use my {whitelabel.brand.name} name
-      </button>
       {err && <p className="onboarding-hint taken">{err}</p>}
     </Shell>
   );
