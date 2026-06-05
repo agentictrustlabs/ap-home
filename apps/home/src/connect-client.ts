@@ -674,6 +674,24 @@ export async function createChildAgentForSite(
   );
   if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
 
+  // spec 253 — the org's site / broker / stewardship grants are validated via the on-chain
+  // approved hashes set INSIDE the deploy batch above (not an off-chain signature), so the org
+  // SA must be deployed AND RPC-visible before the relying app exchanges its grant. The OP's
+  // verifier does a single isDeployed check and returns "delegator not yet deployed (retry
+  // shortly)" on a lagged read replica (SEC-011). The deploy is mined (the relayer confirmed the
+  // receipt), but a replica can lag a few seconds — the per-grant passkey prompts used to mask
+  // this, and one-prompt removed them. Poll briefly so the org is visible before the ceremony
+  // hands the grant off. Bounded (ADR-0013): the SAME getCode call, capped at ~15s.
+  onStep?.('Confirming your organization on the network…');
+  {
+    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    for (let i = 0; i < 15; i++) {
+      const code = await pub.getBytecode({ address: childAgent }).catch(() => undefined);
+      if (code && code !== '0x') break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
   // ADR-0025: person↔org is a PRIVATE vault credential, NOT a public on-chain edge.
   // The control relationship is implicit in custody (the org is custodied by the
   // person's ROOT credential); we do NOT write any AgentRelationship edge. `edgeId`
