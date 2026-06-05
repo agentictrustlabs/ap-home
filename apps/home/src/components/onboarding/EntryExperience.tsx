@@ -5,12 +5,14 @@
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, continueWithGoogle, type Via, type Auth } from '../../home/onboarding';
-import { passkeyLogin, fetchProfile } from '../../connect-client';
+import { passkeyLogin, fetchProfile, siweLogin } from '../../connect-client';
+import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
+const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
 import { useEnrollReq, type EnrollApi } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { BrandShield } from '../shared/BrandShield';
@@ -290,8 +292,12 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   // (a new passkey home is subdomain-bound, so it needs a name) rather than a discoverable login.
   enrollApi?: EnrollApi;
 }) {
-  const [busy, setBusy] = useState<'passkey' | null>(null);
+  const [busy, setBusy] = useState<'passkey' | 'wallet' | null>(null);
   const [err, setErr] = useState('');
+  // Only offer the wallet button when an injected provider is actually present (client-only check,
+  // set after mount to avoid an SSR/first-paint mismatch).
+  const [walletAvail, setWalletAvail] = useState(false);
+  useEffect(() => { setWalletAvail(walletEnabled && hasWallet()); }, []);
   const onGoogle = () => {
     const stash = enrollApi?.enroll
       ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: '' })
@@ -303,7 +309,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   };
   // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"
   // confirmation beat before issuing the session (display only; the token is already minted).
-  const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null } | null>(null);
+  const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null; via: string } | null>(null);
 
   async function withPasskey() {
     setBusy('passkey');
@@ -322,13 +328,46 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           name = p?.name ?? null;
           address = p?.agent ? ((p.agent.split(':').pop() ?? null) as Address | null) : null;
         } catch { /* show the beat without a handle */ }
-        setResolved({ token: out.token, name, address });
+        setResolved({ token: out.token, name, address, via: 'passkey' });
         return;
       }
       // No discoverable home at this origin (subdomain isolation / new user) → name path.
       onUseName();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'passkey sign-in failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Wallet (SIWE/EOA) — parallel to passkey. Connect the wallet + sign SIWE: an EXISTING
+  // wallet-custodied home resolves straight in (the beat → session); a NEW wallet (no home yet)
+  // takes the name path, where the journey deploys a named wallet home. Wallet is NOT
+  // subdomain-bound, so no origin hop is needed (unlike passkey).
+  async function withWallet() {
+    setBusy('wallet');
+    setErr('');
+    try {
+      const out = await siweLogin();
+      if (out.status === 'issued' && out.token) {
+        let name: string | null = null;
+        let address: Address | null = (out.agent ?? null) as Address | null;
+        try {
+          const p = await fetchProfile(out.token);
+          name = p?.name ?? null;
+          if (p?.agent) address = (p.agent.split(':').pop() ?? address) as Address | null;
+        } catch { /* show the beat without a handle */ }
+        setResolved({ token: out.token, name, address, via: 'wallet' });
+        return;
+      }
+      if (out.status === 'bootstrap') {
+        // New wallet — no home for this EOA yet. Name path → the journey deploys the wallet home.
+        onUseName();
+        return;
+      }
+      setErr(('reason' in out && out.reason) || 'wallet sign-in failed');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'wallet sign-in failed');
     } finally {
       setBusy(null);
     }
@@ -343,7 +382,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
         knownName={resolved.name}
         address={resolved.address}
         token={resolved.token}
-        onContinue={() => { void onSession(resolved.token, 'passkey'); }}
+        onContinue={() => { void onSession(resolved.token, resolved.via); }}
       />
     );
   }
@@ -368,6 +407,15 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
       >
         {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
       </button>
+      {walletAvail && (
+        <button
+          className="btn-ghost onboarding-secondary"
+          onClick={enrollApi ? onUseName : withWallet}
+          disabled={busy !== null}
+        >
+          {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
+        </button>
+      )}
       <div className="method-or">or</div>
       <button className="btn-ghost onboarding-secondary" onClick={onUseName}>
         Use my {whitelabel.brand.name} name
