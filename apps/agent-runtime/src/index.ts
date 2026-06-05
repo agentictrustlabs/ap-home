@@ -22,7 +22,7 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/connect-auth';
-import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData } from 'viem';
 import {
   BadInputError,
   badInputResponse,
@@ -63,7 +63,13 @@ import {
   SessionManager,
   hashDelegation,
   mintDelegationToken,
+  buildCaveat,
+  encodeTimestampTerms,
+  encodeValueTerms,
+  encodeAllowedTargetsTerms,
+  ROOT_AUTHORITY,
   type Delegation,
+  type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
 import {
@@ -147,6 +153,11 @@ export interface Env {
   ALLOWED_TARGETS_ENFORCER: string;
   ALLOWED_METHODS_ENFORCER: string;
   VALUE_ENFORCER: string;
+  /** spec 256 — the ApprovedHashRegistry (spec 253) the org's deploy batch approveHashes its
+   *  outbound grant digests into; and the AgentRelationship target the site grants scope to.
+   *  Both already deployed; passed as --var by deploy-cloudflare. */
+  APPROVED_HASH_REGISTRY?: string;
+  AGENT_RELATIONSHIP?: string;
   // Naming service (spec 215). When set, /name/reverse resolves an SA
   // address → its primary `.agent` name via a single reverseResolveString
   // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
@@ -1972,6 +1983,168 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] custody/google/bootstrap-and-claim failed:', e);
     return c.json({ ok: false, error: 'bootstrap_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// ── spec 256: Google-KMS org-create — the org inherits the person's C_sub custody ──
+
+/** spec 256 — the 0x03 approved-hash sentinel wire signature (spec 253). */
+const ORG_GRANT_SENTINEL: Hex = '0x03';
+const ORG_APPROVE_HASH_ABI = [
+  { type: 'function', name: 'approveHash', stateMutability: 'nonpayable', inputs: [{ name: 'hash', type: 'bytes32' }], outputs: [] },
+] as const;
+
+/** Server-side port of demo-sso-next `buildApprovedSiteDelegation` (spec 253): build an
+ *  `org → delegate` least-privilege site delegation, compute its canonical `hashDelegation` digest,
+ *  and stamp the 0x03 sentinel as the wire signature. The org `approveHash`es `digest` inside its own
+ *  deploy op; the relying app validates via the org SA's ERC-1271 approved-hash branch. Caveats match
+ *  the passkey path exactly (timestamp + value 0 + allowed-targets {relationship, naming, subregistry}). */
+function buildOrgGrant(
+  env: Env,
+  orgSA: Address,
+  delegate: Address,
+  validitySeconds = 60 * 60 * 24 * 365,
+): { digest: Hex; wire: Omit<Delegation, 'salt'> & { salt: string } } {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(env.TIMESTAMP_ENFORCER as Address, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(env.VALUE_ENFORCER as Address, encodeValueTerms(0n)),
+    buildCaveat(
+      env.ALLOWED_TARGETS_ENFORCER as Address,
+      encodeAllowedTargetsTerms([
+        env.AGENT_RELATIONSHIP as Address,
+        env.AGENT_NAME_REGISTRY as Address,
+        env.PERMISSIONLESS_SUBREGISTRY as Address,
+      ]),
+    ),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
+  d.signature = ORG_GRANT_SENTINEL; // validated via the org SA's approved-hash ERC-1271 branch
+  return { digest, wire: { ...d, salt: d.salt.toString() } };
+}
+
+function orgApproveHashCall(env: Env, digest: Hex): { to: Address; value: bigint; data: Hex } {
+  return {
+    to: env.APPROVED_HASH_REGISTRY as Address,
+    value: 0n,
+    data: encodeFunctionData({ abi: ORG_APPROVE_HASH_ABI, functionName: 'approveHash', args: [digest] }),
+  };
+}
+
+/**
+ * POST /custody/google/bootstrap-org  (client → a2a, custody session)
+ * Body: { session, label, node, delegate, grantOrg? }
+ *   → { ok, org, orgId, name, person, delegation, brokerDelegation?, stewardshipDelegation?, transactionHash }
+ *
+ * A Google-only member creates an org with ZERO device prompts: the org is custodied by the member's
+ * per-(iss,sub) KMS custodian C_sub (durable-org-custody), deployed + named + its spec-253 sentinel
+ * grants approveHash'd in ONE C_sub-signed, paymaster-sponsored userOp. Mirrors bootstrap-and-claim.
+ */
+app.post('/custody/google/bootstrap-org', async (c) => {
+  if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
+  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
+    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
+  }
+  if (!c.env.APPROVED_HASH_REGISTRY || !c.env.AGENT_RELATIONSHIP) {
+    return c.json({ ok: false, error: 'grants_not_configured' }, 503);
+  }
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; label?: string; node?: Hex; delegate?: Address; grantOrg?: Address;
+  } | null;
+  if (!body?.session || !body?.label || !body?.node || !body?.delegate) {
+    return c.json({ ok: false, error: 'session + label + node + delegate required' }, 400);
+  }
+  const label = body.label.toLowerCase();
+  if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(body.node)) return c.json({ ok: false, error: 'bad_node' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.delegate)) return c.json({ ok: false, error: 'bad_delegate' }, 400);
+  if (body.grantOrg && !/^0x[0-9a-fA-F]{40}$/.test(body.grantOrg)) return c.json({ ok: false, error: 'bad_grantOrg' }, 400);
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+      rotation: gate.rotation,
+    });
+    // Person-binding (spec 235 §5.4): the session must prove the PERSON whose C_sub custodies the org.
+    const person = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), person).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived person SA' }, 403);
+    }
+
+    // Org SA: same custodian C_sub, a DISTINCT server-generated NON-ZERO salt (never name-derived — ADR-0010)
+    // so the org is its own agent, custodied by the person's C_sub.
+    const saltBytes = crypto.getRandomValues(new Uint8Array(8));
+    let orgSalt = 1n; // guarantee non-zero (distinct from the person's salt 0n) even on an all-zero draw
+    for (const b of saltBytes) orgSalt = (orgSalt << 8n) | BigInt(b);
+    const orgSA = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: orgSalt });
+
+    // The org's outbound grants (spec 253) — org is the delegator of all three; person→org membership deferred.
+    const siteGrant = buildOrgGrant(c.env, orgSA, body.delegate);
+    const approveCalls: Array<{ to: Address; value: bigint; data: Hex }> = [orgApproveHashCall(c.env, siteGrant.digest)];
+    let brokerGrant: ReturnType<typeof buildOrgGrant> | undefined;
+    if (body.grantOrg && body.grantOrg.toLowerCase() !== body.delegate.toLowerCase()) {
+      brokerGrant = buildOrgGrant(c.env, orgSA, body.grantOrg);
+      approveCalls.push(orgApproveHashCall(c.env, brokerGrant.digest));
+    }
+    const stewardship = buildOrgGrant(c.env, orgSA, person);
+    approveCalls.push(orgApproveHashCall(c.env, stewardship.digest));
+
+    const register = buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label, newOwner: orgSA });
+    const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
+    const callData = buildExecuteBatchCallData([register, setPrimary, ...approveCalls]);
+
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForAgentAccount({
+      spec: { custodians: [cSub], salt: orgSalt },
+      callData,
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
+    if (sender.toLowerCase() !== orgSA.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'built userOp sender ≠ derived org SA' }, 500);
+    }
+
+    const signature = await sign(userOpHash); // C_sub signs (65-byte ECDSA)
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    if (!inner.ok) {
+      return c.json(
+        { ok: false, error: 'userop_reverted', detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted', transactionHash: receipt.transactionHash },
+        500,
+      );
+    }
+    return c.json({
+      ok: true,
+      org: deployedAddress ?? orgSA,
+      orgId: caip10(Number(c.env.CHAIN_ID), orgSA),
+      name: `${label}.${AGENT_NAME_PARENT}`,
+      person,
+      delegation: siteGrant.wire,
+      brokerDelegation: brokerGrant?.wire,
+      stewardshipDelegation: stewardship.wire,
+      transactionHash: receipt.transactionHash,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/bootstrap-org failed:', e);
+    return c.json({ ok: false, error: 'bootstrap_org_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

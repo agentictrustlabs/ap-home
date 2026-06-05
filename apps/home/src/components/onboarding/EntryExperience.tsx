@@ -4,7 +4,7 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, continueWithGoogle } from '../../home/onboarding';
+import { openHome, createOrganization, continueWithGoogle, type Via, type Auth } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
@@ -288,8 +288,16 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
 function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnType<typeof useEnrollReq> }) {
   const [phase, setPhase] = useState<'consent' | 'busy' | 'connected' | 'error'>('consent');
   const [err, setErr] = useState('');
+  const { session } = useSession();
   const tpl = whitelabel.delegationTemplates['org-create'] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
   const orgBase = api.enroll?.orgBase ?? '';
+  // spec 256 — the org inherits the member's ACTUAL custody. A Google member's org is deployed by
+  // their KMS C_sub server-side (zero device prompts); passkey/wallet members sign on device. The
+  // credential is the one they're signed in with (session.via is 'passkey' | 'wallet' | 'Google').
+  const via: Via = (session?.via ?? 'passkey').toLowerCase() === 'google'
+    ? 'google'
+    : session?.via === 'wallet' ? 'wallet' : 'passkey';
+  const auth: Auth | undefined = session?.token ? { token: session.token } : undefined;
 
   async function authorize() {
     if (!api.enroll) return;
@@ -298,7 +306,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       // SEC-001: registry-derived delegate FROM the server-minted grant (the URL's
       // `api.enroll.delegate` is treated as untrusted hint — the server's binding wins).
       const { grant_id, delegate } = await api.beginGrant(api.enroll.name);
-      const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate, {
+      const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate, via, auth, {
         purpose: api.enroll.purpose,
         requestedBy: api.enroll.aud,
         grantOrg: api.enroll.grantOrg,

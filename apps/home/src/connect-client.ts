@@ -745,6 +745,72 @@ export async function createChildAgentForSite(
   };
 }
 
+/** spec 256 — org-create for a GOOGLE member: the org is custodied by their per-(iss,sub) KMS
+ *  custodian C_sub and deployed + named + grant-approved SERVER-SIDE in one C_sub-signed userOp —
+ *  ZERO device prompts (their only gesture was signing in with Google). Mirrors createChildAgentForSite's
+ *  RESULT shape so `createOrganization` consumes both paths identically. The org's outbound grants come
+ *  back from the server as 0x03 sentinel wire delegations (validated via the org SA's approved-hash
+ *  branch); the private related-agent credential is built client-side (no prompt). */
+export async function createOrganizationWithGoogle(
+  sessionToken: string,
+  base: string,
+  delegate: Address,
+  cOpts: CreateChildOpts = {},
+): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
+  // Resolve a free org name (label + node), like secureHomeWithGoogle does.
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+    label?: string; name?: string; node?: Hex; error?: string;
+  };
+  if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
+
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/bootstrap-org', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg }),
+  });
+  const b = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; org?: Address; name?: string; person?: Address;
+    delegation?: DelegationWire; brokerDelegation?: DelegationWire; stewardshipDelegation?: DelegationWire;
+    error?: string; detail?: string;
+  };
+  if (!res.ok || !b.ok || !b.org || !b.person || !b.delegation) {
+    return { ok: false, error: [b.error, b.detail].filter(Boolean).join(' — ') || `org bootstrap failed (HTTP ${res.status})` };
+  }
+
+  const childAgent = b.org;
+  const personAgent = b.person;
+  const childName = b.name ?? picked.name;
+  const relationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType;
+  const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
+  const purpose = cOpts.purpose ?? 'related-org';
+  const requestedBy = cOpts.requestedBy ?? '';
+  // ADR-0025 / spec 246: the private, self-issued related-agent credential — built client-side (no prompt).
+  const credential = buildRelatedAgentCredential({
+    holder: personAgent,
+    relatedAgent: childAgent,
+    purpose,
+    requestedBy,
+    issuerCaip10: `eip155:${CHAIN_ID}:${personAgent}`,
+    body: { agentName: childName },
+    validFrom: new Date().toISOString(),
+  });
+  const proofHash = relatedAgentProofHash(credential);
+
+  return {
+    ok: true,
+    result: {
+      childAgent, childName, edgeId, governed: false,
+      delegation: b.delegation, // org → app site grant (sentinel wire)
+      person: personAgent, purpose, requestedBy, credential, proofHash,
+      brokerDelegation: b.brokerDelegation,
+      membershipDelegation: undefined, // deferred (person→org), same as the passkey path
+      stewardshipDelegation: b.stewardshipDelegation,
+    },
+  };
+}
+
 // ── Add a second custody credential to an existing agent (the unification) ──
 //
 // The canonical SA address never changes; credentials are facets that can be added.

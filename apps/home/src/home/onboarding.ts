@@ -12,6 +12,7 @@ import {
   deployAndClaimAgent,
   connectWithName,
   createChildAgentForSite,
+  createOrganizationWithGoogle,
   signupWithName,
   passkeySignHash,
   googleSignHash,
@@ -113,9 +114,17 @@ export async function createOrganization(
   home: Home,
   base: string,
   delegate: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
   opts: { purpose?: string; requestedBy?: string; grantOrg?: Address } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
-  const r = await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
+  // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
+  // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
+  const r = via === 'google'
+    ? (auth?.token
+        ? await createOrganizationWithGoogle(auth.token, base, delegate, opts)
+        : ({ ok: false, error: 'creating an org with Google needs a custody session' } as const))
+    : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
   if (!r.ok) return r;
   const x = r.result;
   // ADR-0025: the `org` payload carries the private credential + the person SA so the
