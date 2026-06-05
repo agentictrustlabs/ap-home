@@ -1162,6 +1162,11 @@
       .securing-points li { display: flex; gap: .5rem; align-items: flex-start; font-size: .85rem; color: var(--color-text-body); }
       .securing-points li span { color: var(--color-sage-500); font-weight: 800; }
       .securing-wait { font-size: .78rem; color: var(--color-text-faint); margin: 0; }
+      /* Spec 255 — a pre-PROMPT explainer block (before a WebAuthn / consent gesture). Same shape as the
+         "securing" wait block but tinted to read as guidance you should pause on, not a passive wait. */
+      .pre-prompt-explainer { margin: .75rem 0; background: var(--color-surface); border-color: var(--color-border-strong, var(--color-border)); }
+      .pre-prompt-explainer .securing-wait { margin-top: .35rem; }
+      .pre-prompt-explainer .securing-wait + .securing-wait { margin-top: .25rem; }
 
       /* ── Credential-method choice (passkey | wallet | google) ────────── */
       .method-choice { display: flex; flex-direction: column; gap: .5rem; width: 100%; }

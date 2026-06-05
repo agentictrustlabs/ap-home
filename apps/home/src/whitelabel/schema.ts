@@ -57,9 +57,15 @@ export interface WhiteLabelCopy {
   // Value step ① — your own Portal (deploy the person SA).
   portalStepTitle: string;
   portalStepValue: string;
+  // The CREATE-passkey CTA (gesture 1 — mint the key; passkey path only).
+  portalStepCreateCta: string;
+  // The APPROVE-setup CTA (gesture 2 — use the key just made to deploy + claim; passkey path only).
   portalStepCta: string;
   portalStepBusy: string;
   portalStepReceipt: string;
+  // Receipt shown right after the passkey is CREATED, before the approve step (passkey path only).
+  portalKeyCreatedReceiptTitle: string;
+  portalKeyCreatedReceiptBody: string;
   // Value step ② — your place in the community (claim the name; batched with ①).
   communityStepTitle: string;
   communityStepValue: string;

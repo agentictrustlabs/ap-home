@@ -322,16 +322,28 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   }
 
   if (phase === 'busy') return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Creating your organization…</p></div></Shell>;
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">Organization created</h1><ReceiptCard title={`${orgBase} is set up and connected`} /><p className="onboarding-sub">Returning you to {api.host}…</p></Shell>;
+  // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={`Its home is started, its name is claimed, and ${api.host} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {api.host}…</p></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase('consent')}>Try again</button></Shell>;
   return (
     <Shell>
+      {/* Spec 255 W3.3 — pre-org-create explainer ABOVE the consent sheet. Consent-level copy (NOT
+          passkey-specific — never says "passkey"), so it's correct for ALL org-create credentials
+          including Google. */}
+      <div className="securing-explainer pre-prompt-explainer">
+        <div className="securing-explainer-title">One tap — approve creating {orgBase}</div>
+        <p>
+          This single approval starts the org, claims its name, and gives {api.host} scoped read access to
+          its posted needs. Nothing beyond that.
+        </p>
+        <p className="securing-wait">You can revoke {api.host}&apos;s access at any time from your Impact home.</p>
+      </div>
       <ConsentSheet
         title={`Create ${orgBase} in the ${whitelabel.brand.community}`}
         appName={api.host}
         appDomain={api.host}
         template={tpl}
-        authorizeLabel="Create & authorize"
+        authorizeLabel="Approve & connect"
         onAuthorize={authorize}
         onDecline={api.denyEnroll}
       />

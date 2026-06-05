@@ -11,6 +11,7 @@ import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { whitelabel, fmt } from '../../whitelabel/config';
+import { CENTRAL_AUTH_DOMAIN } from '../../lib/domain';
 import { useSession } from '../../context/session';
 import type { EnrollApi } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
@@ -42,6 +43,12 @@ export function OnboardingJourney({
   const appName = relyingApp?.name ?? appHost; // friendly name (anti-spoof: from registered config)
   const hasApp = variant !== 'self-serve';
   const base = homeLabel(name);
+  // Spec 255 — "the prompt will say impact-agent.me" only makes sense on the real central host (the
+  // RP ID IS impact-agent.me there). On dev hosts (localhost / pages.dev) the RP is the dev host, so
+  // gate the domain note off, mirroring redirectForPasskey's hostname check (EntryExperience).
+  const onCentralHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === CENTRAL_AUTH_DOMAIN || window.location.hostname.endsWith('.' + CENTRAL_AUTH_DOMAIN));
 
   const [screen, setScreen] = useState<Screen>(variant === 'enroll-existing' ? 'grant' : 'arrival');
   const [busy, setBusy] = useState<string | null>(null);
@@ -223,9 +230,24 @@ export function OnboardingJourney({
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
         <p className="onboarding-note">Choose how to secure your home — only you will be able to open it.</p>
+        {/* Spec 255 W3.1 — pre-create explainer. Renders ONLY when passkey is an offered method (so it
+            never appears on a Google-only screen) and sits directly above the passkey CTA. */}
+        {methods.includes('passkey') && (
+          <div className="securing-explainer pre-prompt-explainer">
+            <div className="securing-explainer-title">Your device becomes your key</div>
+            <p>
+              A passkey is a small secret your device stores — confirmed with your fingerprint, face, or PIN.
+              No password to remember, and nothing leaves this device.
+            </p>
+            <p className="securing-wait">This is a one-time step. You will not create this key again.</p>
+            {hasApp && (
+              <p className="securing-wait">You came from {appName} — after setup you&apos;ll return there automatically.</p>
+            )}
+          </div>
+        )}
         <div className="method-choice">
           {methods.includes('passkey') && (
-            <button className="btn-primary" onClick={onCreateKey}>Secure with a passkey</button>
+            <button className="btn-primary" onClick={onCreateKey}>{c.portalStepCreateCta}</button>
           )}
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
@@ -245,12 +267,32 @@ export function OnboardingJourney({
   if (screen === 'key-ready') {
     return (
       <Frame>
-        <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepTitle} />
-        <ReceiptCard title="Now only you can sign in or approve" body="Just this device confirms it's you — no password to lose." />
-        <h1 className="onboarding-h1">{c.portalStepTitle}</h1>
+        {/* Spec 255 W3.4 — same value step (① secure your home) but the gesture label is now the
+            distinct "Approve your setup", not a repeat of "Create your passkey". */}
+        <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepCta} />
+        {/* W1.2/W4.1 — receipt for the passkey just created (gesture 1). */}
+        <ReceiptCard title={c.portalKeyCreatedReceiptTitle} body={c.portalKeyCreatedReceiptBody} />
+        <h1 className="onboarding-h1">One more — approve your setup</h1>
         <p className="onboarding-sub">
-          One more confirmation brings <strong>{base}</strong> to life as your home and claims your name so the {community} can find you.
+          This step is different from the last one. You are not creating anything new — you are using the
+          key you just created to approve what happens next.
         </p>
+        {/* W3.2 — pre-deploy explainer block: exactly what this approval does + the domain pre-empt. */}
+        <div className="securing-explainer pre-prompt-explainer">
+          <div className="securing-explainer-title">What you&apos;re approving</div>
+          <ul className="securing-points">
+            <li><span aria-hidden="true">✓</span> Your home starts on the network</li>
+            <li><span aria-hidden="true">✓</span> Your name {base} is reserved — permanently yours</li>
+            {hasApp && (
+              <li><span aria-hidden="true">✓</span> You return to {appName} to give it permission next</li>
+            )}
+          </ul>
+          {onCentralHost && (
+            <p className="securing-wait">
+              The prompt will say &lsquo;{CENTRAL_AUTH_DOMAIN}&rsquo; — that is this page.
+            </p>
+          )}
+        </div>
         <button className="btn-primary" onClick={onSecureHome}>{c.portalStepCta}</button>
       </Frame>
     );
@@ -259,7 +301,7 @@ export function OnboardingJourney({
   if (screen === 'securing') {
     return (
       <Frame>
-        <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepTitle} />
+        <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepCta} />
         <div className="onboarding-busy">
           <span className="spinner spinner-lg" role="status" aria-label="Securing your home" />
           <p className="onboarding-busy-msg">{securingMsg}</p>

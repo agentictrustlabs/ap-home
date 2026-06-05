@@ -105,12 +105,18 @@ const faithImpact: WhiteLabelConfig = {
     arrivalBody:
       "A place of your own in the missional community — where you oversee what you help lead, manage what you steward, and protect what's entrusted to you.",
     overviewTitle: "Here's how you'll get set up",
-    // ① Secure your home (passkey + found it).
+    // ① Secure your home (passkey + found it). The passkey path has two device gestures: create the
+    // key (portalStepCreateCta) then approve the setup with it (portalStepCta). Spec 255 — distinct
+    // labels so the second OS prompt is clearly NOT a repeat of the first.
     portalStepTitle: 'Secure your home',
     portalStepValue: 'A home of your own that only you can open — using just this device, no password to lose.',
-    portalStepCta: 'Secure my home',
+    portalStepCreateCta: 'Create your passkey',
+    portalStepCta: 'Approve my setup',
     portalStepBusy: 'Securing your home…',
     portalStepReceipt: 'Your home is secured — only you can open it',
+    // Receipt after gesture 1 (passkey created) — spec 255.
+    portalKeyCreatedReceiptTitle: 'Passkey created — your key is ready',
+    portalKeyCreatedReceiptBody: "This device now holds a key that proves it's you. Nothing left this device.",
     // ② Register your name (rides with ①).
     communityStepTitle: 'Register your name',
     communityStepValue: 'Your name in the missional community — so the community and its apps can find you.',
