@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, continueWithGoogle, type Via, type Auth } from '../../home/onboarding';
-import { passkeyLogin } from '../../connect-client';
+import { passkeyLogin, fetchProfile } from '../../connect-client';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
@@ -16,6 +16,7 @@ import { OnboardingJourney } from './OnboardingJourney';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
+import { HomeResolvedView } from './HomeResolvedView';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean }
 async function nameInfo(name: string): Promise<NameInfo> {
@@ -247,6 +248,9 @@ function CredentialFirstStart({ onUseName, onSession }: {
 }) {
   const [busy, setBusy] = useState<'passkey' | null>(null);
   const [err, setErr] = useState('');
+  // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"
+  // confirmation beat before issuing the session (display only; the token is already minted).
+  const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null } | null>(null);
 
   async function withPasskey() {
     setBusy('passkey');
@@ -255,7 +259,19 @@ function CredentialFirstStart({ onUseName, onSession }: {
       // registerIfMissing=false: never silently mint a key here — a fresh user takes the named/
       // bootstrap path. A discoverable assertion that resolves an existing home → straight in.
       const out = await passkeyLogin(false);
-      if (out.status === 'issued' && out.token) { await onSession(out.token, 'passkey'); return; }
+      if (out.status === 'issued' && out.token) {
+        // Best-effort handle for the beat — never gates the session: on any failure we fall
+        // straight through to onSession with what (if anything) we have.
+        let name: string | null = null;
+        let address: Address | null = null;
+        try {
+          const p = await fetchProfile(out.token);
+          name = p?.name ?? null;
+          address = p?.agent ? ((p.agent.split(':').pop() ?? null) as Address | null) : null;
+        } catch { /* show the beat without a handle */ }
+        setResolved({ token: out.token, name, address });
+        return;
+      }
       // No discoverable home at this origin (subdomain isolation / new user) → name path.
       onUseName();
     } catch (e) {
@@ -263,6 +279,20 @@ function CredentialFirstStart({ onUseName, onSession }: {
     } finally {
       setBusy(null);
     }
+  }
+
+  // Resolved-home confirmation beat (greenfield 10): "Welcome back" + handle + role/org chips,
+  // then auto-advance into the session. A returning passkey member is never `fresh`.
+  if (resolved) {
+    return (
+      <HomeResolvedView
+        fresh={false}
+        knownName={resolved.name}
+        address={resolved.address}
+        token={resolved.token}
+        onContinue={() => { void onSession(resolved.token, 'passkey'); }}
+      />
+    );
   }
 
   return (

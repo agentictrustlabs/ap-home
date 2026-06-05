@@ -9,6 +9,7 @@ import { PortalShell } from '../../src/components/portal/PortalShell';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
 import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
 import { GoogleEnrollResume, readPendingEnroll } from '../../src/components/onboarding/GoogleEnrollResume';
+import { HomeResolvedView } from '../../src/components/onboarding/HomeResolvedView';
 import { parseEnrollReq } from '../../src/components/onboarding/useEnrollReq';
 
 function FullBleedSpinner() {
@@ -26,15 +27,39 @@ function hasEnrollParams(): boolean {
 }
 
 function Gate({ children }: { children: ReactNode }) {
-  const { phase, session, agentName, notice, clearNotice } = useSession();
+  const { phase, session, agentName, agentAddress, notice, clearNotice } = useSession();
   const [mounted, setMounted] = useState(false);
   const [enroll, setEnroll] = useState(false);
   const [pendingEnroll, setPendingEnroll] = useState(false);
+  // spec 257 W3 — a one-shot "Welcome back" beat shown the first time a fresh Google sign-in
+  // resolves to an EXISTING home, before the portal. Dismisses to the portal on continue; never
+  // re-shows for restored sessions (only `session.fresh`).
+  const [welcomedBack, setWelcomedBack] = useState(false);
   useEffect(() => {
     setEnroll(hasEnrollParams());
     setPendingEnroll(!!readPendingEnroll());
     setMounted(true);
   }, []);
+
+  // A brand-new Google home already showed its own "You're in." reward in GoogleSecureHome (which
+  // sets this flag just before refreshing in) — suppress the gate's returning-member beat so it
+  // doesn't double-fire once the profile gains a name. Read at render: the flag may be set after
+  // mount, in the same Gate instance, when GoogleSecureHome transitions us to an authed profile.
+  let bootstrapReward = false;
+  try { bootstrapReward = !!sessionStorage.getItem('homeWelcomeShown'); } catch { /* ignore */ }
+  // Consume it once we're past the freshness window (restored / non-fresh) so a later sign-out →
+  // sign-in cycle gets a fresh "Welcome back" beat.
+  useEffect(() => {
+    if (bootstrapReward && (!session?.fresh || phase !== 'authed')) {
+      try { sessionStorage.removeItem('homeWelcomeShown'); } catch { /* ignore */ }
+    }
+  }, [bootstrapReward, session?.fresh, phase]);
+
+  // A fresh Google return that already has a home (no secure-home step, no enroll) → show the
+  // welcome-back beat once. (Passkey/wallet/name surface their own beat in EntryExperience.)
+  const showGoogleWelcomeBack =
+    mounted && phase === 'authed' && session?.via === 'Google' && session.fresh &&
+    !!agentName && !enroll && !pendingEnroll && !welcomedBack && !bootstrapReward;
 
   let content: ReactNode;
   if (!mounted) content = <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)
@@ -47,7 +72,18 @@ function Gate({ children }: { children: ReactNode }) {
   // A Google member returns ALREADY in a custody session but with no home yet (counterfactual,
   // unnamed SA) — claim their name before entering the portal (spec 235 P2.4).
   else if (session?.via === 'Google' && !agentName) content = <GoogleSecureHome />;
-  else content = <PortalShell>{children}</PortalShell>;
+  // spec 257 W3 — "Welcome back, <handle>" beat for a returning Google member (existing home).
+  else if (showGoogleWelcomeBack) {
+    content = (
+      <HomeResolvedView
+        fresh={false}
+        knownName={agentName}
+        address={agentAddress}
+        token={session?.token ?? null}
+        onContinue={() => setWelcomedBack(true)}
+      />
+    );
+  } else content = <PortalShell>{children}</PortalShell>;
 
   return (
     <>

@@ -11,7 +11,7 @@ import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel, toAgentName } from '../../lib/domain';
 import { BrandShield } from '../shared/BrandShield';
-import { ReceiptCard } from '../shared/ReceiptCard';
+import { HomeResolvedView } from './HomeResolvedView';
 
 export function GoogleSecureHome() {
   const { session, refreshProfile } = useSession();
@@ -72,16 +72,20 @@ export function GoogleSecureHome() {
   }
 
   if (phase === 'done') {
+    // spec 257 W3 — the "You're in." reward beat (greenfield 06) for a freshly-bootstrapped home.
+    // Mark the gate's welcome-back beat as already-shown before refreshing in (a new home is its
+    // own reward; we must not also fire the returning-member beat once the profile gains a name).
     return (
-      <Shell>
-        <div className="celebrate">
-          <BrandShield size={56} />
-          <h1 className="onboarding-h1">Your home is ready</h1>
-        </div>
-        <ReceiptCard title={c.portalStepReceipt} body="Secured ✓ · yours alone" />
-        <ReceiptCard title={`You're known as ${securedName}`} body={`The ${community} can find you`} />
-        <button className="btn-primary" onClick={() => void refreshProfile()}>Enter your portal</button>
-      </Shell>
+      <HomeResolvedView
+        fresh
+        knownName={securedName}
+        token={session?.token ?? null}
+        autoAdvanceMs={0}
+        onContinue={() => {
+          try { sessionStorage.setItem('homeWelcomeShown', '1'); } catch { /* ignore */ }
+          void refreshProfile();
+        }}
+      />
     );
   }
 
