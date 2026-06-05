@@ -224,6 +224,8 @@ function NameStart({ onStart, enrollApi }: { onStart: (name: string, exists: boo
     const stash = enrollApi?.enroll
       ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: label ? toAgentName(label) : '' })
       : undefined;
+    // Heading to Google — warn a popup opener (COOP severs it) so it waits for the relay, not close.
+    enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(label ? toAgentName(label) : undefined, stash);
   };
 
@@ -294,6 +296,9 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
     const stash = enrollApi?.enroll
       ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: '' })
       : undefined;
+    // Tell a popup opener we're leaving for Google BEFORE we navigate (COOP will sever the opener):
+    // it must stop trusting `popup.closed` and wait for the relay channel instead. No-op otherwise.
+    enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(undefined, stash);
   };
   // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"

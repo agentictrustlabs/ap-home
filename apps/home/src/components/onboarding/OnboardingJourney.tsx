@@ -121,6 +121,9 @@ export function OnboardingJourney({
       hasApp && api?.enroll
         ? JSON.stringify({ enroll: api.enroll, popupMode: api.popupMode, name })
         : undefined;
+    // Warn a popup opener we're leaving for Google (COOP severs the opener) so it waits for the
+    // relay channel rather than treating the severed `popup.closed` as a cancel. No-op otherwise.
+    api?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(name, stash);
   }
 

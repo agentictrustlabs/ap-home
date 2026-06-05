@@ -149,6 +149,13 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
   const url = new URL(enroll.redirectUri);
   url.searchParams.set('code', code);
   url.searchParams.set('state', enroll.state);
+  // spec 257: if we ARE a popup but lost our opener (the OAuth IdP — e.g. Google COOP — severs
+  // window.opener on the cross-origin round-trip), we can't postMessage the code back. Redirect
+  // THIS popup to the relying app with a relay marker so it hands {code,state} to its same-origin
+  // opener window (which holds the PKCE verifier) and closes, instead of trying to finish the
+  // exchange itself. Marker is only set for popupMode, so the plain full-page redirect (popup
+  // blocked / mobile, greenfield 11) is unchanged, and apps that don't handle it just ignore it.
+  if (popupMode) url.searchParams.set('ac_relay', '1');
   window.location.href = url.toString();
 }
 
