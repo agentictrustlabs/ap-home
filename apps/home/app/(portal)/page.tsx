@@ -6,6 +6,7 @@ import { whitelabel } from '../../src/whitelabel/config';
 import { stewardedThings } from '../../src/home/stewardship';
 import { AddressChip } from '../../src/components/shared/AddressChip';
 import { LockIcon } from '../../src/components/shared/Icons';
+import { ClaimPublicNameCard } from '../../src/components/portal/ClaimPublicNameCard';
 
 export default function HomeDashboard() {
   const { agentName, agentAddress, session } = useSession();
@@ -29,6 +30,11 @@ export default function HomeDashboard() {
           <a className="btn-ghost" href="/you">View your home →</a>
         </div>
       </section>
+
+      {/* spec 257 (greenfield 08) — the deferred, optional, dismissible "Claim your public name"
+          card. With true name-deferral a fresh Google home arrives NAMELESS, so this surfaces the
+          public handle LATER as a desirable choice, not an onboarding gate. Self-hides if dismissed. */}
+      <ClaimPublicNameCard />
 
       <section className="dash-section">
         <h2>{whitelabel.copy.portalManageHeading}</h2>

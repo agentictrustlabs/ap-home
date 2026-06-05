@@ -3,6 +3,17 @@
 // secure → register → permit. Three understandable activities backed by the fewest device
 // prompts: createHomeKey (your device becomes your key) + secureHome (found your home AND
 // register your name — one tap, two outcomes) + givePermission (the one separate consent).
+//
+// spec 257 W4 (name-deferral INTERIM) note: this passkey/wallet bootstrap leaf is reached ONLY
+// via the explicit "Use my Impact name" path (EntryExperience → NameStart → journey) or a
+// relying-app enroll, so it ALWAYS arrives with a name the member already chose — it is NOT a
+// surprise name prompt on the credential-first happy path. The PASSKEY new-user name is
+// genuinely LOAD-BEARING: passkeys are subdomain-isolated (RP ID = <label>.impact-agent.me) and
+// the bootstrap hops to that subdomain, derived from the name (redirectForPasskey). So a true
+// name-free NEW passkey is NOT possible here without the subdomain change — a known, accepted
+// limitation; the GOOGLE path (GoogleSecureHome) is the primary no-name flow. The wallet/EOA path
+// is not subdomain-bound and COULD auto-assign, but it too is only reached after the member
+// explicitly typed a name, so we honour their choice rather than discard it.
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, type Via } from '../../home/onboarding';

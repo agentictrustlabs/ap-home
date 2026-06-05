@@ -289,6 +289,30 @@ export async function secureHomeWithGoogle(
   return { ok: true, agent: body.agent, name: body.name ?? picked.name };
 }
 
+/** spec 257 Phase 1.5 — TRUE name-deferral. Secure a home for a Google-only member with NO
+ *  name: demo-a2a deploys their KMS-custodied SA with empty callData in one sponsored userOp,
+ *  leaving the member's single subregistry slot FREE. The public name is claimed LATER, by the
+ *  member's choice, via {@link claimName} (signed by the same C_sub through /custody/google/sign).
+ *  Onboarding stays name-free; the SA resolves deterministically from the Google identity. */
+export async function secureHomeGoogleNoName(
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
+  onStep?.('Securing your home on the network…');
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/bootstrap', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; error?: string; detail?: string };
+  if (!res.ok || !body.ok || !body.agent) {
+    return { ok: false, error: [body.error, body.detail].filter(Boolean).join(' — ') || `secure-home failed (HTTP ${res.status})` };
+  }
+  return { ok: true, agent: body.agent };
+}
+
 /** Sign in with a passkey (registering one first if none on this device), then resolve. */
 export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOutcome> {
   let passkey = loadPasskey();
@@ -1305,6 +1329,9 @@ export interface BasicProfile {
   name: string | null;
   credential: string;
   access: string;
+  /** spec 257 Phase 1.5 — is the SA deployed on-chain? false = counterfactual (fresh Google
+   *  return, no home yet → secure-home); true with name === null = a nameless deferred home. */
+  deployed: boolean;
 }
 
 export async function fetchProfile(token: string): Promise<BasicProfile | null> {

@@ -17,6 +17,7 @@ import {
   passkeySignHash,
   googleSignHash,
   secureHomeWithGoogle,
+  secureHomeGoogleNoName,
   AUD,
   type SignHash,
 } from '../connect-client';
@@ -85,6 +86,18 @@ export async function secureHome(
   return res.ok ? { ok: true, home: { address: res.agent, name: res.name } } : { ok: false, error: res.error };
 }
 
+/**
+ * spec 257 Phase 1.5 — TRUE name-deferral (Google only). Secure a home with NO name: the server
+ * deploys the member's KMS-custodied SA with empty callData, leaving their single subregistry slot
+ * FREE. The member is name-free after onboarding and claims a public handle LATER, by choice, via
+ * the portal's ClaimPublicNameCard (`claimName`). Returns a home with an empty `name`.
+ */
+export async function secureHomeNoName(auth?: Auth): Promise<Result<{ home: Home }>> {
+  if (!auth?.token) return { ok: false, error: 'no custody session' };
+  const out = await secureHomeGoogleNoName(auth.token);
+  return out.ok ? { ok: true, home: { address: out.agent, name: '' } } : { ok: false, error: out.error };
+}
+
 /** Open your home from this device (prove it's you → a session). `via` = the credential. */
 export async function openHome(name: string, via: 'passkey' | 'wallet' = 'passkey'): Promise<Result<{ token: string }>> {
   const out = await connectWithName(name, via);
@@ -92,8 +105,10 @@ export async function openHome(name: string, via: 'passkey' | 'wallet' = 'passke
 }
 
 /** The signer for an on-behalf action (delegation / userOp), chosen by credential. `sender` is
- *  the SA the signature is for (needed by the Google server-signer to derive + scope C_sub). */
-async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
+ *  the SA the signature is for (needed by the Google server-signer to derive + scope C_sub).
+ *  Exported so portal surfaces (e.g. the spec-257 W4 "Claim your public name" card) can sign a
+ *  userOp with the member's CURRENT credential without re-deriving the signer logic. */
+export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
   if (via === 'wallet') {
     const addr = await connectWallet();
     return (h: Hex) => personalSign(addr, h);

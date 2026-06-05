@@ -27,7 +27,7 @@ function hasEnrollParams(): boolean {
 }
 
 function Gate({ children }: { children: ReactNode }) {
-  const { phase, session, agentName, agentAddress, notice, clearNotice } = useSession();
+  const { phase, session, agentName, agentAddress, agentDeployed, notice, clearNotice } = useSession();
   const [mounted, setMounted] = useState(false);
   const [enroll, setEnroll] = useState(false);
   const [pendingEnroll, setPendingEnroll] = useState(false);
@@ -69,9 +69,11 @@ function Gate({ children }: { children: ReactNode }) {
   // A Google member returned mid relying-app enrollment — finish securing + granting + deliver the
   // code back to the app (the enroll request was stashed before the Google redirect; spec 235).
   else if (session?.via === 'Google' && pendingEnroll) content = <GoogleEnrollResume />;
-  // A Google member returns ALREADY in a custody session but with no home yet (counterfactual,
-  // unnamed SA) — claim their name before entering the portal (spec 235 P2.4).
-  else if (session?.via === 'Google' && !agentName) content = <GoogleSecureHome />;
+  // A Google member returns ALREADY in a custody session but with no home DEPLOYED yet (their
+  // `sub` is a counterfactual SA) — secure it before entering the portal (spec 235 P2.4). spec 257
+  // Phase 1.5: gate on DEPLOYMENT, not name — a deployed-but-nameless home (true name-deferral)
+  // must fall through to the portal, where it claims a public name by choice (ClaimPublicNameCard).
+  else if (session?.via === 'Google' && !agentDeployed) content = <GoogleSecureHome />;
   // spec 257 W3 — "Welcome back, <handle>" beat for a returning Google member (existing home).
   else if (showGoogleWelcomeBack) {
     content = (

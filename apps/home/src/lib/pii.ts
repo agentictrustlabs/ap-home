@@ -35,6 +35,11 @@ export interface BasicProfile {
   name: string | null; // .demo.agent primary name (reverse-resolved), if any
   credential: string; // the credential kind that authenticated
   access: 'standard' | 'full (confirmed with device)';
+  // spec 257 Phase 1.5 — is the SA actually deployed on-chain? A Google member returns in a
+  // custody session whose `sub` is a COUNTERFACTUAL (not-yet-deployed) SA; the portal gate routes
+  // them to secure-home ONLY while `deployed === false`. A NAMELESS deployed home (true
+  // name-deferral) has `deployed: true, name: null` and falls through to the portal.
+  deployed: boolean;
 }
 
 export interface SensitivePiiFields {
@@ -42,13 +47,15 @@ export interface SensitivePiiFields {
   phone: string;
 }
 
-/** Basic profile — open to ANY valid session (login-grade included). */
-export function basicProfile(session: AgentSession, name: string | null): BasicProfile {
+/** Basic profile — open to ANY valid session (login-grade included). `deployed` is the on-chain
+ *  bytecode signal the caller computes (the SA may be counterfactual on a fresh Google return). */
+export function basicProfile(session: AgentSession, name: string | null, deployed: boolean): BasicProfile {
   return {
     agent: session.sub,
     name,
     credential: session.principal.kind,
     access: canReadSensitivePii(session) ? 'full (confirmed with device)' : 'standard',
+    deployed,
   };
 }
 

@@ -25,6 +25,9 @@ interface SessionCtx {
   /** The agent's address, derived from `profile.agent` (CAIP-10 tail). */
   agentAddress: Address | null;
   agentName: string | null;
+  /** spec 257 Phase 1.5 — is the SA deployed on-chain? Distinguishes a counterfactual fresh-Google
+   *  SA (false → secure-home) from a deployed-but-nameless deferred home (true → portal). */
+  agentDeployed: boolean;
   /** A Google return / link notice to surface in the UI (auto-cleared on dismiss). */
   notice: string | null;
   clearNotice(): void;
@@ -239,6 +242,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const agentAddress = (profile?.agent ? (profile.agent.split(':').pop() as Address) : null) ?? null;
   const agentName = profile?.name ?? null;
+  const agentDeployed = profile?.deployed ?? false;
 
   const value: SessionCtx = {
     phase,
@@ -246,6 +250,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     profile,
     agentAddress,
     agentName,
+    agentDeployed,
     notice,
     clearNotice: () => setNotice(null),
     openSession,

@@ -1986,6 +1986,92 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
   }
 });
 
+/**
+ * POST /custody/google/bootstrap  (client → a2a, custody session)
+ * Body: { session }  → { ok, agent, agentId, transactionHash }
+ *
+ * spec 257 Phase 1.5 — TRUE name-deferral. Deploy SA_expected (custodians:[C_sub],
+ * salt 0) with EMPTY callData — NO name registered. The member's single subregistry
+ * slot stays FREE so they can later claim a custom public handle via `claimName`
+ * (separate C_sub-signed userOp through /custody/google/sign). Onboarding is name-free;
+ * the SA resolves deterministically from the Google identity (spec 235) with no name.
+ * The named atomic path is still available at /custody/google/bootstrap-and-claim for
+ * the power-user "choose a name now" affordance.
+ */
+app.post('/custody/google/bootstrap', async (c) => {
+  if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session required' }, 400);
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+      rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
+    });
+    const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    // INVARIANT (spec 235 §5.4): act ONLY for the SA the session proves.
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived SA' }, 403);
+    }
+
+    // Idempotent: if already deployed (named or nameless), the home exists.
+    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const code = await pub.getBytecode({ address: sa });
+    if (code && code !== '0x') {
+      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
+    }
+
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+
+    // Pure deploy: NO callData (initCode-only userOp; agent-account client maps undefined → '0x').
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForAgentAccount({
+      spec: { custodians: [cSub], salt: 0n },
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
+    if (sender.toLowerCase() !== sa.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'built userOp sender ≠ derived SA' }, 500);
+    }
+
+    const signature = await sign(userOpHash);
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    if (!inner.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: 'userop_reverted',
+          detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted',
+          transactionHash: receipt.transactionHash,
+        },
+        500,
+      );
+    }
+    return c.json({
+      ok: true,
+      agent: deployedAddress ?? sa,
+      agentId: caip10(Number(c.env.CHAIN_ID), sa),
+      transactionHash: receipt.transactionHash,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/bootstrap failed:', e);
+    return c.json({ ok: false, error: 'bootstrap_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 // ── spec 256: Google-KMS org-create — the org inherits the person's C_sub custody ──
 
 /** spec 256 — the 0x03 approved-hash sentinel wire signature (spec 253). */

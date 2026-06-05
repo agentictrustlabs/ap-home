@@ -7,9 +7,18 @@
 // gates on the session's assurance (P1-E). Token via `Authorization: Bearer` or
 // `?token=`. Exact `aud` match (P1-F); fail-closed everywhere.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { AgentAccountClient } from '@agenticprimitives/agent-account';
+import type { Address } from '@agenticprimitives/types';
 import { getServer, json, type FnContext } from '../_lib/server-broker';
 import { basicProfile, sensitivePii } from '../../src/lib/pii';
 import { CONNECT_DOMAIN } from '../../src/lib/domain';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+
+/** Parse the SA address out of a CAIP-10 `eip155:<chain>:0x…` subject; null if it isn't one. */
+function addressFromSub(sub: string | undefined): Address | null {
+  if (!sub || !/^eip155:\d+:0x[0-9a-fA-F]{40}$/.test(sub)) return null;
+  return sub.split(':').pop() as Address;
+}
 
 /** The person MCP's own audience (same-origin demo; the server-client mints with this aud). */
 const AUD = 'demo-sso';
@@ -64,7 +73,27 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   const route = url.pathname.replace(/^\/me\/?/, '');
   if (route === '' || route === 'profile') {
-    return json({ profile: basicProfile(session, name) });
+    // spec 257 Phase 1.5 — is the SA actually deployed? A fresh Google session's `sub` is a
+    // counterfactual SA; the portal gate routes to secure-home only while this is false. A nameless
+    // deployed home reads `{ deployed: true, name: null }` → portal. Single read (ADR-0012); a
+    // false default on RPC error is safe (the gate's secure-home call is idempotent for an
+    // already-deployed SA — it short-circuits) and never traps a deployed member.
+    let deployed = false;
+    const addr = addressFromSub(session.sub);
+    if (addr) {
+      try {
+        const accounts = new AgentAccountClient({
+          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+          chainId: CHAIN_ID,
+          entryPoint: CONTRACTS.entryPoint,
+          factory: CONTRACTS.agentAccountFactory,
+        });
+        deployed = await accounts.isDeployed(addr);
+      } catch {
+        deployed = false;
+      }
+    }
+    return json({ profile: basicProfile(session, name, deployed) });
   }
   if (route === 'sensitive') {
     const pii = sensitivePii(session);
