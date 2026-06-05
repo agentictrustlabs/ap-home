@@ -90,6 +90,14 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       return;
     }
     void (async () => {
+      // spec 257 §11: a name-deferred Google enroll arrives with an EMPTY `agent_name`. Don't call
+      // nameInfo('') (it would query the registry for an empty name) — route straight to the
+      // credential-first enroll-new journey, whose overview offers "Continue with Google". The Google
+      // ceremony resumes post-redirect in GoogleEnrollResume, which deploys a NAMELESS SA.
+      if (!api.enroll!.name) {
+        setView({ k: 'journey', variant: 'enroll-new', name: '' });
+        return;
+      }
       const info = await nameInfo(api.enroll!.name);
       // Orphan-registry guard: the name resolves to an SA but that SA has no
       // code on-chain. Refuse to use it — every downstream `executeCall` would

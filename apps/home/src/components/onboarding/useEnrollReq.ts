@@ -14,7 +14,7 @@ export interface EnrollReq {
   aud: string; // = client_id
   redirectUri: string; // = redirect_uri (exact-match in the registry)
   state: string;
-  name: string; // = agent_name (the person to sign in / govern)
+  name: string; // = agent_name — optional; empty = name-deferred Google connect (spec 257 §11)
   delegate: Address; // the relying site's delegate Smart Account (delegation recipient)
   nonce: string;
   codeChallenge: string; // PKCE S256 challenge
@@ -37,7 +37,10 @@ export function parseEnrollReq(): EnrollReq | null {
     const delegate = p.get('delegate');
     const codeChallenge = p.get('code_challenge');
     const template = p.get('delegation_template');
-    if (!clientId || !redirectUri || !agentName || !delegate || !codeChallenge || !template) return null;
+    // spec 257 §11: `agent_name` is OPTIONAL — when absent the OP runs the credential ceremony and
+    // (Google) deploys a NAMELESS SA; `sub`/`canonical_agent_id` is the sole load-bearing identity.
+    // The other fields stay MANDATORY (client_id, redirect_uri, delegate, code_challenge, template).
+    if (!clientId || !redirectUri || !delegate || !codeChallenge || !template) return null;
     const responseType = p.get('response_type');
     if (responseType && responseType !== 'code') return null; // code flow only (spec 230 §4.1)
     const ccm = p.get('code_challenge_method');
@@ -46,7 +49,7 @@ export function parseEnrollReq(): EnrollReq | null {
       aud: clientId,
       redirectUri,
       state: p.get('state') ?? '',
-      name: agentName,
+      name: agentName ?? '',
       delegate: delegate as Address,
       nonce: p.get('nonce') ?? '',
       codeChallenge,

@@ -7,7 +7,7 @@
 // (4) deliver the authorization code back to the relying app — popup postMessage or redirect,
 // exactly as the in-page flow would. This is what lets "Continue with Google" return to demo-org.
 import { useEffect, useRef, useState } from 'react';
-import { secureHome, givePermission } from '../../home/onboarding';
+import { secureHome, secureHomeNoName, givePermission } from '../../home/onboarding';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
@@ -40,7 +40,7 @@ export function readPendingEnroll(): PendingEnroll | null {
 type Phase = 'securing' | 'mismatch' | 'consent' | 'granting' | 'connected' | 'error';
 
 export function GoogleEnrollResume() {
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress, agentName, agentDeployed } = useSession();
   const c = whitelabel.copy;
   const community = whitelabel.brand.community;
   const ran = useRef(false);
@@ -72,16 +72,23 @@ export function GoogleEnrollResume() {
     if (ran.current || !pending || !token) return;
     ran.current = true;
     void (async () => {
-      if (agentName && agentAddress) {
+      // spec 257 §11: gate on DEPLOYMENT, not name — a RETURNING NAMELESS member has a deployed
+      // SA but `agentName === null`, and must take the existing-home branch (NOT re-run secure-home
+      // on an already-deployed SA). A brand-new member (no SA on-chain yet) is deployed below.
+      if (agentDeployed && agentAddress) {
         // Existing Google home. If it differs from the name the app asked to connect as, STOP and
         // explain (one Google account = one home) before granting — don't silently connect the
-        // wrong home.
-        setHome({ address: agentAddress, name: agentName });
+        // wrong home. A nameless home has `agentName === null` → empty name; the mismatch check
+        // below self-skips when EITHER side is empty (only meaningful when both have a name).
+        setHome({ address: agentAddress, name: agentName ?? '' });
         const requested = nameLabel(pending.enroll.name);
-        setPhase(requested && nameLabel(agentName) !== requested ? 'mismatch' : 'consent');
+        setPhase(requested && nameLabel(agentName ?? '') !== requested ? 'mismatch' : 'consent');
         return;
       }
-      const res = await secureHome(null, pending.name, 'google', { token });
+      // Brand-new member: TRUE name-deferral (Google only). Deploy a NAMELESS SA (empty callData,
+      // subregistry slot left free) — the member claims a public handle LATER in their portal. The
+      // enroll's `pending.name` ('' on the name-deferred path) is NOT consumed here.
+      const res = await secureHomeNoName({ token });
       if (!res.ok) return fail(res.error);
       setHome(res.home);
       setPhase('consent');

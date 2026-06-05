@@ -50,8 +50,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 
   const body = (await request.json().catch(() => null)) as AuthorizeGrantBody | null;
-  if (!body?.client_id || !body.redirect_uri || !body.agent_name || !body.code_challenge || !body.delegation_template) {
-    return json({ error: 'client_id + redirect_uri + agent_name + code_challenge + delegation_template required' }, 400);
+  // spec 257 §11: `agent_name` is OPTIONAL (name-deferred Google connect). Every OTHER field —
+  // client_id, redirect_uri, code_challenge, delegation_template — stays REQUIRED, and the
+  // registry/redirect/template/origin checks below are unchanged (only the NAME became optional).
+  if (!body?.client_id || !body.redirect_uri || !body.code_challenge || !body.delegation_template) {
+    return json({ error: 'client_id + redirect_uri + code_challenge + delegation_template required' }, 400);
   }
   if (body.code_challenge_method && body.code_challenge_method !== 'S256') {
     return json({ error: 'code_challenge_method must be S256' }, 400);
@@ -83,7 +86,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     JSON.stringify({
       client_id: body.client_id,
       redirect_uri: body.redirect_uri,
-      agent_name: body.agent_name,
+      agent_name: body.agent_name ?? '',
       // SEC-001 anti-spoof: the delegate this grant binds to is taken FROM THE REGISTRY,
       // not from the request. The SPA reads this back in the response and uses it when
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
