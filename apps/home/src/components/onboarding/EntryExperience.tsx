@@ -11,7 +11,7 @@ import { useSession } from '../../context/session';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
-import { useEnrollReq } from './useEnrollReq';
+import { useEnrollReq, type EnrollApi } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -53,6 +53,8 @@ type View =
   // user into a flow that will revert with AA20 several steps later.
   | { k: 'incomplete'; name: string }
   | { k: 'credential' } // spec 257 W1 — the credential-first front door (default; name demoted)
+  | { k: 'enroll-entry' } // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll
+  | { k: 'enroll-name' } // "Use my Impact name" within a name-deferred enroll → the named journey
   | { k: 'name' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
   | { k: 'enroll-existing'; name: string; agent: Address }
@@ -90,12 +92,13 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       return;
     }
     void (async () => {
-      // spec 257 §11: a name-deferred Google enroll arrives with an EMPTY `agent_name`. Don't call
-      // nameInfo('') (it would query the registry for an empty name) — route straight to the
-      // credential-first enroll-new journey, whose overview offers "Continue with Google". The Google
-      // ceremony resumes post-redirect in GoogleEnrollResume, which deploys a NAMELESS SA.
+      // spec 257 §11: a name-deferred enroll arrives with an EMPTY `agent_name`. Show the
+      // CREDENTIAL-FIRST entry (Continue with Google PRIMARY) — NOT the passkey-first journey
+      // (whose "Get started" / empty-name "home" chip is wrong here). Google deploys a NAMELESS SA
+      // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
+      // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
-        setView({ k: 'journey', variant: 'enroll-new', name: '' });
+        setView({ k: 'enroll-entry' });
         return;
       }
       const info = await nameInfo(api.enroll!.name);
@@ -173,6 +176,28 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       />
     );
   }
+  // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll. Same front door,
+  // but `enrollApi` makes the Google button STASH the enroll so GoogleEnrollResume resumes the
+  // grant + delivers the code back to the relying app (and deploys a nameless SA).
+  if (view.k === 'enroll-entry') {
+    return (
+      <CredentialFirstStart
+        enrollApi={api}
+        onUseName={() => setView({ k: 'enroll-name' })}
+        onSession={async (t, via) => { await openSession(t, via, false); }}
+      />
+    );
+  }
+  // "Use my Impact name" within a name-deferred enroll → collect a name, then route to the named
+  // enroll path (existing home → sign in + grant; new → the named journey which handles passkey).
+  if (view.k === 'enroll-name') {
+    return <NameStart enrollApi={api} onStart={async (name) => {
+      const info = await nameInfo(name);
+      if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
+      if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent });
+      else setView({ k: 'journey', variant: 'enroll-new', name });
+    }} />;
+  }
   // Name-first fallback (reached via "Use my Impact name").
   return <NameStart onStart={(name, exists) => {
     if (exists) {
@@ -188,11 +213,19 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 // ── Self-serve: choose your name in the community ─────────────────────────────
-function NameStart({ onStart }: { onStart: (name: string, exists: boolean) => void }) {
+// `enrollApi` (relying-app enroll only): the "Continue with Google" button must STASH the enroll so
+// the post-redirect GoogleEnrollResume finishes the grant + delivers the code back to the app.
+function NameStart({ onStart, enrollApi }: { onStart: (name: string, exists: boolean) => void; enrollApi?: EnrollApi }) {
   const [value, setValue] = useState('');
   const [avail, setAvail] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [busy, setBusy] = useState(false);
   const label = nameLabel(value);
+  const onGoogle = () => {
+    const stash = enrollApi?.enroll
+      ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: label ? toAgentName(label) : '' })
+      : undefined;
+    continueWithGoogle(label ? toAgentName(label) : undefined, stash);
+  };
 
   useEffect(() => {
     if (!label) { setAvail('idle'); return; }
@@ -233,10 +266,7 @@ function NameStart({ onStart }: { onStart: (name: string, exists: boolean) => vo
       {googleEnabled && (
         <>
           <div className="method-or">or</div>
-          <button
-            className="btn-ghost onboarding-secondary"
-            onClick={() => continueWithGoogle(label ? toAgentName(label) : undefined)}
-          >
+          <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
             Continue with Google
           </button>
         </>
@@ -250,12 +280,22 @@ function NameStart({ onStart }: { onStart: (name: string, exists: boolean) => vo
 // resolves the home server-side with NO name (spec 235); passkeys are subdomain-isolated (RP =
 // <label>.impact-agent.me) so a discoverable assertion here only succeeds for a home reachable
 // from this origin — otherwise we route to the name path (which hops to the right subdomain).
-function CredentialFirstStart({ onUseName, onSession }: {
+function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   onUseName: () => void;
   onSession: (token: string, via: string) => Promise<void>;
+  // spec 257 §11 — when set, this is a NAME-DEFERRED relying-app enroll: Google stashes the enroll
+  // (resumed in GoogleEnrollResume → nameless SA + grant), and passkey routes to the name path
+  // (a new passkey home is subdomain-bound, so it needs a name) rather than a discoverable login.
+  enrollApi?: EnrollApi;
 }) {
   const [busy, setBusy] = useState<'passkey' | null>(null);
   const [err, setErr] = useState('');
+  const onGoogle = () => {
+    const stash = enrollApi?.enroll
+      ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: '' })
+      : undefined;
+    continueWithGoogle(undefined, stash);
+  };
   // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"
   // confirmation beat before issuing the session (display only; the token is already minted).
   const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null } | null>(null);
@@ -312,13 +352,13 @@ function CredentialFirstStart({ onUseName, onSession }: {
         not something you need to remember to get back in.
       </p>
       {googleEnabled && (
-        <button className="btn-primary" onClick={() => continueWithGoogle()}>
+        <button className="btn-primary" onClick={onGoogle}>
           Continue with Google
         </button>
       )}
       <button
         className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-        onClick={withPasskey}
+        onClick={enrollApi ? onUseName : withPasskey}
         disabled={busy !== null}
       >
         {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
