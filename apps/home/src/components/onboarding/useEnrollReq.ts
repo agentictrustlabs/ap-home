@@ -179,7 +179,11 @@ export function useEnrollReq(): EnrollApi {
   const [enroll] = useState<EnrollReq | null>(() => (typeof window === 'undefined' ? null : parseEnrollReq()));
   const [popupMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return !!enroll && !!window.opener && new URL(window.location.href).searchParams.get('mode') === 'popup';
+    // Do NOT require `window.opener`: this Connect origin sets COOP (same-origin-allow-popups), which
+    // severs the cross-origin opener as soon as the popup loads us — so `window.opener` is null inside
+    // the popup even though we ARE the popup ceremony. `mode=popup` is the reliable signal. Delivery
+    // still falls back to the same-origin relay (`ac_relay`) when postMessage can't reach the opener.
+    return !!enroll && new URL(window.location.href).searchParams.get('mode') === 'popup';
   });
 
   // Post to the opener ONLY at the validated relying origin (audit F3 — exact targetOrigin).
