@@ -20,11 +20,11 @@
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
-    "hono": "^4.6.0",
-    "viem": "^2.50.0"
+    "hono": "^4.12.23",
+    "viem": "^2.52.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240909.0",
+    "@cloudflare/workers-types": "^4.20260604.1",
     "@types/node": "^22.7.0",
     "typescript": "^5.5.0",
     "wrangler": "^4.0.0"

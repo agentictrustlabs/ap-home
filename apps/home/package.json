@@ -26,14 +26,14 @@
     "@agenticprimitives/verifiable-credentials": "workspace:*",
     "@upstash/redis": "^1.34.0",
     "next": "^15.5.16",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "viem": "^2.50.0"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "viem": "^2.52.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
     "typescript": "^5.5.0"
   }
 }
