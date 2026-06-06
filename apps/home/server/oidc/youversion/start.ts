@@ -21,10 +21,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const { authUrl, codeVerifier, state, nonce } = beginLogin({
     clientId: env.YOUVERSION_CLIENT_ID,
     redirectUri: env.YOUVERSION_REDIRECT_URI,
-    // spec 265 — request `read_highlights`: highlights are YouVersion's only personal-data resource (read
-    // per Bible chapter via GET /v1/highlights). There is no notes / bookmarks / saved-verses API or scope.
-    // write_* scopes are intentionally NOT requested (read-only access).
-    scope: 'openid profile email read_highlights',
+    // spec 265 — sign-in is IDENTITY only. `read_highlights` is NOT an OIDC scope (YouVersion silently
+    // drops it here); highlights access is granted through the separate Data Exchange consent flow
+    // (GET /connect/youversion/data-exchange → approval page → callback). See spec 265 W5.
+    scope: 'openid profile email',
   });
 
   // Stash the PKCE verifier + nonce + relying-site context, keyed on `state`.

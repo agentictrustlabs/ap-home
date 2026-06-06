@@ -524,6 +524,7 @@ app.use('*', async (c, next) => {
   if (c.req.path === '/custody/youversion/store-token') return next();
   if (c.req.path === '/custody/youversion/fetch') return next();
   if (c.req.path === '/custody/youversion/set-grant') return next();
+  if (c.req.path === '/custody/youversion/data-exchange-token') return next();
   // Signed-token CSRF (ONE mechanism — ADR-0013). The `X-CSRF-Token` header IS the defense: a CUSTOM
   // header (a cross-site attacker can't set it without a CORS preflight we control) carrying an
   // HMAC-signed, origin-bound token that `verifyCsrf` (below) validates — signature + the token's bound
@@ -2554,6 +2555,54 @@ app.post('/custody/youversion/fetch', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] custody/youversion/fetch failed:', e);
     return c.json({ ok: false, error: 'fetch_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/youversion/data-exchange-token  (Connect → a2a, BRIDGE-authenticated)
+ * Body: { sender: <person SA> }  → { ok, token, expiresIn, appKey }
+ *
+ * Spec 265 W5 — YouVersion gates highlights behind a separate **Data Exchange** consent flow (NOT an OIDC
+ * scope). Using the person's KMS-custodied access_token (server-side only), we mint a short-lived (≈5 min)
+ * data-exchange token from `POST /data-exchange/token` {permissions:['highlights']}. That dx-token is
+ * designed to be carried in the user's browser to YouVersion's approval page (GET /data-exchange?token=…),
+ * so returning it here is by-design — it is NOT the access_token (which never leaves this Worker). After
+ * the user approves, the access_token becomes authorized for GET /v1/highlights.
+ */
+app.post('/custody/youversion/data-exchange-token', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  if (!c.env.FED_TOKENS) return c.json({ ok: false, error: 'fed_tokens_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.youversion.data-exchange', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { sender?: Address } | null;
+  if (!body?.sender || !/^0x[0-9a-fA-F]{40}$/.test(body.sender)) return c.json({ ok: false, error: 'bad_sender' }, 400);
+  try {
+    const loaded = await loadFederatedToken(c.env, body.sender);
+    if (!loaded) return c.json({ ok: false, error: 'no_youversion_link' }, 404);
+    let access = loaded.tokens.access;
+    if (loaded.exp - Math.floor(Date.now() / 1000) < 60 && loaded.tokens.refresh) {
+      const refreshed = await refreshYouVersionToken(loaded.tokens.refresh, loaded.appKey);
+      if (refreshed) {
+        access = refreshed.access;
+        await storeFederatedToken(c.env, body.sender, { access: refreshed.access, refresh: refreshed.refresh }, refreshed.expiresIn, refreshed.scope, loaded.appKey);
+      }
+    }
+    const res = await fetch('https://api.youversion.com/data-exchange/token', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json', 'X-YVP-App-Key': loaded.appKey, accept: 'application/json' },
+      body: JSON.stringify({ permissions: ['highlights'] }),
+    });
+    const dx = (await res.json().catch(() => null)) as { token?: string; expires_in?: number } | null;
+    if (!res.ok || !dx?.token) {
+      console.log(JSON.stringify({ evt: 'youversion.data-exchange.error', status: res.status, body: dx }));
+      return c.json({ ok: false, error: `data_exchange_token HTTP ${res.status}`, detail: dx }, 502);
+    }
+    return c.json({ ok: true, token: dx.token, expiresIn: dx.expires_in ?? 300, appKey: loaded.appKey });
+  } catch (e) {
+    console.error('[demo-a2a] custody/youversion/data-exchange-token failed:', e);
+    return c.json({ ok: false, error: 'data_exchange_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

@@ -4,7 +4,7 @@
 // proves the full chain end-to-end: sign in with YouVersion → token custodied → read highlights back.
 // YouVersion serves highlights one Bible chapter at a time (there is no "all highlights" endpoint), so the
 // reader picks a chapter. Highlights are YouVersion's only personal-data resource (no notes/bookmarks API).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession } from '../../context/session';
 
 type Phase = 'idle' | 'loading' | 'done' | 'error';
@@ -15,6 +15,41 @@ export function YouVersionData() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
   const [err, setErr] = useState('');
   const [chapter, setChapter] = useState('JHN.3');
+  const [granting, setGranting] = useState(false);
+  const [notice, setNotice] = useState<'granted' | 'cancelled' | 'error' | ''>('');
+
+  // On return from YouVersion's Data Exchange approval page, the callback lands us at /apps?yv_highlights=…
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const r = p.get('yv_highlights');
+    if (r === 'granted' || r === 'cancelled' || r === 'error') {
+      setNotice(r);
+      p.delete('yv_highlights');
+      const qs = p.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    }
+  }, []);
+
+  // Highlights are gated behind YouVersion's separate Data Exchange consent — kick off the approval flow.
+  async function grantAccess() {
+    if (!session?.token) return;
+    setGranting(true);
+    setErr('');
+    try {
+      const r = await fetch('/connect/youversion/data-exchange', { headers: { authorization: `Bearer ${session.token}` } });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; approveUrl?: string; error?: string; detail?: unknown };
+      if (!r.ok || !j.ok || !j.approveUrl) {
+        const detail = j.detail ? ` — ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)}` : '';
+        setErr(`${j.error ?? `Couldn't start highlights approval (HTTP ${r.status})`}${detail}`);
+        setGranting(false);
+        return;
+      }
+      window.location.href = j.approveUrl; // YouVersion approval page → back to /apps?yv_highlights=…
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setGranting(false);
+    }
+  }
 
   async function load() {
     if (!session?.token) return;
@@ -53,6 +88,17 @@ export function YouVersionData() {
           <div className="connected-app-domain">read live from YouVersion · your token stays in your home</div>
         </div>
       </div>
+
+      {notice === 'granted' && <p className="onboarding-hint">Highlights access approved — pick a chapter and show your highlights.</p>}
+      {notice === 'cancelled' && <p className="onboarding-hint taken">Highlights approval was cancelled.</p>}
+      {notice === 'error' && <p className="onboarding-hint taken">Highlights approval didn’t complete — try again.</p>}
+
+      <p className="muted footnote" style={{ margin: '0 0 .6rem' }}>
+        YouVersion requires a one-time approval before sharing highlights. Approve it once, then read any chapter.
+      </p>
+      <button className="btn-ghost onboarding-secondary" onClick={grantAccess} disabled={granting || !session?.token} style={{ marginBottom: '.6rem' }}>
+        {granting ? 'Opening YouVersion…' : 'Grant highlights access'}
+      </button>
 
       <label style={{ display: 'flex', gap: '.5rem', alignItems: 'center', fontSize: '.85rem', margin: '.4rem 0 .6rem' }}>
         <span className="muted">Chapter</span>
