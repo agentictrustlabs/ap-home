@@ -157,6 +157,13 @@ bindings = [
 binding = "BRIDGE_NONCES"
 id = "7580076e201f480aa9dce2ec1294d0cd"
 
+# Federated user-data tokens (spec 265): per-person YouVersion OAuth access/refresh tokens, KMS-encrypted
+# at rest (envelope), keyed by person SA. Read ONLY server-side by the youversion read-proxy — never
+# returned to a relying app or grantee.
+[[env.production.kv_namespaces]]
+binding = "FED_TOKENS"
+id = "e050ce20dd6e4a88b568e2f5ed1b47a0"
+
 # Service binding: demo-a2a → demo-mcp. Cloudflare blocks direct
 # fetch(*.workers.dev) between sibling Workers on the same account
 # with error 1042 (recursion/loop protection). Service bindings are

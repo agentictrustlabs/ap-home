@@ -165,6 +165,30 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     await recordOidcFacet(env.AUTH_CODES, oidcIss, oidcSub, derived.agentId);
     agent = derived.agentId;
     custodyGrade = true;
+    // spec 265 W2 — custody the YouVersion OAuth tokens (KMS-encrypted in demo-a2a, keyed by the person
+    // SA) for later user-data reads. Best-effort: never block sign-in on token custody. The token never
+    // comes back to the browser or any relying app.
+    if (result.tokens.accessToken && env.A2A_CUSTODY_URL && env.A2A_CUSTODY_BRIDGE_SECRET && env.YOUVERSION_CLIENT_ID) {
+      try {
+        const envelope = await signBridgeCall({
+          secret: env.A2A_CUSTODY_BRIDGE_SECRET,
+          audience: 'custody.youversion.store',
+          payload: {
+            iss: oidcIss, sub: oidcSub,
+            access_token: result.tokens.accessToken,
+            refresh_token: result.tokens.refreshToken,
+            expires_in: result.tokens.expiresIn,
+            scope: result.tokens.scope,
+            appKey: env.YOUVERSION_CLIENT_ID,
+          },
+        });
+        await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/youversion/store-token`, {
+          method: 'POST', headers: envelope.headers, body: envelope.body,
+        });
+      } catch {
+        /* best-effort token custody — sign-in proceeds regardless */
+      }
+    }
   } else {
     agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
     if (!agent) {

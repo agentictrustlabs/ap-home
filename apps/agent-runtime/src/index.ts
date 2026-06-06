@@ -80,6 +80,7 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
+import { storeFederatedToken, loadFederatedToken } from './fed-token';
 
 // SEC-010: in-memory single-use nonce store for the custody-bridge HMAC envelope.
 // Bounded by the freshness window — a worker recycle clears the store, which is
@@ -136,6 +137,9 @@ export interface Env {
   // Bridge anti-replay nonce store (audit M-1) — cross-isolate single-use via KV. Optional: when unbound
   // (e.g. local dev) the bridge falls back to the per-isolate in-memory store.
   BRIDGE_NONCES?: KVNamespace;
+  // Federated user-data tokens (spec 265) — per-person YouVersion OAuth tokens, KMS-encrypted at rest,
+  // keyed by person SA. Read ONLY server-side; never returned to a relying app.
+  FED_TOKENS?: KVNamespace;
 
   // Public config (wrangler.toml [vars])
   RPC_URL: string;
@@ -512,6 +516,10 @@ app.use('*', async (c, next) => {
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
   if (c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/google/sign-site-delegation') return next();
+  // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
+  // authenticated (no browser cookie).
+  if (c.req.path === '/custody/youversion/store-token') return next();
+  if (c.req.path === '/custody/youversion/fetch') return next();
   // Signed-token CSRF (ONE mechanism — ADR-0013). The `X-CSRF-Token` header IS the defense: a CUSTOM
   // header (a cross-site attacker can't set it without a CORS preflight we control) carrying an
   // HMAC-signed, origin-bound token that `verifyCsrf` (below) validates — signature + the token's bound
@@ -2416,6 +2424,106 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] custody/google/sign-site-delegation failed:', e);
     return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/** Refresh a YouVersion access token from its refresh token (public PKCE client — no secret). spec 265. */
+async function refreshYouVersionToken(
+  refresh: string,
+  appKey: string,
+): Promise<{ access: string; refresh: string | null; expiresIn: number | null; scope: string | null } | null> {
+  const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: appKey });
+  const res = await fetch('https://api.youversion.com/auth/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: body.toString(),
+  });
+  if (!res.ok) return null;
+  const j = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number | string; scope?: string };
+  if (!j.access_token) return null;
+  return { access: j.access_token, refresh: j.refresh_token ?? refresh, expiresIn: j.expires_in != null ? Number(j.expires_in) : null, scope: j.scope ?? null };
+}
+
+/**
+ * POST /custody/youversion/store-token  (Connect broker → a2a, BRIDGE-authenticated)
+ * Body: { iss, sub, access_token, refresh_token?, expires_in?, scope?, appKey }
+ *
+ * Spec 265 W2 — after YouVersion sign-in, the broker hands us the OAuth tokens; we KMS-encrypt them and
+ * store keyed by the person SA (derived from (iss,sub), rotation 0). The plaintext token NEVER leaves
+ * this Worker (the read path is a server-side proxy, below).
+ */
+app.post('/custody/youversion/store-token', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  if (!c.env.FED_TOKENS) return c.json({ ok: false, error: 'fed_tokens_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.youversion.store', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as
+    { iss?: string; sub?: string; access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; appKey?: string } | null;
+  if (!body?.iss || !body?.sub || !body?.access_token || !body?.appKey) {
+    return c.json({ ok: false, error: 'iss + sub + access_token + appKey required' }, 400);
+  }
+  try {
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY, { rotation: 0 });
+    const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    await storeFederatedToken(
+      c.env, sa, { access: body.access_token, refresh: body.refresh_token ?? null },
+      body.expires_in ?? null, body.scope ?? null, body.appKey,
+    );
+    return c.json({ ok: true, agent: sa });
+  } catch (e) {
+    console.error('[demo-a2a] custody/youversion/store-token failed:', e);
+    return c.json({ ok: false, error: 'store_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/youversion/fetch  (MCP read tool → a2a, BRIDGE-authenticated)
+ * Body: { sender: <person SA>, path: '/v1/highlights' }  → { ok, data }
+ *
+ * Spec 265 W2 — server-side read PROXY: decrypt the person's YouVersion token, refresh if near expiry,
+ * call the YouVersion Platform API, return ONLY the data. The token never crosses this boundary. The
+ * CALLER (demo-mcp youversion tool, W3) verifies the VaultGrant + data-scope BEFORE calling; this
+ * endpoint trusts the bridge HMAC (broker/MCP only) and reads by the `sender` SA key. Paths are
+ * allowlisted to the documented user-content reads — no arbitrary proxying.
+ */
+app.post('/custody/youversion/fetch', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  if (!c.env.FED_TOKENS) return c.json({ ok: false, error: 'fed_tokens_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.youversion.fetch', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { sender?: Address; path?: string } | null;
+  if (!body?.sender || !body?.path) return c.json({ ok: false, error: 'sender + path required' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.sender)) return c.json({ ok: false, error: 'bad_sender' }, 400);
+  if (!/^\/v1\/(highlights|notes|bookmarks|saved_verses)(\?[^#]*)?$/.test(body.path)) {
+    return c.json({ ok: false, error: 'path_not_allowed' }, 400);
+  }
+  try {
+    const loaded = await loadFederatedToken(c.env, body.sender);
+    if (!loaded) return c.json({ ok: false, error: 'no_youversion_link' }, 404);
+    let access = loaded.tokens.access;
+    if (loaded.exp - Math.floor(Date.now() / 1000) < 60 && loaded.tokens.refresh) {
+      const refreshed = await refreshYouVersionToken(loaded.tokens.refresh, loaded.appKey);
+      if (refreshed) {
+        access = refreshed.access;
+        await storeFederatedToken(
+          c.env, body.sender, { access: refreshed.access, refresh: refreshed.refresh },
+          refreshed.expiresIn, refreshed.scope, loaded.appKey,
+        );
+      }
+    }
+    const res = await fetch(`https://api.youversion.com${body.path}`, {
+      headers: { authorization: `Bearer ${access}`, 'X-YVP-App-Key': loaded.appKey, accept: 'application/json' },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return c.json({ ok: false, error: `youversion HTTP ${res.status}`, detail: data }, 502);
+    return c.json({ ok: true, data });
+  } catch (e) {
+    console.error('[demo-a2a] custody/youversion/fetch failed:', e);
+    return c.json({ ok: false, error: 'fetch_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
