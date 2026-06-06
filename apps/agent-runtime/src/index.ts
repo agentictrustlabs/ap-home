@@ -79,13 +79,19 @@ import {
 } from '@agenticprimitives/audit';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
-import { verifyBridgeCall, type NonceStore } from './bridge-hmac';
+import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 
 // SEC-010: in-memory single-use nonce store for the custody-bridge HMAC envelope.
 // Bounded by the freshness window — a worker recycle clears the store, which is
 // acceptable since the freshness window already bounds replay risk. Production
 // deployments should swap this for a KV/D1-backed store for cross-instance defense.
 let _bridgeNonces: Map<string, number> | null = null;
+/** The bridge nonce store: cross-isolate KV (single-use holds globally) when `BRIDGE_NONCES` is bound,
+ *  else the per-isolate in-memory Map (local dev / unbound). Audit M-1. */
+function bridgeNonceStore(env: Env): NonceStore {
+  return env.BRIDGE_NONCES ? nonceStoreFromKv(env.BRIDGE_NONCES) : getInMemoryNonceStore();
+}
+
 function getInMemoryNonceStore(): NonceStore {
   if (!_bridgeNonces) _bridgeNonces = new Map();
   const store = _bridgeNonces;
@@ -127,6 +133,9 @@ export { SessionStoreDO };
 export interface Env {
   // Durable Object binding (declared in wrangler.toml)
   SESSIONS: DurableObjectNamespace;
+  // Bridge anti-replay nonce store (audit M-1) — cross-isolate single-use via KV. Optional: when unbound
+  // (e.g. local dev) the bridge falls back to the per-isolate in-memory store.
+  BRIDGE_NONCES?: KVNamespace;
 
   // Public config (wrangler.toml [vars])
   RPC_URL: string;
@@ -1902,7 +1911,7 @@ app.post('/custody/google/resolve', async (c) => {
     rawBody,
     secret,
     expectedAudience: 'custody.google.resolve',
-    nonces: getInMemoryNonceStore(),
+    nonces: bridgeNonceStore(c.env),
   });
   if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
 
@@ -2371,7 +2380,7 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
     rawBody,
     secret,
     expectedAudience: 'custody.google.sign-delegation',
-    nonces: getInMemoryNonceStore(),
+    nonces: bridgeNonceStore(c.env),
   });
   if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
 

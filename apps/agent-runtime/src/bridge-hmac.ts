@@ -12,7 +12,9 @@
 //   3. The nonce has not been seen recently — recorded in the supplied store with a
 //      TTL of BRIDGE_FRESHNESS_MS so an intra-window replay is rejected.
 
-import type { KVNamespace } from '@cloudflare/workers-types';
+// `KVNamespace` is the AMBIENT global from `@cloudflare/workers-types` (tsconfig `types`), the same one
+// the Worker's `Env` uses — importing it instead yields a distinct type identity (global-vs-module) that
+// TS reports as "not assignable", so we rely on the global here.
 
 export const BRIDGE_FRESHNESS_MS = 60_000;
 

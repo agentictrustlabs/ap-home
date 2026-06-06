@@ -151,6 +151,12 @@ bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
 ]
 
+# Bridge anti-replay nonce store (audit M-1): single-use bridge-envelope nonces recorded across isolates
+# (the per-isolate in-memory Map caught nothing cross-isolate). TTL'd presence keys via `nonceStoreFromKv`.
+[[env.production.kv_namespaces]]
+binding = "BRIDGE_NONCES"
+id = "7580076e201f480aa9dce2ec1294d0cd"
+
 # Service binding: demo-a2a → demo-mcp. Cloudflare blocks direct
 # fetch(*.workers.dev) between sibling Workers on the same account
 # with error 1042 (recursion/loop protection). Service bindings are
