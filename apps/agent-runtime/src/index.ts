@@ -80,7 +80,10 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
-import { storeFederatedToken, loadFederatedToken } from './fed-token';
+import {
+  storeFederatedToken, loadFederatedToken, setYouVersionGrant, getYouVersionGrant,
+  YOUVERSION_DATA_SCOPES, type YouVersionDataScope,
+} from './fed-token';
 
 // SEC-010: in-memory single-use nonce store for the custody-bridge HMAC envelope.
 // Bounded by the freshness window — a worker recycle clears the store, which is
@@ -520,6 +523,7 @@ app.use('*', async (c, next) => {
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
   if (c.req.path === '/custody/youversion/fetch') return next();
+  if (c.req.path === '/custody/youversion/set-grant') return next();
   // Signed-token CSRF (ONE mechanism — ADR-0013). The `X-CSRF-Token` header IS the defense: a CUSTOM
   // header (a cross-site attacker can't set it without a CORS preflight we control) carrying an
   // HMAC-signed, origin-bound token that `verifyCsrf` (below) validates — signature + the token's bound
@@ -2444,6 +2448,32 @@ async function refreshYouVersionToken(
   return { access: j.access_token, refresh: j.refresh_token ?? refresh, expiresIn: j.expires_in != null ? Number(j.expires_in) : null, scope: j.scope ?? null };
 }
 
+/** Read a YouVersion user-content path for a person: decrypt the stored token, refresh near expiry, call
+ *  the Platform API, return ONLY the data (the token never leaves this Worker). Shared by the bridge
+ *  fetch endpoint + the delegation-gated /mcp/youversion routes (spec 265). */
+async function fetchYouVersionData(
+  env: Env,
+  sa: Address,
+  path: string,
+): Promise<{ ok: true; data: unknown } | { ok: false; status: number; error: string; detail?: unknown }> {
+  const loaded = await loadFederatedToken(env, sa);
+  if (!loaded) return { ok: false, status: 404, error: 'no_youversion_link' };
+  let access = loaded.tokens.access;
+  if (loaded.exp - Math.floor(Date.now() / 1000) < 60 && loaded.tokens.refresh) {
+    const refreshed = await refreshYouVersionToken(loaded.tokens.refresh, loaded.appKey);
+    if (refreshed) {
+      access = refreshed.access;
+      await storeFederatedToken(env, sa, { access: refreshed.access, refresh: refreshed.refresh }, refreshed.expiresIn, refreshed.scope, loaded.appKey);
+    }
+  }
+  const res = await fetch(`https://api.youversion.com${path}`, {
+    headers: { authorization: `Bearer ${access}`, 'X-YVP-App-Key': loaded.appKey, accept: 'application/json' },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false, status: 502, error: `youversion HTTP ${res.status}`, detail: data };
+  return { ok: true, data };
+}
+
 /**
  * POST /custody/youversion/store-token  (Connect broker → a2a, BRIDGE-authenticated)
  * Body: { iss, sub, access_token, refresh_token?, expires_in?, scope?, appKey }
@@ -2502,28 +2532,67 @@ app.post('/custody/youversion/fetch', async (c) => {
     return c.json({ ok: false, error: 'path_not_allowed' }, 400);
   }
   try {
-    const loaded = await loadFederatedToken(c.env, body.sender);
-    if (!loaded) return c.json({ ok: false, error: 'no_youversion_link' }, 404);
-    let access = loaded.tokens.access;
-    if (loaded.exp - Math.floor(Date.now() / 1000) < 60 && loaded.tokens.refresh) {
-      const refreshed = await refreshYouVersionToken(loaded.tokens.refresh, loaded.appKey);
-      if (refreshed) {
-        access = refreshed.access;
-        await storeFederatedToken(
-          c.env, body.sender, { access: refreshed.access, refresh: refreshed.refresh },
-          refreshed.expiresIn, refreshed.scope, loaded.appKey,
-        );
-      }
-    }
-    const res = await fetch(`https://api.youversion.com${body.path}`, {
-      headers: { authorization: `Bearer ${access}`, 'X-YVP-App-Key': loaded.appKey, accept: 'application/json' },
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) return c.json({ ok: false, error: `youversion HTTP ${res.status}`, detail: data }, 502);
-    return c.json({ ok: true, data });
+    const r = await fetchYouVersionData(c.env, body.sender, body.path);
+    return r.ok ? c.json({ ok: true, data: r.data }) : c.json({ ok: false, error: r.error, detail: r.detail }, r.status as 404);
   } catch (e) {
     console.error('[demo-a2a] custody/youversion/fetch failed:', e);
     return c.json({ ok: false, error: 'fetch_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/youversion/set-grant  (Connect → a2a, BRIDGE-authenticated)
+ * Body: { person, app, scopes: YouVersionDataScope[] }  → { ok }
+ *
+ * Spec 265 W3 — record (under the person's authority, written by Connect on consent) which YouVersion
+ * data types the person grants `app` to read. Empty `scopes` = revoke. The read route gates each type
+ * against this record.
+ */
+app.post('/custody/youversion/set-grant', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  if (!c.env.FED_TOKENS) return c.json({ ok: false, error: 'fed_tokens_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.youversion.set-grant', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { person?: Address; app?: Address; scopes?: string[] } | null;
+  if (!body?.person || !body?.app || !Array.isArray(body?.scopes)) return c.json({ ok: false, error: 'person + app + scopes required' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.person) || !/^0x[0-9a-fA-F]{40}$/.test(body.app)) return c.json({ ok: false, error: 'bad_address' }, 400);
+  try {
+    await setYouVersionGrant(c.env, body.person, body.app, body.scopes as YouVersionDataScope[]);
+    return c.json({ ok: true });
+  } catch (e) {
+    return c.json({ ok: false, error: 'set_grant_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /mcp/youversion/:type   (relying app → a2a via the /a2a proxy; delegation-gated + CSRF, like
+ * /mcp/vault/*). Body: { delegation, requester }  → { ok, data }
+ *
+ * Spec 265 W3 — the VaultGrant-gated read. `type` ∈ {highlights,notes,bookmarks,saved_verses}. Verify the
+ * person→app delegation (delegator = person, delegate = requester = the app), confirm the person granted
+ * `app` the `type` scope, then read live from YouVersion (token stays server-side). Returns ONLY the data.
+ */
+app.post('/mcp/youversion/:type', async (c) => {
+  const type = c.req.param('type') as YouVersionDataScope;
+  if (!YOUVERSION_DATA_SCOPES.includes(type)) return c.json({ ok: false, error: 'unknown_type' }, 404);
+  const body = (await c.req.json().catch(() => null)) as { delegation?: IncomingDelegation; requester?: Address } | null;
+  if (!body?.delegation || !body?.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+  // 1. Verify the person→app delegation (delegate == requester, ERC-1271 against the delegator person SA).
+  const v = await verifyDelegation(c.env, body.delegation, body.requester);
+  if (!v.ok) return c.json({ ok: false, error: `delegation_invalid: ${v.reason}` }, 403);
+  const person = body.delegation.delegator;
+  const app = body.delegation.delegate;
+  // 2. Confirm the person granted THIS app THIS data type (the VaultGrant data-scope, spec 265).
+  const granted = await getYouVersionGrant(c.env, person, app);
+  if (!granted.includes(type)) return c.json({ ok: false, error: 'scope_not_granted', detail: `no '${type}' grant for ${app}` }, 403);
+  // 3. Read live from YouVersion — the token never leaves this worker; return ONLY the data.
+  try {
+    const r = await fetchYouVersionData(c.env, person, `/v1/${type}`);
+    return r.ok ? c.json({ ok: true, data: r.data }) : c.json({ ok: false, error: r.error, detail: r.detail }, r.status as 404);
+  } catch (e) {
+    return c.json({ ok: false, error: 'read_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

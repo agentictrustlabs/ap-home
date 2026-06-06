@@ -90,3 +90,29 @@ export async function loadFederatedToken(
 export async function deleteFederatedToken(env: FedEnv, sa: Address): Promise<void> {
   await env.FED_TOKENS?.delete(key(sa));
 }
+
+// ─── VaultGrant data-scope records (spec 265 W3) ──────────────────────────────
+// Which YouVersion data types a person has granted an app to read. Stored in the SAME KV with a `grant:`
+// prefix, keyed by (person SA, app delegate). Written under the person's authority (Connect, bridge);
+// read by the youversion read routes to gate each data type per app.
+
+/** The grantable YouVersion data types (our internal scope vocabulary — distinct from the OAuth scope
+ *  strings like `read_highlights`). */
+export type YouVersionDataScope = 'highlights' | 'notes' | 'bookmarks' | 'saved_verses';
+export const YOUVERSION_DATA_SCOPES: YouVersionDataScope[] = ['highlights', 'notes', 'bookmarks', 'saved_verses'];
+
+const grantKey = (person: Address, app: Address): string => `grant:${person.toLowerCase()}:${app.toLowerCase()}`;
+
+export async function setYouVersionGrant(env: FedEnv, person: Address, app: Address, scopes: YouVersionDataScope[]): Promise<void> {
+  if (!env.FED_TOKENS) throw new Error('FED_TOKENS not configured');
+  const clean = scopes.filter((s) => YOUVERSION_DATA_SCOPES.includes(s));
+  if (clean.length === 0) { await env.FED_TOKENS.delete(grantKey(person, app)); return; } // empty = revoke
+  await env.FED_TOKENS.put(grantKey(person, app), JSON.stringify({ scopes: clean }));
+}
+
+export async function getYouVersionGrant(env: FedEnv, person: Address, app: Address): Promise<YouVersionDataScope[]> {
+  if (!env.FED_TOKENS) return [];
+  const raw = await env.FED_TOKENS.get(grantKey(person, app));
+  if (!raw) return [];
+  try { return (JSON.parse(raw) as { scopes?: YouVersionDataScope[] }).scopes ?? []; } catch { return []; }
+}
