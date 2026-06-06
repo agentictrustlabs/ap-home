@@ -2478,9 +2478,15 @@ async function fetchYouVersionData(
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    // Surface the provider's error body so a 422 (missing/invalid param) is diagnosable via `wrangler tail`.
-    console.log(JSON.stringify({ evt: 'youversion.fetch.error', path, status: res.status, body: data }));
-    return { ok: false, status: 502, error: `youversion HTTP ${res.status}`, detail: data };
+    // Surface the provider's error body + the GRANTED OAuth scope so a 422 (bad param) vs a 403
+    // ("not granted highlights permissions" → `read_highlights` missing from the token, i.e. the
+    // YouVersion Portal app isn't approved for it) is diagnosable via `wrangler tail` and the UI. The
+    // scope string is non-sensitive metadata — the access token itself never leaves this Worker.
+    console.log(JSON.stringify({ evt: 'youversion.fetch.error', path, status: res.status, grantedScope: loaded.scope, body: data }));
+    const detail = res.status === 401 || res.status === 403
+      ? { provider: data, grantedScope: loaded.scope ?? '(none recorded)', hint: 'read_highlights must be enabled for this app in the YouVersion Platform Portal, then re-sign-in with YouVersion to mint a token carrying it.' }
+      : data;
+    return { ok: false, status: 502, error: `youversion HTTP ${res.status}`, detail };
   }
   return { ok: true, data };
 }
