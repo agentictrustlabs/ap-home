@@ -270,21 +270,33 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
   // → no delegation, and the relying app falls back to the popup. The delegation is still the substrate's
   // scoped, revocable authority object — just delivered alongside the bootstrap because custody is here.
   let delegation: unknown = null;
+  let delegationError: string | undefined; // surfaced in the packed token for diagnosis (DevTools)
   const addr = addressFromSub(hs.sub);
   const viaLower = hs.via.toLowerCase();
-  if (addr && client.delegate && (viaLower === 'google' || viaLower === 'wallet' || viaLower === 'passkey')) {
+  if (!addr) {
+    delegationError = `sub_not_caip10:${hs.sub}`;
+  } else if (!client.delegate) {
+    delegationError = 'client_has_no_delegate';
+  } else if (viaLower !== 'google' && viaLower !== 'wallet' && viaLower !== 'passkey') {
+    delegationError = `unsupported_via:${viaLower || '(empty)'}`;
+  } else {
     try {
       const auth: Auth | undefined = viaLower === 'google' ? { token: hs.custodyToken } : undefined;
       const perm = await givePermission({ address: addr, name: hs.name ?? '' } as Home, client.delegate, viaLower as Via, auth);
       if (perm.ok) delegation = perm.grant;
-    } catch {
-      delegation = null; // relying side falls back to the popup
+      else delegationError = `give_permission_failed:${perm.error}`;
+    } catch (e) {
+      delegationError = `give_permission_threw:${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
   // FedCM returns a single opaque `token` string; pack {id_token, delegation?} so the relying app gets
-  // identity + the grant in one round-trip (it JSON-parses the token).
-  const packed = JSON.stringify(delegation ? { id_token: idToken, delegation } : { id_token: idToken });
+  // identity + the grant in one round-trip (it JSON-parses the token). On a delegation-mint failure we
+  // pack `delegation_error` (visible in the assertion Network response) so the cause is diagnosable; the
+  // relying app then has no grant → falls back to the popup.
+  const packed = JSON.stringify(
+    delegation ? { id_token: idToken, delegation } : { id_token: idToken, delegation_error: delegationError ?? 'unknown' },
+  );
   const sl = loginStatusHeader('logged-in');
   return json(buildTokenResponse(packed), 200, { ...cors, [sl.name]: sl.value });
 };
