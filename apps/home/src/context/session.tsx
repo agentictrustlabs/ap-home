@@ -36,7 +36,7 @@ interface SessionCtx {
   refreshProfile(): Promise<void>;
 }
 
-const SESSION_KEY = 'agenticprimitives:demo-sso:session';
+export const SESSION_KEY = 'agenticprimitives:demo-sso:session';
 const Ctx = createContext<SessionCtx | null>(null);
 
 /** Tell the browser's FedCM login-status API the user's IdP state (Chrome-only; feature-detected). With
