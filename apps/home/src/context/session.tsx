@@ -39,6 +39,18 @@ interface SessionCtx {
 const SESSION_KEY = 'agenticprimitives:demo-sso:session';
 const Ctx = createContext<SessionCtx | null>(null);
 
+/** Tell the browser's FedCM login-status API the user's IdP state (Chrome-only; feature-detected). With
+ *  `logged-in`, FedCM will call `/fedcm/accounts`; with `logged-out` it shows the `login_url` affordance
+ *  instead of erroring. Without this signal FedCM treats the IdP state as `unknown` and an accounts 401
+ *  surfaces as an error (spec 264 Phase 1b). */
+export function setFedcmLoginStatus(status: 'logged-in' | 'logged-out'): void {
+  try {
+    (navigator as unknown as { login?: { setStatus?: (s: string) => void } }).login?.setStatus?.(status);
+  } catch {
+    /* not supported — fine */
+  }
+}
+
 /** Restore a persisted session on load only if one exists AND we're not mid Google-redirect
  *  (?code/connect_status) or central-auth enrollment (?delegate) — those mint their own. */
 function shouldRestore(): boolean {
@@ -82,6 +94,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       /* storage blocked (private mode) — session just won't persist */
     }
     setSsoCookie(token, via); // share across *.impact-agent.me (parent-domain SSO)
+    setFedcmLoginStatus('logged-in'); // FedCM may now call /fedcm/accounts (spec 264)
     const p = await fetchProfile(token);
     setProfile(p);
     setPhase('authed');
@@ -98,6 +111,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     clearSsoCookie(); // sign out across *.impact-agent.me
+    setFedcmLoginStatus('logged-out'); // FedCM shows the login_url affordance instead of erroring
     setPhase('anon');
   }, []);
 

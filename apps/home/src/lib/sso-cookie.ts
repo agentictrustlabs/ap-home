@@ -28,7 +28,11 @@ export function setSsoCookie(token: string, via: string, maxAgeSec = 3600): void
   if (!onImpactHost()) return;
   try {
     const value = encodeURIComponent(JSON.stringify({ t: token, v: via }));
-    document.cookie = `${NAME}=${value}; Domain=${PARENT}; Path=/; Max-Age=${maxAgeSec}; Secure; SameSite=Lax`;
+    // SameSite=None (with Secure) so the cookie rides on FedCM's credentialed cross-site fetches
+    // (`/fedcm/accounts` + `/fedcm/assertion`), which are initiated for the relying app and therefore
+    // cross-site — a Lax cookie would NOT be sent → the IdP couldn't see the session (401). The token is
+    // short-lived + aud/iss-pinned + ERC-1271/JWKS-verified, so the relaxed SameSite is low-risk.
+    document.cookie = `${NAME}=${value}; Domain=${PARENT}; Path=/; Max-Age=${maxAgeSec}; Secure; SameSite=None`;
   } catch {
     /* ignore */
   }

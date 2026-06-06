@@ -14,6 +14,7 @@ import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setSsoCookie } from '../../lib/sso-cookie';
+import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -112,6 +113,7 @@ export function GoogleEnrollResume() {
       // ACTUAL Google credential (server-side KMS deploy) instead of falling through to the passkey path
       // and erroring "your central-auth passkey isn't on this device." Passkey enrolls never reach here.
       setSsoCookie(token, 'Google');
+      setFedcmLoginStatus('logged-in'); // FedCM may now call /fedcm/accounts (spec 264)
       const tpl = whitelabel.delegationTemplates[enroll.template];
       recordConnectedApp(home.address, {
         clientId: enroll.aud,
