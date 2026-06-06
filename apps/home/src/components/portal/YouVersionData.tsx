@@ -20,12 +20,13 @@ export function YouVersionData() {
     setErr('');
     try {
       const r = await fetch('/connect/youversion?type=highlights', { headers: { authorization: `Bearer ${session.token}` } });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; data?: unknown; error?: string };
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; data?: unknown; error?: string; detail?: unknown };
       if (!r.ok || j.ok === false) {
+        const detail = j.detail ? ` — ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)}` : '';
         setErr(
           j.error === 'no_youversion_link'
             ? 'No YouVersion account linked yet — sign in with YouVersion first.'
-            : j.error ?? `Couldn't load (HTTP ${r.status})`,
+            : `${j.error ?? `Couldn't load (HTTP ${r.status})`}${detail}`,
         );
         setPhase('error');
         return;

@@ -2470,7 +2470,11 @@ async function fetchYouVersionData(
     headers: { authorization: `Bearer ${access}`, 'X-YVP-App-Key': loaded.appKey, accept: 'application/json' },
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) return { ok: false, status: 502, error: `youversion HTTP ${res.status}`, detail: data };
+  if (!res.ok) {
+    // Surface the provider's error body so a 422 (missing/invalid param) is diagnosable via `wrangler tail`.
+    console.log(JSON.stringify({ evt: 'youversion.fetch.error', path, status: res.status, body: data }));
+    return { ok: false, status: 502, error: `youversion HTTP ${res.status}`, detail: data };
+  }
   return { ok: true, data };
 }
 
