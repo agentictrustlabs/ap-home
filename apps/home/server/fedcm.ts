@@ -148,9 +148,12 @@ function isOwnConnectOrigin(origin: string): boolean {
 /** Verify the home session from the `ap_sso` cookie (signature/exp/owner via the broker JWKS, then a
  *  trusted issuer), and resolve the signed-in agent's `sub` (CAIP-10 SA address) + display name. Returns
  *  `null` when there is no valid session — the caller returns 401, which makes FedCM open `login_url`. */
-async function verifyHomeSession(env: FnContext['env'], request: Request) {
+interface HomeSession { sub: string; name: string | null; via: string; custodyToken: string }
+type VerifyHome = { ok: true; session: HomeSession } | { ok: false; reason: string };
+
+async function verifyHomeSession(env: FnContext['env'], request: Request): Promise<VerifyHome> {
   const sso = readSso(request);
-  if (!sso) return null;
+  if (!sso) return { ok: false, reason: 'no_ap_sso_cookie' }; // cookie not sent (SameSite) OR not signed in
   const token = sso.token;
   const { jwks, directory } = await getServer(env);
   const keys = await importJwks(jwks);
@@ -161,10 +164,12 @@ async function verifyHomeSession(env: FnContext['env'], request: Request) {
     const selfAud = decodeAud(token);
     if (selfAud && selfAud !== HOME_AUD) v = await verifyAgentSession(token, { keys, expectedAud: selfAud });
   }
-  if (!v.ok) return null;
+  if (!v.ok) return { ok: false, reason: `session_verify_failed:${v.reason ?? 'unknown'}` };
   const session = v.session;
   const reqOrigin = resolveOrigin(request, env);
-  if (session.iss !== reqOrigin && !isOwnConnectOrigin(session.iss)) return null;
+  if (session.iss !== reqOrigin && !isOwnConnectOrigin(session.iss)) {
+    return { ok: false, reason: `issuer_untrusted:${session.iss}` };
+  }
   let name: string | null = null;
   try {
     const view = await directory.agent(session.sub);
@@ -173,8 +178,8 @@ async function verifyHomeSession(env: FnContext['env'], request: Request) {
     name = null;
   }
   // `via` + the custody token let the assertion endpoint mint the scoped delegation in the SAME ceremony
-  // (the SameSite=Lax `ap_sso` cookie is readable ONLY here, same-origin — never by a cross-origin grant).
-  return { sub: session.sub, name, via: sso.via, custodyToken: sso.token };
+  // (the `ap_sso` cookie is readable ONLY here, same-origin — never by a cross-origin grant).
+  return { ok: true, session: { sub: session.sub, name, via: sso.via, custodyToken: sso.token } };
 }
 
 /** GET /fedcm/accounts (credentialed). Verify `Sec-Fetch-Dest: webidentity`, read the home session, and
@@ -185,10 +190,14 @@ export const onAccounts = async ({ request, env }: FnContext): Promise<Response>
     return json({ error: 'not a FedCM request' }, 400);
   }
   const home = await verifyHomeSession(env, request);
-  if (!home) return json({ error: 'not signed in' }, 401);
+  if (!home.ok) {
+    // `reason` is a diagnostic (no_ap_sso_cookie / session_verify_failed:… / issuer_untrusted:…) — visible
+    // in the FedCM accounts Network response so a 401 can be pinpointed without server logs.
+    return json({ error: 'not signed in', reason: home.reason }, 401);
+  }
   const account: FedcmAccount = {
-    id: home.sub,
-    name: home.name ?? 'Your Impact account', // ≥1 of name/email/username/tel required; we provide name
+    id: home.session.sub,
+    name: home.session.name ?? 'Your Impact account', // ≥1 of name/email/username/tel; we provide name
   };
   return json(buildAccountsResponse([account]));
 };
@@ -234,8 +243,9 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
 
   // The chosen account must be the signed-in one.
   const home = await verifyHomeSession(env, request);
-  if (!home) return json(buildErrorResponse('access_denied'), 401, cors);
-  if (parsed.accountId.toLowerCase() !== home.sub.toLowerCase()) {
+  if (!home.ok) return json({ ...buildErrorResponse('access_denied'), reason: home.reason }, 401, cors);
+  const hs = home.session;
+  if (parsed.accountId.toLowerCase() !== hs.sub.toLowerCase()) {
     return json(buildErrorResponse('invalid_request'), 400, cors);
   }
 
@@ -244,11 +254,11 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
   const idToken = await mintIdToken(
     {
       iss,
-      sub: home.sub,
+      sub: hs.sub as Parameters<typeof mintIdToken>[0]['sub'],
       aud: parsed.clientId,
       ttlSeconds: ID_TOKEN_TTL,
       nonce: parsed.nonce,
-      agentName: home.name ?? undefined,
+      agentName: hs.name ?? undefined,
     },
     signer,
   );
@@ -260,12 +270,12 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
   // → no delegation, and the relying app falls back to the popup. The delegation is still the substrate's
   // scoped, revocable authority object — just delivered alongside the bootstrap because custody is here.
   let delegation: unknown = null;
-  const addr = addressFromSub(home.sub);
-  const viaLower = home.via.toLowerCase();
+  const addr = addressFromSub(hs.sub);
+  const viaLower = hs.via.toLowerCase();
   if (addr && client.delegate && (viaLower === 'google' || viaLower === 'wallet' || viaLower === 'passkey')) {
     try {
-      const auth: Auth | undefined = viaLower === 'google' ? { token: home.custodyToken } : undefined;
-      const perm = await givePermission({ address: addr, name: home.name ?? '' } as Home, client.delegate, viaLower as Via, auth);
+      const auth: Auth | undefined = viaLower === 'google' ? { token: hs.custodyToken } : undefined;
+      const perm = await givePermission({ address: addr, name: hs.name ?? '' } as Home, client.delegate, viaLower as Via, auth);
       if (perm.ok) delegation = perm.grant;
     } catch {
       delegation = null; // relying side falls back to the popup
