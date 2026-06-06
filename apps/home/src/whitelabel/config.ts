@@ -16,7 +16,7 @@ const faithImpact: WhiteLabelConfig = {
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
   onboarding: {
-    credentialMethods: ['passkey', 'wallet', 'google'],
+    credentialMethods: ['passkey', 'wallet', 'google', 'youversion'],
   },
   services: { devices: true, connectedApps: true },
   // The stewardship hub: what the member helps oversee / manage / protect from their home.

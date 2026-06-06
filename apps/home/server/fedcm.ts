@@ -384,7 +384,9 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
   //    session, so a forged `via:Google` on a passkey/wallet token cannot yield a server-side signature.
   //    Device-custodied members (passkey/wallet) MUST sign the delegation on-device → popup fallback.
   const viaLower = hs.via.toLowerCase();
-  if (viaLower !== 'google') {
+  // KMS-custodied OIDC credentials (Google + YouVersion) are signable server-side; device credentials
+  // (passkey/wallet) must sign on-device → popup fallback.
+  if (viaLower !== 'google' && viaLower !== 'youversion') {
     audit('needs_device_credential', { sub: hs.sub, via: viaLower || 'unknown' });
     return json({ needs_device_credential: true, via: viaLower || 'unknown' }, 200, cors);
   }

@@ -162,12 +162,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Real Google OIDC return: ?code → exchange → login-grade session.
+      // Real OIDC return: ?code → exchange → session. `via` (default Google) names which IdP opened it —
+      // both Google and YouVersion are KMS-custodied, so the credential label drives custody routing.
       const code = url.searchParams.get('code');
       if (code && !url.searchParams.has('delegate')) {
+        const credVia = url.searchParams.get('via') === 'youversion' ? 'YouVersion' : 'Google';
         try {
           const token = await exchangeCode(code, AUD);
-          const prof = await openSession(token, 'Google', true);
+          const prof = await openSession(token, credVia, true);
           // Google is one-account-one-home: if it resolved to an EXISTING home that differs from
           // the name the member just asked for, tell them (their Google account is already bound).
           // A brand-new member (no home yet) keeps `pendingHomeName` for the secure-home step.
@@ -176,7 +178,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             const want = pending ? nameLabel(pending) : '';
             if (want && nameLabel(prof.name) !== want) {
               setNotice(
-                `Your Google account already opens ${prof.name}. Signing in with Google always brings you ` +
+                `Your ${credVia} account already opens ${prof.name}. Signing in with ${credVia} always brings you ` +
                   `here — to set up a separate “${want}”, secure it with a passkey or wallet instead.`,
               );
             }
@@ -191,6 +193,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         } finally {
           url.searchParams.delete('code');
           url.searchParams.delete('state');
+          url.searchParams.delete('via');
           window.history.replaceState({}, '', url.toString());
         }
         return;

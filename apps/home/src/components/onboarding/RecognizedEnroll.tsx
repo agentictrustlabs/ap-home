@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile } from '../../connect-client';
@@ -97,7 +97,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     try {
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
-      const auth: Auth | undefined = viaLower === 'google' ? { token } : undefined;
+      const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
       const granted = await givePermission(home, delegate, viaLower, auth);
       if (!granted.ok) return fail(granted.error);
       const code = await submitEnrollGrant(grant_id, granted.grant);

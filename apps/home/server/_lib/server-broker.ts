@@ -49,6 +49,14 @@ export interface Env {
    *  e.g. https://<your-connect-origin>/oidc/google/callback */
   GOOGLE_REDIRECT_URI?: string;
 
+  // ─── YouVersion Platform OIDC (real). developers.youversion.com/sign-in-apis ──
+  /** YouVersion App Key — the PUBLIC PKCE client_id (set as a Pages env var). There is NO client
+   *  secret: YouVersion is a public PKCE client, so only the App Key + redirect URI are needed. */
+  YOUVERSION_CLIENT_ID?: string;
+  /** Must EXACTLY match the callback URL registered in the YouVersion Platform Portal,
+   *  e.g. https://www.impact-agent.me/oidc/youversion/callback */
+  YOUVERSION_REDIRECT_URI?: string;
+
   // ─── Google × KMS custody (spec 235) ───────────────────────────────
   /** demo-a2a base URL for the server-to-server custody RESOLVE call (e.g.
    *  `https://<a2a-worker>`). The broker can't hold the master, so during the

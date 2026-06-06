@@ -21,17 +21,24 @@ import {
   AUD,
   type SignHash,
 } from '../connect-client';
-import { startGoogleSignIn } from '../server-client';
+import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { issueSiteDelegation, toWire } from '../lib/delegation';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
 
-export type Via = 'passkey' | 'wallet' | 'google';
-/** Extra auth a `google` op needs: the custody session token demo-a2a verifies. */
+export type Via = 'passkey' | 'wallet' | 'google' | 'youversion';
+/** Extra auth a server-custodied op needs: the custody session token demo-a2a verifies. */
 export type Auth = { token: string };
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+/** OIDC credentials that are KMS-custodied server-side (demo-a2a derives the custodian from the
+ *  session's (iss, sub) — spec 235). Both sign + recover with no device gesture, unlike passkey/wallet.
+ *  The signer path (`signHashFor`), org-create, and the recognized-connect grant all branch on this. */
+export function isKmsVia(via: Via): boolean {
+  return via === 'google' || via === 'youversion';
+}
 
 /** ①a — your device becomes your key (passkey path only; wallet/Google have no create step). */
 export async function createHomeKey(name: string): Promise<DemoPasskey> {
@@ -55,6 +62,20 @@ export function continueWithGoogle(preferredName?: string, enrollStashJson?: str
     /* storage blocked — the secure-home step will just ask for a name */
   }
   startGoogleSignIn(AUD, window.location.origin + '/');
+}
+
+/** Begin YouVersion sign-in for the Personal Home — identical to {@link continueWithGoogle} (full-page
+ *  redirect out to the broker, back to `?code&via=youversion`). YouVersion is KMS-custodied like Google,
+ *  so the post-redirect resume + secure-home steps are shared; only the IdP differs. */
+export function continueWithYouVersion(preferredName?: string, enrollStashJson?: string): void {
+  try {
+    if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
+    if (enrollStashJson) sessionStorage.setItem('pendingEnroll', enrollStashJson);
+    else sessionStorage.removeItem('pendingEnroll');
+  } catch {
+    /* storage blocked — the secure-home step will just ask for a name */
+  }
+  startYouVersionSignIn(AUD, window.location.origin + '/');
 }
 
 /**
@@ -113,9 +134,9 @@ export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Prom
     const addr = await connectWallet();
     return (h: Hex) => personalSign(addr, h);
   }
-  if (via === 'google') {
-    if (!sender || !auth?.token) throw new Error('granting with Google needs a custody session');
-    return googleSignHash(sender, auth.token); // demo-a2a signs with the per-subject custodian
+  if (isKmsVia(via)) {
+    if (!sender || !auth?.token) throw new Error('granting with an OIDC home needs a custody session');
+    return googleSignHash(sender, auth.token); // demo-a2a signs with the per-(iss,sub) KMS custodian
   }
   return passkeySignHash;
 }
@@ -135,10 +156,10 @@ export async function createOrganization(
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
-  const r = via === 'google'
+  const r = isKmsVia(via)
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts)
-        : ({ ok: false, error: 'creating an org with Google needs a custody session' } as const))
+        : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
     : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
   if (!r.ok) return r;
   const x = r.result;

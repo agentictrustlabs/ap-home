@@ -4,7 +4,7 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, continueWithGoogle, type Via, type Auth } from '../../home/onboarding';
+import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, type Via, type Auth } from '../../home/onboarding';
 import { passkeyLogin, fetchProfile, siweLogin } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
@@ -13,6 +13,7 @@ import { readSsoCookie } from '../../lib/sso-cookie';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
+const youversionEnabled = whitelabel.onboarding.credentialMethods.includes('youversion');
 const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
 import { useEnrollReq, type EnrollApi } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
@@ -248,6 +249,13 @@ function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exi
     enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(label ? toAgentName(label) : undefined, stash);
   };
+  const onYouVersion = () => {
+    const stash = enrollApi?.enroll
+      ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: label ? toAgentName(label) : '' })
+      : undefined;
+    enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with YouVersion…', idp: true });
+    continueWithYouVersion(label ? toAgentName(label) : undefined, stash);
+  };
 
   useEffect(() => {
     if (!label) { setAvail('idle'); return; }
@@ -307,12 +315,19 @@ function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exi
       >
         {cta}
       </button>
-      {googleEnabled && (
+      {(googleEnabled || youversionEnabled) && (
         <>
           <div className="method-or">Other ways to continue</div>
-          <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
-            Continue with Google
-          </button>
+          {googleEnabled && (
+            <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
+              Continue with Google
+            </button>
+          )}
+          {youversionEnabled && (
+            <button className="btn-ghost onboarding-secondary" onClick={onYouVersion}>
+              Continue with YouVersion
+            </button>
+          )}
         </>
       )}
     </Shell>
@@ -346,6 +361,13 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
     // it must stop trusting `popup.closed` and wait for the relay channel instead. No-op otherwise.
     enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(undefined, stash);
+  };
+  const onYouVersion = () => {
+    const stash = enrollApi?.enroll
+      ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: '' })
+      : undefined;
+    enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with YouVersion…', idp: true });
+    continueWithYouVersion(undefined, stash);
   };
   // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"
   // confirmation beat before issuing the session (display only; the token is already minted).
@@ -438,6 +460,11 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
       {googleEnabled && (
         <button className="btn-primary" onClick={onGoogle}>
           Continue with Google
+        </button>
+      )}
+      {youversionEnabled && (
+        <button className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={onYouVersion}>
+          Continue with YouVersion
         </button>
       )}
       {enrollApi ? (

@@ -21,6 +21,16 @@ export function startGoogleSignIn(aud: string, redirectUri: string, linkToken?: 
   window.location.assign(u.toString());
 }
 
+/** Redirect the browser to the Connect origin to begin YouVersion OIDC. Mirrors {@link startGoogleSignIn}
+ *  (YouVersion is a public PKCE client; the callback returns `?code&via=youversion`). */
+export function startYouVersionSignIn(aud: string, redirectUri: string, linkToken?: string): void {
+  const u = new URL('/oidc/youversion/start', window.location.origin);
+  u.searchParams.set('aud', aud);
+  u.searchParams.set('redirect_uri', redirectUri);
+  if (linkToken) u.searchParams.set('link_token', linkToken);
+  window.location.assign(u.toString());
+}
+
 /** Exchange a single-use code (delivered to the redirect_uri) for the AgentSession. */
 export async function exchangeCode(code: string, aud: string): Promise<string> {
   const res = await fetch('/token', {
