@@ -23,9 +23,12 @@ import {
   type FedcmAccount,
 } from '@agenticprimitives/fedcm-idp';
 import { importJwks, verifyAgentSession, mintIdToken } from '@agenticprimitives/connect';
+import type { Address } from '@agenticprimitives/types';
 import { whitelabel } from '../src/whitelabel/config';
 import { getClient } from '../src/lib/oidc-clients';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
+import { givePermission, type Via, type Auth } from '../src/home/onboarding';
+import type { Home } from '../src/home/types';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
 
 /** The home's own audience (same-origin demo; mirrors server/me/handler.ts `AUD`). */
@@ -95,18 +98,24 @@ export const onLogin = ({ request, env }: FnContext): Response => {
 // ─── Credentialed endpoints: the signed-in agent + the thin signed assertion ──
 
 /** The cross-subdomain SSO session cookie (lib/sso-cookie.ts: `ap_sso = enc(JSON {t,v})`). FedCM sends
- *  it credentialed; we read the AgentSession token from it. */
-function readSsoToken(request: Request): string | null {
+ *  it credentialed; we read the AgentSession token + the credential `via` from it. `v` is `'Google' |
+ *  'passkey' | 'wallet'` (case as stored). */
+function readSso(request: Request): { token: string; via: string } | null {
   const cookie = request.headers.get('cookie');
   if (!cookie) return null;
   const m = cookie.match(/(?:^|;\s*)ap_sso=([^;]*)/);
   if (!m || !m[1]) return null;
   try {
-    const o = JSON.parse(decodeURIComponent(m[1])) as { t?: string };
-    return o?.t ?? null;
+    const o = JSON.parse(decodeURIComponent(m[1])) as { t?: string; v?: string };
+    return o?.t ? { token: o.t, via: o.v ?? '' } : null;
   } catch {
     return null;
   }
+}
+
+/** Parse the SA address from a CAIP-10 `eip155:<chain>:0x…` subject; null otherwise (mirrors me/handler). */
+function addressFromSub(sub: string): Address | null {
+  return /^eip155:\d+:0x[0-9a-fA-F]{40}$/.test(sub) ? (sub.split(':').pop() as Address) : null;
 }
 
 /** Read an AgentSession's own `aud` WITHOUT trusting it (signature is verified separately). Lets us
@@ -140,8 +149,9 @@ function isOwnConnectOrigin(origin: string): boolean {
  *  trusted issuer), and resolve the signed-in agent's `sub` (CAIP-10 SA address) + display name. Returns
  *  `null` when there is no valid session — the caller returns 401, which makes FedCM open `login_url`. */
 async function verifyHomeSession(env: FnContext['env'], request: Request) {
-  const token = readSsoToken(request);
-  if (!token) return null;
+  const sso = readSso(request);
+  if (!sso) return null;
+  const token = sso.token;
   const { jwks, directory } = await getServer(env);
   const keys = await importJwks(jwks);
   // The home session token's aud is the home's own; if a session was minted with a different aud, retry
@@ -162,7 +172,9 @@ async function verifyHomeSession(env: FnContext['env'], request: Request) {
   } catch {
     name = null;
   }
-  return { sub: session.sub, name };
+  // `via` + the custody token let the assertion endpoint mint the scoped delegation in the SAME ceremony
+  // (the SameSite=Lax `ap_sso` cookie is readable ONLY here, same-origin — never by a cross-origin grant).
+  return { sub: session.sub, name, via: sso.via, custodyToken: sso.token };
 }
 
 /** GET /fedcm/accounts (credentialed). Verify `Sec-Fetch-Dest: webidentity`, read the home session, and
@@ -229,7 +241,7 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
 
   const { signer } = await getServer(env);
   const iss = resolveOrigin(request, env);
-  const token = await mintIdToken(
+  const idToken = await mintIdToken(
     {
       iss,
       sub: home.sub,
@@ -241,6 +253,28 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
     signer,
   );
 
+  // Spec 264 §VII / ADR-0031: FedCM bootstraps IDENTITY (the thin id_token). For a relying app that needs
+  // a scoped grant in the SAME ceremony (e.g. demo-gs's vault reads), mint the person→client delegation
+  // HERE — the only point with custody access (the `ap_sso` cookie is SameSite=Lax, unreadable from a
+  // cross-origin grant). Best-effort: a credential we can't sign with server-side (e.g. a passkey member)
+  // → no delegation, and the relying app falls back to the popup. The delegation is still the substrate's
+  // scoped, revocable authority object — just delivered alongside the bootstrap because custody is here.
+  let delegation: unknown = null;
+  const addr = addressFromSub(home.sub);
+  const viaLower = home.via.toLowerCase();
+  if (addr && client.delegate && (viaLower === 'google' || viaLower === 'wallet' || viaLower === 'passkey')) {
+    try {
+      const auth: Auth | undefined = viaLower === 'google' ? { token: home.custodyToken } : undefined;
+      const perm = await givePermission({ address: addr, name: home.name ?? '' } as Home, client.delegate, viaLower as Via, auth);
+      if (perm.ok) delegation = perm.grant;
+    } catch {
+      delegation = null; // relying side falls back to the popup
+    }
+  }
+
+  // FedCM returns a single opaque `token` string; pack {id_token, delegation?} so the relying app gets
+  // identity + the grant in one round-trip (it JSON-parses the token).
+  const packed = JSON.stringify(delegation ? { id_token: idToken, delegation } : { id_token: idToken });
   const sl = loginStatusHeader('logged-in');
-  return json(buildTokenResponse(token), 200, { ...cors, [sl.name]: sl.value });
+  return json(buildTokenResponse(packed), 200, { ...cors, [sl.name]: sl.value });
 };
