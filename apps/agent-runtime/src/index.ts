@@ -487,18 +487,18 @@ app.use('*', async (c, next) => {
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
   if (c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/google/sign-site-delegation') return next();
-  // Signed-token CSRF. The `X-CSRF-Token` header IS the defense: it is a CUSTOM header (a cross-site
-  // attacker can't set it without a CORS preflight we control) carrying an HMAC-signed, origin-bound
-  // token that `verifyCsrf` (below) validates — signature + the token's bound origin must equal the
-  // inbound Origin, which must be allow-listed. The double-submit COOKIE was belt-and-suspenders, but
-  // modern browsers DROP the `SameSite` cookie behind a same-origin reverse proxy (third-party-cookie
-  // blocking), so requiring `header === cookie` produced a `403 csrf required` storm on the vault path
-  // even though the signed header token was valid. `verifyCsrf` is already the gate every mutating
-  // request passes, so we no longer REQUIRE the cookie (ADR-0013 — one mechanism). When the cookie IS
-  // present (direct cross-site callers) it must still agree; its absence is not a failure.
+  // Signed-token CSRF (ONE mechanism — ADR-0013). The `X-CSRF-Token` header IS the defense: a CUSTOM
+  // header (a cross-site attacker can't set it without a CORS preflight we control) carrying an
+  // HMAC-signed, origin-bound token that `verifyCsrf` (below) validates — signature + the token's bound
+  // origin must equal the inbound Origin, which must be allow-listed. We deliberately DO NOT compare it
+  // to the `agentic-csrf` cookie: (a) the cookie adds nothing the signed origin-bound token + custom
+  // header don't already give; (b) modern browsers DROP the `SameSite` cookie behind a same-origin
+  // reverse proxy (3p-cookie blocking); and (c) when the cookie DID store, parallel vault reads each
+  // re-minting a fresh token raced the single shared cookie, so `header === cookie` flapped → a
+  // `403 csrf required` storm that only cleared once the burst settled. The signed token alone is the
+  // gate; the cookie is irrelevant to authorization.
   const headerToken = c.req.header(CSRF_HEADER);
-  const cookieToken = getCookie(c, CSRF_COOKIE);
-  if (!headerToken || (cookieToken && headerToken !== cookieToken)) {
+  if (!headerToken) {
     return c.json({ error: 'csrf required' }, 403);
   }
   // Build allowed origins from ALLOWED_ORIGINS env (the same list SIWE
