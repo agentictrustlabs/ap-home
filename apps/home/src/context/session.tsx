@@ -241,6 +241,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setSession({ token, via, fresh: false });
         setProfile(p);
         setPhase('authed');
+        // spec 264 — a RESTORED session (returning user) must also (a) refresh the SSO cookie so an old
+        // SameSite=Lax cookie is upgraded to SameSite=None (FedCM's cross-site accounts/assertion fetch
+        // can't read a Lax cookie), and (b) signal `logged-in` to FedCM. Without this, a logged-in user
+        // is invisible to FedCM and it shows the sign-in screen instead of the account chooser.
+        setSsoCookie(token, via);
+        setFedcmLoginStatus('logged-in');
         if (fromCookie) {
           try {
             localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // cache on this origin
