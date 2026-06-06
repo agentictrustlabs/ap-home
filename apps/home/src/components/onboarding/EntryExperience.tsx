@@ -16,6 +16,7 @@ const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google')
 const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
 import { useEnrollReq, type EnrollApi } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
+import { RecognizedEnroll } from './RecognizedEnroll';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -57,6 +58,7 @@ type View =
   | { k: 'incomplete'; name: string }
   | { k: 'credential' } // spec 257 W1 — the credential-first front door (default; name demoted)
   | { k: 'enroll-entry' } // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll
+  | { k: 'enroll-recognized' } // already-authenticated member (ap_sso cookie) → one-tap authorize (ADR-0032)
   | { k: 'enroll-name' } // "Use my Impact name" within a name-deferred enroll → the named journey
   | { k: 'name' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
@@ -101,7 +103,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
       // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
-        setView({ k: 'enroll-entry' });
+        // An ALREADY-authenticated member (cross-subdomain `ap_sso` cookie) is RECOGNIZED → one-tap
+        // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
+        // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
+        // null here — recognition reads the cookie directly, the same recovery org-create already does.)
+        setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
       const info = await nameInfo(api.enroll!.name);
@@ -182,6 +188,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll. Same front door,
   // but `enrollApi` makes the Google button STASH the enroll so GoogleEnrollResume resumes the
   // grant + delivers the code back to the relying app (and deploys a nameless SA).
+  if (view.k === 'enroll-recognized') {
+    // Recognized returning member → authorize in one tap. Stale/absent session falls back to the entry.
+    return <RecognizedEnroll api={api} onUnrecognized={() => setView({ k: 'enroll-entry' })} />;
+  }
   if (view.k === 'enroll-entry') {
     return (
       <CredentialFirstStart
