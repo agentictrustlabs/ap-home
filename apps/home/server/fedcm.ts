@@ -23,9 +23,9 @@ import {
   type FedcmAccount,
 } from '@agenticprimitives/fedcm-idp';
 import { importJwks, verifyAgentSession, mintIdToken } from '@agenticprimitives/connect';
-import type { Address } from '@agenticprimitives/types';
+import type { Address, CredentialPrincipal } from '@agenticprimitives/types';
 import { whitelabel } from '../src/whitelabel/config';
-import { getClient } from '../src/lib/oidc-clients';
+import { getClient, isAllowedRelyingOrigin } from '../src/lib/oidc-clients';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
 import { signBridgeCall } from './_lib/bridge-hmac';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
@@ -147,7 +147,7 @@ function isOwnConnectOrigin(origin: string): boolean {
 /** Verify the home session from the `ap_sso` cookie (signature/exp/owner via the broker JWKS, then a
  *  trusted issuer), and resolve the signed-in agent's `sub` (CAIP-10 SA address) + display name. Returns
  *  `null` when there is no valid session — the caller returns 401, which makes FedCM open `login_url`. */
-interface HomeSession { sub: string; name: string | null; via: string; custodyToken: string }
+interface HomeSession { sub: string; name: string | null; via: string; custodyToken: string; principal: CredentialPrincipal }
 type VerifyHome = { ok: true; session: HomeSession } | { ok: false; reason: string };
 
 async function verifyHomeSession(env: FnContext['env'], request: Request): Promise<VerifyHome> {
@@ -176,9 +176,10 @@ async function verifyHomeSession(env: FnContext['env'], request: Request): Promi
   } catch {
     name = null;
   }
-  // `via` + the custody token let the assertion endpoint mint the scoped delegation in the SAME ceremony
-  // (the `ap_sso` cookie is readable ONLY here, same-origin — never by a cross-origin grant).
-  return { ok: true, session: { sub: session.sub, name, via: sso.via, custodyToken: sso.token } };
+  // Return the VERIFIED `principal` (kind + role, from the signed AgentSession) so the grant endpoint
+  // routes custody on cryptographically-trusted data — NOT the client-controlled `via` cookie field
+  // (H-1). `via` is kept only as a display/label hint.
+  return { ok: true, session: { sub: session.sub, name, via: sso.via, custodyToken: sso.token, principal: session.principal } };
 }
 
 /** GET /fedcm/accounts (credentialed). Verify `Sec-Fetch-Dest: webidentity`, read the home session, and
@@ -281,10 +282,11 @@ function grantCors(rpOrigin: string): Record<string, string> {
 /** CORS preflight for `/fedcm/grant` (JSON body → non-simple request → preflighted). */
 export const onFedcmGrantOptions = ({ request }: FnContext): Response => {
   const rpOrigin = request.headers.get('origin') ?? '';
+  // L-1: only advertise CORS to a REGISTERED relying origin.
   return new Response(null, {
     status: 204,
     headers: {
-      ...grantCors(rpOrigin),
+      ...(isAllowedRelyingOrigin(rpOrigin) ? grantCors(rpOrigin) : {}),
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'content-type',
     },
@@ -309,7 +311,10 @@ export const onFedcmGrantOptions = ({ request }: FnContext): Response => {
  *  a FedCM payload. */
 export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Response> => {
   const rpOrigin = request.headers.get('origin') ?? '';
-  const cors = grantCors(rpOrigin);
+  // L-1: reflect CORS ONLY for a REGISTERED relying origin — never echo `Access-Control-Allow-Origin` to
+  // an arbitrary caller. (The exact client_id↔origin match is still enforced below; this is the coarse
+  // gate so an unknown origin can't read any response body.)
+  const cors = isAllowedRelyingOrigin(rpOrigin) ? grantCors(rpOrigin) : {};
   const body = (await request.json().catch(() => null)) as { id_token?: string; client_id?: string } | null;
 
   // M-3 (audit AC-0032): this is the only NEW browser-reachable authority-issuance surface, so EVERY
@@ -378,18 +383,30 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
     return json({ error: 'client_has_no_delegate' }, 409, cors);
   }
 
-  // 3. Custody boundary. Only a SERVER-custodied member (Google/KMS) can be signed for server-side. The
-  //    `via` is read from the cookie and is therefore ADVISORY only (H-1 tracked): it merely routes; the
-  //    real gate is downstream — the demo-a2a bridge's `verifyCustodySession` REJECTS any non-custody-grade
-  //    session, so a forged `via:Google` on a passkey/wallet token cannot yield a server-side signature.
-  //    Device-custodied members (passkey/wallet) MUST sign the delegation on-device → popup fallback.
-  const viaLower = hs.via.toLowerCase();
-  // KMS-custodied OIDC credentials (Google + YouVersion) are signable server-side; device credentials
-  // (passkey/wallet) must sign on-device → popup fallback.
-  if (viaLower !== 'google' && viaLower !== 'youversion') {
-    audit('needs_device_credential', { sub: hs.sub, via: viaLower || 'unknown' });
-    return json({ needs_device_credential: true, via: viaLower || 'unknown' }, 200, cors);
+  // 3. Custody boundary (H-1) — decide on the VERIFIED principal (kind + role, from the signed
+  //    AgentSession), NOT the client-controlled cookie `via`. Only a custody-grade OIDC credential
+  //    (Google/YouVersion, KMS-custodied) is signable server-side; device credentials (passkey/wallet)
+  //    and login-grade sessions must sign on-device → popup fallback. The demo-a2a bridge re-verifies
+  //    custody-grade independently, so this is the trusted FIRST gate, not the only one.
+  const serverCustodied = hs.principal.kind === 'oidc' && hs.principal.role === 'custody-grade';
+  if (!serverCustodied) {
+    audit('needs_device_credential', { sub: hs.sub, kind: hs.principal.kind, role: hs.principal.role ?? null });
+    return json({ needs_device_credential: true, via: hs.via.toLowerCase() || 'unknown' }, 200, cors);
   }
+
+  // M-2: consume the id_token's one-time `nonce` (unique per FedCM ceremony) so a captured id_token can't
+  // be replayed for a second delegation within its TTL. Best-effort single-use via KV.
+  const nonce = (v.session as unknown as { nonce?: string }).nonce;
+  if (!nonce) {
+    audit('reject', { reason: 'id_token_missing_nonce', sub: hs.sub });
+    return json({ error: 'id_token_missing_nonce' }, 401, cors);
+  }
+  const nonceKey = `fedcm-grant-nonce:${nonce}`;
+  if (await env.AUTH_CODES.get(nonceKey)) {
+    audit('reject', { reason: 'nonce_replayed', sub: hs.sub });
+    return json({ error: 'nonce_replayed' }, 409, cors);
+  }
+  await env.AUTH_CODES.put(nonceKey, '1', { expirationTtl: ID_TOKEN_TTL });
 
   if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
     audit('error', { reason: 'custody_bridge_not_configured', sub: hs.sub });
