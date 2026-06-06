@@ -27,8 +27,7 @@ import type { Address } from '@agenticprimitives/types';
 import { whitelabel } from '../src/whitelabel/config';
 import { getClient } from '../src/lib/oidc-clients';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
-import { givePermission, type Via, type Auth } from '../src/home/onboarding';
-import type { Home } from '../src/home/types';
+import { signBridgeCall } from './_lib/bridge-hmac';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
 
 /** The home's own audience (same-origin demo; mirrors server/me/handler.ts `AUD`). */
@@ -263,40 +262,161 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
     signer,
   );
 
-  // Spec 264 §VII / ADR-0031: FedCM bootstraps IDENTITY (the thin id_token). For a relying app that needs
-  // a scoped grant in the SAME ceremony (e.g. demo-gs's vault reads), mint the person→client delegation
-  // HERE — the only point with custody access (the `ap_sso` cookie is SameSite=Lax, unreadable from a
-  // cross-origin grant). Best-effort: a credential we can't sign with server-side (e.g. a passkey member)
-  // → no delegation, and the relying app falls back to the popup. The delegation is still the substrate's
-  // scoped, revocable authority object — just delivered alongside the bootstrap because custody is here.
-  let delegation: unknown = null;
-  let delegationError: string | undefined; // surfaced in the packed token for diagnosis (DevTools)
-  const addr = addressFromSub(hs.sub);
-  const viaLower = hs.via.toLowerCase();
-  if (!addr) {
-    delegationError = `sub_not_caip10:${hs.sub}`;
-  } else if (!client.delegate) {
-    delegationError = 'client_has_no_delegate';
-  } else if (viaLower !== 'google' && viaLower !== 'wallet' && viaLower !== 'passkey') {
-    delegationError = `unsupported_via:${viaLower || '(empty)'}`;
-  } else {
+  // ADR-0031/0032: the FedCM token is a THIN identity bootstrap — the same AgentSession id_token the
+  // relying app already verifies — and NOTHING else. The scoped person→client delegation is issued by
+  // the SEPARATE substrate grant endpoint (`/fedcm/grant`, below), authorized by THIS id_token, after
+  // the chooser. FedCM is the identity adapter; it is NEVER the capability/delegation substrate.
+  const sl = loginStatusHeader('logged-in');
+  return json(buildTokenResponse(idToken), 200, { ...cors, [sl.name]: sl.value });
+};
+
+// ─── Substrate grant: id_token → scoped delegation (ADR-0032) ─────────────────
+
+/** CORS for the credentialed `/fedcm/grant` POST (echo the exact RP origin + credentials). Mirrors the
+ *  assertion CORS — the call is a normal cross-site credentialed fetch from the relying app. */
+function grantCors(rpOrigin: string): Record<string, string> {
+  return assertionCorsHeaders(rpOrigin);
+}
+
+/** CORS preflight for `/fedcm/grant` (JSON body → non-simple request → preflighted). */
+export const onFedcmGrantOptions = ({ request }: FnContext): Response => {
+  const rpOrigin = request.headers.get('origin') ?? '';
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...grantCors(rpOrigin),
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'content-type',
+    },
+  });
+};
+
+/** POST /fedcm/grant (credentialed, JSON `{ id_token, client_id }`). The SUBSTRATE step that follows a
+ *  FedCM assertion (ADR-0031/0032). The relying app presents the THIN id_token it just received, and we:
+ *
+ *  1. Verify that id_token is one WE minted for THIS client. This is the authorization — NOT the cookie.
+ *     `ap_sso` is `SameSite=None`, so a bare credentialed POST is CSRF-harvestable by any site; only a
+ *     site the user actually picked in the browser's FedCM chooser holds an `aud`-bound id_token (the
+ *     browser binds `aud` to the requesting origin, and we re-check `Origin ∈ client origins`).
+ *  2. Read the home session from the cookie purely to reach CUSTODY (the Google `via` + custody token),
+ *     and require it to be the SAME subject as the id_token.
+ *  3. Custody boundary: a SERVER-custodied member (Google/KMS) gets the `person → client.delegate` site
+ *     delegation minted server-side via the bridge-authenticated demo-a2a KMS sign — ZERO device prompt.
+ *     A DEVICE-custodied member (passkey/wallet) gets `needs_device_credential` and the relying app
+ *     falls back to the popup, where the device signs the delegation (we cannot sign a device key here).
+ *
+ *  The delegation is the substrate's scoped, revocable, value-0 authority object — issued HERE, never as
+ *  a FedCM payload. */
+export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Response> => {
+  const rpOrigin = request.headers.get('origin') ?? '';
+  const cors = grantCors(rpOrigin);
+  const body = (await request.json().catch(() => null)) as { id_token?: string; client_id?: string } | null;
+
+  // M-3 (audit AC-0032): this is the only NEW browser-reachable authority-issuance surface, so EVERY
+  // decision leaves a structured broker-side trail (the bridge sign leg emits `key-custody.sign` on the
+  // a2a side; this is the broker-side complement). The subject (CAIP-10 SA address) is the canonical
+  // PUBLIC identifier (ADR-0010), not PII — safe to log. Replays (id_token within TTL) are visible here.
+  const audit = (outcome: string, extra: Record<string, unknown> = {}): void => {
     try {
-      const auth: Auth | undefined = viaLower === 'google' ? { token: hs.custodyToken } : undefined;
-      const perm = await givePermission({ address: addr, name: hs.name ?? '' } as Home, client.delegate, viaLower as Via, auth);
-      if (perm.ok) delegation = perm.grant;
-      else delegationError = `give_permission_failed:${perm.error}`;
-    } catch (e) {
-      delegationError = `give_permission_threw:${e instanceof Error ? e.message : String(e)}`;
+      console.log(JSON.stringify({ evt: 'fedcm.grant', outcome, rpOrigin, client_id: body?.client_id ?? null, ...extra }));
+    } catch {
+      /* never let logging break the response */
     }
+  };
+
+  if (!body?.id_token || !body?.client_id) {
+    audit('reject', { reason: 'missing_id_token_or_client_id' });
+    return json({ error: 'id_token + client_id required' }, 400, cors);
   }
 
-  // FedCM returns a single opaque `token` string; pack {id_token, delegation?} so the relying app gets
-  // identity + the grant in one round-trip (it JSON-parses the token). On a delegation-mint failure we
-  // pack `delegation_error` (visible in the assertion Network response) so the cause is diagnosable; the
-  // relying app then has no grant → falls back to the popup.
-  const packed = JSON.stringify(
-    delegation ? { id_token: idToken, delegation } : { id_token: idToken, delegation_error: delegationError ?? 'unknown' },
+  // The RP must be a registered client, and the request Origin one of its registered origins.
+  const client = getClient(body.client_id);
+  if (!client) {
+    audit('reject', { reason: 'unknown_client' });
+    return json({ error: 'unauthorized_client' }, 400, cors);
+  }
+  const clientOrigins = new Set(
+    client.redirect_uris.map((u) => {
+      try { return new URL(u).origin; } catch { return ''; }
+    }),
   );
-  const sl = loginStatusHeader('logged-in');
-  return json(buildTokenResponse(packed), 200, { ...cors, [sl.name]: sl.value });
+  if (!rpOrigin || !clientOrigins.has(rpOrigin)) {
+    audit('reject', { reason: 'origin_not_registered' });
+    return json({ error: 'unauthorized_client' }, 403, cors);
+  }
+
+  // 1. The id_token must be one WE minted for THIS client (proof of the browser-mediated FedCM chooser).
+  const { jwks } = await getServer(env);
+  const keys = await importJwks(jwks);
+  const iss = resolveOrigin(request, env);
+  const v = await verifyAgentSession(body.id_token, { keys, expectedAud: body.client_id, expectedIss: iss });
+  if (!v.ok) {
+    audit('reject', { reason: `id_token_invalid:${v.reason ?? 'unknown'}` });
+    return json({ error: `id_token_invalid:${v.reason ?? 'unknown'}` }, 401, cors);
+  }
+  const tokenSub = v.session.sub;
+
+  // 2. The cookie home session (custody) must be the SAME subject as the id_token.
+  const home = await verifyHomeSession(env, request);
+  if (!home.ok) {
+    audit('reject', { reason: `no_session:${home.reason}`, sub: tokenSub });
+    return json({ error: `no_session:${home.reason}` }, 401, cors);
+  }
+  const hs = home.session;
+  if (hs.sub.toLowerCase() !== tokenSub.toLowerCase()) {
+    audit('reject', { reason: 'subject_mismatch', sub: tokenSub, cookieSub: hs.sub });
+    return json({ error: 'subject_mismatch' }, 403, cors);
+  }
+
+  const addr = addressFromSub(hs.sub);
+  if (!addr) {
+    audit('reject', { reason: 'sub_not_caip10', sub: hs.sub });
+    return json({ error: `sub_not_caip10:${hs.sub}` }, 400, cors);
+  }
+  if (!client.delegate) {
+    audit('reject', { reason: 'client_has_no_delegate', sub: hs.sub });
+    return json({ error: 'client_has_no_delegate' }, 409, cors);
+  }
+
+  // 3. Custody boundary. Only a SERVER-custodied member (Google/KMS) can be signed for server-side. The
+  //    `via` is read from the cookie and is therefore ADVISORY only (H-1 tracked): it merely routes; the
+  //    real gate is downstream — the demo-a2a bridge's `verifyCustodySession` REJECTS any non-custody-grade
+  //    session, so a forged `via:Google` on a passkey/wallet token cannot yield a server-side signature.
+  //    Device-custodied members (passkey/wallet) MUST sign the delegation on-device → popup fallback.
+  const viaLower = hs.via.toLowerCase();
+  if (viaLower !== 'google') {
+    audit('needs_device_credential', { sub: hs.sub, via: viaLower || 'unknown' });
+    return json({ needs_device_credential: true, via: viaLower || 'unknown' }, 200, cors);
+  }
+
+  if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
+    audit('error', { reason: 'custody_bridge_not_configured', sub: hs.sub });
+    return json({ error: 'custody_bridge_not_configured' }, 503, cors);
+  }
+  try {
+    // Bridge-authenticated, CONSTRAINED sign: the worker BUILDS the person→delegate site delegation and
+    // C_sub signs THAT (never an arbitrary hash). The custody token proves the member; the HMAC envelope
+    // proves the broker. A broker compromise can at worst mint a scoped, value-0, revocable delegation.
+    const envelope = await signBridgeCall({
+      secret: env.A2A_CUSTODY_BRIDGE_SECRET,
+      audience: 'custody.google.sign-delegation',
+      payload: { custodyToken: hs.custodyToken, delegate: client.delegate, sender: addr },
+    });
+    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/sign-site-delegation`, {
+      method: 'POST',
+      headers: envelope.headers,
+      body: envelope.body,
+    });
+    const out = (await res.json().catch(() => ({}))) as { ok?: boolean; delegation?: unknown; error?: string };
+    if (!res.ok || !out.ok || !out.delegation) {
+      audit('error', { reason: `bridge_sign_failed:${out.error ?? res.status}`, sub: hs.sub, delegate: client.delegate });
+      return json({ error: out.error ?? `sign HTTP ${res.status}` }, 502, cors);
+    }
+    audit('granted', { sub: hs.sub, delegate: client.delegate });
+    const sl = loginStatusHeader('logged-in');
+    return json({ delegation: out.delegation }, 200, { ...cors, [sl.name]: sl.value });
+  } catch (e) {
+    audit('error', { reason: `grant_threw:${e instanceof Error ? e.message : String(e)}`, sub: hs.sub });
+    return json({ error: `grant_failed:${e instanceof Error ? e.message : String(e)}` }, 500, cors);
+  }
 };

@@ -482,10 +482,11 @@ app.use('*', async (c, next) => {
   // /api/a2a is the machine-to-machine A2A endpoint (spec 231) — no browser
   // cookie/CSRF; authorization is per the A2A protocol, not double-submit.
   if (c.req.path === '/api/a2a') return next();
-  // /custody/google/resolve is a server-to-server call from the Connect broker
-  // (no browser cookie). It's authenticated by the bridge secret, not CSRF.
-  // (bootstrap-and-claim + sign ARE browser-facing and KEEP CSRF.)
+  // /custody/google/resolve + /custody/google/sign-site-delegation are server-to-server calls from the
+  // Connect broker (no browser cookie). They're authenticated by the bridge HMAC envelope, not CSRF.
+  // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
   if (c.req.path === '/custody/google/resolve') return next();
+  if (c.req.path === '/custody/google/sign-site-delegation') return next();
   // Header double-submit + HMAC.
   const headerToken = c.req.header(CSRF_HEADER);
   const cookieToken = getCookie(c, CSRF_COOKIE);
@@ -2091,11 +2092,16 @@ function buildOrgGrant(
   delegate: Address,
   validitySeconds = 60 * 60 * 24 * 365,
 ): { digest: Hex; wire: Omit<Delegation, 'salt'> & { salt: string } } {
-  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let salt = 0n;
-  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
-  const caveats: Caveat[] = [
+  const { d, digest } = buildUnsignedSiteGrant(env, orgSA, delegate, validitySeconds);
+  d.signature = ORG_GRANT_SENTINEL; // validated via the org SA's approved-hash ERC-1271 branch
+  return { digest, wire: { ...d, salt: d.salt.toString() } };
+}
+
+/** Least-privilege site-delegation caveats (timestamp + value 0 + allowed-targets {relationship, naming,
+ *  subregistry}) — IDENTICAL to demo-sso-next `siteCaveats` so the org-sentinel, person-KMS, and ROOT
+ *  passkey grant paths all produce a delegation the relying app validates the same way. */
+function siteGrantCaveats(env: Env, validUntil: number): Caveat[] {
+  return [
     buildCaveat(env.TIMESTAMP_ENFORCER as Address, encodeTimestampTerms(0, validUntil)),
     buildCaveat(env.VALUE_ENFORCER as Address, encodeValueTerms(0n)),
     buildCaveat(
@@ -2107,10 +2113,31 @@ function buildOrgGrant(
       ]),
     ),
   ];
-  const d: Delegation = { delegator: orgSA, delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+}
+
+/** Build a `delegator → delegate` least-privilege site delegation UNSIGNED, returning the struct + its
+ *  canonical EIP-712 digest. Callers either stamp the 0x03 approved-hash sentinel (org deploy path) or
+ *  sign the digest with a real custodian key (the FedCM person-KMS path below). */
+function buildUnsignedSiteGrant(
+  env: Env,
+  delegator: Address,
+  delegate: Address,
+  validitySeconds = 60 * 60 * 24 * 365,
+): { d: Delegation; digest: Hex } {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const d: Delegation = {
+    delegator,
+    delegate,
+    authority: ROOT_AUTHORITY,
+    caveats: siteGrantCaveats(env, validUntil),
+    salt,
+    signature: '0x',
+  };
   const digest = hashDelegation(d, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
-  d.signature = ORG_GRANT_SENTINEL; // validated via the org SA's approved-hash ERC-1271 branch
-  return { digest, wire: { ...d, salt: d.salt.toString() } };
+  return { d, digest };
 }
 
 function orgApproveHashCall(env: Env, digest: Hex): { to: Address; value: bigint; data: Hex } {
@@ -2273,6 +2300,80 @@ app.post('/custody/google/sign', async (c) => {
     return c.json({ ok: true, signature, custodian: cSub });
   } catch (e) {
     console.error('[demo-a2a] custody/google/sign failed:', e);
+    return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/google/sign-site-delegation  (Connect broker → a2a, BRIDGE-authenticated)
+ * Body: { custodyToken, delegate, sender }  → { ok, delegation, custodian }
+ *
+ * The server-side custody leg of the FedCM delegation flow (ADR-0032). After a FedCM assertion, the
+ * Connect broker's `/fedcm/grant` calls THIS endpoint to mint a Google member's `person → delegate`
+ * site delegation with ZERO device prompt. Two independent gates: the BRIDGE HMAC envelope proves the
+ * broker (audience `custody.google.sign-delegation`); the `custodyToken` proves the MEMBER (same gate
+ * as the browser `/custody/google/sign`).
+ *
+ * CONSTRAINED SIGNING (vs. the browser `/custody/google/sign`, which signs an arbitrary 32-byte hash):
+ * the worker itself BUILDS the least-privilege site delegation (time-boxed, value 0, allowed-targets
+ * {relationship, naming, subregistry}) and C_sub signs THAT — never a caller-supplied hash. So a broker
+ * compromise can at worst mint a scoped, value-0, revocable site delegation, NEVER a fund-moving userOp.
+ */
+app.post('/custody/google/sign-site-delegation', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+  if (
+    !c.env.DELEGATION_MANAGER || !c.env.TIMESTAMP_ENFORCER || !c.env.VALUE_ENFORCER ||
+    !c.env.ALLOWED_TARGETS_ENFORCER || !c.env.AGENT_RELATIONSHIP || !c.env.AGENT_NAME_REGISTRY ||
+    !c.env.PERMISSIONLESS_SUBREGISTRY
+  ) {
+    return c.json({ ok: false, error: 'delegation_env_not_configured' }, 503);
+  }
+
+  // Gate 1 — BRIDGE HMAC envelope (proves the broker). Read the raw body ONCE; the hash must match.
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({
+    request: c.req.raw,
+    rawBody,
+    secret,
+    expectedAudience: 'custody.google.sign-delegation',
+    nonces: getInMemoryNonceStore(),
+  });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as
+    { custodyToken?: string; delegate?: Address; sender?: Address } | null;
+  if (!body?.custodyToken || !body?.delegate || !body?.sender) {
+    return c.json({ ok: false, error: 'custodyToken + delegate + sender required' }, 400);
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.delegate)) return c.json({ ok: false, error: 'bad_delegate' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.sender)) return c.json({ ok: false, error: 'bad_sender' }, 400);
+
+  // Gate 2 — the custody session (proves the MEMBER), same gate as the browser sign path.
+  const gate = await verifyCustodySession(body.custodyToken, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
+      rotation: gate.rotation,
+    });
+    const person = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    // INVARIANT (spec 235 §5.4): only ever sign for the SA the session proves.
+    if (body.sender.toLowerCase() !== person.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'requested sender ≠ session SA' }, 403);
+    }
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), person).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch' }, 403);
+    }
+    // Build the delegation server-side (constrained), then C_sub signs the canonical digest.
+    const { d, digest } = buildUnsignedSiteGrant(c.env, person, body.delegate);
+    d.signature = await sign(digest); // real EIP-712 sig; the person SA's ERC-1271 validates it
+    return c.json({ ok: true, delegation: { ...d, salt: d.salt.toString() }, custodian: cSub });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/sign-site-delegation failed:', e);
     return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
