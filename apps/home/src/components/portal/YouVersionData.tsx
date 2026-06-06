@@ -2,7 +2,8 @@
 // Spec 265 W4 — the person's OWN YouVersion data, read on demand through Connect (which uses the
 // KMS-custodied token server-side and returns only the data; the token never reaches the browser). This
 // proves the full chain end-to-end: sign in with YouVersion → token custodied → read highlights back.
-// notes/bookmarks/saved verses light up once their OAuth scopes are confirmed in the Platform Portal.
+// YouVersion serves highlights one Bible chapter at a time (there is no "all highlights" endpoint), so the
+// reader picks a chapter. Highlights are YouVersion's only personal-data resource (no notes/bookmarks API).
 import { useState } from 'react';
 import { useSession } from '../../context/session';
 
@@ -13,13 +14,15 @@ export function YouVersionData() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
   const [err, setErr] = useState('');
+  const [chapter, setChapter] = useState('JHN.3');
 
   async function load() {
     if (!session?.token) return;
     setPhase('loading');
     setErr('');
     try {
-      const r = await fetch('/connect/youversion?type=highlights', { headers: { authorization: `Bearer ${session.token}` } });
+      const passage = encodeURIComponent(chapter.trim() || 'JHN.3');
+      const r = await fetch(`/connect/youversion?type=highlights&passage=${passage}`, { headers: { authorization: `Bearer ${session.token}` } });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; data?: unknown; error?: string; detail?: unknown };
       if (!r.ok || j.ok === false) {
         const detail = j.detail ? ` — ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)}` : '';
@@ -51,7 +54,18 @@ export function YouVersionData() {
         </div>
       </div>
 
-      {phase === 'idle' && (
+      <label style={{ display: 'flex', gap: '.5rem', alignItems: 'center', fontSize: '.85rem', margin: '.4rem 0 .6rem' }}>
+        <span className="muted">Chapter</span>
+        <input
+          value={chapter}
+          onChange={(e) => setChapter(e.target.value)}
+          placeholder="JHN.3"
+          spellCheck={false}
+          style={{ flex: 1, padding: '.4rem .55rem', border: '1px solid var(--border, #d7dce5)', borderRadius: 6, fontSize: '.85rem' }}
+        />
+      </label>
+
+      {(phase === 'idle' || phase === 'done') && (
         <button className="btn-primary" onClick={load} disabled={!session?.token}>Show my highlights</button>
       )}
       {phase === 'loading' && (

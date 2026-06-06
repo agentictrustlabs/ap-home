@@ -21,10 +21,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const { authUrl, codeVerifier, state, nonce } = beginLogin({
     clientId: env.YOUVERSION_CLIENT_ID,
     redirectUri: env.YOUVERSION_REDIRECT_URI,
-    // spec 265 — request `read_highlights` (publicly-confirmed endpoint scope) so the access_token can read
-    // the member's highlights. notes/bookmarks/saved-verses scope literals are pending Portal confirmation
-    // and will be appended here once known; the substrate (KMS custody/refresh/read-proxy) doesn't depend
-    // on the names. write_* scopes are intentionally NOT requested (read-only access for now).
+    // spec 265 — request `read_highlights`: highlights are YouVersion's only personal-data resource (read
+    // per Bible chapter via GET /v1/highlights). There is no notes / bookmarks / saved-verses API or scope.
+    // write_* scopes are intentionally NOT requested (read-only access).
     scope: 'openid profile email read_highlights',
   });
 

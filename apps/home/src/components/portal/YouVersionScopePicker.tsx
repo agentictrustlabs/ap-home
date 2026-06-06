@@ -8,11 +8,10 @@ import { useSession } from '../../context/session';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import type { Permission } from '../../home/types';
 
+// YouVersion's Platform API exposes one personal-data resource: highlights (read per Bible chapter).
+// There is no notes / bookmarks / saved-verses API or OAuth scope, so highlights is the only grantable type.
 const SCOPES: Array<{ id: string; label: string; live: boolean }> = [
   { id: 'highlights', label: 'Highlights', live: true },
-  { id: 'notes', label: 'Notes', live: false },
-  { id: 'bookmarks', label: 'Bookmarks', live: false },
-  { id: 'saved_verses', label: 'Saved verses', live: false },
 ];
 
 type Phase = 'idle' | 'saving' | 'saved' | 'error';

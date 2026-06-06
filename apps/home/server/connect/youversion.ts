@@ -7,13 +7,17 @@
 //                                                       person's authority via the demo-a2a bridge.
 //
 // Neither path ever exposes the federated token — demo-a2a holds it; we only ever see the DATA (self-read)
-// or write a grant record. notes/bookmarks/saved_verses light up once their OAuth scopes are confirmed.
+// or write a grant record. YouVersion's Platform API exposes exactly one user-data resource: highlights,
+// read per Bible chapter (GET /v1/highlights?bible_id=&passage_id=<chapter>). There is no notes/bookmarks/
+// saved-verses API, so highlights is the only data type.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, json, type FnContext } from '../_lib/server-broker';
 import { getClient, getClientDelegate } from '../../src/lib/oidc-clients';
 import { signBridgeCall } from '../_lib/bridge-hmac';
 
-const DATA_TYPES = ['highlights', 'notes', 'bookmarks', 'saved_verses'];
+const DATA_TYPES = ['highlights'];
+const DEFAULT_YV_VERSION = '111'; // NIV
+const DEFAULT_YV_PASSAGE = 'JHN.3';
 
 /** Verify the caller's AgentSession → the person SA (lowercased 0x…40), or null. */
 async function personFromSession(env: FnContext['env'], request: Request): Promise<string | null> {
@@ -41,9 +45,15 @@ async function bridge(env: FnContext['env'], audience: string, payload: unknown)
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFromSession(env, request);
   if (!person) return json({ error: 'unauthorized' }, 401);
-  const type = new URL(request.url).searchParams.get('type') ?? 'highlights';
+  const qp = new URL(request.url).searchParams;
+  const type = qp.get('type') ?? 'highlights';
   if (!DATA_TYPES.includes(type)) return json({ error: 'unknown_type' }, 400);
-  const r = await bridge(env, 'custody.youversion.fetch', { sender: person, path: `/v1/${type}` });
+  // Highlights are per Bible chapter — bible_id + passage_id (chapter USFM) are required. The API is
+  // mid-migration version_id→bible_id, so send both names. Caller may pick the version/chapter.
+  const version = (qp.get('version') ?? DEFAULT_YV_VERSION).replace(/[^0-9]/g, '') || DEFAULT_YV_VERSION;
+  const passage = (qp.get('passage') ?? DEFAULT_YV_PASSAGE).trim() || DEFAULT_YV_PASSAGE;
+  const path = `/v1/${type}?bible_id=${version}&version_id=${version}&passage_id=${encodeURIComponent(passage)}`;
+  const r = await bridge(env, 'custody.youversion.fetch', { sender: person, path });
   return json(r.body, r.status);
 };
 

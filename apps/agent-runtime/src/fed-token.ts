@@ -97,9 +97,12 @@ export async function deleteFederatedToken(env: FedEnv, sa: Address): Promise<vo
 // read by the youversion read routes to gate each data type per app.
 
 /** The grantable YouVersion data types (our internal scope vocabulary — distinct from the OAuth scope
- *  strings like `read_highlights`). */
-export type YouVersionDataScope = 'highlights' | 'notes' | 'bookmarks' | 'saved_verses';
-export const YOUVERSION_DATA_SCOPES: YouVersionDataScope[] = ['highlights', 'notes', 'bookmarks', 'saved_verses'];
+ *  strings like `read_highlights`). YouVersion's Platform API exposes exactly ONE user-data resource:
+ *  highlights (read per Bible chapter). There is NO notes / bookmarks / saved-verses API — the SDK
+ *  "notes" are scripture footnotes, not personal notes — so we do not invent grant types with no backing
+ *  read endpoint or OAuth scope. */
+export type YouVersionDataScope = 'highlights';
+export const YOUVERSION_DATA_SCOPES: YouVersionDataScope[] = ['highlights'];
 
 const grantKey = (person: Address, app: Address): string => `grant:${person.toLowerCase()}:${app.toLowerCase()}`;
 

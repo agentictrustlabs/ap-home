@@ -2431,6 +2431,13 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
   }
 });
 
+// YouVersion highlights are per Bible CHAPTER (GET /v1/highlights requires bible_id + passage_id, where
+// passage_id is a chapter USFM like "JHN.3" — confirmed against the official Swift/Kotlin SDKs). There is
+// NO "list all highlights" endpoint. These are the demo defaults; the UI lets the member pick a chapter.
+// 111 = NIV.
+const DEFAULT_YV_VERSION = '111';
+const DEFAULT_YV_PASSAGE = 'JHN.3';
+
 /** Refresh a YouVersion access token from its refresh token (public PKCE client — no secret). spec 265. */
 async function refreshYouVersionToken(
   refresh: string,
@@ -2532,7 +2539,7 @@ app.post('/custody/youversion/fetch', async (c) => {
   const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { sender?: Address; path?: string } | null;
   if (!body?.sender || !body?.path) return c.json({ ok: false, error: 'sender + path required' }, 400);
   if (!/^0x[0-9a-fA-F]{40}$/.test(body.sender)) return c.json({ ok: false, error: 'bad_sender' }, 400);
-  if (!/^\/v1\/(highlights|notes|bookmarks|saved_verses)(\?[^#]*)?$/.test(body.path)) {
+  if (!/^\/v1\/highlights(\?[^#]*)?$/.test(body.path)) {
     return c.json({ ok: false, error: 'path_not_allowed' }, 400);
   }
   try {
@@ -2574,15 +2581,22 @@ app.post('/custody/youversion/set-grant', async (c) => {
  * POST /mcp/youversion/:type   (relying app → a2a via the /a2a proxy; delegation-gated + CSRF, like
  * /mcp/vault/*). Body: { delegation, requester }  → { ok, data }
  *
- * Spec 265 W3 — the VaultGrant-gated read. `type` ∈ {highlights,notes,bookmarks,saved_verses}. Verify the
- * person→app delegation (delegator = person, delegate = requester = the app), confirm the person granted
- * `app` the `type` scope, then read live from YouVersion (token stays server-side). Returns ONLY the data.
+ * Spec 265 W3 — the VaultGrant-gated read. `type` is `highlights` (the only YouVersion user-data resource).
+ * Verify the person→app delegation (delegator = person, delegate = requester = the app), confirm the person
+ * granted `app` the `type` scope, then read live from YouVersion (token stays server-side). Returns ONLY
+ * the data. Highlights are per Bible chapter, so the body carries versionId + passageId (chapter USFM).
  */
 app.post('/mcp/youversion/:type', async (c) => {
   const type = c.req.param('type') as YouVersionDataScope;
   if (!YOUVERSION_DATA_SCOPES.includes(type)) return c.json({ ok: false, error: 'unknown_type' }, 404);
-  const body = (await c.req.json().catch(() => null)) as { delegation?: IncomingDelegation; requester?: Address } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    { delegation?: IncomingDelegation; requester?: Address; versionId?: string | number; passageId?: string } | null;
   if (!body?.delegation || !body?.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+  // YouVersion content is per Bible passage — /v1/highlights requires bible_id + passage_id (the API is
+  // mid-migration version_id→bible_id, so we send BOTH names). passage_id is mandatory.
+  const versionId = String(body.versionId ?? DEFAULT_YV_VERSION).replace(/[^0-9]/g, '') || DEFAULT_YV_VERSION;
+  const passageId = (body.passageId ?? '').trim();
+  if (!passageId) return c.json({ ok: false, error: 'passage_required', detail: 'YouVersion highlights are per chapter; pass passageId (chapter USFM, e.g. JHN.3)' }, 400);
   // 1. Verify the person→app delegation (delegate == requester, ERC-1271 against the delegator person SA).
   const v = await verifyDelegation(c.env, body.delegation, body.requester);
   if (!v.ok) return c.json({ ok: false, error: `delegation_invalid: ${v.reason}` }, 403);
@@ -2593,7 +2607,8 @@ app.post('/mcp/youversion/:type', async (c) => {
   if (!granted.includes(type)) return c.json({ ok: false, error: 'scope_not_granted', detail: `no '${type}' grant for ${app}` }, 403);
   // 3. Read live from YouVersion — the token never leaves this worker; return ONLY the data.
   try {
-    const r = await fetchYouVersionData(c.env, person, `/v1/${type}`);
+    const qs = `bible_id=${versionId}&version_id=${versionId}&passage_id=${encodeURIComponent(passageId)}`;
+    const r = await fetchYouVersionData(c.env, person, `/v1/${type}?${qs}`);
     return r.ok ? c.json({ ok: true, data: r.data }) : c.json({ ok: false, error: r.error, detail: r.detail }, r.status as 404);
   } catch (e) {
     return c.json({ ok: false, error: 'read_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
