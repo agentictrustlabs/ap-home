@@ -59,8 +59,8 @@ type View =
   | { k: 'credential' } // spec 257 W1 — the credential-first front door (default; name demoted)
   | { k: 'enroll-entry' } // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll
   | { k: 'enroll-recognized' } // already-authenticated member (ap_sso cookie) → one-tap authorize (ADR-0032)
-  | { k: 'enroll-name' } // "Use my Impact name" within a name-deferred enroll → the named journey
-  | { k: 'name' }
+  | { k: 'enroll-name'; reason?: 'passkey' | 'wallet' } // "Use my Impact name" within a name-deferred enroll → the named journey
+  | { k: 'name'; reason?: 'passkey' | 'wallet' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
   | { k: 'enroll-existing'; name: string; agent: Address }
   | { k: 'org'; name: string; agent: Address }
@@ -180,7 +180,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   if (view.k === 'credential') {
     return (
       <CredentialFirstStart
-        onUseName={() => setView({ k: 'name' })}
+        onUseName={(reason) => setView({ k: 'name', reason })}
         onSession={async (t, via) => { await openSession(t, via, false); }}
       />
     );
@@ -196,7 +196,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return (
       <CredentialFirstStart
         enrollApi={api}
-        onUseName={() => setView({ k: 'enroll-name' })}
+        onUseName={(reason) => setView({ k: 'enroll-name', reason })}
         onSession={async (t, via) => { await openSession(t, via, false); }}
       />
     );
@@ -204,7 +204,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // "Use my Impact name" within a name-deferred enroll → collect a name, then route to the named
   // enroll path (existing home → sign in + grant; new → the named journey which handles passkey).
   if (view.k === 'enroll-name') {
-    return <NameStart enrollApi={api} onStart={async (name) => {
+    return <NameStart enrollApi={api} reason={view.reason} onStart={async (name) => {
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
       if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent });
@@ -212,7 +212,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     }} />;
   }
   // Name-first fallback (reached via "Use my Impact name").
-  return <NameStart onStart={(name, exists) => {
+  return <NameStart reason={view.k === 'name' ? view.reason : undefined} onStart={(name, exists) => {
     if (exists) {
       if (!redirectForPasskey('signin', name)) setView({ k: 'signin', name });
     } else {
@@ -228,11 +228,18 @@ function Shell({ children }: { children: React.ReactNode }) {
 // ── Self-serve: choose your name in the community ─────────────────────────────
 // `enrollApi` (relying-app enroll only): the "Continue with Google" button must STASH the enroll so
 // the post-redirect GoogleEnrollResume finishes the grant + delivers the code back to the app.
-function NameStart({ onStart, enrollApi }: { onStart: (name: string, exists: boolean) => void; enrollApi?: EnrollApi }) {
+// The name screen does TWO jobs — sign in to an EXISTING home, or create a NEW one — so it stays
+// NEUTRAL ("Find your home") until `nameInfo()` resolves whether the typed name exists, then commits to
+// "Continue to <name>" (taken → sign in) or "Create <name>" (available). No "join" before the system
+// confirms availability. `reason` (passkey/wallet) explains WHY we routed here from a credential click.
+function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exists: boolean) => void; enrollApi?: EnrollApi; reason?: 'passkey' | 'wallet' }) {
   const [value, setValue] = useState('');
   const [avail, setAvail] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [busy, setBusy] = useState(false);
   const label = nameLabel(value);
+  const brand = whitelabel.brand.name;
+  const fullName = label ? toAgentName(label) : '';                 // <label>.impact (the public handle)
+  const homeHost = label ? `${label}.${CENTRAL_AUTH_DOMAIN}` : '';  // <label>.impact-agent.me (the home)
   const onGoogle = () => {
     const stash = enrollApi?.enroll
       ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: label ? toAgentName(label) : '' })
@@ -252,35 +259,57 @@ function NameStart({ onStart, enrollApi }: { onStart: (name: string, exists: boo
     return () => clearTimeout(t);
   }, [label]);
 
+  // CTA commits ONLY once the name is resolved: neutral "Continue" while idle/checking, then the
+  // sign-in vs create verb once we know if it exists.
+  const cta = busy ? 'One moment…'
+    : avail === 'checking' ? 'Checking…'
+    : avail === 'taken' ? `Continue to ${fullName}`
+    : avail === 'available' ? `Create ${fullName}`
+    : 'Continue';
+
   return (
     <Shell>
       <BrandShield size={56} />
-      <h1 className="onboarding-h1">{whitelabel.copy.arrivalTitle}</h1>
-      <p className="onboarding-sub">Choose your name in the {whitelabel.brand.community}.</p>
+      <h1 className="onboarding-h1">Find your {brand} home</h1>
+      <p className="onboarding-sub">
+        Use your {brand} name if you know it. Your name is your public handle; Google, passkeys, and
+        wallets are how you prove it&apos;s yours.
+      </p>
+      {reason && (
+        <p className="onboarding-note">
+          {reason === 'passkey'
+            ? `Passkeys are tied to your ${brand} home address. Enter your ${brand} name so we can open the right home.`
+            : `We need your ${brand} name to open the right home for this wallet.`}
+        </p>
+      )}
       <input
         className="onboarding-input"
         value={value}
         onChange={(e) => setValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
         placeholder="e.g. alice"
-        aria-label="Your name"
+        aria-label={`Your ${brand} name`}
         autoCapitalize="none"
         spellCheck={false}
       />
-      {label && <div className="onboarding-name-preview">{toAgentName(label)}</div>}
-      {avail === 'taken' && <p className="onboarding-hint taken">That name is taken — try another, or sign in if it&apos;s yours.</p>}
-      {avail === 'available' && <p className="onboarding-hint ok">✓ Available</p>}
+      {label && (
+        <div className="onboarding-name-preview">
+          {fullName} <span className="onboarding-name-host">· home at {homeHost}</span>
+        </div>
+      )}
+      {avail === 'taken' && (
+        <p className="onboarding-hint taken">That name already exists. Sign in if it&apos;s yours, or choose another name.</p>
+      )}
+      {avail === 'available' && <p className="onboarding-hint ok">✓ {fullName} is available</p>}
       <button
         className="btn-primary"
         disabled={!label || busy || avail === 'checking'}
         onClick={() => { setBusy(true); onStart(toAgentName(label), avail === 'taken'); }}
       >
-        {avail === 'taken'
-          ? `Sign in to the ${whitelabel.brand.community}`
-          : `Join the ${whitelabel.brand.community} as '${label || '…'}'`}
+        {cta}
       </button>
       {googleEnabled && (
         <>
-          <div className="method-or">or</div>
+          <div className="method-or">Other ways to continue</div>
           <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
             Continue with Google
           </button>
@@ -296,7 +325,7 @@ function NameStart({ onStart, enrollApi }: { onStart: (name: string, exists: boo
 // <label>.impact-agent.me) so a discoverable assertion here only succeeds for a home reachable
 // from this origin — otherwise we route to the name path (which hops to the right subdomain).
 function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
-  onUseName: () => void;
+  onUseName: (reason?: 'passkey' | 'wallet') => void;
   onSession: (token: string, via: string) => Promise<void>;
   // spec 257 §11 — when set, this is a NAME-DEFERRED relying-app enroll: Google stashes the enroll
   // (resumed in GoogleEnrollResume → nameless SA + grant), and passkey routes to the name path
@@ -343,7 +372,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
         return;
       }
       // No discoverable home at this origin (subdomain isolation / new user) → name path.
-      onUseName();
+      onUseName('passkey');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'passkey sign-in failed');
     } finally {
@@ -373,7 +402,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
       }
       if (out.status === 'bootstrap') {
         // New wallet — no home for this EOA yet. Name path → the journey deploys the wallet home.
-        onUseName();
+        onUseName('wallet');
         return;
       }
       setErr(('reason' in out && out.reason) || 'wallet sign-in failed');
@@ -419,7 +448,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
         // plus a redundant "use my name" link.
         <button
           className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-          onClick={onUseName}
+          onClick={() => onUseName('passkey')}
         >
           Continue with a passkey or wallet
         </button>
@@ -444,7 +473,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
             </button>
           )}
           <div className="method-or">or</div>
-          <button className="btn-ghost onboarding-secondary" onClick={onUseName}>
+          <button className="btn-ghost onboarding-secondary" onClick={() => onUseName()}>
             Use my {whitelabel.brand.name} name
           </button>
         </>

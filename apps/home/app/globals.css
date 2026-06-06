@@ -1137,6 +1137,7 @@
       .celebrate { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
       .onboarding-input { width: 100%; font-size: 1rem; padding: .7rem .85rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-12); background: var(--color-surface); color: var(--color-text-primary); }
       .onboarding-name-preview { font-family: var(--font-mono); font-size: .78rem; color: var(--color-text-muted); }
+      .onboarding-name-host { opacity: .65; }
       .onboarding-hint { font-size: .82rem; margin: 0; }
       .onboarding-hint.ok { color: var(--color-sage-700); font-weight: 600; }
       .onboarding-hint.taken { color: var(--color-danger); }
