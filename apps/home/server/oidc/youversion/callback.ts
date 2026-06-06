@@ -71,8 +71,30 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
-  if (!code || !state) return json({ error: 'code + state required' }, 400);
+  if (!state) return json({ error: 'state required' }, 400);
 
+  // YouVersion's flow hits this redirect_uri TWICE. Auth Call 1 (/authorize) bounces back here with the
+  // USER ATTRIBUTES (yvp_id, user_name, user_email, profile_picture) + state and NO code. We then make
+  // Auth Call 2 by redirecting the browser to YouVersion's /auth/callback with those attributes (the
+  // user's YouVersion session cookie rides, so it can mint the code); it 302s back HERE with ?code, which
+  // we exchange in Auth Call 3 (/token) below. We do NOT trust the leg-1 attributes for identity — only
+  // the JWKS-verified id_token from /token. So here we just forward them; verify the state stash exists
+  // but do NOT consume it (leg 3 still needs the codeVerifier + nonce).
+  const yvpId = url.searchParams.get('yvp_id');
+  if (!code && yvpId) {
+    const exists = await env.AUTH_CODES.get(`oidc:${state}`);
+    if (!exists) return json({ error: 'unknown or expired state' }, 400);
+    const cb = new URL('https://api.youversion.com/auth/callback');
+    cb.searchParams.set('state', state);
+    cb.searchParams.set('yvp_id', yvpId);
+    cb.searchParams.set('user_name', url.searchParams.get('user_name') ?? '');
+    cb.searchParams.set('user_email', url.searchParams.get('user_email') ?? '');
+    cb.searchParams.set('profile_picture', url.searchParams.get('profile_picture') ?? '');
+    return new Response(null, { status: 302, headers: { location: cb.toString() } });
+  }
+  if (!code) return json({ error: 'code + state required' }, 400);
+
+  // Auth Call 3 (/token): we now have the code — consume the single-use stash and exchange it.
   const stashKey = `oidc:${state}`;
   const stashRaw = await env.AUTH_CODES.get(stashKey);
   await env.AUTH_CODES.delete(stashKey);
