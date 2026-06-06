@@ -1138,6 +1138,10 @@
       .onboarding-input { width: 100%; font-size: 1rem; padding: .7rem .85rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-12); background: var(--color-surface); color: var(--color-text-primary); }
       .onboarding-name-preview { font-family: var(--font-mono); font-size: .78rem; color: var(--color-text-muted); }
       .onboarding-name-host { opacity: .65; }
+      .yv-scopes { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--color-border, #e5e7eb); }
+      .yv-scopes-title { font-size: .8rem; font-weight: 700; margin-bottom: .4rem; }
+      .yv-scopes-list { display: flex; flex-wrap: wrap; gap: .5rem .9rem; margin-bottom: .55rem; }
+      .yv-scope { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; }
       .onboarding-hint { font-size: .82rem; margin: 0; }
       .onboarding-hint.ok { color: var(--color-sage-700); font-weight: 600; }
       .onboarding-hint.taken { color: var(--color-danger); }

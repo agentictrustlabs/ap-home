@@ -38,4 +38,7 @@ export interface Permission {
   cannotDo: string[];
   grantedAt: number;
   expiresAt?: number;
+  /** spec 265 — YouVersion data types the person has granted this app to read (mirrors the authoritative
+   *  server-side grant; the picker reads it for the checked state). */
+  youversionScopes?: string[];
 }

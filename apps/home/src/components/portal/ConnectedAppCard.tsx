@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { Permission } from '../../home/types';
 import { CheckIcon, XIcon } from '../shared/Icons';
 import { InlineConfirm } from '../shared/InlineConfirm';
+import { YouVersionScopePicker } from './YouVersionScopePicker';
 
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
@@ -51,6 +52,8 @@ export function ConnectedAppCard({
           </span>
         )}
       </div>
+
+      <YouVersionScopePicker app={app} />
 
       {confirming ? (
         <InlineConfirm

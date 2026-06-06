@@ -9,6 +9,7 @@ import type { Permission } from '../../../src/home/types';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCard';
+import { YouVersionData } from '../../../src/components/portal/YouVersionData';
 import { LinkIcon } from '../../../src/components/shared/Icons';
 
 export default function AppsPage() {
@@ -23,6 +24,7 @@ export default function AppsPage() {
       title="Connected Apps"
       description={`Apps you've authorized to act on your behalf in the ${whitelabel.brand.community}. See exactly what each can do.`}
     >
+      <YouVersionData />
       {apps.length === 0 ? (
         <ComingSoonState
           icon={<LinkIcon size={40} />}
