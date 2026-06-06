@@ -55,10 +55,14 @@ function Gate({ children }: { children: ReactNode }) {
     }
   }, [bootstrapReward, session?.fresh, phase]);
 
-  // A fresh Google return that already has a home (no secure-home step, no enroll) → show the
-  // welcome-back beat once. (Passkey/wallet/name surface their own beat in EntryExperience.)
+  // KMS-custodied OIDC homes (Google + YouVersion) share the server-side secure-home / enroll-resume /
+  // welcome-back beats — the demo-a2a bridge derives the custodian from the session (iss, sub) for both.
+  const isOidcHome = session?.via === 'Google' || session?.via === 'YouVersion';
+
+  // A fresh OIDC return that already has a home (no secure-home step, no enroll) → show the welcome-back
+  // beat once. (Passkey/wallet/name surface their own beat in EntryExperience.)
   const showGoogleWelcomeBack =
-    mounted && phase === 'authed' && session?.via === 'Google' && session.fresh &&
+    mounted && phase === 'authed' && isOidcHome && session?.fresh &&
     !!agentName && !enroll && !pendingEnroll && !welcomedBack && !bootstrapReward;
 
   let content: ReactNode;
@@ -68,12 +72,12 @@ function Gate({ children }: { children: ReactNode }) {
   else if (phase === 'anon') content = <EntryExperience mode="entry" />;
   // A Google member returned mid relying-app enrollment — finish securing + granting + deliver the
   // code back to the app (the enroll request was stashed before the Google redirect; spec 235).
-  else if (session?.via === 'Google' && pendingEnroll) content = <GoogleEnrollResume />;
+  else if (isOidcHome && pendingEnroll) content = <GoogleEnrollResume />;
   // A Google member returns ALREADY in a custody session but with no home DEPLOYED yet (their
   // `sub` is a counterfactual SA) — secure it before entering the portal (spec 235 P2.4). spec 257
   // Phase 1.5: gate on DEPLOYMENT, not name — a deployed-but-nameless home (true name-deferral)
   // must fall through to the portal, where it claims a public name by choice (ClaimPublicNameCard).
-  else if (session?.via === 'Google' && !agentDeployed) content = <GoogleSecureHome />;
+  else if (isOidcHome && !agentDeployed) content = <GoogleSecureHome />;
   // spec 257 W3 — "Welcome back, <handle>" beat for a returning Google member (existing home).
   else if (showGoogleWelcomeBack) {
     content = (
