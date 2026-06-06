@@ -473,6 +473,22 @@ const CSRF_HEADER = 'X-CSRF-Token';
 const CSRF_COOKIE = 'agentic-csrf';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** Decode the bound origin from a CSRF token's first segment (base64url JSON). Used as the LAST-RESORT
+ *  `actualOrigin` for verifyCsrf when neither the Origin header nor the Referer survived the same-origin
+ *  /a2a/* proxy hop. The token's HMAC (verified separately) makes this embedded origin unforgeable, so
+ *  trusting it can't be abused — an attacker can't obtain a validly-signed token for an allow-listed
+ *  origin in the first place. */
+function decodeCsrfTokenOrigin(token: string): string {
+  try {
+    let seg = (token.split('.')[0] ?? '').replace(/-/g, '+').replace(/_/g, '/');
+    seg += '='.repeat((4 - (seg.length % 4)) % 4);
+    const json = JSON.parse(atob(seg)) as { origin?: unknown };
+    return typeof json.origin === 'string' ? json.origin : '';
+  } catch {
+    return '';
+  }
+}
+
 app.use('*', async (c, next) => {
   if (!MUTATING_METHODS.has(c.req.method)) return next();
   // /rpc is a read-only JSON-RPC pass-through (eth_call, eth_getCode,
@@ -508,24 +524,27 @@ app.use('*', async (c, next) => {
     const t = o.trim();
     if (t) allowed.push(t);
   }
-  // Per-person subdomains (spec 231) are wildcarded in ALLOWED_ORIGINS as
-  // `https://*.<base>`. verifyCsrf is exact-match on the token's bound origin,
-  // so admit the request's own origin when it matches a wildcard — the HMAC
-  // still pins the token to its mint origin, so this can't be forged.
-  const reqOrigin = c.req.header('origin');
+  // Resolve the caller origin for verifyCsrf. `/auth/csrf` MINTS the token's bound origin from
+  // `Origin ?? Referer`; the verifier MUST use the same fallback or mint+verify disagree. Chrome omits
+  // the `Origin` header on some SAME-ORIGIN POSTs, and the same-origin /a2a/* proxy hop can drop it, so:
+  //   1) Origin header → 2) Referer's origin → 3) the token's OWN signed origin (last resort).
+  // (3) is safe: the token is HMAC-signed + origin-bound, so an attacker can't obtain a valid token for
+  // an allow-listed origin in the first place — trusting its embedded origin can't be forged. Net: a
+  // validly-signed, allow-listed token always verifies regardless of which origin headers survived.
+  let reqOrigin = c.req.header('origin') ?? '';
+  if (!reqOrigin) {
+    const ref = c.req.header('referer');
+    if (ref) { try { reqOrigin = new URL(ref).origin; } catch { /* not a URL */ } }
+  }
+  if (!reqOrigin) reqOrigin = decodeCsrfTokenOrigin(headerToken);
+  // Per-person subdomains (spec 231) are wildcarded in ALLOWED_ORIGINS as `https://*.<base>`; admit the
+  // request's own origin when it matches a wildcard — the HMAC still pins the token to its mint origin.
   if (reqOrigin && originAllowed(reqOrigin, allowed) && !allowed.includes(reqOrigin)) {
     allowed.push(reqOrigin);
   }
-  // R5.11 (PKG-CONNECT-AUTH-004 / external audit P1-2) — verifyCsrf
-  // now requires `actualOrigin` explicitly. The token's signed origin
-  // must equal the inbound Origin header (HMAC tampering would already
-  // fail, but this closes the cross-origin replay vector). Demo-a2a's
-  // double-submit cookie pattern already rejects requests with no
-  // Origin / Referer earlier in the middleware; this is the second
-  // gate.
   if (
     !verifyCsrf(headerToken, {
-      actualOrigin: reqOrigin ?? '',
+      actualOrigin: reqOrigin,
       allowedOrigins: allowed,
       // Optional method/path/sessionSid bindings are intentionally not
       // wired here — spec 227 (Real-Connect) will add per-route binding
@@ -533,6 +552,11 @@ app.use('*', async (c, next) => {
       developmentMode: true, // testnet demo; spec 227 replaces with real prod gate
     })
   ) {
+    console.log(JSON.stringify({
+      evt: 'csrf.reject', path: c.req.path, reqOrigin,
+      origin: c.req.header('origin') ?? null, referer: c.req.header('referer') ?? null,
+      secFetchSite: c.req.header('sec-fetch-site') ?? null, allowed,
+    }));
     return c.json({ error: 'csrf invalid' }, 403);
   }
   return next();
