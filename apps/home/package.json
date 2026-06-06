@@ -17,6 +17,7 @@
     "@agenticprimitives/agent-relationships": "workspace:*",
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
+    "@agenticprimitives/fedcm-idp": "workspace:*",
     "@agenticprimitives/contracts": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/identity-directory": "workspace:*",
