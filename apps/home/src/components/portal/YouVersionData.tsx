@@ -39,8 +39,15 @@ export function YouVersionData() {
       const r = await fetch('/connect/youversion/data-exchange', { headers: { authorization: `Bearer ${session.token}` } });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; approveUrl?: string; error?: string; detail?: unknown };
       if (!r.ok || !j.ok || !j.approveUrl) {
-        const detail = j.detail ? ` — ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)}` : '';
-        setErr(`${j.error ?? `Couldn't start highlights approval (HTTP ${r.status})`}${detail}`);
+        const blob = `${j.error ?? ''} ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? '')}`;
+        // YouVersion gates Data Exchange behind app provisioning — the Apigee gateway returns
+        // "Invalid ApiKey for given resource" when the app key isn't enabled for that API.
+        const notProvisioned = /InvalidApiKeyForGivenResource|Invalid ApiKey for given resource|HTTP 401|HTTP 403/.test(blob);
+        setErr(
+          notProvisioned
+            ? 'YouVersion hasn’t enabled Data Exchange for this app yet, so highlights can’t be shared. This is a YouVersion-side approval for the app key — not something to fix here. (Sign-in and Bible reading already work.)'
+            : `${j.error ?? `Couldn't start highlights approval (HTTP ${r.status})`}${j.detail ? ` — ${typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)}` : ''}`,
+        );
         setGranting(false);
         return;
       }
