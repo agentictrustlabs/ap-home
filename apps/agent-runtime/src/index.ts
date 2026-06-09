@@ -12,6 +12,7 @@ import { cors } from 'hono/cors';
 import {
   verify as siweVerifyLegacy,
   verifyOnchain as siweVerifyOnchain,
+  parseMessage as siweParseMessage,
 } from '@agenticprimitives/connect-auth/siwe';
 import {
   mintSession,
@@ -1082,6 +1083,26 @@ app.post('/auth/siwe-verify', async (c) => {
     allowedDomains.push(reqHost);
   }
 
+  // CA-001 (audit 2026-06-09): SIWE replay guard. demo-a2a doesn't pre-issue nonces, so we enforce
+  // ONE-SHOT consumption: the (message address, nonce) pair may be accepted at most once. A captured
+  // signature replayed within the message's validity window hits the already-recorded nonce and is
+  // rejected. The message's own nonce is the expectedNonce (self-consistent); the replay store is
+  // what actually makes it single-use.
+  let siweNonce: string;
+  let siweAddrForNonce: string;
+  try {
+    const parsed = siweParseMessage(body.message);
+    siweNonce = parsed.nonce;
+    siweAddrForNonce = parsed.address.toLowerCase();
+  } catch {
+    return c.json({ error: 'siwe verify failed', reason: 'malformed SIWE message' }, 401);
+  }
+  const siweNonceStore = bridgeNonceStore(c.env);
+  const siweReplayKey = `siwe:${siweAddrForNonce}:${siweNonce}`;
+  if (await siweNonceStore.has(siweReplayKey)) {
+    return c.json({ error: 'siwe verify failed', reason: 'nonce already used (replay)' }, 401);
+  }
+
   // Two verification modes:
   //   1. Signer-agnostic (preferred): UNIVERSAL_SIGNATURE_VALIDATOR is set →
   //      use verifyOnchain. Handles EOA, ERC-1271, and ERC-6492 uniformly.
@@ -1111,16 +1132,18 @@ app.post('/auth/siwe-verify', async (c) => {
         });
         return r.ok;
       },
-      { allowedDomains },
+      { allowedDomains, expectedNonce: siweNonce },
     );
     verifyResult = r.ok ? { ok: true, address: r.address } : { ok: false, reason: r.reason };
   } else {
-    const r = siweVerifyLegacy(body.message, body.signature, { allowedDomains });
+    const r = siweVerifyLegacy(body.message, body.signature, { allowedDomains, expectedNonce: siweNonce });
     verifyResult = r.ok ? { ok: true, address: r.address } : { ok: false, reason: r.reason };
   }
   if (!verifyResult.ok) {
     return c.json({ error: 'siwe verify failed', reason: verifyResult.reason }, 401);
   }
+  // CA-001: burn the nonce now that this signature verified — it can't be presented again.
+  await siweNonceStore.record(siweReplayKey, 600);
 
   // Resolve the smart-account address. Two cases:
   //   - addressIsSmartAccount=true  → the SIWE message already names the

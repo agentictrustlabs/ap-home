@@ -156,19 +156,20 @@ async function verifyHomeSession(env: FnContext['env'], request: Request): Promi
   const token = sso.token;
   const { jwks, directory } = await getServer(env);
   const keys = await importJwks(jwks);
+  // CN-1: the home accepts a session minted by THIS request origin OR any of its own Connect
+  // origins (the personal-subdomain wildcard). Pass that allowlist predicate so the verifier
+  // enforces the issuer binding (expectedIss is now required).
+  const reqOrigin = resolveOrigin(request, env);
+  const expectedIss = (iss: string) => iss === reqOrigin || isOwnConnectOrigin(iss);
   // The home session token's aud is the home's own; if a session was minted with a different aud, retry
   // with the token's own aud (the signature is still verified, so this can't be forged).
-  let v = await verifyAgentSession(token, { keys, expectedAud: HOME_AUD });
+  let v = await verifyAgentSession(token, { keys, expectedAud: HOME_AUD, expectedIss });
   if (!v.ok) {
     const selfAud = decodeAud(token);
-    if (selfAud && selfAud !== HOME_AUD) v = await verifyAgentSession(token, { keys, expectedAud: selfAud });
+    if (selfAud && selfAud !== HOME_AUD) v = await verifyAgentSession(token, { keys, expectedAud: selfAud, expectedIss });
   }
   if (!v.ok) return { ok: false, reason: `session_verify_failed:${v.reason ?? 'unknown'}` };
   const session = v.session;
-  const reqOrigin = resolveOrigin(request, env);
-  if (session.iss !== reqOrigin && !isOwnConnectOrigin(session.iss)) {
-    return { ok: false, reason: `issuer_untrusted:${session.iss}` };
-  }
   let name: string | null = null;
   try {
     const view = await directory.agent(session.sub);

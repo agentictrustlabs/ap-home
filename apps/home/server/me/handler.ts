@@ -55,7 +55,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // Verify signature/alg/aud/exp/owner (the alg-pin rejects HS256 BrokerSession tokens), then
   // accept the issuer if it's the request origin OR one of our own Connect origins — a Google
   // session is minted on the central origin but consumed on the member's per-handle subdomain.
-  const v = await verifyAgentSession(token, { keys, expectedAud: AUD });
+  const v = await verifyAgentSession(token, { keys, expectedAud: AUD, expectedIss: (i) => i === iss || isOwnConnectOrigin(i) });
   if (!v.ok) return json({ error: `invalid AgentSession: ${v.reason}` }, 401);
   const session = v.session;
   if (session.iss !== iss && !isOwnConnectOrigin(session.iss)) {

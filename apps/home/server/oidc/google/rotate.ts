@@ -47,7 +47,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const keys = await importJwks(jwks);
   // Verify signature/alg/aud/exp (alg-pin rejects HS256), then accept the issuer if it's one of
   // our own Connect origins (the session was minted on www, used here on any of our origins).
-  const v = await verifyAgentSession(token, { keys, expectedAud: aud });
+  const v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: (i) => i === reqOrigin || isOwnConnectOrigin(i) });
   if (!v.ok) return json({ error: `invalid session: ${v.reason}` }, 401);
   const s = v.session;
   if (s.iss !== reqOrigin && !isOwnConnectOrigin(s.iss)) {
