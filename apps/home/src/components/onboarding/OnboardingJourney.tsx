@@ -170,9 +170,11 @@ export function OnboardingJourney({
       // attacker-controllable). The supplied delegation's `delegate` MUST equal what the
       // server bound — /oidc/grant rejects otherwise.
       const { grant_id, delegate } = await api.beginGrant(home.name);
-      const granted = await givePermission(home, delegate, via);
+      // spec 270 v4 W2 — sign the DEL-001 leaf for the relying app's session-key address (from the
+      // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
+      const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey);
       if (!granted.ok) return fail(granted.error, 'grant');
-      const code = await api.submitGrant(grant_id, granted.grant);
+      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,

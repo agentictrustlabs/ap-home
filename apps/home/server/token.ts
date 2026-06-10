@@ -104,6 +104,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const grant = JSON.parse(raw) as {
       id_token: string;
       delegation: unknown;
+      sessionDelegation?: unknown;
       org: unknown;
       code_challenge: string;
       client_id: string;
@@ -120,6 +121,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         token_type: 'Bearer',
         expires_in: ID_TOKEN_TTL,
         delegation: grant.delegation ?? undefined,
+        sessionDelegation: grant.sessionDelegation ?? undefined, // spec 270 v4 W2 — the DEL-001 leaf
         ...(grant.org ? { org: grant.org } : {}),
       },
       request,

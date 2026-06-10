@@ -34,6 +34,8 @@ interface GrantBody {
   grant_id?: string;
   delegation?: IncomingDelegation;
   org?: unknown;
+  /** spec 270 v4 W2 — the DEL-001 leaf the home signed for the relying app's session key. */
+  sessionDelegation?: unknown;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -143,6 +145,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     JSON.stringify({
       id_token: idToken,
       delegation: body.delegation,
+      sessionDelegation: body.sessionDelegation ?? null,
       org: body.org ?? null,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,

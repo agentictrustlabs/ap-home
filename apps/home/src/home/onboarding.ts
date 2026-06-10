@@ -23,7 +23,7 @@ import {
 } from '../connect-client';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
-import { issueSiteDelegation, toWire } from '../lib/delegation';
+import { issueSiteDelegation, issueSessionDelegation, toWire, type DelegationWire } from '../lib/delegation';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
@@ -189,11 +189,27 @@ export async function createOrganization(
  * revocable). The delegation is signed by YOUR custodian (passkey or the wallet EOA), so the
  * signer is chosen by `via`. Returns the signed grant to hand to the app.
  */
-export async function givePermission(home: Home, delegate: Address, via: Via = 'passkey', auth?: Auth): Promise<Result<{ grant: unknown }>> {
+export async function givePermission(
+  home: Home,
+  delegate: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
+  /** spec 270 v4 W2 — the RELYING APP's session-key address (the relying app generates the keypair and
+   *  keeps the private key; only its public address reaches the home). When present, the same credential
+   *  that signs the site delegation also signs the DEL-001 leaf binding that key to the person SA. */
+  sessionKeyAddress?: Address,
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire }>> {
   try {
     const signHash = await signHashFor(via, home.address, auth);
     const delegation = await issueSiteDelegation(home.address, delegate, signHash);
-    return { ok: true, grant: toWire(delegation) };
+    // The leaf is signed in the SAME ceremony, by the SAME credential. Only the PUBLIC leaf crosses back
+    // to the relying app — the session private key never leaves the relying app (no cross-origin key
+    // transport). The relying app signs its tokens with that key + presents the leaf; the verifier binds
+    // it to the person SA's authority (closing observe-and-re-mint). One credential interaction covers both.
+    const sessionDelegation = sessionKeyAddress
+      ? toWire(await issueSessionDelegation(home.address, sessionKeyAddress, signHash))
+      : undefined;
+    return { ok: true, grant: toWire(delegation), sessionDelegation };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
   }

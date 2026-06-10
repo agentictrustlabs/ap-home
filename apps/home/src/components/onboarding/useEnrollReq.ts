@@ -22,6 +22,7 @@ export interface EnrollReq {
   orgBase?: string; // org_create: the org name to create
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
+  sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -57,6 +58,7 @@ export function parseEnrollReq(): EnrollReq | null {
       orgBase: p.get('org_base') ?? undefined,
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
+      sessionKey: (p.get('session_key') as Address) ?? undefined,
     };
   } catch {
     return null;
@@ -127,11 +129,12 @@ export async function submitEnrollGrant(
   grantId: string,
   delegationWire: unknown,
   org?: unknown,
+  sessionDelegation?: unknown,
 ): Promise<string> {
   const r = await fetch('/oidc/grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org }),
+    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org, sessionDelegation }),
   });
   const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
   if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);
@@ -169,8 +172,9 @@ export interface EnrollApi {
    *  delegate the SPA MUST use when building the delegation (which overrides the
    *  URL-supplied `enroll.delegate` — anti-spoof). Call this BEFORE the ceremony. */
   beginGrant(resolvedName: string): Promise<{ grant_id: string; delegate: Address }>;
-  /** Redeem a server-minted grant by presenting the signed delegation. */
-  submitGrant(grantId: string, delegationWire: unknown, org?: unknown): Promise<string>;
+  /** Redeem a server-minted grant by presenting the signed delegation. `sessionDelegation` (spec 270 v4
+   *  W2) is the DEL-001 leaf the home signed for the relying app's session key — carried to /token. */
+  submitGrant(grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown): Promise<string>;
   deliverCode(code: string): void;
   denyEnroll(): void;
 }
@@ -206,8 +210,8 @@ export function useEnrollReq(): EnrollApi {
 
   // Redeem the grant by presenting the signed delegation.
   const submitGrant = useCallback(
-    async (grantId: string, delegationWire: unknown, org?: unknown): Promise<string> => {
-      return submitEnrollGrant(grantId, delegationWire, org);
+    async (grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown): Promise<string> => {
+      return submitEnrollGrant(grantId, delegationWire, org, sessionDelegation);
     },
     [],
   );

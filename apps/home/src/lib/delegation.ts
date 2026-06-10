@@ -12,8 +12,10 @@ import {
   encodeAllowedTargetsTerms,
   encodeValueTerms,
   hashDelegation,
+  buildSessionDelegation,
   ROOT_AUTHORITY,
 } from '@agenticprimitives/delegation';
+import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS } from './chain';
 
@@ -100,4 +102,42 @@ export function buildApprovedSiteDelegation(
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch
   return { delegation: d, digest };
+}
+
+// ─── spec 270 v4 W2 — the DEL-001 session-delegation leaf (the connect-ceremony emission) ─────
+
+/** A freshly-generated session key the relying app uses to sign delegation tokens. The private key is
+ *  held by the relying app's session (browser); the leaf below authorizes it. */
+export interface SessionKey {
+  privateKey: Hex;
+  address: Address;
+}
+
+/** Generate a fresh secp256k1 session keypair (client-side, per connect). */
+export function generateSessionKey(): SessionKey {
+  const privateKey = generatePrivateKey();
+  return { privateKey, address: privateKeyToAddress(privateKey) };
+}
+
+/** Issue the DEL-001 session-delegation leaf `personAgent → sessionKey`, signed by the SAME ROOT
+ *  credential (`signHash`) that signs the site delegation at connect. Bound to the person SA (the
+ *  canonical identity), so it works for whatever credential the member connected with (passkey / wallet /
+ *  Google-KMS); the verifier validates it via the UniversalSignatureValidator (spec 270 W1). The relying
+ *  app holds the session key + this leaf, signs tokens with the key, and presents the chain. */
+export async function issueSessionDelegation(
+  personAgent: Address,
+  sessionKeyAddress: Address,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 12, // 12h session
+): Promise<Delegation> {
+  const { leaf, digest } = buildSessionDelegation({
+    delegator: personAgent,
+    sessionKeyAddress,
+    validUntil: Math.floor(Date.now() / 1000) + validitySeconds,
+    enforcers: { timestamp: CONTRACTS.timestampEnforcer, value: CONTRACTS.valueEnforcer },
+    chainId: CHAIN_ID,
+    delegationManager: CONTRACTS.delegationManager,
+  });
+  leaf.signature = await signHash(digest); // the ROOT credential authorizes the session key
+  return leaf;
 }

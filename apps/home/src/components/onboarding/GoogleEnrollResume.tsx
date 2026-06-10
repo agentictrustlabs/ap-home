@@ -103,9 +103,10 @@ export function GoogleEnrollResume() {
     try {
       // SEC-001: server-mint the enrollment grant FIRST; use the registry-derived delegate.
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
-      const granted = await givePermission(home, delegate, 'google', { token });
+      // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
+      const granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey);
       if (!granted.ok) return fail(granted.error);
-      const code = await submitEnrollGrant(grant_id, granted.grant);
+      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
       // means a follow-on home operation — e.g. org-create at `<handle>.impact-agent.me`, which arrives

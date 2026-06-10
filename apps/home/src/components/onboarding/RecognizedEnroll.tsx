@@ -98,9 +98,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
       const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
-      const granted = await givePermission(home, delegate, viaLower, auth);
+      // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
+      const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
       if (!granted.ok) return fail(granted.error);
-      const code = await submitEnrollGrant(grant_id, granted.grant);
+      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
       setFedcmLoginStatus('logged-in');
