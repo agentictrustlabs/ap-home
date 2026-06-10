@@ -160,6 +160,10 @@ function vaultConfig(env: Env, enforceBinding: boolean | undefined): McpResource
   return {
     ...baseConfig(env),
     requireSessionDelegateBinding: true,
+    // DEL-001 fail-closed guard (P0-2): this IS the strict client-mint path — assert it. If a future
+    // edit drops requireSessionDelegateBinding above, verifyDelegationToken throws instead of silently
+    // verifying unbound (re-opening observe-and-re-mint). The persona/admin path stays on baseConfig.
+    strictSessionBinding: true,
     universalSignatureValidator: usv as Address,
   };
 }
