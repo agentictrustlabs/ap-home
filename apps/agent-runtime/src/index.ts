@@ -3095,6 +3095,74 @@ async function verifyDelegation(
  *   7. Audit-emit `delegation.verify.accept|reject` happens inside
  *      `withDelegation` on the MCP side.
  */
+/**
+ * Service-MAC-wrap a delegation token and forward it to demo-mcp's `/tools/<name>`, passing demo-mcp's
+ * response straight through. Shared by two callers:
+ *   - `callMcpToolViaDelegation` — demo-a2a MINTS the token (persona/admin paths; it verified the raw
+ *     ERC-1271 delegation itself, so it IS the local authority).
+ *   - the client-mint vault routes (spec 270 v4 W2) — the RELYING APP already minted the token with its
+ *     session key + embedded the DEL-001 leaf; demo-a2a holds NO session key and only forwards. demo-mcp
+ *     recovers the session key from the signature and (W3) checks the leaf binds it to the delegator.
+ * The service-MAC is what authenticates demo-a2a → demo-mcp; the delegation token authorizes the action.
+ */
+async function forwardMcpToken(args: {
+  env: Env;
+  toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  token: string;
+  toolArgs?: Record<string, unknown>;
+  auditSink: ReturnType<typeof buildAuditSink>;
+  correlationId: string;
+}): Promise<Response> {
+  const requestBody = JSON.stringify({ token: args.token, args: args.toolArgs ?? {} });
+  const macProvider = buildMacProvider(MCP_AUDIENCE, {
+    backend: 'local-aes',
+    config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
+    auditSink: args.auditSink,
+  });
+  const macHeaders = await generateServiceMac({
+    ctx: {
+      audience: MCP_AUDIENCE,
+      service: 'a2a-to-mcp',
+      route: args.toolName,
+      bodyDigest: bodyDigestHex(requestBody),
+    },
+    provider: macProvider,
+  });
+  const reqInit: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-A2A-Mac': macHeaders.mac,
+      'X-A2A-Mac-Nonce': macHeaders.nonce,
+      'X-A2A-Mac-Timestamp': macHeaders.timestamp,
+      'X-A2A-Mac-Key-Id': macHeaders.keyId,
+      'X-Correlation-Id': args.correlationId,
+    },
+    body: requestBody,
+  };
+  const mcpRes = args.env.MCP
+    ? await args.env.MCP.fetch(new Request(`https://internal/tools/${args.toolName}`, reqInit))
+    : await fetch(`${args.env.MCP_URL}/tools/${args.toolName}`, reqInit);
+  const mcpBody = await mcpRes.text();
+  if (!mcpRes.ok) {
+    let detail = mcpBody;
+    let error = `mcp_${mcpRes.status}`;
+    try {
+      const parsed = JSON.parse(mcpBody) as { error?: string; detail?: string };
+      if (parsed.error) error = parsed.error;
+      if (parsed.detail) detail = parsed.detail;
+    } catch { /* keep raw body */ }
+    return new Response(
+      JSON.stringify({ ok: false, error, detail, mcp_status: mcpRes.status }),
+      { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  return new Response(mcpBody, {
+    status: mcpRes.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 async function callMcpToolViaDelegation(args: {
   env: Env;
   toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
@@ -3155,59 +3223,14 @@ async function callMcpToolViaDelegation(args: {
     { auditSink, correlationId },
   );
 
-  // 5. Service-MAC envelope for the worker-to-worker call.
-  const requestBody = JSON.stringify({ token, args: args.toolArgs ?? {} });
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
+  // 5 + 6. Service-MAC envelope + worker-to-worker call to demo-mcp (shared with the client-mint path).
+  return forwardMcpToken({
+    env: args.env,
+    toolName: args.toolName,
+    token,
+    toolArgs: args.toolArgs,
     auditSink,
-  });
-  const macHeaders = await generateServiceMac({
-    ctx: {
-      audience: MCP_AUDIENCE,
-      service: 'a2a-to-mcp',
-      route: args.toolName,
-      bodyDigest: bodyDigestHex(requestBody),
-    },
-    provider: macProvider,
-  });
-  const reqInit: RequestInit = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-A2A-Mac': macHeaders.mac,
-      'X-A2A-Mac-Nonce': macHeaders.nonce,
-      'X-A2A-Mac-Timestamp': macHeaders.timestamp,
-      'X-A2A-Mac-Key-Id': macHeaders.keyId,
-      'X-Correlation-Id': correlationId,
-    },
-    body: requestBody,
-  };
-  // 6. Call the MCP server. Prefer the service binding in production
-  //    (avoids Cloudflare error 1042 on sibling-Worker fetches); fall
-  //    back to public-URL fetch in local dev.
-  const mcpRes = args.env.MCP
-    ? await args.env.MCP.fetch(new Request(`https://internal/tools/${args.toolName}`, reqInit))
-    : await fetch(`${args.env.MCP_URL}/tools/${args.toolName}`, reqInit);
-  const mcpBody = await mcpRes.text();
-  // Pass through demo-mcp's response. On a non-2xx, wrap the body so
-  // the front-end sees a consistent { ok: false, error, detail } shape.
-  if (!mcpRes.ok) {
-    let detail = mcpBody;
-    let error = `mcp_${mcpRes.status}`;
-    try {
-      const parsed = JSON.parse(mcpBody) as { error?: string; detail?: string };
-      if (parsed.error) error = parsed.error;
-      if (parsed.detail) detail = parsed.detail;
-    } catch { /* keep raw body */ }
-    return new Response(
-      JSON.stringify({ ok: false, error, detail, mcp_status: mcpRes.status }),
-      { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-  return new Response(mcpBody, {
-    status: mcpRes.status,
-    headers: { 'Content-Type': 'application/json' },
+    correlationId,
   });
 }
 
@@ -3268,13 +3291,24 @@ app.post('/mcp/org/sensitive', async (c) => {
 app.post('/mcp/vault/get', async (c) => {
   try {
     const body = (await c.req.json().catch(() => null)) as {
-      delegation: IncomingDelegation;
-      requester: Address;
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
       recordType: string;
     } | null;
-    if (!body?.delegation || !body?.requester || !body?.recordType) {
-      return c.json({ ok: false, error: 'bad_body' }, 400);
+    if (!body?.recordType) return c.json({ ok: false, error: 'bad_body' }, 400);
+    // spec 270 v4 W2 — client-mint: the relying app already minted + signed the token (leaf embedded).
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'get_vault_record',
+        token: body.token,
+        toolArgs: { recordType: body.recordType },
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
     }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
     return await callMcpToolViaDelegation({
       env: c.env,
       toolName: 'get_vault_record',
@@ -3290,14 +3324,25 @@ app.post('/mcp/vault/get', async (c) => {
 app.post('/mcp/vault/set', async (c) => {
   try {
     const body = (await c.req.json().catch(() => null)) as {
-      delegation: IncomingDelegation;
-      requester: Address;
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
       recordType: string;
       data: unknown;
     } | null;
-    if (!body?.delegation || !body?.requester || !body?.recordType) {
-      return c.json({ ok: false, error: 'bad_body' }, 400);
+    if (!body?.recordType) return c.json({ ok: false, error: 'bad_body' }, 400);
+    // spec 270 v4 W2 — client-mint path.
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'set_vault_record',
+        token: body.token,
+        toolArgs: { recordType: body.recordType, data: body.data },
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
     }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
     return await callMcpToolViaDelegation({
       env: c.env,
       toolName: 'set_vault_record',
@@ -3313,9 +3358,20 @@ app.post('/mcp/vault/set', async (c) => {
 app.post('/mcp/vault/list', async (c) => {
   try {
     const body = (await c.req.json().catch(() => null)) as {
-      delegation: IncomingDelegation;
-      requester: Address;
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
     } | null;
+    // spec 270 v4 W2 — client-mint path.
+    if (typeof body?.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'list_vault_record',
+        token: body.token,
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
+    }
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
