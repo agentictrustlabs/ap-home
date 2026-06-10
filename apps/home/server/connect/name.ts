@@ -1,4 +1,4 @@
-// GET /connect/name?base=<label> → the next free `<label>[N].demo.agent` +
+// GET /connect/name?base=<label> → the next free `<label>[N].impact` +
 // its namehash node. Forced-unique via sequential suffix (spec 220 §5): alice ->
 // alice2 -> alice3 … Read-only (AgentNamingClient.resolveName; null = free).
 import { AgentNamingClient, namehash } from '@agenticprimitives/agent-naming';
@@ -6,7 +6,11 @@ import { json, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 function sanitize(base: string): string {
-  const s = base.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+  // Take the FIRST dot-segment first: a dotted base (e.g. `joe.impact`, if a caller passes a full name)
+  // must NEVER be flattened into one label (`joeimpact`) by stripping the dot — that produced the
+  // `joeimpact.impact` doubled-name bug. Then keep [a-z0-9-] only.
+  const firstLabel = base.split('.')[0] ?? '';
+  const s = firstLabel.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
   return s.length >= 3 ? s.slice(0, 24) : 'agent';
 }
 
