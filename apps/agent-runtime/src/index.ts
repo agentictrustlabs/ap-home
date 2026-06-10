@@ -1678,6 +1678,8 @@ const DIRECT_DEPLOY_FACTORY_ABI = [
     stateMutability: 'view',
     inputs: [
       DIRECT_DEPLOY_INIT_PARAMS_TUPLE,
+      // CA-F1 (audit 2026-06-10): the address commits to the full custody config.
+      { name: 'timelockOverrides', type: 'uint32[7]' },
       { name: 'salt', type: 'uint256' },
     ],
     outputs: [{ name: 'account', type: 'address' }],
@@ -1783,7 +1785,8 @@ app.post('/session/direct-deploy', async (c) => {
       address: c.env.AGENT_ACCOUNT_FACTORY as Address,
       abi: DIRECT_DEPLOY_FACTORY_ABI,
       functionName: 'getAddressForAgentAccount',
-      args: [params, salt],
+      // CA-F1: predict with the SAME timelockOverrides used at deploy below.
+      args: [params, timelockOverrides, salt],
     })) as Address;
 
     // R5.12d / R5.12c gate: verify the CLIENT-SUPPLIED target is the
@@ -1808,6 +1811,8 @@ app.post('/session/direct-deploy', async (c) => {
           mode: params.mode,
           salt,
           trustees: params.trustees,
+          // CA-F1: the derivation now commits to timelockOverrides too.
+          timelockOverrides: timelockOverrides as unknown as number[],
           passkey: params.initialPasskeyX !== 0n || params.initialPasskeyY !== 0n
             ? {
                 credentialIdDigest: params.initialPasskeyCredentialIdDigest,
