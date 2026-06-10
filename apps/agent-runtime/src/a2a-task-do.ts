@@ -23,6 +23,10 @@ import {
   type SkillHandler,
 } from '@agenticprimitives/a2a';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
+// FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
+// cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
+// time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
+import { callMcpToolViaDelegation, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -37,16 +41,6 @@ const echo: SkillHandler = {
   skill: 'echo',
   handle: async (ctx) => ({ state: 'completed', artifactIds: [await ctx.emitArtifact({ artifactKind: 'echo', body: ctx.input })] }),
 };
-
-/** Only the env fields the task runtime needs — kept local so the DO doesn't couple to the worker's Env. */
-interface A2aDoEnv {
-  RPC_URL: string;
-  CHAIN_ID?: string;
-  DELEGATION_MANAGER: string;
-  TIMESTAMP_ENFORCER: string;
-  ALLOWED_TARGETS_ENFORCER: string;
-  ALLOWED_METHODS_ENFORCER: string;
-}
 
 const AGENT_SA_KEY = '__a2a_agent_sa';
 const ALARM_DELAY_MS = 1500;
@@ -68,7 +62,7 @@ const DELEGATION_METHODS = new Set(['message/send', 'tasks/resubmit']);
 
 export class A2aTaskDO {
   private agent: A2aAgent | null = null;
-  constructor(private state: DurableObjectState, private env: A2aDoEnv) {}
+  constructor(private state: DurableObjectState, private env: Env) {}
 
   private build(agentSA: Address): A2aAgent {
     if (this.agent) return this.agent;
@@ -85,10 +79,32 @@ export class A2aTaskDO {
       verifyDelegationSignature: async (d) => erc1271(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex),
       verifyMessageSignature: async (msg, digest) => erc1271(msg.sender as Address, digest, msg.signature as Hex),
     };
-    // The agent's private store: bodies keyed by owner; only refs/hashes land in task state (A2A-INV-04).
+    // Vault seam (A2A-INV-04 — only refs/hashes in task state):
+    //  • with a delegation (FR-3.4) → write/read the DELEGATOR's demo-mcp vault via the captured grant
+    //    (demo-mcp keys by principal); this is how a handler delivers an Entitlement VC into the reader's
+    //    own namespace. No DO signing key needed — the delegation is pre-signed (SR-8).
+    //  • without one → the agent's private DO-storage store (its own artifacts), keyed by owner.
+    const env = this.env;
+    const toWire = (d: Delegation): IncomingDelegation => ({ ...d, salt: d.salt.toString() } as unknown as IncomingDelegation);
     const vault: VaultClient = {
-      write: async ({ owner, recordType, data }) => { await this.state.storage.put(`vault:${owner.toLowerCase()}:${recordType}`, data); return { owner, recordType }; },
-      read: async (ref) => (await this.state.storage.get(`vault:${ref.owner.toLowerCase()}:${ref.recordType}`)) ?? null,
+      write: async ({ owner, recordType, data, delegation }) => {
+        if (delegation) {
+          const resp = await callMcpToolViaDelegation({ env, toolName: 'set_vault_record', delegation: toWire(delegation), requester: delegation.delegate as Address, toolArgs: { recordType, data } });
+          if (!resp.ok) throw new Error(`a2a vault write via delegation failed (HTTP ${resp.status})`);
+          return { owner, recordType };
+        }
+        await this.state.storage.put(`vault:${owner.toLowerCase()}:${recordType}`, data);
+        return { owner, recordType };
+      },
+      read: async (ref, opts) => {
+        if (opts?.delegation) {
+          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: toWire(opts.delegation), requester: opts.delegation.delegate as Address, toolArgs: { recordType: ref.recordType } });
+          if (!resp.ok) return null;
+          const j = (await resp.json().catch(() => null)) as { data?: unknown } | null;
+          return j?.data ?? null;
+        }
+        return (await this.state.storage.get(`vault:${ref.owner.toLowerCase()}:${ref.recordType}`)) ?? null;
+      },
     };
     this.agent = createA2aAgent({
       agentSA, chainId, delegationManager: dm,

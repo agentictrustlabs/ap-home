@@ -2944,7 +2944,7 @@ interface IncomingCaveat {
   terms: Hex;
   args?: Hex;
 }
-interface IncomingDelegation {
+export interface IncomingDelegation {
   delegator: Address;
   delegate: Address;
   authority: Hex;
@@ -3250,7 +3250,7 @@ async function forwardMcpToken(args: {
   });
 }
 
-async function callMcpToolViaDelegation(args: {
+export async function callMcpToolViaDelegation(args: {
   env: Env;
   toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
   delegation: IncomingDelegation;
