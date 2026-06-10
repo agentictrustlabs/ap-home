@@ -139,6 +139,12 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     // accounts via paymaster-sponsored UserOp in Step 1.5 before any
     // delegation is issued, so ERC-1271 verification against the live
     // on-chain contract is the production-grade behavior.
+    //
+    // DEL-001 (ADR-0036): the delegation library now ENFORCES the session-delegate binding by default.
+    // This base (persona / non-client-minted) path issues UNBOUND tokens (the demo's deterministic
+    // operator-key story — accepted testnet hole C-1), so it EXPLICITLY opts out. Client-minted vault
+    // calls use `vaultConfig`, which keeps the default (binding enforced). The opt-out is greppable.
+    allowUnboundSessionToken: true,
   };
 }
 
@@ -159,11 +165,10 @@ function vaultConfig(env: Env, enforceBinding: boolean | undefined): McpResource
   }
   return {
     ...baseConfig(env),
-    requireSessionDelegateBinding: true,
-    // DEL-001 fail-closed guard (P0-2): this IS the strict client-mint path — assert it. If a future
-    // edit drops requireSessionDelegateBinding above, verifyDelegationToken throws instead of silently
-    // verifying unbound (re-opening observe-and-re-mint). The persona/admin path stays on baseConfig.
-    strictSessionBinding: true,
+    // DEL-001 (ADR-0036): client-mint path — ENFORCE the binding (the library default). We override
+    // baseConfig's persona opt-out back to false so an unbound token on this path is REJECTED, and wire
+    // the UniversalSignatureValidator so the leaf validates under any connection strategy.
+    allowUnboundSessionToken: false,
     universalSignatureValidator: usv as Address,
   };
 }
