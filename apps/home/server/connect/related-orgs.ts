@@ -85,6 +85,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const body = (await request.json().catch(() => null)) as {
     person?: string; orgAgent?: string; orgName?: string; purpose?: string;
     requestedBy?: string; sig?: string; siteDelegation?: unknown; proofHash?: string | null;
+    // spec 271 (W0a) — the recoverable custody descriptor for the org SA (private; salt + custody kind,
+    // NO owner identifier). Persisted so an authenticated owner can later reconstruct the org's custodian.
+    custody?: unknown;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -117,6 +120,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     requestedBy: body?.requestedBy ?? '',
     siteDelegation: body?.siteDelegation ?? null,
     proofHash: body?.proofHash ?? null,
+    // spec 271 (W0a) — persist the recoverable custody descriptor when the caller supplies one. Stored in
+    // the same person-scoped KV the owner controls; read back by recoverCustodian (W0b).
+    custody: body?.custody ?? null,
     createdAt: Date.now(),
   };
   await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));

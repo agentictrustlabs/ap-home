@@ -16,10 +16,11 @@
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/connect": "workspace:*",
-    "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
+    "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/related-agents": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
     "hono": "^4.12.23",
     "viem": "^2.52.2"

@@ -23,7 +23,8 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/connect-auth';
-import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes } from 'viem';
+import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import {
   BadInputError,
   badInputResponse,
@@ -2221,6 +2222,69 @@ function orgApproveHashCall(env: Env, digest: Hex): { to: Address; value: bigint
   };
 }
 
+/** spec 271 W0b (ADR-0035 pillar 1/2) — recover an SA's KMS custodian from { authenticated owner session,
+ *  the SA's custody descriptor }. The descriptor is supplied by the owner's authenticated client (which
+ *  reads its OWN private related vault); the `derived == targetSA` assert validates it — forging a salt to
+ *  hit a specific CREATE2 address is infeasible, so a tampered descriptor cannot recover a foreign SA, and
+ *  an owner can only recover SAs their C_sub + the stored salt actually reconstruct. THAT ASSERT IS the
+ *  caller-authentication. Fail-closed; kms-subject only in W0b (passkey/eoa are W3). */
+async function recoverCustodian(
+  env: Env,
+  args: { ownerSession: string; targetSA: Address; descriptor: CustodyDescriptor },
+): Promise<
+  | { ok: true; custodian: Address; sign: (digest: Hex) => Promise<Hex>; salt: Hex }
+  | { ok: false; error: string; status: number }
+> {
+  const gateCfg = custodyGateConfig(env);
+  if (!gateCfg) return { ok: false, error: 'custody_gate_not_configured', status: 503 };
+  let descriptor: CustodyDescriptor;
+  try {
+    descriptor = buildCustodyDescriptor(args.descriptor); // re-validate untrusted input + strip extras (RC-INV-3)
+  } catch (e) {
+    return { ok: false, error: `bad_descriptor: ${e instanceof Error ? e.message : String(e)}`, status: 400 };
+  }
+  if (descriptor.targetSA.toLowerCase() !== args.targetSA.toLowerCase()) {
+    return { ok: false, error: 'descriptor_target_mismatch', status: 400 };
+  }
+  if (descriptor.custody.kind !== 'kms-subject') {
+    return { ok: false, error: 'unsupported_custody_kind (W0b: kms-subject only)', status: 400 };
+  }
+  const gate = await verifyCustodySession(args.ownerSession, gateCfg);
+  if (!gate.ok) return { ok: false, error: gate.error, status: gate.status };
+  const { cSub, sign } = await deriveSubjectCustodian(gate.subject, env.A2A_MASTER_PRIVATE_KEY, {
+    auditSink: buildAuditSink(env),
+    rotation: descriptor.custody.rotation,
+  });
+  const derived = await accountClient(env).getAddressForAgentAccount({ custodians: [cSub], salt: BigInt(descriptor.salt) });
+  // RC-INV-2 / ADR-0035 pillar-2 caller-auth — only an owner whose C_sub + the stored salt reproduce
+  // targetSA may recover it. A wrong-owner session (different C_sub) cannot.
+  if (derived.toLowerCase() !== args.targetSA.toLowerCase()) {
+    return { ok: false, error: 'descriptor_does_not_reconstruct_target', status: 403 };
+  }
+  return { ok: true, custodian: cSub, sign, salt: descriptor.salt };
+}
+
+/**
+ * POST /custody/recover-probe  (client → a2a, owner custody session) — spec 271 W0b
+ * Body: { session, targetSA, descriptor }  → { ok, custodian, probe, signature }
+ *
+ * PROVES recovery without being a signing oracle: it recovers the targetSA's custodian under the owner
+ * session and signs a FIXED, recover-probe-specific challenge (never a delegation/userOp digest, so the
+ * signature cannot be replayed as authority). A caller verifies the signature ERC-1271-validates against
+ * targetSA (RC-AC-2). Only the owner can probe their own SA (the assert in recoverCustodian).
+ */
+app.post('/custody/recover-probe', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; targetSA?: Address; descriptor?: CustodyDescriptor } | null;
+  if (!body?.session || !body?.targetSA || !body?.descriptor) {
+    return c.json({ ok: false, error: 'session + targetSA + descriptor required' }, 400);
+  }
+  const rec = await recoverCustodian(c.env, { ownerSession: body.session, targetSA: body.targetSA, descriptor: body.descriptor });
+  if (!rec.ok) return c.json({ ok: false, error: rec.error }, rec.status as 400);
+  const probe = keccak256(toBytes(`custody-recover-probe:${body.targetSA.toLowerCase()}`));
+  const signature = await rec.sign(probe);
+  return c.json({ ok: true, custodian: rec.custodian, probe, signature });
+});
+
 /**
  * POST /custody/google/bootstrap-org  (client → a2a, custody session)
  * Body: { session, label, node, delegate, grantOrg? }
@@ -2317,6 +2381,15 @@ app.post('/custody/google/bootstrap-org', async (c) => {
         500,
       );
     }
+    // spec 271 (W0a / ADR-0035) — DO NOT discard the org's deployment salt. Return its recoverable
+    // custody descriptor so the client persists it in the owner's PRIVATE related vault. The (iss,sub)
+    // is NOT included — it is supplied by the owner session at recovery time. Without this, the org's
+    // KMS custodian is unreconstructable from its address (the DEL-001 recoverability gap).
+    const custodyDescriptor = buildCustodyDescriptor({
+      targetSA: orgSA,
+      salt: toHex(orgSalt, { size: 32 }),
+      custody: { kind: 'kms-subject', rotation: gate.rotation },
+    });
     return c.json({
       ok: true,
       org: deployedAddress ?? orgSA,
@@ -2326,6 +2399,7 @@ app.post('/custody/google/bootstrap-org', async (c) => {
       delegation: siteGrant.wire,
       brokerDelegation: brokerGrant?.wire,
       stewardshipDelegation: stewardship.wire,
+      custodyDescriptor,
       transactionHash: receipt.transactionHash,
     });
   } catch (e) {
