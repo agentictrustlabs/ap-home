@@ -3110,10 +3110,18 @@ async function forwardMcpToken(args: {
   toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
   token: string;
   toolArgs?: Record<string, unknown>;
+  /** spec 270 v4 W3 — per-source binding: set true ONLY on the client-mint path so demo-mcp enforces the
+   *  DEL-001 session-key↔delegator binding. The flag rides the MAC-signed body, so it's unforgeable; the
+   *  persona/admin path (callMcpToolViaDelegation) leaves it off and verifies under the legacy config. */
+  enforceBinding?: boolean;
   auditSink: ReturnType<typeof buildAuditSink>;
   correlationId: string;
 }): Promise<Response> {
-  const requestBody = JSON.stringify({ token: args.token, args: args.toolArgs ?? {} });
+  const requestBody = JSON.stringify({
+    token: args.token,
+    args: args.toolArgs ?? {},
+    ...(args.enforceBinding ? { enforceBinding: true } : {}),
+  });
   const macProvider = buildMacProvider(MCP_AUDIENCE, {
     backend: 'local-aes',
     config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
@@ -3304,6 +3312,7 @@ app.post('/mcp/vault/get', async (c) => {
         toolName: 'get_vault_record',
         token: body.token,
         toolArgs: { recordType: body.recordType },
+        enforceBinding: true, // client-mint → demo-mcp enforces the DEL-001 binding (W3)
         auditSink: buildAuditSink(c.env),
         correlationId: crypto.randomUUID(),
       });
@@ -3338,6 +3347,7 @@ app.post('/mcp/vault/set', async (c) => {
         toolName: 'set_vault_record',
         token: body.token,
         toolArgs: { recordType: body.recordType, data: body.data },
+        enforceBinding: true, // client-mint → demo-mcp enforces the DEL-001 binding (W3)
         auditSink: buildAuditSink(c.env),
         correlationId: crypto.randomUUID(),
       });
@@ -3368,6 +3378,7 @@ app.post('/mcp/vault/list', async (c) => {
         env: c.env,
         toolName: 'list_vault_record',
         token: body.token,
+        enforceBinding: true, // client-mint → demo-mcp enforces the DEL-001 binding (W3)
         auditSink: buildAuditSink(c.env),
         correlationId: crypto.randomUUID(),
       });

@@ -98,6 +98,13 @@ export interface Env {
   ALLOWED_METHODS_ENFORCER: string;
   VALUE_ENFORCER: string;
   /**
+   * DEL-001 (spec 270 v4) — the deployed UniversalSignatureValidator. Threaded into the verifier
+   * (ERC-1271 / ERC-6492 / ECDSA) when a client-minted token requires session-key↔delegator binding.
+   * Sourced from packages/contracts/deployments-<network>.json's `universalSignatureValidator`.
+   * Empty/unset ⇒ binding can't be enforced; treat empty as undefined (wrangler binds `""`).
+   */
+  UNIVERSAL_SIGNATURE_VALIDATOR?: string;
+  /**
    * Shared HMAC secret for service-mac verification (audit C1).
    * Same value as demo-a2a's A2A_MAC_SECRET. When unset, the
    * service-mac middleware fails closed in production
@@ -135,11 +142,33 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
   };
 }
 
+// DEL-001 (spec 270 v4) — the verify config for a vault call, ENFORCING the session-key↔delegator
+// binding when the request is client-minted. demo-a2a sets `enforceBinding` ONLY on the forwarded
+// client-mint path (per-source binding); the persona/admin path leaves it false, so those tokens
+// (no leaf) keep verifying under the legacy config. The signal rides the service-MAC-authenticated
+// body, so it's unforgeable. When enforcing, we ALSO switch to the UniversalSignatureValidator so the
+// leaf validates under any connection strategy (and counterfactual SAs via ERC-6492 — `requireDeployed`
+// becomes moot on that surface). A `""`/unset USV is treated as undefined (wrangler binds empty strings).
+function vaultConfig(env: Env, enforceBinding: boolean | undefined): McpResourceVerifyConfig {
+  if (!enforceBinding) return baseConfig(env);
+  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!usv) {
+    // Fail-closed: the caller asked us to enforce binding but we have no validator to do it with.
+    // Thrown inside the route's try → mapped to a 500 (rejects the call) rather than verifying weakly.
+    throw new Error('binding enforcement requested but UNIVERSAL_SIGNATURE_VALIDATOR is unset (fail-closed)');
+  }
+  return {
+    ...baseConfig(env),
+    requireSessionDelegateBinding: true,
+    universalSignatureValidator: usv as Address,
+  };
+}
+
 // Variables stashed on the Hono context by the service-mac middleware
 // so the tool route handlers don't need to re-read the body (Hono
 // consumes the stream on first read).
 interface Variables {
-  parsedBody: { token?: string; args?: Record<string, unknown> };
+  parsedBody: { token?: string; args?: Record<string, unknown>; enforceBinding?: boolean };
 }
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -433,25 +462,25 @@ app.post('/tools/get_vault_record', async (c) => {
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: { recordType?: string } };
-  const handler = withDelegation<Args>(
-    baseConfig(c.env),
-    async ({ principal, args }) => {
-      const recordType = args?.recordType;
-      if (!recordType) return { ok: false, error: 'recordType required' };
-      const data = await getVaultRecord(c.env.DB, principal, recordType);
-      return { ok: true, owner: principal, recordType, data, served_by: 'demo-mcp:get_vault_record' };
-    },
-    {
-      toolName: 'get_vault_record',
-      classification: GET_VAULT_RECORD_CLASSIFICATION,
-      auditSink,
-      correlationId: getCorrelationId(c),
-      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
-        ? 'production'
-        : 'development'),
-    },
-  );
   try {
+    const handler = withDelegation<Args>(
+      vaultConfig(c.env, body.enforceBinding),
+      async ({ principal, args }) => {
+        const recordType = args?.recordType;
+        if (!recordType) return { ok: false, error: 'recordType required' };
+        const data = await getVaultRecord(c.env.DB, principal, recordType);
+        return { ok: true, owner: principal, recordType, data, served_by: 'demo-mcp:get_vault_record' };
+      },
+      {
+        toolName: 'get_vault_record',
+        classification: GET_VAULT_RECORD_CLASSIFICATION,
+        auditSink,
+        correlationId: getCorrelationId(c),
+        environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+          ? 'production'
+          : 'development'),
+      },
+    );
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
@@ -472,26 +501,26 @@ app.post('/tools/set_vault_record', async (c) => {
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: { recordType?: string; data?: unknown } };
-  const handler = withDelegation<Args>(
-    baseConfig(c.env),
-    async ({ principal, args }) => {
-      const recordType = args?.recordType;
-      if (!recordType) return { ok: false, error: 'recordType required' };
-      // `data === null` is a soft-delete (tombstone) by contract.
-      await setVaultRecord(c.env.DB, principal, recordType, args?.data ?? null);
-      return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
-    },
-    {
-      toolName: 'set_vault_record',
-      classification: SET_VAULT_RECORD_CLASSIFICATION,
-      auditSink,
-      correlationId: getCorrelationId(c),
-      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
-        ? 'production'
-        : 'development'),
-    },
-  );
   try {
+    const handler = withDelegation<Args>(
+      vaultConfig(c.env, body.enforceBinding),
+      async ({ principal, args }) => {
+        const recordType = args?.recordType;
+        if (!recordType) return { ok: false, error: 'recordType required' };
+        // `data === null` is a soft-delete (tombstone) by contract.
+        await setVaultRecord(c.env.DB, principal, recordType, args?.data ?? null);
+        return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
+      },
+      {
+        toolName: 'set_vault_record',
+        classification: SET_VAULT_RECORD_CLASSIFICATION,
+        auditSink,
+        correlationId: getCorrelationId(c),
+        environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+          ? 'production'
+          : 'development'),
+      },
+    );
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
@@ -512,23 +541,23 @@ app.post('/tools/list_vault_record', async (c) => {
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: Record<string, unknown> };
-  const handler = withDelegation<Args>(
-    baseConfig(c.env),
-    async ({ principal }) => {
-      const records = await listVaultRecords(c.env.DB, principal);
-      return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
-    },
-    {
-      toolName: 'list_vault_record',
-      classification: LIST_VAULT_RECORD_CLASSIFICATION,
-      auditSink,
-      correlationId: getCorrelationId(c),
-      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
-        ? 'production'
-        : 'development'),
-    },
-  );
   try {
+    const handler = withDelegation<Args>(
+      vaultConfig(c.env, body.enforceBinding),
+      async ({ principal }) => {
+        const records = await listVaultRecords(c.env.DB, principal);
+        return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
+      },
+      {
+        toolName: 'list_vault_record',
+        classification: LIST_VAULT_RECORD_CLASSIFICATION,
+        auditSink,
+        correlationId: getCorrelationId(c),
+        environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+          ? 'production'
+          : 'development'),
+      },
+    );
     const result = await handler({ token: body.token, args: body.args ?? {} });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
