@@ -134,10 +134,13 @@ function buildAuditSink(_env: Env): AuditSink {
 }
 
 export { SessionStoreDO };
+export { A2aTaskDO } from './a2a-task-do.js';
 
 export interface Env {
   // Durable Object binding (declared in wrangler.toml)
   SESSIONS: DurableObjectNamespace;
+  // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
+  A2A_TASKS: DurableObjectNamespace;
   // Bridge anti-replay nonce store (audit M-1) — cross-isolate single-use via KV. Optional: when unbound
   // (e.g. local dev) the bridge falls back to the per-isolate in-memory store.
   BRIDGE_NONCES?: KVNamespace;
@@ -655,33 +658,21 @@ app.post('/api/a2a', async (c) => {
   if (!ctx.agent) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
   }
-  let body: { jsonrpc?: string; id?: string | number | null; method?: string; params?: unknown };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400);
-  }
+  // Validate the envelope, then hand the body to the agent's live Task runtime (spec 269 W5). The
+  // runtime is an A2aTaskDO sharded per agent (idFromName(agentSA)); it authorizes the delegation
+  // (ERC-1271 + isRevoked), persists the task, advances it via alarm(), and answers tasks/get|cancel|
+  // resubmit. The worker no longer fakes "received" — message/send returns a real {taskId,state}.
+  const raw = await c.req.text();
+  let body: { jsonrpc?: string; id?: string | number | null; method?: string };
+  try { body = JSON.parse(raw); } catch { return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400); }
   if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
     return c.json({ jsonrpc: '2.0', id: body.id ?? null, error: { code: -32600, message: 'invalid JSON-RPC request' } }, 400);
   }
-  const id = body.id ?? null;
-  switch (body.method) {
-    case 'message/send':
-      // Minimal "live routing" — confirm the message reached the right agent.
-      // Skill handling is future work (spec 231 ships discovery + routing).
-      return c.json({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          agentName: ctx.name,
-          agentAddress: ctx.agent,
-          status: 'received',
-          message: `A2A message routed to ${ctx.name}`,
-        },
-      });
-    default:
-      return c.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${body.method}` } }, 404);
-  }
+  const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(ctx.agent.toLowerCase()));
+  const doResp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${ctx.agent}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
+  }));
+  return new Response(await doResp.text(), { status: 200, headers: { 'Content-Type': 'application/json' } });
 });
 
 /**

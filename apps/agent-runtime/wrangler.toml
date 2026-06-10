@@ -21,11 +21,16 @@ local_protocol = "http"
 [durable_objects]
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
+  { name = "A2A_TASKS", class_name = "A2aTaskDO" },
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SessionStoreDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["A2aTaskDO"]
 
 [vars]
 RPC_URL = "http://127.0.0.1:8545"
@@ -149,6 +154,7 @@ UNIVERSAL_SIGNATURE_VALIDATOR = ""
 [env.production.durable_objects]
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
+  { name = "A2A_TASKS", class_name = "A2aTaskDO" },
 ]
 
 # Bridge anti-replay nonce store (audit M-1): single-use bridge-envelope nonces recorded across isolates
