@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, isKmsVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile } from '../../connect-client';
@@ -98,10 +98,32 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
       const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
-      // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
-      const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
-      if (!granted.ok) return fail(granted.error);
-      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
+
+      let code: string;
+      if (enroll.orgBase) {
+        // ORG-CREATE for a RECOGNIZED member (e.g. a facilitator org for demo-jp). This component is
+        // reached for a NAMELESS enroll (spec 257 §11) — including org-create — but previously ran ONLY
+        // the site-login pipeline below, submitting `org=undefined`. The relying app's /token then
+        // returned no org → demo-jp threw "no organization returned from your home" even though the
+        // request WAS an org-create (no org was ever deployed). Deploy the org custodied by this member
+        // and submit the grant WITH the org payload (KMS → bootstrap-org; the descriptor build is
+        // non-fatal per #295). One mechanism, no fallback (ADR-0013).
+        const created = await createOrganization(
+          home,
+          enroll.orgBase,
+          delegate,
+          viaLower,
+          auth,
+          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg },
+        );
+        if (!created.ok) return fail(created.error);
+        code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
+      } else {
+        // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
+        const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
+        if (!granted.ok) return fail(granted.error);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
+      }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
       setFedcmLoginStatus('logged-in');
