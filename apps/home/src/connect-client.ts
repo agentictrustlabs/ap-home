@@ -19,7 +19,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { encodeFunctionData, createPublicClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { connectWallet, personalSign } from './lib/wallet';
-import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, loadPasskey, type DemoPasskey } from './lib/passkey';
+import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
@@ -1225,11 +1225,13 @@ export async function connectWithName(
     const signature = await personalSign(address, message);
     proof = { kind: 'siwe-eoa', message, signature };
   } else {
-    const pk = loadPasskey();
-    if (!pk) return { ok: false, error: 'No passkey on this device — sign up first, or connect with your wallet.' };
+    // Discoverable passkey connect (no localStorage): the platform offers any passkey registered for
+    // this home's RP — including one synced from the device where it was created — so a named sign-in
+    // works cross-browser/device, not only where the credential was cached. The server verifies the
+    // returned credentialIdDigest is an on-chain custodian of name→SA (an unrelated passkey is rejected).
     const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
-    const signature = await signWithPasskey(challenge);
-    proof = { kind: 'passkey', credentialIdDigest: pk.credentialIdDigest, challenge, signature };
+    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge);
+    proof = { kind: 'passkey', credentialIdDigest, challenge, signature };
   }
   const r = await fetch('/connect/with-name', {
     method: 'POST',

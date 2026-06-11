@@ -173,6 +173,31 @@ export async function signWithDiscoverablePasskey(
   return signAssertionFromCredential(credential);
 }
 
+/** Discoverable named-CONNECT assertion (spec 233, Mechanism A): a single discoverable `get` (empty
+ *  allowCredentials, NO localStorage) that returns BOTH the on-chain signature blob AND the
+ *  `credentialIdDigest` the server needs to resolve which custodian signed (keccak256 of the
+ *  credentialId — matches registration). Lets a NAMED passkey sign-in work on any browser/device the
+ *  platform can surface the (synced) passkey on, not just the one that cached the credential locally —
+ *  closing the gap where `connectWithName` dead-ended with "No passkey on this device". The server
+ *  verifies the digest is an on-chain custodian of the name-resolved SA, so an unrelated passkey the
+ *  platform might offer is rejected — no client-supplied pubkey, no device cache. */
+export async function connectAssertionDiscoverable(digest: Hex): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
+  if (typeof navigator === 'undefined' || !navigator.credentials) {
+    throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
+  }
+  const credential = (await navigator.credentials.get({
+    publicKey: {
+      challenge: hexToBytes(digest) as BufferSource,
+      allowCredentials: [], // discoverable: the platform offers any passkey for this RP (incl. synced)
+      userVerification: 'required',
+      timeout: 60_000,
+    },
+  })) as PublicKeyCredential | null;
+  if (!credential) throw new Error('no passkey available on this device');
+  const credentialIdDigest = keccak256(bytesToHex(new Uint8Array(credential.rawId)));
+  return { signature: signAssertionFromCredential(credential), credentialIdDigest };
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
   let hex = '0x';
