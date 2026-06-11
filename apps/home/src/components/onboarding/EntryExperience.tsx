@@ -32,6 +32,13 @@ async function nameInfo(name: string): Promise<NameInfo> {
   }
 }
 
+/** CAIP-10 tail (`eip155:<chain>:0x…`) → `0x…`, or null. Mirrors RecognizedEnroll / context/session. */
+function addressOf(caip10: string | undefined): Address | null {
+  if (!caip10) return null;
+  const tail = caip10.split(':').pop();
+  return tail && /^0x[0-9a-fA-F]{40}$/.test(tail) ? (tail as Address) : null;
+}
+
 // Subdomain-isolated passkeys (spec 229 P5): the ROOT passkey must be created/used at the
 // person's OWN subdomain (RP ID = <label>.impact-agent.me). If we're not there yet, redirect;
 // the subdomain auto-resumes via ?start / ?signin. Dev hosts (localhost/pages.dev) skip this.
@@ -515,9 +522,30 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState<NameInfo | null>(null);
+  // Recognize an existing cross-subdomain `ap_sso` session that resolves to THIS home → offer a one-tap
+  // "Continue as <name>" without a fresh credential assertion (mirrors the relying-app RecognizedEnroll
+  // path). Fixes the dead-end where a direct visit to a passkey-only home on a device WITHOUT the passkey
+  // forced "Continue with passkey" and failed, even though the member was already signed in. `null` =
+  // not recognized → fall through to credential sign-in; set → show the one-tap continue.
+  const [recognized, setRecognized] = useState<{ token: string; via: string } | null>(null);
   useEffect(() => {
-    nameInfo(name).then(setInfo).catch(() => setInfo({}));
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      const ni = await nameInfo(name).catch(() => ({}) as NameInfo);
+      if (cancelled) return;
+      setInfo(ni);
+      const sso = readSsoCookie();
+      if (!sso?.token || !ni.agent) return;
+      const profile = await fetchProfile(sso.token).catch(() => null);
+      const addr = addressOf(profile?.agent);
+      // Only recognize when the live session resolves to THIS exact home (a different signed-in home,
+      // or a stale/undeployed one, falls through to credential sign-in — one mechanism, ADR-0013).
+      if (!cancelled && addr && profile?.deployed !== false && addr.toLowerCase() === ni.agent.toLowerCase()) {
+        setRecognized({ token: sso.token, via: sso.via || 'sso' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [name]);
 
   async function go(via: 'passkey' | 'wallet') {
     if (via === 'passkey' && redirectForPasskey('signin', name)) return;
@@ -540,6 +568,42 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
   const showWallet = info ? !!info.hasEoa : true;
   const onlyWallet = info ? !!info.hasEoa && !info.hasPasskey : false;
   const notFound = info ? info.exists === false : false;
+
+  // Recognized: the member already has a live session for THIS home → one tap, no fresh credential.
+  if (recognized) {
+    return (
+      <Shell>
+        <BrandShield size={56} />
+        <h1 className="onboarding-h1">Welcome back</h1>
+        <p className="onboarding-sub">You&apos;re already signed in — continue as <strong>{nameLabel(name)}</strong>.</p>
+        {busy ? (
+          <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming…</p></div>
+        ) : (
+          <>
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                setBusy(true);
+                setErr('');
+                try {
+                  await onSession(recognized.token, recognized.via);
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : 'sign-in failed');
+                  setBusy(false);
+                }
+              }}
+            >
+              Continue as {nameLabel(name)}
+            </button>
+            <button className="btn-ghost onboarding-secondary" onClick={() => setRecognized(null)}>
+              Sign in a different way
+            </button>
+          </>
+        )}
+        {err && <p className="onboarding-hint taken">{err}</p>}
+      </Shell>
+    );
+  }
 
   return (
     <Shell>
