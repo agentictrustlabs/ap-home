@@ -2385,11 +2385,21 @@ app.post('/custody/google/bootstrap-org', async (c) => {
     // custody descriptor so the client persists it in the owner's PRIVATE related vault. The (iss,sub)
     // is NOT included — it is supplied by the owner session at recovery time. Without this, the org's
     // KMS custodian is unreconstructable from its address (the DEL-001 recoverability gap).
-    const custodyDescriptor = buildCustodyDescriptor({
-      targetSA: orgSA,
-      salt: toHex(orgSalt, { size: 32 }),
-      custody: { kind: 'kms-subject', rotation: gate.rotation },
-    });
+    // W0a (ADR-0035): build the recoverable-custody descriptor — but NON-FATALLY. The org is already
+    // deployed + named on-chain above; this descriptor is additive (nothing reads it yet), so a build
+    // failure (e.g. a custody session whose `rotation` isn't an integer — the YouVersion/social path
+    // leaves it undefined where Google supplies 0) MUST NOT turn a successful org-create into a 500.
+    // Default rotation to 0 (the effective derivation rotation) and swallow any residual error.
+    let custodyDescriptor: CustodyDescriptor | null = null;
+    try {
+      custodyDescriptor = buildCustodyDescriptor({
+        targetSA: orgSA,
+        salt: toHex(orgSalt, { size: 32 }),
+        custody: { kind: 'kms-subject', rotation: gate.rotation ?? 0 },
+      });
+    } catch (e) {
+      console.warn('[demo-a2a] custodyDescriptor build failed (non-fatal; org already deployed):', e);
+    }
     return c.json({
       ok: true,
       org: deployedAddress ?? orgSA,
