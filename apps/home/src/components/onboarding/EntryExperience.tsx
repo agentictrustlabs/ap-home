@@ -610,8 +610,12 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
       <BrandShield size={56} />
       <h1 className="onboarding-h1">Welcome back</h1>
       <p className="onboarding-sub">Sign in to <strong>{name}</strong> — your home in the {whitelabel.brand.community}.</p>
-      {busy ? (
-        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming…</p></div>
+      {busy || !info ? (
+        // Wait for name-info before rendering credential buttons. Otherwise the pre-load defaults
+        // (showPasskey=true) flash "Continue with passkey" as the primary even for a WALLET-only home,
+        // so the member is taken to passkey when they should get wallet. Show only this home's ACTUAL
+        // credential(s) once resolved.
+        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{busy ? 'Confirming…' : 'Opening your home…'}</p></div>
       ) : notFound ? (
         <>
           <p className="onboarding-hint taken">No home named <strong>{nameLabel(name)}</strong> yet.</p>
