@@ -156,11 +156,15 @@ export async function createOrganization(
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
+  // eslint-disable-next-line no-console
+  console.log('[DIAG-ORG-SPA] createOrganization route', JSON.stringify({ via, isKms: isKmsVia(via), hasToken: !!auth?.token }));
   const r = isKmsVia(via)
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts)
         : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
     : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
+  // eslint-disable-next-line no-console
+  console.log('[DIAG-ORG-SPA] createOrganization result', JSON.stringify({ ok: r.ok, err: r.ok ? undefined : r.error, childAgent: r.ok ? r.result.childAgent : undefined, person: r.ok ? r.result.person : undefined }));
   if (!r.ok) return r;
   const x = r.result;
   // ADR-0025: the `org` payload carries the private credential + the person SA so the
