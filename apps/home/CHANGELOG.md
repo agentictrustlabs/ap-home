@@ -1,5 +1,29 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.5
+
+### Patch Changes
+
+- Updated dependencies [439eac9]
+- Updated dependencies [a04a0e4]
+- Updated dependencies [50690a8]
+- Updated dependencies [d0a4436]
+- Updated dependencies [ddbf7d6]
+- Updated dependencies [ba49084]
+  - @agenticprimitives/contracts@1.0.0-alpha.7
+  - @agenticprimitives/delegation@1.0.0-alpha.7
+  - @agenticprimitives/agent-account@1.0.0-alpha.7
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.3
+  - @agenticprimitives/related-agents@0.0.0-alpha.3
+  - @agenticprimitives/agent-naming@1.0.0-alpha.7
+  - @agenticprimitives/agent-profile@1.0.0-alpha.7
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.7
+  - @agenticprimitives/identity-directory-adapters@1.0.0-alpha.7
+  - @agenticprimitives/types@1.0.0-alpha.7
+  - @agenticprimitives/connect-auth@1.0.0-alpha.7
+  - @agenticprimitives/connect@1.0.0-alpha.7
+  - @agenticprimitives/identity-directory@1.0.0-alpha.7
+
 ## 0.0.2-alpha.4
 
 ### Patch Changes
