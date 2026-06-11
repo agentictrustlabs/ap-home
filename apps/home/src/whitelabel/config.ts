@@ -77,6 +77,17 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // demo-corpus relying app — connects via Global.Church identity; site-login + org-create
+    // (no PII held by the broker). aud = client_id; the allowed origin is derived from the
+    // exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
+    {
+      client_id: 'demo-corpus',
+      name: 'Demo Corpus',
+      redirect_uris: ['https://demo-corpus-production.richardpedersen3.workers.dev/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
