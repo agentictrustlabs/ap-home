@@ -40,11 +40,15 @@ export function OnboardingJourney({
   name,
   api,
   existingAgent,
+  initialVia,
 }: {
   variant: JourneyVariant;
   name: string;
   api?: EnrollApi;
   existingAgent?: Address;
+  /** For `enroll-existing`: the credential the EXISTING home actually signs with (resolved from its
+   *  on-chain credentials by EntryExperience), so a wallet home isn't defaulted to passkey. */
+  initialVia?: Via;
 }) {
   const { openSession } = useSession();
   const c = whitelabel.copy;
@@ -65,7 +69,7 @@ export function OnboardingJourney({
   const [busy, setBusy] = useState<string | null>(null);
   const [securingMsg, setSecuringMsg] = useState<string>('');
   const [key, setKey] = useState<DemoPasskey | null>(null);
-  const [via, setVia] = useState<Via>('passkey'); // the credential the member secures/opens with
+  const [via, setVia] = useState<Via>(initialVia ?? 'passkey'); // the credential the member secures/opens with
   const [home, setHome] = useState<Home | null>(existingAgent ? { address: existingAgent, name } : null);
   // Credential methods offered for securing a home: config-enabled ∩ device capability.
   // passkey + google are always available; wallet needs an injected provider.

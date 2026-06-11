@@ -39,6 +39,13 @@ function addressOf(caip10: string | undefined): Address | null {
   return tail && /^0x[0-9a-fA-F]{40}$/.test(tail) ? (tail as Address) : null;
 }
 
+/** The credential an EXISTING home actually signs with, from its on-chain credentials (name-info) — so
+ *  a wallet-only home is opened/granted with the WALLET, not the passkey default. (KMS/Google homes
+ *  don't reach the name path; they're recognized via the session cookie.) */
+function viaForHome(info: NameInfo): Via {
+  return info.hasPasskey ? 'passkey' : info.hasEoa ? 'wallet' : 'passkey';
+}
+
 // Subdomain-isolated passkeys (spec 229 P5): the ROOT passkey must be created/used at the
 // person's OWN subdomain (RP ID = <label>.impact-agent.me). If we're not there yet, redirect;
 // the subdomain auto-resumes via ?start / ?signin. Dev hosts (localhost/pages.dev) skip this.
@@ -70,7 +77,7 @@ type View =
   | { k: 'enroll-name'; reason?: 'passkey' | 'wallet' } // "Use my Impact name" within a name-deferred enroll → the named journey
   | { k: 'name'; reason?: 'passkey' | 'wallet' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
-  | { k: 'enroll-existing'; name: string; agent: Address }
+  | { k: 'enroll-existing'; name: string; agent: Address; via?: Via }
   | { k: 'org'; name: string; agent: Address }
   | { k: 'signin'; name: string };
 
@@ -134,7 +141,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         else setView({ k: 'blocked' });
         return;
       }
-      if (info.exists && info.agent) setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent });
+      if (info.exists && info.agent) setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent, via: viaForHome(info) });
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
   }, [mode, api.enroll, api.allowed]);
@@ -175,7 +182,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <OnboardingJourney variant={view.variant} name={view.name} api={mode === 'enroll' ? api : undefined} />;
   }
   if (view.k === 'enroll-existing') {
-    return <OnboardingJourney variant="enroll-existing" name={view.name} api={api} existingAgent={view.agent} />;
+    return <OnboardingJourney variant="enroll-existing" name={view.name} api={api} existingAgent={view.agent} initialVia={view.via} />;
   }
   if (view.k === 'org') {
     return <OrgConsent personAgent={view.agent} api={api} />;
@@ -215,7 +222,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <NameStart enrollApi={api} reason={view.reason} onStart={async (name) => {
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
-      if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent });
+      if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent, via: viaForHome(info) });
       else setView({ k: 'journey', variant: 'enroll-new', name });
     }} />;
   }
