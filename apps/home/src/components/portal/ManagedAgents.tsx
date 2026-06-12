@@ -7,11 +7,16 @@
 // created in one gasless prompt. Links are PRIVATE vault credentials (ADR-0025), read back from
 // the same /connect/related-orgs vault (MAM-D7) via listManagedAgents.
 import { useEffect, useState } from 'react';
-import { createPublicClient, http, formatEther } from 'viem';
+import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
+
+const ERC20_BALANCE_ABI = [
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
+] as const;
 
 const EXPLORER = 'https://sepolia.basescan.org/address/';
 const lc = (s: string) => s.toLowerCase();
@@ -38,15 +43,15 @@ export function useManagedAgents(token: string | null) {
   return { agents, loaded, reload: () => setReloadKey((k) => k + 1) };
 }
 
-/** Live native-balance read for a treasury SA (honest on-chain number; '—' on error). */
-function useEthBalance(address?: string): string | null {
+/** Live USDC-balance read for a treasury SA (the demo settlement asset, 6 decimals; '—' on error). */
+function useUsdcBalance(address?: string): string | null {
   const [bal, setBal] = useState<string | null>(null);
   useEffect(() => {
     if (!address) return;
     let cancelled = false;
     const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
-    pub.getBalance({ address: address as `0x${string}` })
-      .then((b) => { if (!cancelled) setBal(formatEther(b)); })
+    pub.readContract({ address: CONTRACTS.mockUsdc, abi: ERC20_BALANCE_ABI, functionName: 'balanceOf', args: [address as `0x${string}`] })
+      .then((b) => { if (!cancelled) setBal(formatUnits(b as bigint, 6)); })
       .catch(() => { if (!cancelled) setBal(null); });
     return () => { cancelled = true; };
   }, [address]);
@@ -54,10 +59,10 @@ function useEthBalance(address?: string): string | null {
 }
 
 function BalanceLine({ address }: { address: string }) {
-  const bal = useEthBalance(address);
+  const bal = useUsdcBalance(address);
   return (
     <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>
-      Balance: <b>{bal !== null ? `${Number(bal).toFixed(4)} ETH` : '—'}</b>
+      Balance: <b>{bal !== null ? `${Number(bal).toFixed(2)} USDC` : '—'}</b>
     </span>
   );
 }
