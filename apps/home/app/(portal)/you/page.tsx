@@ -1,9 +1,9 @@
 'use client';
-// "You" — the person agent (default context). Identity card + facts + your organizations.
+// "You" — the person agent (default context). Identity card + facts + your personal treasury.
+// Organizations live at /organizations, all treasuries at /treasuries (dedicated portal areas).
 import { useState } from 'react';
 import { useSession } from '../../../src/context/session';
-import { OrgList } from '../../../src/components/portal/OrgList';
-import { ManagedAgents } from '../../../src/components/portal/ManagedAgents';
+import { PersonalTreasurySection } from '../../../src/components/portal/ManagedAgents';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
@@ -40,9 +40,7 @@ export default function YouPage() {
         </dl>
       </div>
 
-      <ManagedAgents token={session?.token ?? null} person={agentAddress ?? null} personName={agentName ?? null} via={session?.via ?? ''} />
-
-      <OrgList token={session?.token ?? null} />
+      <PersonalTreasurySection token={session?.token ?? null} person={agentAddress ?? null} via={session?.via ?? ''} />
 
       <DelegationsList token={session?.token ?? null} />
 

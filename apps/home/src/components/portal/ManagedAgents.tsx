@@ -1,17 +1,20 @@
 'use client';
-// spec 275 — "Your agents": the member's whole Smart-Agent tree, managed from their home.
-//   Person SA (root, identity)
-//    ├─ Person Treasury Service SA
-//    └─ Org SA  →  Org Treasury Service SA
-// Each is an on-chain SA with an EXACT name, custodied by the member's ROOT passkey, created
-// in one gasless prompt. The links are PRIVATE vault credentials (ADR-0025), read back from
-// the same /connect/related-orgs vault the orgs view uses (MAM-D7).
+// spec 275 — the member's Smart-Agent tree, split across the portal's dedicated areas:
+//   /you          → PersonalTreasurySection (your personal money agent)
+//   /organizations→ OrganizationsManager   (orgs + each org's treasury)
+//   /treasuries   → TreasuriesRollup        (every treasury, personal + org)
+// Each agent is an on-chain SA with an EXACT name, custodied by the member's ROOT credential,
+// created in one gasless prompt. Links are PRIVATE vault credentials (ADR-0025), read back from
+// the same /connect/related-orgs vault (MAM-D7) via listManagedAgents.
 import { useEffect, useState } from 'react';
+import { createPublicClient, http, formatEther } from 'viem';
+import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { AddressChip } from '../shared/AddressChip';
-import { BuildingIcon, UserIcon } from '../shared/Icons';
+import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
 
 const EXPLORER = 'https://sepolia.basescan.org/address/';
+const lc = (s: string) => s.toLowerCase();
 
 const KIND_LABEL: Record<AgentKind, string> = {
   'person-treasury': 'Personal treasury',
@@ -19,23 +22,51 @@ const KIND_LABEL: Record<AgentKind, string> = {
   'org-treasury': 'Org treasury',
 };
 
-/** Inline "name it and create" form for one agent slot. */
-function CreateForm({
-  kind,
-  parent,
-  person,
-  token,
-  via,
-  onDone,
-  cta,
+/** Shared loader for the member's managed agents — one read path (MAM-D7). */
+export function useManagedAgents(token: string | null) {
+  const [agents, setAgents] = useState<ManagedAgent[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    if (!token) { setLoaded(true); return; }
+    let cancelled = false;
+    void listManagedAgents(token)
+      .then((a) => { if (!cancelled) { setAgents(a); setLoaded(true); } })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [token, reloadKey]);
+  return { agents, loaded, reload: () => setReloadKey((k) => k + 1) };
+}
+
+/** Live native-balance read for a treasury SA (honest on-chain number; '—' on error). */
+function useEthBalance(address?: string): string | null {
+  const [bal, setBal] = useState<string | null>(null);
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    pub.getBalance({ address: address as `0x${string}` })
+      .then((b) => { if (!cancelled) setBal(formatEther(b)); })
+      .catch(() => { if (!cancelled) setBal(null); });
+    return () => { cancelled = true; };
+  }, [address]);
+  return bal;
+}
+
+function BalanceLine({ address }: { address: string }) {
+  const bal = useEthBalance(address);
+  return (
+    <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>
+      Balance: <b>{bal !== null ? `${Number(bal).toFixed(4)} ETH` : '—'}</b>
+    </span>
+  );
+}
+
+/** Inline "name it and create" form for one agent slot (MAM-D4 exact-name, MAM-D5 one prompt). */
+export function CreateAgentForm({
+  kind, parent, person, token, via, onDone, cta,
 }: {
-  kind: AgentKind;
-  parent: string;
-  person: string;
-  token: string;
-  via: string;
-  onDone: () => void;
-  cta: string;
+  kind: AgentKind; parent: string; person: string; token: string; via: string; onDone: () => void; cta: string;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
@@ -49,8 +80,7 @@ function CreateForm({
     setBusy(true); setErr(''); setStep('');
     const res = await createManagedAgent(
       { kind, label: clean, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
-      token,
-      setStep,
+      token, setStep,
     );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
@@ -60,12 +90,7 @@ function CreateForm({
 
   if (!open) {
     return (
-      <button
-        type="button"
-        className="btn-ghost"
-        style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }}
-        onClick={() => setOpen(true)}
-      >
+      <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => setOpen(true)}>
         {cta}
       </button>
     );
@@ -73,13 +98,8 @@ function CreateForm({
   return (
     <div style={{ marginTop: '.55rem', display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder="name"
-          disabled={busy}
-          style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }}
-        />
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name" disabled={busy}
+          style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
@@ -98,108 +118,98 @@ function CreateForm({
   );
 }
 
-function AgentRow({ a, children }: { a: { name: string; address: string; kindLabel: string }; children?: React.ReactNode }) {
+/** A treasury card — name, address, live balance, explorer link. */
+function TreasuryCard({ name, address, sublabel }: { name: string; address: string; sublabel?: string }) {
   return (
     <div className="manage-card">
       <div className="manage-card-head">
-        <span className="manage-card-label"><BuildingIcon size={16} /> {a.name || '(unnamed)'}</span>
-        <span className="manage-card-badge live">{a.kindLabel}</span>
+        <span className="manage-card-label"><LandmarkIcon size={16} /> {name || '(unnamed treasury)'}</span>
+        <span className="manage-card-badge live">{sublabel ?? KIND_LABEL['person-treasury']}</span>
       </div>
-      <div style={{ margin: '.45rem 0' }}><AddressChip address={a.address as `0x${string}`} size="sm" /></div>
-      <p className="manage-card-blurb">
-        Custodied by you. <a href={EXPLORER + a.address} target="_blank" rel="noreferrer">View on explorer ↗</a>
+      <div style={{ margin: '.45rem 0' }}><AddressChip address={address as `0x${string}`} size="sm" /></div>
+      <p className="manage-card-blurb" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem' }}>
+        <BalanceLine address={address} />
+        <a href={EXPLORER + address} target="_blank" rel="noreferrer">explorer ↗</a>
       </p>
-      {children}
     </div>
   );
 }
 
-export function ManagedAgents({
-  token,
-  person,
-  personName,
-  via,
-}: {
-  token: string | null;
-  person: string | null;
-  personName: string | null;
-  via: string;
-}) {
-  const [agents, setAgents] = useState<ManagedAgent[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    if (!token) { setLoaded(true); return; }
-    let cancelled = false;
-    void listManagedAgents(token)
-      .then((a) => { if (!cancelled) { setAgents(a); setLoaded(true); } })
-      .catch(() => { if (!cancelled) setLoaded(true); });
-    return () => { cancelled = true; };
-  }, [token, reloadKey]);
-
-  const reload = () => setReloadKey((k) => k + 1);
-
+// ── /you — your personal treasury ───────────────────────────────────────
+export function PersonalTreasurySection({ token, person, via }: { token: string | null; person: string | null; via: string }) {
+  const { agents, loaded, reload } = useManagedAgents(token);
   if (!token || !person) return null;
-
-  const lc = (s: string) => s.toLowerCase();
-  const personTreasury = agents.find((a) => a.kind === 'person-treasury');
-  const orgs = agents.filter((a) => a.kind === 'org');
-  const orgTreasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
+  const treasury = agents.find((a) => a.kind === 'person-treasury');
 
   return (
     <div className="dash-section" style={{ marginTop: '1.5rem' }}>
-      <h2>Your agents</h2>
+      <h2>Your personal treasury</h2>
       <p style={{ color: 'var(--c-g500, #64748b)', fontSize: '.9rem', marginTop: '-.4rem', marginBottom: '.8rem' }}>
-        Build out your tree of Smart Agents — a personal treasury, organizations, and each
-        organization&rsquo;s treasury. Every agent is on-chain, named on the agent naming service, and
-        custodied by you. These links are private to your home.
+        A Smart Agent that holds and moves your funds, separate from your identity — on-chain, named, and
+        custodied by you.
       </p>
+      {!loaded ? (
+        <p className="manage-card-blurb">Loading…</p>
+      ) : treasury ? (
+        <div className="manage-grid">
+          <TreasuryCard name={treasury.name} address={treasury.agent} />
+        </div>
+      ) : (
+        <div className="manage-grid">
+          <div className="manage-card">
+            <div className="manage-card-head">
+              <span className="manage-card-label"><LandmarkIcon size={16} /> Personal treasury</span>
+              <span className="manage-card-badge">Not yet</span>
+            </div>
+            <p className="manage-card-blurb">Create your money agent — it can hold funds and pay on your behalf, while your identity stays separate.</p>
+            <CreateAgentForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
+// ── /organizations — orgs + each org's treasury + create ────────────────
+export function OrganizationsManager({
+  token, person, via, onSelect,
+}: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void }) {
+  const { agents, loaded, reload } = useManagedAgents(token);
+  if (!token || !person) return null;
+  const orgs = agents.filter((a) => a.kind === 'org');
+  const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
+
+  return (
+    <div className="dash-section">
       {!loaded ? (
         <p className="manage-card-blurb">Loading…</p>
       ) : (
         <div className="manage-grid">
-          {/* Root — the person SA */}
-          <div className="manage-card" style={{ borderColor: 'var(--c-accent, #2563eb)' }}>
-            <div className="manage-card-head">
-              <span className="manage-card-label"><UserIcon size={16} /> {personName || 'You'}</span>
-              <span className="manage-card-badge live">You (root)</span>
-            </div>
-            <div style={{ margin: '.45rem 0' }}><AddressChip address={person as `0x${string}`} size="sm" /></div>
-            <p className="manage-card-blurb">Your identity — every agent below is custodied by this one credential.</p>
-          </div>
-
-          {/* Personal treasury */}
-          {personTreasury ? (
-            <AgentRow a={{ name: personTreasury.name, address: personTreasury.agent, kindLabel: KIND_LABEL['person-treasury'] }} />
-          ) : (
-            <div className="manage-card">
-              <div className="manage-card-head">
-                <span className="manage-card-label">💳 Personal treasury</span>
-                <span className="manage-card-badge">Not yet</span>
-              </div>
-              <p className="manage-card-blurb">A Smart Agent that holds and moves your funds, separate from your identity.</p>
-              <CreateForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
-            </div>
-          )}
-
-          {/* Organizations + their treasuries */}
           {orgs.map((org) => {
-            const t = orgTreasuryFor(org.agent);
+            const t = treasuryFor(org.agent);
             return (
-              <AgentRow key={org.agent} a={{ name: org.name, address: org.agent, kindLabel: KIND_LABEL.org }}>
+              <div className="manage-card" key={org.agent}>
+                <div className="manage-card-head">
+                  <span className="manage-card-label"><BuildingIcon size={16} /> {org.name || '(unnamed org)'}</span>
+                  <span className="manage-card-badge live">{KIND_LABEL.org}</span>
+                </div>
+                <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
+                <p className="manage-card-blurb">
+                  Custodied by you. <a href={EXPLORER + org.agent} target="_blank" rel="noreferrer">explorer ↗</a>
+                  {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>view data →</button></>}
+                </p>
                 <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
                   {t ? (
-                    <div style={{ fontSize: '.82rem' }}>
-                      <span style={{ color: 'var(--c-g500, #64748b)' }}>Org treasury:</span>{' '}
-                      <b>{t.name}</b> <AddressChip address={t.agent as `0x${string}`} size="sm" />
+                    <div style={{ fontSize: '.82rem', display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
+                      <span style={{ color: 'var(--c-g500, #64748b)' }}><LandmarkIcon size={13} /> Treasury: <b>{t.name}</b></span>
+                      <AddressChip address={t.agent as `0x${string}`} size="sm" />
+                      <BalanceLine address={t.agent} />
                     </div>
                   ) : (
-                    <CreateForm kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Create org treasury" />
+                    <CreateAgentForm kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Create org treasury" />
                   )}
                 </div>
-              </AgentRow>
+              </div>
             );
           })}
 
@@ -210,9 +220,55 @@ export function ManagedAgents({
               <span className="manage-card-badge">＋</span>
             </div>
             <p className="manage-card-blurb">An organization you control — its own Smart Agent and name. Add its treasury after.</p>
-            <CreateForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create organization" />
+            <CreateAgentForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create organization" />
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── /treasuries — every treasury, personal + org ────────────────────────
+export function TreasuriesRollup({ token, person, via }: { token: string | null; person: string | null; via: string }) {
+  const { agents, loaded, reload } = useManagedAgents(token);
+  if (!token || !person) return null;
+  const personal = agents.find((a) => a.kind === 'person-treasury');
+  const orgTreasuries = agents.filter((a) => a.kind === 'org-treasury');
+  const orgName = (orgAgent: string) => agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(orgAgent))?.name ?? 'organization';
+
+  return (
+    <div className="dash-section">
+      {!loaded ? (
+        <p className="manage-card-blurb">Loading…</p>
+      ) : (
+        <>
+          <h2 style={{ fontSize: '1rem' }}>Personal</h2>
+          <div className="manage-grid">
+            {personal ? (
+              <TreasuryCard name={personal.name} address={personal.agent} />
+            ) : (
+              <div className="manage-card">
+                <div className="manage-card-head">
+                  <span className="manage-card-label"><LandmarkIcon size={16} /> Personal treasury</span>
+                  <span className="manage-card-badge">Not yet</span>
+                </div>
+                <p className="manage-card-blurb">Your own money agent — holds funds and pays on your behalf.</p>
+                <CreateAgentForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
+              </div>
+            )}
+          </div>
+
+          <h2 style={{ fontSize: '1rem', marginTop: '1.5rem' }}>Organization treasuries</h2>
+          {orgTreasuries.length === 0 ? (
+            <p className="manage-card-blurb">No org treasuries yet — create one from an organization in <a href="/organizations">Organizations</a>.</p>
+          ) : (
+            <div className="manage-grid">
+              {orgTreasuries.map((t) => (
+                <TreasuryCard key={t.agent} name={t.name} address={t.agent} sublabel={`${orgName(t.parent)} treasury`} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

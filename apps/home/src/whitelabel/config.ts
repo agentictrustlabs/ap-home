@@ -22,8 +22,8 @@ const faithImpact: WhiteLabelConfig = {
   // The stewardship hub: what the member helps oversee / manage / protect from their home.
   manageableAgents: [
     { id: 'person', label: 'You', blurb: 'Your personal home — the you the community knows.', status: 'live' },
-    { id: 'organization', label: 'Organizations', blurb: 'Ministries, churches, and teams you help oversee.', status: 'soon', verb: 'oversee' },
-    { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving you help manage.', status: 'soon', verb: 'manage' },
+    { id: 'organization', label: 'Organizations', blurb: 'Ministries, churches, and teams you help oversee.', status: 'live', verb: 'oversee' },
+    { id: 'treasury', label: 'Treasuries', blurb: 'Funds and giving you help manage.', status: 'live', verb: 'manage' },
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
   relyingApps: [

@@ -8,6 +8,13 @@ import { AddressChip } from '../../src/components/shared/AddressChip';
 import { LockIcon } from '../../src/components/shared/Icons';
 import { ClaimPublicNameCard } from '../../src/components/portal/ClaimPublicNameCard';
 
+// Which dedicated page each stewarded area links to (live areas only; spec 275).
+const STEWARD_HREF: Record<string, string | undefined> = {
+  organization: '/organizations',
+  treasury: '/treasuries',
+  'data-source': '/data-sources',
+};
+
 export default function HomeDashboard() {
   const { agentName, agentAddress, session } = useSession();
   const things = stewardedThings();
@@ -39,17 +46,26 @@ export default function HomeDashboard() {
       <section className="dash-section">
         <h2>{whitelabel.copy.portalManageHeading}</h2>
         <div className="manage-grid">
-          {things.map((t) => (
-            <div key={t.kind} className={`manage-card ${t.status}`}>
-              <div className="manage-card-head">
-                <span className="manage-card-label">{t.label}</span>
-                <span className={`manage-card-badge ${t.status}`}>
-                  {t.status === 'live' ? '✓ Live' : <><LockIcon size={12} /> Coming soon</>}
-                </span>
-              </div>
-              <p className="manage-card-blurb">{t.blurb}</p>
-            </div>
-          ))}
+          {things.map((t) => {
+            const href = STEWARD_HREF[t.kind];
+            const body = (
+              <>
+                <div className="manage-card-head">
+                  <span className="manage-card-label">{t.label}</span>
+                  <span className={`manage-card-badge ${t.status}`}>
+                    {t.status === 'live' ? '✓ Live' : <><LockIcon size={12} /> Coming soon</>}
+                  </span>
+                </div>
+                <p className="manage-card-blurb">{t.blurb}</p>
+              </>
+            );
+            // Live areas link to their dedicated page; "soon" areas stay non-clickable.
+            return t.status === 'live' && href ? (
+              <a key={t.kind} className="manage-card link live" href={href}>{body}</a>
+            ) : (
+              <div key={t.kind} className={`manage-card ${t.status}`}>{body}</div>
+            );
+          })}
         </div>
       </section>
 
