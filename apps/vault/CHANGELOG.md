@@ -1,5 +1,17 @@
 # @agenticprimitives-demo/mcp
 
+## 0.0.2-alpha.7
+
+### Patch Changes
+
+- @agenticprimitives/types@1.0.0-alpha.9
+- @agenticprimitives/audit@1.0.0-alpha.9
+- @agenticprimitives/key-custody@1.0.0-alpha.9
+- @agenticprimitives/delegation@1.0.0-alpha.9
+- @agenticprimitives/tool-policy@1.0.0-alpha.9
+- @agenticprimitives/mcp-runtime@1.0.0-alpha.9
+- @agenticprimitives/agent-naming@1.0.0-alpha.9
+
 ## 0.0.2-alpha.6
 
 ### Patch Changes
