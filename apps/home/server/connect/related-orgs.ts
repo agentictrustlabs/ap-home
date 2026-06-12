@@ -9,6 +9,8 @@ import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+// (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
+//  spec-275 session-authorized POST branch below — same verifier as the GET.)
 
 const ERC1271_MAGIC = '0x1626ba7e';
 const ERC1271_ABI = [
@@ -58,6 +60,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       membershipDelegation?: unknown; stewardshipDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
+    const l = link as typeof link & { kind?: string; parent?: string };
     orgs.push({
       orgAgent: link.orgAgent,
       orgName: link.orgName,
@@ -70,6 +73,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // member); stewardship = org→person (person reads/oversees the org).
       membershipDelegation: link.membershipDelegation ?? null,
       stewardshipDelegation: link.stewardshipDelegation ?? null,
+      // spec 275: the agent kind + its parent in the member's agent tree. Legacy org
+      // links (no kind) default to a person-parented 'org' so the tree still renders.
+      kind: l.kind ?? 'org',
+      parent: l.parent ?? person,
     });
   }
   return jsonCors({ orgs }, request);
@@ -88,30 +95,65 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // spec 271 (W0a) — the recoverable custody descriptor for the org SA (private; salt + custody kind,
     // NO owner identifier). Persisted so an authenticated owner can later reconstruct the org's custodian.
     custody?: unknown;
+    // spec 275 — managed-agent metadata: kind ∈ {person-treasury,org,org-treasury} and the
+    // PARENT this agent hangs under in the member's tree (person SA, or an org SA the person controls).
+    kind?: string;
+    parent?: string;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
-  const sig = (body?.sig ?? '') as Hex;
-  if (!/^0x[0-9a-f]{40}$/.test(person) || !/^0x[0-9a-f]{40}$/.test(org) || !sig.startsWith('0x')) {
-    return jsonCors({ error: 'person, orgAgent (0x…40) + sig required' }, request, 400);
+  if (!/^0x[0-9a-f]{40}$/.test(person) || !/^0x[0-9a-f]{40}$/.test(org)) {
+    return jsonCors({ error: 'person, orgAgent (0x…40) required' }, request, 400);
   }
 
-  // Control-of-person proof (ERC-1271 over the fixed per-person challenge).
-  const challenge = keccak256(toBytes(`related-orgs:write:${person}`));
-  const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
-  let valid = false;
-  try {
-    const r = (await client.readContract({
-      address: person as Hex,
-      abi: ERC1271_ABI,
-      functionName: 'isValidSignature',
-      args: [challenge, sig],
-    })) as string;
-    valid = r === ERC1271_MAGIC;
-  } catch {
-    valid = false;
+  // Two explicit, caller-SELECTED auth methods (not a fallback chain — ADR-0013):
+  //   • Bearer home-session token  → the person manages their OWN agent tree (spec 275).
+  //   • `sig` (ERC-1271 over the   → an external custodian (e.g. demo-jp operator) registers
+  //     fixed per-person challenge)   a person→org link it already governs (spec 247).
+  const auth = request.headers.get('authorization') ?? '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const sig = (body?.sig ?? '') as Hex;
+
+  if (bearer) {
+    // Home-session path: the token's `sub` IS the authority; it must equal `person`.
+    const iss = resolveOrigin(request, env);
+    const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
+    const { jwks } = await getServer(env);
+    const keys = await importJwks(jwks);
+    const v = await verifyAgentSession(bearer, { keys, expectedAud: homeAud, expectedIss: iss });
+    if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
+    const sessionPerson = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+    if (!sessionPerson || sessionPerson !== person) {
+      return jsonCors({ error: 'session does not control this person' }, request, 401);
+    }
+    // spec 275 MAM-D6: an org-treasury's PARENT must be an org the person already controls
+    // (present in their tree) — never an arbitrary address. Person-parented kinds are implicitly fine.
+    const parent = (body?.parent ?? person).toLowerCase();
+    if (parent !== person) {
+      const ownIdx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+      if (!ownIdx.includes(parent)) {
+        return jsonCors({ error: 'parent is not an agent you control' }, request, 401);
+      }
+    }
+  } else {
+    // ERC-1271 control-of-person proof (existing spec-247 external-custodian path).
+    if (!sig.startsWith('0x')) return jsonCors({ error: 'sig or Bearer session required' }, request, 400);
+    const challenge = keccak256(toBytes(`related-orgs:write:${person}`));
+    const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
+    let valid = false;
+    try {
+      const r = (await client.readContract({
+        address: person as Hex,
+        abi: ERC1271_ABI,
+        functionName: 'isValidSignature',
+        args: [challenge, sig],
+      })) as string;
+      valid = r === ERC1271_MAGIC;
+    } catch {
+      valid = false;
+    }
+    if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
   }
-  if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
 
   const link = {
     orgAgent: org,
@@ -123,8 +165,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // spec 271 (W0a) — persist the recoverable custody descriptor when the caller supplies one. Stored in
     // the same person-scoped KV the owner controls; read back by recoverCustodian (W0b).
     custody: body?.custody ?? null,
+    // spec 275 — agent kind + parent (defaults keep legacy org links person-parented).
+    kind: body?.kind ?? 'org',
+    parent: (body?.parent ?? person).toLowerCase(),
     createdAt: Date.now(),
   };
+  // Index the WHOLE tree under the person (root) so the home renders org-treasuries too (MAM-D7).
   await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
   const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
   if (!idx.includes(org)) {

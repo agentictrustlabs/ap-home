@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { OrgList } from '../../../src/components/portal/OrgList';
+import { ManagedAgents } from '../../../src/components/portal/ManagedAgents';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
@@ -38,6 +39,8 @@ export default function YouPage() {
           <div><dt>Access</dt><dd>{profile?.access === 'standard' ? 'Standard' : 'Full access'}</dd></div>
         </dl>
       </div>
+
+      <ManagedAgents token={session?.token ?? null} person={agentAddress ?? null} personName={agentName ?? null} />
 
       <OrgList token={session?.token ?? null} />
 

@@ -108,7 +108,8 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
     if (!token) { setLoaded(true); return; }
     let cancelled = false;
     void listMyOrgs(token)
-      .then((o) => { if (!cancelled) { setOrgs(o); setLoaded(true); } })
+      // spec 275 — the orgs list shows only organizations; treasury kinds live in "Your agents".
+      .then((o) => { if (!cancelled) { setOrgs(o.filter((x) => (x.kind ?? 'org') === 'org')); setLoaded(true); } })
       .catch(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, [token]);

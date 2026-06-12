@@ -393,15 +393,25 @@ async function buildClaimCallData(
   base: string,
   sa: Address,
   onStep?: (s: string) => void,
+  exact = false,
 ): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string }> {
-  onStep?.('Finding a free name…');
-  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+  // exact (spec 275 MAM-D4): the member typed the precise label — claim it or fail, no
+  // suffix bump. Otherwise forced-unique (spec 220) picks the next free `<base>[N]`.
+  const query = exact
+    ? `/connect/name?exact=1&label=${encodeURIComponent(base)}`
+    : `/connect/name?base=${encodeURIComponent(base)}`;
+  onStep?.(exact ? 'Checking that name…' : 'Finding a free name…');
+  const picked = (await (await fetch(query)).json()) as {
     label?: string;
     name?: string;
     node?: Hex;
     error?: string;
+    taken?: boolean;
   };
-  if (!picked.name || !picked.node || !picked.label) return { ok: false, error: picked.error ?? 'no free name' };
+  if (!picked.name || !picked.node || !picked.label) {
+    if (picked.taken) return { ok: false, error: `“${base}.impact” is already taken — pick another name.` };
+    return { ok: false, error: picked.error ?? 'no free name' };
+  }
   const register = buildSubregistryRegisterCall({ subregistry: CONTRACTS.permissionlessSubregistry, label: picked.label, newOwner: sa });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
   // `calls` is surfaced so an org-create can EXTEND the batch with approveHash(digest) calls
@@ -767,6 +777,146 @@ export async function createChildAgentForSite(
       membershipDelegation, stewardshipDelegation,
     },
   };
+}
+
+// ── spec 275: multi-agent management from the Personal Trust Home ──────────────────
+//
+// The member, custodian of their Person SA, builds out the rest of their agent tree —
+// a Person Treasury, Org(s), and each Org's Treasury — each an on-chain SA with an EXACT
+// name, custodied by the SAME ROOT passkey, created in ONE gasless prompt. The links between
+// them are PRIVATE vault credentials (ADR-0025), indexed under the person for the tree view.
+
+export type AgentKind = 'person-treasury' | 'org' | 'org-treasury';
+
+export interface ManagedAgent {
+  agent: Address;
+  name: string;
+  kind: AgentKind;
+  /** Parent in the tree: person SA for person-treasury/org; the ORG SA for org-treasury. */
+  parent: Address;
+  createdAt: number | null;
+  proofHash?: string;
+}
+
+export interface CreateManagedAgentResult {
+  agent: Address;
+  name: string;
+  kind: AgentKind;
+  parent: Address;
+}
+
+/** Deploy + claim the EXACT name (MAM-D4) + pre-approve the parent stewardship grant — ALL in
+ *  ONE gasless passkey userOp (MAM-D5) — then record the PRIVATE link under the person's home
+ *  vault (MAM-D7). Custodied by the member's ROOT passkey (MAM-D2). Throws "name taken" rather
+ *  than bumping a suffix (MAM-INV-2). */
+export async function createManagedAgent(
+  input: { kind: AgentKind; label: string; parent: Address; person: Address },
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
+  const pk = loadPasskey();
+  if (!pk) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
+
+  // Name-independent random salt (ADR-0010) → a distinct SA under the one root credential (MAM-INV-4).
+  const saltBytes = crypto.getRandomValues(new Uint8Array(8));
+  let salt = 0n;
+  for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
+  const child = await derivePasskeySa(pk, salt);
+  if (child.toLowerCase() === input.person.toLowerCase() || child.toLowerCase() === input.parent.toLowerCase()) {
+    return { ok: false, error: 'address collided with an existing agent (salt) — please retry' };
+  }
+
+  // EXACT name or fail (MAM-D4) — no forced-unique suffix.
+  const claim = await buildClaimCallData(input.label, child, onStep, true);
+  if (!claim.ok) return { ok: false, error: claim.error };
+
+  // Stewardship grant child → parent so the parent SA can read/oversee this agent's vault
+  // (spec 246). The child is its own delegator, so it pre-approves the digest (0x03 sentinel,
+  // spec 253) INSIDE the deploy batch — no second prompt.
+  const stewardship = buildApprovedSiteDelegation(child, input.parent);
+  const deployCallData = buildExecuteBatchCallData([...claim.calls, buildApproveHashCall(stewardship.digest)]);
+
+  onStep?.('Deploying your agent — name + access grant…');
+  const rpIdHash = await derivePasskeyRpIdHash(); // MUST match derivePasskeySa (sha256(hostname)).
+  const dep = await deployAgent(
+    {
+      initMethod: 'passkey',
+      credentialIdDigest: pk.credentialIdDigest,
+      pubKeyX: pk.pubKeyX.toString(),
+      pubKeyY: pk.pubKeyY.toString(),
+      rpIdHash,
+      salt: salt.toString(),
+      callData: deployCallData, // deploy + claim exact name + approve stewardship — ONE signature
+    },
+    passkeySignHash,
+  );
+  if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
+
+  // MAM-INV-1 — the SA must be deployed AND RPC-visible before it counts as "created" (SEC-011).
+  onStep?.('Confirming on the network…');
+  {
+    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    for (let i = 0; i < 15; i++) {
+      const code = await pub.getBytecode({ address: child }).catch(() => undefined);
+      if (code && code !== '0x') break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
+  // ADR-0025: private, self-issued related-agent credential (unsigned — proofHash anchors integrity,
+  // the authenticated home session provides provenance). Holder = the parent in the tree.
+  const credential = buildRelatedAgentCredential({
+    holder: input.parent,
+    relatedAgent: child,
+    purpose: input.kind,
+    requestedBy: '',
+    issuerCaip10: `eip155:${CHAIN_ID}:${input.person}`,
+    body: { agentName: claim.name },
+    validFrom: new Date().toISOString(),
+  });
+  const proofHash = relatedAgentProofHash(credential);
+
+  // MAM-D7 — persist into the person's home vault via the session-authorized POST. Indexed
+  // under the person (root) so org-treasuries render in the tree even though their holder is the org.
+  onStep?.('Saving to your private vault…');
+  const save = await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({
+      person: input.person,
+      orgAgent: child,
+      orgName: claim.name,
+      purpose: input.kind,
+      kind: input.kind,
+      parent: input.parent,
+      stewardshipDelegation: toWire(stewardship.delegation),
+      proofHash,
+    }),
+  });
+  if (!save.ok) {
+    const e = (await save.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: `agent deployed (${claim.name}) but saving the link failed: ${e.error ?? save.status}` };
+  }
+
+  return { ok: true, result: { agent: child, name: claim.name, kind: input.kind, parent: input.parent } };
+}
+
+/** List the member's managed agents (all kinds) from their home vault — one read path
+ *  (the same /connect/related-orgs the orgs view already uses, MAM-D7). */
+export async function listManagedAgents(sessionToken: string): Promise<ManagedAgent[]> {
+  const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
+  if (!r.ok) return [];
+  const b = (await r.json().catch(() => ({}))) as {
+    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string }>;
+  };
+  return (b.orgs ?? []).map((o) => ({
+    agent: o.orgAgent,
+    name: o.orgName,
+    kind: (o.kind ?? 'org') as AgentKind,
+    parent: (o.parent ?? ('' as Address)) as Address,
+    createdAt: o.createdAt,
+    proofHash: o.proofHash,
+  }));
 }
 
 /** spec 256 — org-create for a GOOGLE member: the org is custodied by their per-(iss,sub) KMS
@@ -1351,6 +1501,9 @@ export interface MyOrg {
   requestedBy: string;
   createdAt: number | null;
   proofHash?: string;
+  /** spec 275 — agent kind. The orgs view shows only `org` (or legacy undefined); the
+   *  treasury kinds belong to the "Your agents" tree, not the organizations list. */
+  kind?: AgentKind;
   /** The scoped org→site delegation the person granted (absent for self-governed orgs).
    *  Carries the full wire struct so /you can revoke it (revokeGrantedDelegation). */
   delegation?: DelegationWire;
