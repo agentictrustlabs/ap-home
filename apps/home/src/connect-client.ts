@@ -367,15 +367,18 @@ async function derivePasskeyRpIdHash(): Promise<Hex> {
   return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
 }
 
-async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
-  const accounts = new AgentAccountClient({
+function agentAccountClient(): AgentAccountClient {
+  return new AgentAccountClient({
     rpcUrl: DEFAULT_RPC_URL,
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,
   });
+}
+
+async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
   const rpIdHash = await derivePasskeyRpIdHash();
-  return accounts.getAddressForAgentAccount({
+  return agentAccountClient().getAddressForAgentAccount({
     custodians: [],
     passkey: {
       credentialIdDigest: passkey.credentialIdDigest,
@@ -385,6 +388,13 @@ async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Addr
     },
     salt,
   });
+}
+
+/** EOA/SIWE-custodied SA address — MUST mirror the server's `/session/deploy` EOA spec
+ *  (`custodians: [owner], salt`, mode 0, no passkey) so the predicted address == the
+ *  deployed address (else the name-claim `newOwner` orphans). */
+async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address> {
+  return agentAccountClient().getAddressForAgentAccount({ custodians: [owner], salt });
 }
 
 /** Pick a free name + build the `executeBatch(register, setPrimary)` calldata the new SA runs
@@ -810,18 +820,42 @@ export interface CreateManagedAgentResult {
  *  vault (MAM-D7). Custodied by the member's ROOT passkey (MAM-D2). Throws "name taken" rather
  *  than bumping a suffix (MAM-INV-2). */
 export async function createManagedAgent(
-  input: { kind: AgentKind; label: string; parent: Address; person: Address },
+  input: { kind: AgentKind; label: string; parent: Address; person: Address; via: string },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
-  const pk = loadPasskey();
-  if (!pk) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
-
   // Name-independent random salt (ADR-0010) → a distinct SA under the one root credential (MAM-INV-4).
   const saltBytes = crypto.getRandomValues(new Uint8Array(8));
   let salt = 0n;
   for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
-  const child = await derivePasskeySa(pk, salt);
+
+  // Resolve the credential method (the SAME root credential that custodies the Person SA,
+  // MAM-D2): derive the child SA, choose the signer, and build the matching deploy body.
+  let child: Address;
+  let signHash: SignHash;
+  let deployBody: Record<string, unknown>;
+  if (input.via === 'wallet') {
+    const owner = await connectWallet();
+    child = await deriveEoaSa(owner, salt);
+    signHash = (h) => personalSign(owner, h);
+    deployBody = { initMethod: 'eoa', owner, salt: salt.toString() };
+  } else if (input.via === 'Google' || input.via === 'YouVersion') {
+    return { ok: false, error: 'Creating agents with a Google sign-in is coming soon — for now use a passkey or wallet credential.' };
+  } else {
+    const pk = loadPasskey();
+    if (!pk) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
+    child = await derivePasskeySa(pk, salt);
+    signHash = passkeySignHash;
+    const rpIdHash = await derivePasskeyRpIdHash(); // MUST match derivePasskeySa (sha256(hostname)).
+    deployBody = {
+      initMethod: 'passkey',
+      credentialIdDigest: pk.credentialIdDigest,
+      pubKeyX: pk.pubKeyX.toString(),
+      pubKeyY: pk.pubKeyY.toString(),
+      rpIdHash,
+      salt: salt.toString(),
+    };
+  }
   if (child.toLowerCase() === input.person.toLowerCase() || child.toLowerCase() === input.parent.toLowerCase()) {
     return { ok: false, error: 'address collided with an existing agent (salt) — please retry' };
   }
@@ -837,19 +871,8 @@ export async function createManagedAgent(
   const deployCallData = buildExecuteBatchCallData([...claim.calls, buildApproveHashCall(stewardship.digest)]);
 
   onStep?.('Deploying your agent — name + access grant…');
-  const rpIdHash = await derivePasskeyRpIdHash(); // MUST match derivePasskeySa (sha256(hostname)).
-  const dep = await deployAgent(
-    {
-      initMethod: 'passkey',
-      credentialIdDigest: pk.credentialIdDigest,
-      pubKeyX: pk.pubKeyX.toString(),
-      pubKeyY: pk.pubKeyY.toString(),
-      rpIdHash,
-      salt: salt.toString(),
-      callData: deployCallData, // deploy + claim exact name + approve stewardship — ONE signature
-    },
-    passkeySignHash,
-  );
+  // deploy + claim exact name + approve stewardship — ONE signature from the root credential.
+  const dep = await deployAgent({ ...deployBody, callData: deployCallData }, signHash);
   if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
 
   // MAM-INV-1 — the SA must be deployed AND RPC-visible before it counts as "created" (SEC-011).

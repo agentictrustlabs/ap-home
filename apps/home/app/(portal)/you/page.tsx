@@ -40,7 +40,7 @@ export default function YouPage() {
         </dl>
       </div>
 
-      <ManagedAgents token={session?.token ?? null} person={agentAddress ?? null} personName={agentName ?? null} />
+      <ManagedAgents token={session?.token ?? null} person={agentAddress ?? null} personName={agentName ?? null} via={session?.via ?? ''} />
 
       <OrgList token={session?.token ?? null} />
 

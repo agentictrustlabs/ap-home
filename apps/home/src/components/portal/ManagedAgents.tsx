@@ -25,6 +25,7 @@ function CreateForm({
   parent,
   person,
   token,
+  via,
   onDone,
   cta,
 }: {
@@ -32,6 +33,7 @@ function CreateForm({
   parent: string;
   person: string;
   token: string;
+  via: string;
   onDone: () => void;
   cta: string;
 }) {
@@ -46,7 +48,7 @@ function CreateForm({
     if (clean.length < 3) { setErr('Pick a name with at least 3 characters.'); return; }
     setBusy(true); setErr(''); setStep('');
     const res = await createManagedAgent(
-      { kind, label: clean, parent: parent as `0x${string}`, person: person as `0x${string}` },
+      { kind, label: clean, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
       token,
       setStep,
     );
@@ -89,7 +91,7 @@ function CreateForm({
         </button>
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
-        Deploys an on-chain Smart Agent named <code>{(label.trim().toLowerCase() || 'name')}.impact</code>, custodied by you — one device prompt, gas sponsored.
+        Deploys an on-chain Smart Agent named <code>{(label.trim().toLowerCase() || 'name')}.impact</code>, custodied by you — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
@@ -116,10 +118,12 @@ export function ManagedAgents({
   token,
   person,
   personName,
+  via,
 }: {
   token: string | null;
   person: string | null;
   personName: string | null;
+  via: string;
 }) {
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -176,7 +180,7 @@ export function ManagedAgents({
                 <span className="manage-card-badge">Not yet</span>
               </div>
               <p className="manage-card-blurb">A Smart Agent that holds and moves your funds, separate from your identity.</p>
-              <CreateForm kind="person-treasury" parent={person} person={person} token={token} onDone={reload} cta="Create personal treasury" />
+              <CreateForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
             </div>
           )}
 
@@ -192,7 +196,7 @@ export function ManagedAgents({
                       <b>{t.name}</b> <AddressChip address={t.agent as `0x${string}`} size="sm" />
                     </div>
                   ) : (
-                    <CreateForm kind="org-treasury" parent={org.agent} person={person} token={token} onDone={reload} cta="Create org treasury" />
+                    <CreateForm kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Create org treasury" />
                   )}
                 </div>
               </AgentRow>
@@ -206,7 +210,7 @@ export function ManagedAgents({
               <span className="manage-card-badge">＋</span>
             </div>
             <p className="manage-card-blurb">An organization you control — its own Smart Agent and name. Add its treasury after.</p>
-            <CreateForm kind="org" parent={person} person={person} token={token} onDone={reload} cta="Create organization" />
+            <CreateForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create organization" />
           </div>
         </div>
       )}
