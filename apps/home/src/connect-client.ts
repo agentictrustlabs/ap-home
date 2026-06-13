@@ -820,7 +820,7 @@ export interface CreateManagedAgentResult {
  *  vault (MAM-D7). Custodied by the member's ROOT passkey (MAM-D2). Throws "name taken" rather
  *  than bumping a suffix (MAM-INV-2). */
 export async function createManagedAgent(
-  input: { kind: AgentKind; label: string; parent: Address; person: Address; via: string },
+  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -860,17 +860,27 @@ export async function createManagedAgent(
     return { ok: false, error: 'address collided with an existing agent (salt) — please retry' };
   }
 
-  // EXACT name or fail (MAM-D4) — no forced-unique suffix.
-  const claim = await buildClaimCallData(input.label, child, onStep, true);
-  if (!claim.ok) return { ok: false, error: claim.error };
+  // Name is OPTIONAL (true name-deferral, cf. spec 257). If the member typed a label we claim it
+  // EXACTLY (MAM-D4, no suffix); otherwise the agent deploys NAMELESS and can be named later
+  // (nameManagedAgent). A nameless agent is fully functional — the SA address is the canonical id
+  // (ADR-0010); the name is just an optional public facet.
+  const wantName = !!input.label && input.label.trim().length >= 3;
+  let claimCalls: ContractCall[] = [];
+  let name = '';
+  if (wantName) {
+    const claim = await buildClaimCallData(input.label!, child, onStep, true);
+    if (!claim.ok) return { ok: false, error: claim.error };
+    claimCalls = claim.calls;
+    name = claim.name;
+  }
 
   // Stewardship grant child → parent so the parent SA can read/oversee this agent's vault
   // (spec 246). The child is its own delegator, so it pre-approves the digest (0x03 sentinel,
   // spec 253) INSIDE the deploy batch — no second prompt.
   const stewardship = buildApprovedSiteDelegation(child, input.parent);
-  const deployCallData = buildExecuteBatchCallData([...claim.calls, buildApproveHashCall(stewardship.digest)]);
+  const deployCallData = buildExecuteBatchCallData([...claimCalls, buildApproveHashCall(stewardship.digest)]);
 
-  onStep?.('Deploying your agent — name + access grant…');
+  onStep?.(wantName ? 'Deploying your agent — name + access grant…' : 'Deploying your agent (unnamed)…');
   // deploy + claim exact name + approve stewardship — ONE signature from the root credential.
   const dep = await deployAgent({ ...deployBody, callData: deployCallData }, signHash);
   if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
@@ -894,7 +904,7 @@ export async function createManagedAgent(
     purpose: input.kind,
     requestedBy: '',
     issuerCaip10: `eip155:${CHAIN_ID}:${input.person}`,
-    body: { agentName: claim.name },
+    body: { agentName: name },
     validFrom: new Date().toISOString(),
   });
   const proofHash = relatedAgentProofHash(credential);
@@ -908,7 +918,7 @@ export async function createManagedAgent(
     body: JSON.stringify({
       person: input.person,
       orgAgent: child,
-      orgName: claim.name,
+      orgName: name,
       purpose: input.kind,
       kind: input.kind,
       parent: input.parent,
@@ -918,10 +928,50 @@ export async function createManagedAgent(
   });
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
-    return { ok: false, error: `agent deployed (${claim.name}) but saving the link failed: ${e.error ?? save.status}` };
+    return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
   }
 
-  return { ok: true, result: { agent: child, name: claim.name, kind: input.kind, parent: input.parent } };
+  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
+}
+
+/** spec 275 — claim an EXACT name for an already-deployed NAMELESS managed agent (name-later).
+ *  Runs `executeBatch(register, setPrimary)` AS the agent via its root credential (one gasless
+ *  prompt), then updates the private vault record's name (server MERGES, so delegations persist). */
+export async function nameManagedAgent(
+  input: { agent: Address; label: string; kind: AgentKind; parent: Address; person: Address; via: string },
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  let signHash: SignHash;
+  if (input.via === 'wallet') {
+    const owner = await connectWallet();
+    signHash = (h) => personalSign(owner, h);
+  } else if (input.via === 'Google' || input.via === 'YouVersion') {
+    return { ok: false, error: 'Naming with a Google sign-in is coming soon — use a passkey or wallet credential.' };
+  } else {
+    if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
+    signHash = passkeySignHash;
+  }
+
+  const claim = await buildClaimCallData(input.label, input.agent, onStep, true); // EXACT or fail
+  if (!claim.ok) return { ok: false, error: claim.error };
+
+  onStep?.('Naming your agent on the network…');
+  const res = await executeCall(input.agent, signHash, buildExecuteBatchCallData(claim.calls), { attempts: 6 });
+  if (!res.ok) return { ok: false, error: `naming failed: ${res.error}` };
+
+  onStep?.('Saving the name…');
+  const save = await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+    // Only orgName changes; the server MERGES so kind/parent/stewardshipDelegation are preserved.
+    body: JSON.stringify({ person: input.person, orgAgent: input.agent, orgName: claim.name, kind: input.kind, parent: input.parent }),
+  });
+  if (!save.ok) {
+    const e = (await save.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: `named on-chain (${claim.name}) but vault save failed: ${e.error ?? save.status}` };
+  }
+  return { ok: true, name: claim.name };
 }
 
 /** List the member's managed agents (all kinds) from their home vault — one read path
