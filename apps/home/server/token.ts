@@ -105,6 +105,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       id_token: string;
       delegation: unknown;
       sessionDelegation?: unknown;
+      paymentDelegation?: unknown;
       org: unknown;
       code_challenge: string;
       client_id: string;
@@ -122,6 +123,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         expires_in: ID_TOKEN_TTL,
         delegation: grant.delegation ?? undefined,
         sessionDelegation: grant.sessionDelegation ?? undefined, // spec 270 v4 W2 — the DEL-001 leaf
+        paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
         ...(grant.org ? { org: grant.org } : {}),
       },
       request,

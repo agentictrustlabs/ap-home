@@ -11,6 +11,7 @@ import {
   encodeTimestampTerms,
   encodeAllowedTargetsTerms,
   encodeValueTerms,
+  buildPaymentMandateCaveats,
   hashDelegation,
   buildSessionDelegation,
   ROOT_AUTHORITY,
@@ -101,6 +102,68 @@ export function buildApprovedSiteDelegation(
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch
   return { delegation: d, digest };
+}
+
+// ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────
+
+/** DelegationManager sentinel: delegate = 0xa11 ⇒ ANY redeemer may redeem (the PaymentEnforcer still
+ *  fully gates every charge — payee-bound, capped, transfer-only). Use this for x402 PUSH payments
+ *  where the PAYER (reader) drives the redemption at access time; the funds still move treasury →
+ *  treasury (payer-treasury → the caveat's payee). For PULL payments (subscriptions, metered post-pay)
+ *  pass `delegate = the payee treasury` instead, so the provider redeems on its own schedule. */
+export const OPEN_DELEGATION = '0x0000000000000000000000000000000000000a11' as Address;
+
+/** Issue an x402 payment delegation from the person's TREASURY SA. The custodian never appears: the
+ *  person's treasury is custodied by the SAME ROOT credential as the person SA (MAM-D2), so `signHash`
+ *  — the same passkey/wallet/social signer used for the site delegation — authorizes it; the treasury's
+ *  ERC-1271 validates it at redemption. Signed ONCE at connect, stored in a vault, redeemed many times
+ *  within the caveats (no held key, no per-charge signature). USDC always lands at `payee`.
+ *
+ *  `delegate`: OPEN_DELEGATION for x402 push (the reader redeems) | a payee treasury for pull/subscription. */
+export async function issuePaymentDelegation(
+  payerTreasury: Address,
+  delegate: Address,
+  payee: Address,
+  signHash: SignHash,
+  opts: {
+    asset: Address;
+    maxAmountPerCharge: bigint;
+    maxAggregate: bigint;
+    maxRedemptionsPerWindow?: number;
+    windowSeconds?: number;
+    validitySeconds?: number;
+  },
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + (opts.validitySeconds ?? 60 * 60 * 24 * 365);
+  const caveats = buildPaymentMandateCaveats({
+    enforcers: {
+      payment: CONTRACTS.paymentEnforcer,
+      timestamp: CONTRACTS.timestampEnforcer,
+      allowedTargets: CONTRACTS.allowedTargetsEnforcer,
+      allowedMethods: CONTRACTS.allowedMethodsEnforcer,
+    },
+    payee,
+    asset: opts.asset,
+    maxAmountPerCharge: opts.maxAmountPerCharge,
+    maxAggregate: opts.maxAggregate,
+    maxRedemptionsPerWindow: opts.maxRedemptionsPerWindow ?? 1000,
+    windowSeconds: opts.windowSeconds ?? 3600,
+    validUntil,
+  });
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const d: Delegation = {
+    delegator: payerTreasury,
+    delegate,
+    authority: ROOT_AUTHORITY,
+    caveats,
+    salt,
+    signature: '0x',
+  };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // SAME root credential that signs the site delegation
+  return d;
 }
 
 // ─── spec 270 v4 W2 — the DEL-001 session-delegation leaf (the connect-ceremony emission) ─────

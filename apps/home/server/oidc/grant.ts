@@ -36,6 +36,12 @@ interface GrantBody {
   org?: unknown;
   /** spec 270 v4 W2 — the DEL-001 leaf the home signed for the relying app's session key. */
   sessionDelegation?: unknown;
+  /** spec 272/243 — the x402 `person-treasury → payee` payment delegation the member authorized at
+   *  connect (template `x402-pay`). Its `delegate` is the OPEN sentinel (push) or the payee treasury
+   *  (pull), NOT `client.delegate`, so it is NOT subject to the site-delegate match — only ERC-1271 +
+   *  window. Carried alongside `delegation` (like `sessionDelegation`); the relying app stores it in
+   *  the payee's vault and redeems it per paid read. The PaymentEnforcer caps every charge on-chain. */
+  paymentDelegation?: IncomingDelegation;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -70,6 +76,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // digest, which we use as the silent-reauth binding key.
   const v = await verifyDelegation(env, body.delegation);
   if (!v.ok) return json({ error: `delegation proof failed: ${v.reason}` }, 401);
+
+  // spec 272/243 — if an x402 payment delegation rode along, verify it independently (ERC-1271 +
+  // window against ITS delegator = the person's treasury SA). It is NOT delegate-matched to the
+  // client (its delegate is the OPEN sentinel / the payee treasury). Reject an invalid one rather
+  // than silently dropping it.
+  if (body.paymentDelegation) {
+    const pv = await verifyDelegation(env, body.paymentDelegation);
+    if (!pv.ok) return json({ error: `payment delegation proof failed: ${pv.reason}` }, 401);
+  }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
   const sub = toCanonicalAgentId(CHAIN_ID, body.delegation.delegator);
@@ -146,6 +161,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       id_token: idToken,
       delegation: body.delegation,
       sessionDelegation: body.sessionDelegation ?? null,
+      paymentDelegation: body.paymentDelegation ?? null,
       org: body.org ?? null,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,

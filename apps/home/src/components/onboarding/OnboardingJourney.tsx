@@ -17,6 +17,7 @@
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, type Via } from '../../home/onboarding';
+import { listManagedAgents } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
@@ -174,11 +175,41 @@ export function OnboardingJourney({
       // attacker-controllable). The supplied delegation's `delegate` MUST equal what the
       // server bound — /oidc/grant rejects otherwise.
       const { grant_id, delegate } = await api.beginGrant(home.name);
+      // spec 272/243 — x402-pay: authorize a capped payment delegation from the member's PRE-CREATED
+      // person-treasury (approach A — the treasury is made once in the Portal; we don't deploy here).
+      // Resolve it via the member's own agent tree, then sign `treasury → lbsb-treasury` in the SAME
+      // ceremony (same credential). If they have no treasury yet, connect proceeds without payment —
+      // they create a personal treasury in their home and reconnect.
+      let payment:
+        | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull' }
+        | undefined;
+      const pc = relyingApp?.paymentConfig;
+      // Only an EXISTING member can have a person-treasury (a brand-new first-run member just made their
+      // home and has none yet — they set up payment later from the Portal, then reconnect). Guarding on
+      // `existingAgent` avoids a wasted re-auth for first-run x402-pay connects.
+      if (api.enroll.template === 'x402-pay' && pc && existingAgent && (via === 'passkey' || via === 'wallet')) {
+        const opened = await openHome(home.name, via);
+        if (opened.ok) {
+          const treasury = (await listManagedAgents(opened.token)).find((a) => a.kind === 'person-treasury');
+          if (treasury) {
+            payment = {
+              treasury: treasury.agent as Address,
+              payee: pc.payee,
+              asset: pc.asset,
+              maxAmountPerCharge: BigInt(pc.maxAmountPerCharge),
+              maxAggregate: BigInt(pc.maxAggregate),
+              maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow,
+              windowSeconds: pc.windowSeconds,
+              mode: pc.mode,
+            };
+          }
+        }
+      }
       // spec 270 v4 W2 — sign the DEL-001 leaf for the relying app's session-key address (from the
       // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
-      const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey);
+      const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
-      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
+      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,

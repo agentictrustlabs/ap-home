@@ -30,6 +30,9 @@ export const CONTRACTS = {
   allowedTargetsEnforcer: DEPLOYED.allowedTargetsEnforcer as Address,
   allowedMethodsEnforcer: DEPLOYED.allowedMethodsEnforcer as Address,
   valueEnforcer: DEPLOYED.valueEnforcer as Address,
+  // spec 272/243 — PaymentEnforcer gates an x402 payment delegation (treasury → treasury):
+  // per-charge + aggregate caps, transfer-only, single-use nonce, payee-bound.
+  paymentEnforcer: DEPLOYED.paymentEnforcer as Address,
   // spec 253 — the org-create ceremony batches approveHash(digest) for its outbound
   // grants into the deploy userOp; the SA's isValidSignature 0x03 branch consults this.
   approvedHashRegistry: DEPLOYED.approvedHashRegistry as Address,

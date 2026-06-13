@@ -23,7 +23,7 @@ import {
 } from '../connect-client';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
-import { issueSiteDelegation, issueSessionDelegation, toWire, type DelegationWire } from '../lib/delegation';
+import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, OPEN_DELEGATION, toWire, type DelegationWire } from '../lib/delegation';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
@@ -198,7 +198,23 @@ export async function givePermission(
    *  keeps the private key; only its public address reaches the home). When present, the same credential
    *  that signs the site delegation also signs the DEL-001 leaf binding that key to the person SA. */
   sessionKeyAddress?: Address,
-): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire }>> {
+  /** spec 272/243 — when the relying app requested the `x402-pay` template, ALSO issue a capped
+   *  payment delegation from the member's TREASURY SA (custodied by the SAME credential as the person
+   *  SA, MAM-D2 — so the same `signHash` authorizes it; the custodian never appears as a party). The
+   *  public delegation crosses back to the app, which stores it in the payee's vault and redeems it per
+   *  paid read. `mode`: 'push' (x402 — OPEN delegate, the reader redeems) | 'pull' (delegate = payee,
+   *  the provider redeems on its schedule — subscriptions). The PaymentEnforcer caps every charge. */
+  payment?: {
+    treasury: Address;
+    payee: Address;
+    asset: Address;
+    maxAmountPerCharge: bigint;
+    maxAggregate: bigint;
+    maxRedemptionsPerWindow?: number;
+    windowSeconds?: number;
+    mode?: 'push' | 'pull';
+  },
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire }>> {
   try {
     const signHash = await signHashFor(via, home.address, auth);
     const delegation = await issueSiteDelegation(home.address, delegate, signHash);
@@ -209,7 +225,26 @@ export async function givePermission(
     const sessionDelegation = sessionKeyAddress
       ? toWire(await issueSessionDelegation(home.address, sessionKeyAddress, signHash))
       : undefined;
-    return { ok: true, grant: toWire(delegation), sessionDelegation };
+    // x402 payment delegation — issued from the TREASURY, signed by the same credential, in the same
+    // ceremony. delegate = OPEN (push: reader redeems) or the payee (pull: provider redeems).
+    const paymentDelegation = payment
+      ? toWire(
+          await issuePaymentDelegation(
+            payment.treasury,
+            payment.mode === 'pull' ? payment.payee : OPEN_DELEGATION,
+            payment.payee,
+            signHash,
+            {
+              asset: payment.asset,
+              maxAmountPerCharge: payment.maxAmountPerCharge,
+              maxAggregate: payment.maxAggregate,
+              maxRedemptionsPerWindow: payment.maxRedemptionsPerWindow,
+              windowSeconds: payment.windowSeconds,
+            },
+          ),
+        )
+      : undefined;
+    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
   }

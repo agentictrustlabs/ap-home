@@ -74,8 +74,21 @@ const faithImpact: WhiteLabelConfig = {
       name: 'Bible Explorer',
       redirect_uris: ['https://demo-bible-ontology-production.richardpedersen3.workers.dev/', 'http://localhost:5673/'],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      // spec 272/243 — `x402-pay`: the member authorizes (once) a capped payment delegation from
+      // their person-treasury to the lbsb licensed-scripture treasury, redeemed per paid read (x402).
+      allowed_delegation_templates: ['site-login', 'org-create', 'x402-pay'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
+      // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
+      paymentConfig: {
+        payee: '0xa9e0acecfbce08548358b4f5681b13a00a5cab7a',
+        asset: '0x8fb56ff3C13347DFC4E1287aE83E88deE5a7211C',
+        maxAmountPerCharge: '1000',
+        maxAggregate: '1000000',
+        maxRedemptionsPerWindow: 1000,
+        windowSeconds: 3600,
+        mode: 'push',
+      },
     },
     // demo-corpus relying app — connects via Global.Church identity; site-login + org-create
     // (no PII held by the broker). aud = client_id; the allowed origin is derived from the
@@ -100,6 +113,21 @@ const faithImpact: WhiteLabelConfig = {
     'org-create': {
       canDo: ['Set up an organization under your name', 'View approved org records for this session'],
       cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
+      expiryDays: 365,
+    },
+    // spec 272/243 — pay-per-access for licensed content. Your personal treasury authorizes capped,
+    // per-read charges to the content's treasury; you can revoke anytime. The cap + payee are
+    // contract-enforced (PaymentEnforcer), not just disclosure.
+    'x402-pay': {
+      canDo: [
+        'Pay a small, capped fee from your personal treasury for each licensed read',
+        'Send those payments only to this content provider’s treasury',
+      ],
+      cannotDo: [
+        'Charge more than the per-read cap or the total you approved',
+        'Move funds to anyone other than this provider',
+        'Touch your sign-in methods or recovery',
+      ],
       expiryDays: 365,
     },
     // spec 247 — JP's adoption program reads + writes the data it holds for you (your

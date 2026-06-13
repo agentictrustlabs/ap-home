@@ -99,6 +99,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // PARENT this agent hangs under in the member's tree (person SA, or an org SA the person controls).
     kind?: string;
     parent?: string;
+    // spec 246 — person↔agent read delegations (stewardship = agent→parent so the parent can
+    // read/oversee the agent's vault). Persisted so OrgDetail can read a home-created org's data.
+    stewardshipDelegation?: unknown;
+    membershipDelegation?: unknown;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -155,20 +159,28 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
   }
 
+  // MERGE with any existing record so a partial re-save (e.g. spec-275 name-later, which sends
+  // only orgName) NEVER clobbers fields it doesn't carry — delegations, proofHash, custody persist.
+  const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
+  const pick = <T,>(next: T | undefined, prev: unknown, dflt: T): T => (next !== undefined ? next : (prev as T) ?? dflt);
   const link = {
+    ...existing,
     orgAgent: org,
-    orgName: body?.orgName ?? '',
-    purpose: body?.purpose ?? '',
-    requestedBy: body?.requestedBy ?? '',
-    siteDelegation: body?.siteDelegation ?? null,
-    proofHash: body?.proofHash ?? null,
+    orgName: pick(body?.orgName, existing.orgName, ''),
+    purpose: pick(body?.purpose, existing.purpose, ''),
+    requestedBy: pick(body?.requestedBy, existing.requestedBy, ''),
+    siteDelegation: pick(body?.siteDelegation, existing.siteDelegation, null),
+    // spec 246 — persist the read delegations (previously dropped on this path).
+    stewardshipDelegation: pick(body?.stewardshipDelegation, existing.stewardshipDelegation, null),
+    membershipDelegation: pick(body?.membershipDelegation, existing.membershipDelegation, null),
+    proofHash: pick(body?.proofHash, existing.proofHash, null),
     // spec 271 (W0a) — persist the recoverable custody descriptor when the caller supplies one. Stored in
     // the same person-scoped KV the owner controls; read back by recoverCustodian (W0b).
-    custody: body?.custody ?? null,
+    custody: pick(body?.custody, existing.custody, null),
     // spec 275 — agent kind + parent (defaults keep legacy org links person-parented).
-    kind: body?.kind ?? 'org',
-    parent: (body?.parent ?? person).toLowerCase(),
-    createdAt: Date.now(),
+    kind: pick(body?.kind, existing.kind, 'org'),
+    parent: pick(body?.parent, existing.parent, person).toLowerCase(),
+    createdAt: (existing.createdAt as number) ?? Date.now(),
   };
   // Index the WHOLE tree under the person (root) so the home renders org-treasuries too (MAM-D7).
   await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));

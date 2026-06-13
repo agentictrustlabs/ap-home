@@ -25,6 +25,20 @@ export interface RelyingApp {
    *  treated as untrusted hint and MUST match this. Address format: 0x-prefixed 20-byte hex.
    *  (SEC-001 closure — the broker no longer accepts attacker-chosen delegates.) */
   delegate: `0x${string}`;
+  /** x402 payment params for the `x402-pay` template (spec 272/243). Present only on clients that
+   *  sell paid content. The home mints a `person-treasury → payee` PaymentEnforcer delegation with
+   *  these caps; amounts are atomic-unit strings (plain data / JSON-serializable). `mode`: 'push'
+   *  (x402 — OPEN delegate, the reader redeems at access) | 'pull' (delegate = payee, the provider
+   *  redeems on its own schedule — subscriptions/metered post-pay). Defaults to 'push'. */
+  paymentConfig?: {
+    payee: `0x${string}`;
+    asset: `0x${string}`;
+    maxAmountPerCharge: string;
+    maxAggregate: string;
+    maxRedemptionsPerWindow?: number;
+    windowSeconds?: number;
+    mode?: 'push' | 'pull';
+  };
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

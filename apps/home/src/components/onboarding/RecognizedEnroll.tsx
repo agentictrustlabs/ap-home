@@ -22,7 +22,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
-import { fetchProfile } from '../../connect-client';
+import { fetchProfile, listManagedAgents } from '../../connect-client';
 import { readSsoCookie, setSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -136,9 +136,31 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
       } else {
         // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
-        const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
+        // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so
+        // resolve their PRE-CREATED person-treasury (approach A) and authorize a capped `treasury →
+        // lbsb-treasury` payment delegation in the SAME ceremony. No treasury → connect without payment.
+        let payment:
+          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull' }
+          | undefined;
+        const pc = relyingApp?.paymentConfig;
+        if (enroll.template === 'x402-pay' && pc && (viaLower === 'passkey' || viaLower === 'wallet')) {
+          const treasury = (await listManagedAgents(token)).find((a) => a.kind === 'person-treasury');
+          if (treasury) {
+            payment = {
+              treasury: treasury.agent as Address,
+              payee: pc.payee,
+              asset: pc.asset,
+              maxAmountPerCharge: BigInt(pc.maxAmountPerCharge),
+              maxAggregate: BigInt(pc.maxAggregate),
+              maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow,
+              windowSeconds: pc.windowSeconds,
+              mode: pc.mode,
+            };
+          }
+        }
+        const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation);
       }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
