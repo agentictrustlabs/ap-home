@@ -2419,6 +2419,189 @@ app.post('/custody/google/bootstrap-org', async (c) => {
 });
 
 /**
+ * POST /custody/google/bootstrap-agent  (client → a2a, custody session — Google OR YouVersion)
+ * Body: { session, kind, parent, label?, node? }
+ *   → { ok, agent, name, person, stewardshipDelegation, custodyDescriptor, transactionHash }
+ *
+ * spec 275 — a SOCIAL-login member (KMS-custodied by C_sub) creates a managed agent (person treasury /
+ * org / org treasury) with ZERO device prompts. Generalizes bootstrap-org: the NAME is OPTIONAL (true
+ * name-deferral — deploy nameless, name later via /name-agent) and the stewardship grant is child→PARENT
+ * (the org SA for an org-treasury; the person for the rest) rather than always child→person. No relying-app
+ * `delegate` site grant — these are the member's own home-managed agents.
+ */
+app.post('/custody/google/bootstrap-agent', async (c) => {
+  if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
+  if (!c.env.APPROVED_HASH_REGISTRY) return c.json({ ok: false, error: 'grants_not_configured' }, 503);
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; kind?: string; parent?: Address; label?: string; node?: Hex;
+  } | null;
+  if (!body?.session || !body?.kind || !body?.parent) {
+    return c.json({ ok: false, error: 'session + kind + parent required' }, 400);
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.parent)) return c.json({ ok: false, error: 'bad_parent' }, 400);
+  const wantName = !!body.label && !!body.node;
+  if (wantName) {
+    if (!/^[a-z0-9-]{1,63}$/.test(body.label!.toLowerCase())) return c.json({ ok: false, error: 'bad_label' }, 400);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(body.node!)) return c.json({ ok: false, error: 'bad_node' }, 400);
+  }
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env),
+      rotation: gate.rotation,
+    });
+    // Person-binding (spec 235 §5.4): the session must prove the PERSON whose C_sub custodies the agent.
+    const person = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), person).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived person SA' }, 403);
+    }
+
+    // Child SA: same custodian C_sub, a DISTINCT non-zero salt (never name-derived — ADR-0010).
+    const saltBytes = crypto.getRandomValues(new Uint8Array(8));
+    let salt = 1n;
+    for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
+    const childSA = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt });
+
+    // Stewardship grant child → parent (spec 246), pre-approved (0x03 sentinel) in the deploy batch.
+    const stewardship = buildOrgGrant(c.env, childSA, body.parent);
+    const calls: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    if (wantName) {
+      if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
+        return c.json({ ok: false, error: 'naming_not_configured' }, 503);
+      }
+      calls.push(buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label: body.label!.toLowerCase(), newOwner: childSA }));
+      calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
+    }
+    calls.push(orgApproveHashCall(c.env, stewardship.digest));
+    const callData = buildExecuteBatchCallData(calls);
+
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+
+    const { userOp, userOpHash, sender } = await accountClient(c.env).buildDeployUserOpForAgentAccount({
+      spec: { custodians: [cSub], salt },
+      callData,
+      paymaster: c.env.PAYMASTER as Address,
+      verifyingPaymaster,
+    });
+    if (sender.toLowerCase() !== childSA.toLowerCase()) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'built userOp sender ≠ derived agent SA' }, 500);
+    }
+
+    const signature = await sign(userOpHash); // C_sub signs
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
+    if (!inner.ok) {
+      return c.json(
+        { ok: false, error: 'userop_reverted', detail: inner.revertReason ? `inner userOp reverted with ${inner.revertReason}` : 'inner userOp reverted', transactionHash: receipt.transactionHash },
+        500,
+      );
+    }
+    let custodyDescriptor: CustodyDescriptor | null = null;
+    try {
+      custodyDescriptor = buildCustodyDescriptor({
+        targetSA: childSA,
+        salt: toHex(salt, { size: 32 }),
+        custody: { kind: 'kms-subject', rotation: gate.rotation ?? 0 },
+      });
+    } catch (e) {
+      console.warn('[demo-a2a] custodyDescriptor build failed (non-fatal; agent already deployed):', e);
+    }
+    return c.json({
+      ok: true,
+      agent: deployedAddress ?? childSA,
+      name: wantName ? `${body.label!.toLowerCase()}.${AGENT_NAME_PARENT}` : '',
+      person,
+      stewardshipDelegation: stewardship.wire,
+      custodyDescriptor,
+      transactionHash: receipt.transactionHash,
+    });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/bootstrap-agent failed:', e);
+    return c.json({ ok: false, error: 'bootstrap_agent_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/google/name-agent  (client → a2a, custody session — Google OR YouVersion)
+ * Body: { session, agent, label, node }  → { ok, name, transactionHash }
+ *
+ * spec 275 name-later: claim an EXACT name for an already-deployed NAMELESS social-custodied agent.
+ * C_sub signs `executeBatch(register, setPrimary)` AS the agent. Authorized by isCustodian(agent, C_sub)
+ * — only an agent THIS session's C_sub actually custodies can be named (defence-in-depth; on-chain
+ * validateUserOp would reject a non-custodian signature anyway).
+ */
+app.post('/custody/google/name-agent', async (c) => {
+  if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
+  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
+    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
+  }
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as { session?: string; agent?: Address; label?: string; node?: Hex } | null;
+  if (!body?.session || !body?.agent || !body?.label || !body?.node) {
+    return c.json({ ok: false, error: 'session + agent + label + node required' }, 400);
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.agent)) return c.json({ ok: false, error: 'bad_agent' }, 400);
+  if (!/^[a-z0-9-]{1,63}$/.test(body.label.toLowerCase())) return c.json({ ok: false, error: 'bad_label' }, 400);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(body.node)) return c.json({ ok: false, error: 'bad_node' }, 400);
+
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env),
+      rotation: gate.rotation,
+    });
+    // Authorization: the agent must be custodied by THIS session's C_sub.
+    if (!(await accountClient(c.env).isCustodian(body.agent, cSub))) {
+      return c.json({ ok: false, error: 'not_custodian', detail: 'agent is not custodied by this session' }, 403);
+    }
+
+    const register = buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label: body.label.toLowerCase(), newOwner: body.agent });
+    const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
+    const callData = buildExecuteBatchCallData([register, setPrimary]);
+
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+
+    const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({
+      sender: body.agent, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster,
+    });
+    const signature = await sign(userOpHash); // C_sub signs (it custodies the agent)
+    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const { receipt } = await accountClient(c.env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: body.agent as `0x${string}` });
+    if (!inner.ok) {
+      return c.json({ ok: false, error: 'userop_reverted', detail: inner.revertReason ?? 'inner userOp reverted', transactionHash: receipt.transactionHash }, 500);
+    }
+    return c.json({ ok: true, name: `${body.label.toLowerCase()}.${AGENT_NAME_PARENT}`, transactionHash: receipt.transactionHash });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/name-agent failed:', e);
+    return c.json({ ok: false, error: 'name_agent_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
  * POST /custody/google/sign  (client → a2a, custody session)
  * Body: { session, hash, sender }  → { ok, signature, custodian }
  *

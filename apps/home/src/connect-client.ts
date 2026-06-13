@@ -824,6 +824,13 @@ export async function createManagedAgent(
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
+  // SOCIAL (Google / YouVersion): the member is KMS-custodied by C_sub, which (spec 235 §5.4) only
+  // signs for the SAs it custodies — built SERVER-SIDE. So the whole deploy+name+grant runs on the
+  // worker (/custody/google/bootstrap-agent), zero device prompts, and we just record the vault link.
+  if (input.via === 'Google' || input.via === 'YouVersion') {
+    return createManagedAgentSocial(input, sessionToken, onStep);
+  }
+
   // Name-independent random salt (ADR-0010) → a distinct SA under the one root credential (MAM-INV-4).
   const saltBytes = crypto.getRandomValues(new Uint8Array(8));
   let salt = 0n;
@@ -942,12 +949,15 @@ export async function nameManagedAgent(
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  // SOCIAL (Google / YouVersion): the worker's C_sub signs register+setPrimary AS the agent (server-side).
+  if (input.via === 'Google' || input.via === 'YouVersion') {
+    return nameManagedAgentSocial(input, sessionToken, onStep);
+  }
+
   let signHash: SignHash;
   if (input.via === 'wallet') {
     const owner = await connectWallet();
     signHash = (h) => personalSign(owner, h);
-  } else if (input.via === 'Google' || input.via === 'YouVersion') {
-    return { ok: false, error: 'Naming with a Google sign-in is coming soon — use a passkey or wallet credential.' };
   } else {
     if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
     signHash = passkeySignHash;
@@ -972,6 +982,111 @@ export async function nameManagedAgent(
     return { ok: false, error: `named on-chain (${claim.name}) but vault save failed: ${e.error ?? save.status}` };
   }
   return { ok: true, name: claim.name };
+}
+
+/** Resolve an EXACT label to { label, node } or fail (MAM-D4) — for the social server paths that
+ *  hand the worker a pre-checked name to register. */
+async function resolveExactName(label: string): Promise<{ ok: true; label: string; node: Hex } | { ok: false; error: string }> {
+  const clean = label.trim().toLowerCase();
+  const picked = (await (await fetch(`/connect/name?exact=1&label=${encodeURIComponent(clean)}`)).json()) as {
+    label?: string; node?: Hex; error?: string; taken?: boolean;
+  };
+  if (!picked.label || !picked.node) {
+    if (picked.taken) return { ok: false, error: `“${clean}.impact” is already taken — pick another name.` };
+    return { ok: false, error: picked.error ?? 'no free name' };
+  }
+  return { ok: true, label: picked.label, node: picked.node };
+}
+
+/** SOCIAL create (Google / YouVersion): the worker derives C_sub + deploys the child SA (named or
+ *  nameless) + approves the stewardship grant in one sponsored userOp; we record the vault link. */
+async function createManagedAgentSocial(
+  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string },
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
+  const wantName = !!input.label && input.label.trim().length >= 3;
+  let label: string | undefined;
+  let node: Hex | undefined;
+  if (wantName) {
+    onStep?.('Checking that name…');
+    const r = await resolveExactName(input.label!);
+    if (!r.ok) return r;
+    label = r.label; node = r.node;
+  }
+
+  onStep?.(wantName ? 'Deploying your agent — name + access grant…' : 'Deploying your agent (unnamed)…');
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/bootstrap-agent', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.parent, label, node }),
+  });
+  const b = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; agent?: Address; name?: string; stewardshipDelegation?: DelegationWire; custodyDescriptor?: unknown; error?: string; detail?: string;
+  };
+  if (!res.ok || !b.ok || !b.agent) {
+    return { ok: false, error: [b.error, b.detail].filter(Boolean).join(' — ') || `create failed (HTTP ${res.status})` };
+  }
+  const child = b.agent;
+  const name = b.name ?? '';
+
+  onStep?.('Saving to your private vault…');
+  const credential = buildRelatedAgentCredential({
+    holder: input.parent, relatedAgent: child, purpose: input.kind, requestedBy: '',
+    issuerCaip10: `eip155:${CHAIN_ID}:${input.person}`, body: { agentName: name }, validFrom: new Date().toISOString(),
+  });
+  const proofHash = relatedAgentProofHash(credential);
+  const save = await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({
+      person: input.person, orgAgent: child, orgName: name, purpose: input.kind, kind: input.kind, parent: input.parent,
+      stewardshipDelegation: b.stewardshipDelegation, proofHash, custody: b.custodyDescriptor,
+    }),
+  });
+  if (!save.ok) {
+    const e = (await save.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
+  }
+  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
+}
+
+/** SOCIAL name-later (Google / YouVersion): the worker's C_sub signs register+setPrimary AS the agent. */
+async function nameManagedAgentSocial(
+  input: { agent: Address; label: string; kind: AgentKind; parent: Address; person: Address; via: string },
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  onStep?.('Checking that name…');
+  const r = await resolveExactName(input.label);
+  if (!r.ok) return r;
+
+  onStep?.('Naming your agent on the network…');
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/name-agent', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken, agent: input.agent, label: r.label, node: r.node }),
+  });
+  const b = (await res.json().catch(() => ({}))) as { ok?: boolean; name?: string; error?: string; detail?: string };
+  if (!res.ok || !b.ok || !b.name) {
+    return { ok: false, error: [b.error, b.detail].filter(Boolean).join(' — ') || `naming failed (HTTP ${res.status})` };
+  }
+
+  onStep?.('Saving the name…');
+  const save = await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({ person: input.person, orgAgent: input.agent, orgName: b.name, kind: input.kind, parent: input.parent }),
+  });
+  if (!save.ok) {
+    const e = (await save.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: `named on-chain (${b.name}) but vault save failed: ${e.error ?? save.status}` };
+  }
+  return { ok: true, name: b.name };
 }
 
 /** List the member's managed agents (all kinds) from their home vault — one read path
