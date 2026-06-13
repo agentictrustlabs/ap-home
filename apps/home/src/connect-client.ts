@@ -1107,6 +1107,41 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
   }));
 }
 
+const MINT_ABI = [
+  { type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] },
+] as const;
+
+/** Fund a treasury with demo USDC. MockUSDC.mint is permissionless, so the member's HOME SA executes
+ *  `mint(treasury, amount)` in ONE gasless sponsored userOp. The home SA is the single SA EVERY credential
+ *  can sign for — passkey (passkeySignHash), wallet (personalSign), and SOCIAL (googleSignHash signs for
+ *  the home SA, spec 235 §5.4). No wallet transaction → no MetaMask/Blockaid prompt. */
+export async function fundTreasury(
+  input: { treasury: Address; usdc: number; person: Address; via: string },
+  sessionToken: string,
+  onStep?: (s: string) => void,
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  if (!(input.usdc > 0)) return { ok: false, error: 'Enter an amount greater than 0.' };
+  const amount = BigInt(Math.round(input.usdc * 1_000_000)); // USDC has 6 decimals
+
+  let signHash: SignHash;
+  if (input.via === 'wallet') {
+    const owner = await connectWallet();
+    signHash = (h) => personalSign(owner, h);
+  } else if (input.via === 'Google' || input.via === 'YouVersion') {
+    signHash = googleSignHash(input.person, sessionToken); // C_sub signs for the home SA
+  } else {
+    if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
+    signHash = passkeySignHash;
+  }
+
+  onStep?.(`Funding ${input.usdc} USDC…`);
+  const mintData = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [input.treasury, amount] });
+  const callData = buildExecuteCallData({ to: CONTRACTS.mockUsdc, value: 0n, data: mintData });
+  const res = await executeCall(input.person, signHash, callData, { attempts: 6 });
+  if (!res.ok) return { ok: false, error: `funding failed: ${res.error}` };
+  return { ok: true, txHash: res.txHash };
+}
+
 /** spec 256 — org-create for a GOOGLE member: the org is custodied by their per-(iss,sub) KMS
  *  custodian C_sub and deployed + named + grant-approved SERVER-SIDE in one C_sub-signed userOp —
  *  ZERO device prompts (their only gesture was signing in with Google). Mirrors createChildAgentForSite's

@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { createManagedAgent, nameManagedAgent, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
@@ -40,11 +40,13 @@ export function useManagedAgents(token: string | null) {
       .catch(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, [token, reloadKey]);
-  return { agents, loaded, reload: () => setReloadKey((k) => k + 1) };
+  // `version` bumps on every reload — treasury balances re-read when it changes (e.g. after funding).
+  return { agents, loaded, version: reloadKey, reload: () => setReloadKey((k) => k + 1) };
 }
 
-/** Live USDC-balance read for a treasury SA (the demo settlement asset, 6 decimals; '—' on error). */
-function useUsdcBalance(address?: string): string | null {
+/** Live USDC-balance read for a treasury SA (the demo settlement asset, 6 decimals; '—' on error).
+ *  `refreshKey` forces a re-read (the address is stable, so funding wouldn't otherwise refresh it). */
+function useUsdcBalance(address?: string, refreshKey?: number): string | null {
   const [bal, setBal] = useState<string | null>(null);
   useEffect(() => {
     if (!address) return;
@@ -54,16 +56,68 @@ function useUsdcBalance(address?: string): string | null {
       .then((b) => { if (!cancelled) setBal(formatUnits(b as bigint, 6)); })
       .catch(() => { if (!cancelled) setBal(null); });
     return () => { cancelled = true; };
-  }, [address]);
+  }, [address, refreshKey]);
   return bal;
 }
 
-function BalanceLine({ address }: { address: string }) {
-  const bal = useUsdcBalance(address);
+function BalanceLine({ address, refreshKey }: { address: string; refreshKey?: number }) {
+  const bal = useUsdcBalance(address, refreshKey);
   return (
     <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>
       Balance: <b>{bal !== null ? `${Number(bal).toFixed(2)} USDC` : '—'}</b>
     </span>
+  );
+}
+
+/** Fund a treasury with demo USDC (gasless mint via the home SA). On success, bumps the parent
+ *  reload so the balance re-reads. */
+export function FundForm({
+  treasury, person, via, token, onDone,
+}: {
+  treasury: string; person: string; via: string; token: string; onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [amt, setAmt] = useState('10');
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState('');
+  const [err, setErr] = useState('');
+
+  async function go() {
+    const n = Number(amt);
+    if (!(n > 0)) { setErr('Enter an amount greater than 0.'); return; }
+    setBusy(true); setErr(''); setStep('');
+    const res = await fundTreasury({ treasury: treasury as `0x${string}`, usdc: n, person: person as `0x${string}`, via }, token, setStep);
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    setOpen(false);
+    onDone();
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.78rem', padding: '.25rem .55rem' }} onClick={() => setOpen(true)}>
+        Fund with USDC
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: '.5rem', display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
+      <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+        <input type="number" min="0" step="1" value={amt} onChange={(e) => setAmt(e.target.value)} disabled={busy}
+          style={{ width: 90, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>USDC</span>
+      </div>
+      <div style={{ display: 'flex', gap: '.4rem' }}>
+        <button type="button" className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void go()}>
+          {busy ? (step || 'Funding…') : 'Fund'}
+        </button>
+        <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => { setOpen(false); setErr(''); }}>
+          Cancel
+        </button>
+      </div>
+      <p className="onboarding-note" style={{ margin: 0 }}>Mints demo USDC to this treasury — gasless, no wallet prompt.</p>
+      {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
+    </div>
   );
 }
 
@@ -180,8 +234,13 @@ export function NameAgentForm({
   );
 }
 
-/** A treasury card — name (or "unnamed" + an optional name-it slot), address, balance, explorer. */
-function TreasuryCard({ name, address, sublabel, nameSlot }: { name: string; address: string; sublabel?: string; nameSlot?: React.ReactNode }) {
+/** A treasury card — name (or "unnamed" + name-it slot), address, live balance, explorer, fund action. */
+function TreasuryCard({
+  name, address, sublabel, nameSlot, person, via, token, refreshKey, onFunded,
+}: {
+  name: string; address: string; sublabel?: string; nameSlot?: React.ReactNode;
+  person?: string | null; via?: string; token?: string | null; refreshKey?: number; onFunded?: () => void;
+}) {
   return (
     <div className="manage-card">
       <div className="manage-card-head">
@@ -190,17 +249,18 @@ function TreasuryCard({ name, address, sublabel, nameSlot }: { name: string; add
       </div>
       <div style={{ margin: '.45rem 0' }}><AddressChip address={address as `0x${string}`} size="sm" /></div>
       <p className="manage-card-blurb" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem' }}>
-        <BalanceLine address={address} />
+        <BalanceLine address={address} refreshKey={refreshKey} />
         <a href={EXPLORER + address} target="_blank" rel="noreferrer">explorer ↗</a>
       </p>
       {!name && nameSlot}
+      {token && person && onFunded && <FundForm treasury={address} person={person} via={via ?? ''} token={token} onDone={onFunded} />}
     </div>
   );
 }
 
 // ── /you — your personal treasury ───────────────────────────────────────
 export function PersonalTreasurySection({ token, person, via }: { token: string | null; person: string | null; via: string }) {
-  const { agents, loaded, reload } = useManagedAgents(token);
+  const { agents, loaded, version, reload } = useManagedAgents(token);
   if (!token || !person) return null;
   const treasury = agents.find((a) => a.kind === 'person-treasury');
 
@@ -216,6 +276,7 @@ export function PersonalTreasurySection({ token, person, via }: { token: string 
       ) : treasury ? (
         <div className="manage-grid">
           <TreasuryCard name={treasury.name} address={treasury.agent}
+            person={person} via={via} token={token} refreshKey={version} onFunded={reload}
             nameSlot={<NameAgentForm agent={treasury.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
         </div>
       ) : (
@@ -238,7 +299,7 @@ export function PersonalTreasurySection({ token, person, via }: { token: string 
 export function OrganizationsManager({
   token, person, via, onSelect,
 }: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void }) {
-  const { agents, loaded, reload } = useManagedAgents(token);
+  const { agents, loaded, version, reload } = useManagedAgents(token);
   if (!token || !person) return null;
   const orgs = agents.filter((a) => a.kind === 'org');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
@@ -268,8 +329,9 @@ export function OrganizationsManager({
                     <div style={{ fontSize: '.82rem', display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
                       <span style={{ color: 'var(--c-g500, #64748b)' }}><LandmarkIcon size={13} /> Treasury: <b>{t.name || 'Unnamed'}</b></span>
                       <AddressChip address={t.agent as `0x${string}`} size="sm" />
-                      <BalanceLine address={t.agent} />
+                      <BalanceLine address={t.agent} refreshKey={version} />
                       {!t.name && <NameAgentForm agent={t.agent} kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} />}
+                      <FundForm treasury={t.agent} person={person} via={via} token={token} onDone={reload} />
                     </div>
                   ) : (
                     <CreateAgentForm kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Create org treasury" />
@@ -296,7 +358,7 @@ export function OrganizationsManager({
 
 // ── /treasuries — every treasury, personal + org ────────────────────────
 export function TreasuriesRollup({ token, person, via }: { token: string | null; person: string | null; via: string }) {
-  const { agents, loaded, reload } = useManagedAgents(token);
+  const { agents, loaded, version, reload } = useManagedAgents(token);
   if (!token || !person) return null;
   const personal = agents.find((a) => a.kind === 'person-treasury');
   const orgTreasuries = agents.filter((a) => a.kind === 'org-treasury');
@@ -312,6 +374,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
           <div className="manage-grid">
             {personal ? (
               <TreasuryCard name={personal.name} address={personal.agent}
+                person={person} via={via} token={token} refreshKey={version} onFunded={reload}
                 nameSlot={<NameAgentForm agent={personal.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
             ) : (
               <div className="manage-card">
@@ -332,6 +395,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
             <div className="manage-grid">
               {orgTreasuries.map((t) => (
                 <TreasuryCard key={t.agent} name={t.name} address={t.agent} sublabel={`${orgName(t.parent)} treasury`}
+                  person={person} via={via} token={token} refreshKey={version} onFunded={reload}
                   nameSlot={<NameAgentForm agent={t.agent} kind="org-treasury" parent={t.parent} person={person} token={token} via={via} onDone={reload} />} />
               ))}
             </div>
