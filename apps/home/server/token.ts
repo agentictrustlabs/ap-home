@@ -129,7 +129,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
         pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
-        treasury: grant.treasury ?? undefined, // person-treasury SA (or absent) — relying app gates financial ops on it
+        // PRIVACY: the person-treasury ADDRESS is intentionally NOT returned to the relying app. The home
+        // owns the treasury question during a purchase; the app gates on access/subscription, not the wallet.
         ...(grant.org ? { org: grant.org } : {}),
       },
       request,
