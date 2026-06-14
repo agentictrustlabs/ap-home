@@ -2629,12 +2629,17 @@ app.post('/custody/google/sign', async (c) => {
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
-    // INVARIANT (spec 235 §5.4): only sign for the SA the session proves.
-    if ((body.sender as string).toLowerCase() !== sa.toLowerCase()) {
-      return c.json({ ok: false, error: 'sender_mismatch', detail: 'requested sender ≠ session SA' }, 403);
-    }
+    // The session proves control of the person SA (salt 0) — confirm that binding first.
     if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
       return c.json({ ok: false, error: 'sa_mismatch' }, 403);
+    }
+    // spec 235 §5.4 (relaxed, ON-CHAIN VERIFIED): sign for the person SA, OR for any SA this session's
+    // C_sub provably CUSTODIES on-chain — a managed agent / treasury the member controls (e.g. their
+    // lbsb-treasury, for owner-side subscription collection). The isCustodian check (same gate used by
+    // /name-agent-as-the-agent) means a session still can't sign for SAs it doesn't control.
+    const isPersonSa = (body.sender as string).toLowerCase() === sa.toLowerCase();
+    if (!isPersonSa && !(await accountClient(c.env).isCustodian(body.sender as Address, cSub))) {
+      return c.json({ ok: false, error: 'sender_mismatch', detail: 'requested sender is neither the session SA nor an SA custodied by this session' }, 403);
     }
     const signature = await sign(body.hash);
     return c.json({ ok: true, signature, custodian: cSub });
