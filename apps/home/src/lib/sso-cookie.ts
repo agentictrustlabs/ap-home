@@ -24,7 +24,15 @@ function onImpactHost(): boolean {
   }
 }
 
-export function setSsoCookie(token: string, via: string, maxAgeSec = 3600): void {
+/** Default SSO-session lifetime: 30 days — "authenticated once, recognized for weeks." A returning
+ *  member is recognized for the whole window (no fresh login), so a relying app's later step (e.g. an
+ *  x402 charge) is one-tap + the per-action credential signature, not a re-connect. The cookie only
+ *  CARRIES the (short-lived) session token; for passkey/wallet members recognition doesn't re-use that
+ *  token (they re-sign per action), so the long recognition window is safe. (KMS/social custody sessions
+ *  still expire on the token's own TTL — those re-auth when the underlying token lapses.) */
+const SSO_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+
+export function setSsoCookie(token: string, via: string, maxAgeSec = SSO_MAX_AGE_SEC): void {
   if (!onImpactHost()) return;
   try {
     const value = encodeURIComponent(JSON.stringify({ t: token, v: via }));

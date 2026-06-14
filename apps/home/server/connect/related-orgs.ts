@@ -7,6 +7,7 @@
 // Connect-home vault (KV). person↔org never travels as public graph state.
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
@@ -141,6 +142,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     }
   } else {
     // ERC-1271 control-of-person proof (existing spec-247 external-custodian path).
+    // AUDIT NEW-RAG-2 (OPEN — remediation pending, coordinated demo-jp change): this challenge is a CONSTANT
+    // (no nonce / expiry / payload binding), so a single captured signature authorizes UNLIMITED writes to any
+    // link field forever (link poisoning / denial-of-recovery). The fix binds the challenge to (org, content
+    // hash, nonce, expiry) and adds a one-shot nonce store — but the demo-jp operator client signs this exact
+    // string today, so flipping it is a cross-app change. The home's OWN management uses the nonce-protected
+    // session-token branch above (not this path). Tracked in findings.yaml; do NOT widen this path meanwhile.
     if (!sig.startsWith('0x')) return jsonCors({ error: 'sig or Bearer session required' }, request, 400);
     const challenge = keccak256(toBytes(`related-orgs:write:${person}`));
     const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
@@ -159,6 +166,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
   }
 
+  // AUDIT NEW-RAG-1 — the recoverable custody descriptor is client-supplied; VALIDATE it server-side
+  // (RC-INV-3: re-validates + rebuilds field-by-field, so a smuggled owner id `iss`/`sub` can't be
+  // persisted at rest). Fail closed on bad input rather than storing raw bytes.
+  let custodyValidated: unknown = undefined;
+  if (body?.custody !== undefined && body?.custody !== null) {
+    try {
+      custodyValidated = buildCustodyDescriptor(body.custody as CustodyDescriptor);
+    } catch (e) {
+      return jsonCors({ error: 'invalid custody descriptor', detail: e instanceof Error ? e.message : String(e) }, request, 400);
+    }
+  }
+
   // MERGE with any existing record so a partial re-save (e.g. spec-275 name-later, which sends
   // only orgName) NEVER clobbers fields it doesn't carry — delegations, proofHash, custody persist.
   const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
@@ -174,9 +193,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     stewardshipDelegation: pick(body?.stewardshipDelegation, existing.stewardshipDelegation, null),
     membershipDelegation: pick(body?.membershipDelegation, existing.membershipDelegation, null),
     proofHash: pick(body?.proofHash, existing.proofHash, null),
-    // spec 271 (W0a) — persist the recoverable custody descriptor when the caller supplies one. Stored in
+    // spec 271 (W0a) — persist the VALIDATED recoverable custody descriptor (NEW-RAG-1). Stored in
     // the same person-scoped KV the owner controls; read back by recoverCustodian (W0b).
-    custody: pick(body?.custody, existing.custody, null),
+    custody: custodyValidated !== undefined ? custodyValidated : (existing.custody ?? null),
     // spec 275 — agent kind + parent (defaults keep legacy org links person-parented).
     kind: pick(body?.kind, existing.kind, 'org'),
     parent: pick(body?.parent, existing.parent, person).toLowerCase(),

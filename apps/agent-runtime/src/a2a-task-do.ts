@@ -78,6 +78,8 @@ export class A2aTaskDO {
       isRevoked: async (d) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
       verifyDelegationSignature: async (d) => erc1271(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex),
       verifyMessageSignature: async (msg, digest) => erc1271(msg.sender as Address, digest, msg.signature as Hex),
+      // AUDIT NEW-A2A-2 — the read/control caller proves control of `caller` via ERC-1271 over the request digest.
+      verifyCallerSignature: async (caller, digest, signature) => erc1271(caller as Address, digest, signature as Hex),
     };
     // Vault seam (A2A-INV-04 — only refs/hashes in task state):
     //  • with a delegation (FR-3.4) → write/read the DELEGATOR's demo-mcp vault via the captured grant
