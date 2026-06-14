@@ -143,36 +143,43 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string }
           | undefined;
         const pc = relyingApp?.paymentConfig;
+        // Resolve the member's PRE-CREATED person-treasury ONCE for any connect (a recognized member has
+        // a home session `token` in hand). Surfaced to the relying app as `treasury` so it can gate ALL
+        // financial ops up front — a member with no treasury is told to create one, not shown a Buy-access
+        // flow that silently no-ops. A social member with no treasury yet resolves to null here.
+        let treasuryAddr: Address | null = null;
+        try {
+          treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null;
+        } catch {
+          treasuryAddr = null;
+        }
         // ALL custodians (wallet / passkey / social-KMS) — the charge is signed via signHashFor, which
-        // handles every credential. A social member needs a person-treasury (createManagedAgent KMS is
-        // still pending); with none, listManagedAgents finds nothing and we connect without payment.
-        if (enroll.template === 'x402-pay' && pc) {
-          const treasury = (await listManagedAgents(token)).find((a) => a.kind === 'person-treasury');
-          if (treasury) {
-            // spec 272 — charge the tier amount the relying app requested (enroll.payAmount), CAPPED by the
-            // client's registered per-charge max. Defaults to the max (≈ pay-as-you-go) when unspecified.
-            const cap = BigInt(pc.maxAmountPerCharge);
-            const req = enroll.payAmount ? BigInt(enroll.payAmount) : cap;
-            const amt = req < cap ? req : cap;
-            payment = {
-              treasury: treasury.agent as Address,
-              payee: pc.payee,
-              asset: pc.asset,
-              maxAmountPerCharge: BigInt(pc.maxAmountPerCharge),
-              maxAggregate: BigInt(pc.maxAggregate),
-              maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow,
-              windowSeconds: pc.windowSeconds,
-              mode: pc.mode,
-              // CHARGE the first payment in this ceremony (all-custodian) → settlementHash → app mints a pass.
-              chargeNow: true,
-              chargeAmount: amt,
-              edition: 'lbsb',
-            };
-          }
+        // handles every credential. With no treasury we connect without payment and the app surfaces
+        // "create a treasury" rather than attempting a charge.
+        if (enroll.template === 'x402-pay' && pc && treasuryAddr) {
+          // spec 272 — charge the tier amount the relying app requested (enroll.payAmount), CAPPED by the
+          // client's registered per-charge max. Defaults to the max (≈ pay-as-you-go) when unspecified.
+          const cap = BigInt(pc.maxAmountPerCharge);
+          const req = enroll.payAmount ? BigInt(enroll.payAmount) : cap;
+          const amt = req < cap ? req : cap;
+          payment = {
+            treasury: treasuryAddr,
+            payee: pc.payee,
+            asset: pc.asset,
+            maxAmountPerCharge: BigInt(pc.maxAmountPerCharge),
+            maxAggregate: BigInt(pc.maxAggregate),
+            maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow,
+            windowSeconds: pc.windowSeconds,
+            mode: pc.mode,
+            // CHARGE the first payment in this ceremony (all-custodian) → settlementHash → app mints a pass.
+            chargeNow: true,
+            chargeAmount: amt,
+            edition: 'lbsb',
+          };
         }
         const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr);
       }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);

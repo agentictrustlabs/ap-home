@@ -184,6 +184,11 @@ export function OnboardingJourney({
         | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string }
         | undefined;
       const pc = relyingApp?.paymentConfig;
+      // The member's person-treasury (if any), surfaced to the relying app so it can gate financial ops.
+      // Resolved only on the x402-pay path here (it opens the home anyway); for plain site-login the
+      // recognized fast-path (RecognizedEnroll) resolves it for free, so we don't force a re-auth gesture
+      // just to read it. A first-run member has no treasury → null.
+      let treasuryAddr: Address | null = null;
       // Only an EXISTING member can have a person-treasury (a brand-new first-run member just made their
       // home and has none yet — they set up payment later from the Portal, then reconnect). Guarding on
       // `existingAgent` avoids a wasted re-auth for first-run x402-pay connects. openHome here is
@@ -193,6 +198,7 @@ export function OnboardingJourney({
         const opened = await openHome(home.name, via);
         if (opened.ok) {
           const treasury = (await listManagedAgents(opened.token)).find((a) => a.kind === 'person-treasury');
+          treasuryAddr = (treasury?.agent as Address) ?? null;
           if (treasury) {
             payment = {
               treasury: treasury.agent as Address,
@@ -215,7 +221,7 @@ export function OnboardingJourney({
       // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
       const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
-      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash);
+      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,

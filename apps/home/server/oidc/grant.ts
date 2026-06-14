@@ -46,6 +46,10 @@ interface GrantBody {
    *  chargePayment). Opaque to the home; carried to the relying app, which verifies it on-chain + mints
    *  the access pass. */
   settlementHash?: string;
+  /** The member's person-treasury SA address (or null if they have none yet). Resolved at connect from
+   *  the home's managed-agent tree and carried to the relying app so it can gate ALL financial ops up
+   *  front — a member with no treasury is told to create one rather than shown a no-op Buy-access flow. */
+  treasury?: string | null;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -167,6 +171,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       sessionDelegation: body.sessionDelegation ?? null,
       paymentDelegation: body.paymentDelegation ?? null,
       settlementHash: body.settlementHash ?? null,
+      treasury: body.treasury ?? null,
       org: body.org ?? null,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,

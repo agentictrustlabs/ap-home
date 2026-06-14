@@ -134,11 +134,12 @@ export async function submitEnrollGrant(
   sessionDelegation?: unknown,
   paymentDelegation?: unknown,
   settlementHash?: string,
+  treasury?: string | null,
 ): Promise<string> {
   const r = await fetch('/oidc/grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org, sessionDelegation, paymentDelegation, settlementHash }),
+    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org, sessionDelegation, paymentDelegation, settlementHash, treasury }),
   });
   const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
   if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);
@@ -178,7 +179,7 @@ export interface EnrollApi {
   beginGrant(resolvedName: string): Promise<{ grant_id: string; delegate: Address }>;
   /** Redeem a server-minted grant by presenting the signed delegation. `sessionDelegation` (spec 270 v4
    *  W2) is the DEL-001 leaf the home signed for the relying app's session key — carried to /token. */
-  submitGrant(grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown, paymentDelegation?: unknown, settlementHash?: string): Promise<string>;
+  submitGrant(grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown, paymentDelegation?: unknown, settlementHash?: string, treasury?: string | null): Promise<string>;
   deliverCode(code: string): void;
   denyEnroll(): void;
 }
@@ -214,8 +215,8 @@ export function useEnrollReq(): EnrollApi {
 
   // Redeem the grant by presenting the signed delegation.
   const submitGrant = useCallback(
-    async (grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown, paymentDelegation?: unknown, settlementHash?: string): Promise<string> => {
-      return submitEnrollGrant(grantId, delegationWire, org, sessionDelegation, paymentDelegation, settlementHash);
+    async (grantId: string, delegationWire: unknown, org?: unknown, sessionDelegation?: unknown, paymentDelegation?: unknown, settlementHash?: string, treasury?: string | null): Promise<string> => {
+      return submitEnrollGrant(grantId, delegationWire, org, sessionDelegation, paymentDelegation, settlementHash, treasury);
     },
     [],
   );
