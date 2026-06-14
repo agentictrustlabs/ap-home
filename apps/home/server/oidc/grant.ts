@@ -42,6 +42,10 @@ interface GrantBody {
    *  window. Carried alongside `delegation` (like `sessionDelegation`); the relying app stores it in
    *  the payee's vault and redeems it per paid read. The PaymentEnforcer caps every charge on-chain. */
   paymentDelegation?: IncomingDelegation;
+  /** spec 272 — the settlement tx hash of the FIRST charge done IN the ceremony (all-custodian, via
+   *  chargePayment). Opaque to the home; carried to the relying app, which verifies it on-chain + mints
+   *  the access pass. */
+  settlementHash?: string;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -162,6 +166,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       delegation: body.delegation,
       sessionDelegation: body.sessionDelegation ?? null,
       paymentDelegation: body.paymentDelegation ?? null,
+      settlementHash: body.settlementHash ?? null,
       org: body.org ?? null,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,

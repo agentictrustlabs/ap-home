@@ -106,6 +106,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       delegation: unknown;
       sessionDelegation?: unknown;
       paymentDelegation?: unknown;
+      settlementHash?: string;
       org: unknown;
       code_challenge: string;
       client_id: string;
@@ -124,6 +125,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         delegation: grant.delegation ?? undefined,
         sessionDelegation: grant.sessionDelegation ?? undefined, // spec 270 v4 W2 — the DEL-001 leaf
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
+        settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
         ...(grant.org ? { org: grant.org } : {}),
       },
       request,

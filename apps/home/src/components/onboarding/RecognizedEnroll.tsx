@@ -140,12 +140,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // resolve their PRE-CREATED person-treasury (approach A) and authorize a capped `treasury →
         // lbsb-treasury` payment delegation in the SAME ceremony. No treasury → connect without payment.
         let payment:
-          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull' }
+          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string }
           | undefined;
         const pc = relyingApp?.paymentConfig;
-        if (enroll.template === 'x402-pay' && pc && (viaLower === 'passkey' || viaLower === 'wallet')) {
+        // ALL custodians (wallet / passkey / social-KMS) — the charge is signed via signHashFor, which
+        // handles every credential. A social member needs a person-treasury (createManagedAgent KMS is
+        // still pending); with none, listManagedAgents finds nothing and we connect without payment.
+        if (enroll.template === 'x402-pay' && pc) {
           const treasury = (await listManagedAgents(token)).find((a) => a.kind === 'person-treasury');
           if (treasury) {
+            // spec 272 — PAYG amount for now; tier amounts arrive with #2.
+            const amt = BigInt(pc.maxAmountPerCharge);
             payment = {
               treasury: treasury.agent as Address,
               payee: pc.payee,
@@ -155,12 +160,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
               maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow,
               windowSeconds: pc.windowSeconds,
               mode: pc.mode,
+              // CHARGE the first payment in this ceremony (all-custodian) → settlementHash → app mints a pass.
+              chargeNow: true,
+              chargeAmount: amt,
+              edition: 'lbsb',
             };
           }
         }
         const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash);
       }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
