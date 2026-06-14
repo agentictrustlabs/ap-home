@@ -18,6 +18,7 @@ import {
   googleSignHash,
   secureHomeWithGoogle,
   secureHomeGoogleNoName,
+  chargePayment,
   AUD,
   type SignHash,
 } from '../connect-client';
@@ -213,8 +214,14 @@ export async function givePermission(
     maxRedemptionsPerWindow?: number;
     windowSeconds?: number;
     mode?: 'push' | 'pull';
+    /** spec 272 — also CHARGE the first/top-up payment in THIS ceremony (all-custodian via signHash):
+     *  the person SA redeems the push delegation → `chargeAmount` USDC moves person-treasury → payee.
+     *  The relying app verifies the returned settlementHash on-chain and mints a `reads`-read pass. */
+    chargeNow?: boolean;
+    chargeAmount?: bigint;
+    edition?: string;
   },
-): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire }>> {
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; settlementHash?: Hex }>> {
   try {
     const signHash = await signHashFor(via, home.address, auth);
     const delegation = await issueSiteDelegation(home.address, delegate, signHash);
@@ -227,24 +234,33 @@ export async function givePermission(
       : undefined;
     // x402 payment delegation — issued from the TREASURY, signed by the same credential, in the same
     // ceremony. delegate = OPEN (push: reader redeems) or the payee (pull: provider redeems).
-    const paymentDelegation = payment
-      ? toWire(
-          await issuePaymentDelegation(
-            payment.treasury,
-            payment.mode === 'pull' ? payment.payee : OPEN_DELEGATION,
-            payment.payee,
-            signHash,
-            {
-              asset: payment.asset,
-              maxAmountPerCharge: payment.maxAmountPerCharge,
-              maxAggregate: payment.maxAggregate,
-              maxRedemptionsPerWindow: payment.maxRedemptionsPerWindow,
-              windowSeconds: payment.windowSeconds,
-            },
-          ),
+    const payDeleg = payment
+      ? await issuePaymentDelegation(
+          payment.treasury,
+          payment.mode === 'pull' ? payment.payee : OPEN_DELEGATION,
+          payment.payee,
+          signHash,
+          {
+            asset: payment.asset,
+            maxAmountPerCharge: payment.maxAmountPerCharge,
+            maxAggregate: payment.maxAggregate,
+            maxRedemptionsPerWindow: payment.maxRedemptionsPerWindow,
+            windowSeconds: payment.windowSeconds,
+          },
         )
       : undefined;
-    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation };
+    // ALL-CUSTODIAN CHARGE (spec 272): redeem the just-minted push delegation IN this ceremony — the
+    // person SA executes it, signed by the SAME credential (signHash), gaslessly. Moves chargeAmount USDC
+    // person-treasury → payee; the relying app verifies the tx + mints a pass. Non-fatal: if the charge
+    // fails (treasury underfunded), the delegation is still returned so the app can settle later.
+    let settlementHash: Hex | undefined;
+    if (payDeleg && payment?.chargeNow && payment.chargeAmount && payment.mode !== 'pull') {
+      const charged = await chargePayment(home.address, payDeleg, signHash, {
+        payee: payment.payee, asset: payment.asset, amount: payment.chargeAmount, edition: payment.edition ?? 'lbsb',
+      });
+      if (charged.ok) settlementHash = charged.settlementHash;
+    }
+    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, settlementHash };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
   }
