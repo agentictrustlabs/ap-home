@@ -204,7 +204,8 @@ export function OnboardingJourney({
               windowSeconds: pc.windowSeconds,
               mode: pc.mode,
               chargeNow: true,
-              chargeAmount: BigInt(pc.maxAmountPerCharge), // PAYG; tier amounts arrive with #2
+              // tier amount (enroll.payAmount) capped by the registered per-charge max; default = max.
+              chargeAmount: (() => { const cap = BigInt(pc.maxAmountPerCharge); const req = api.enroll!.payAmount ? BigInt(api.enroll!.payAmount) : cap; return req < cap ? req : cap; })(),
               edition: 'lbsb',
             };
           }

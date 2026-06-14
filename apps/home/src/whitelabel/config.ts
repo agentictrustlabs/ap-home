@@ -83,8 +83,8 @@ const faithImpact: WhiteLabelConfig = {
       paymentConfig: {
         payee: '0xa9e0acecfbce08548358b4f5681b13a00a5cab7a',
         asset: '0x8fb56ff3C13347DFC4E1287aE83E88deE5a7211C',
-        maxAmountPerCharge: '1000',
-        maxAggregate: '1000000',
+        maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
+        maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
         windowSeconds: 3600,
         mode: 'push',

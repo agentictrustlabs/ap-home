@@ -149,8 +149,11 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (enroll.template === 'x402-pay' && pc) {
           const treasury = (await listManagedAgents(token)).find((a) => a.kind === 'person-treasury');
           if (treasury) {
-            // spec 272 — PAYG amount for now; tier amounts arrive with #2.
-            const amt = BigInt(pc.maxAmountPerCharge);
+            // spec 272 — charge the tier amount the relying app requested (enroll.payAmount), CAPPED by the
+            // client's registered per-charge max. Defaults to the max (≈ pay-as-you-go) when unspecified.
+            const cap = BigInt(pc.maxAmountPerCharge);
+            const req = enroll.payAmount ? BigInt(enroll.payAmount) : cap;
+            const amt = req < cap ? req : cap;
             payment = {
               treasury: treasury.agent as Address,
               payee: pc.payee,
