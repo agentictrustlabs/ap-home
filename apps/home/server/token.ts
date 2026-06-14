@@ -106,6 +106,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       delegation: unknown;
       sessionDelegation?: unknown;
       paymentDelegation?: unknown;
+      pullDelegation?: unknown;
       settlementHash?: string;
       treasury?: string | null;
       org: unknown;
@@ -126,6 +127,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         delegation: grant.delegation ?? undefined,
         sessionDelegation: grant.sessionDelegation ?? undefined, // spec 270 v4 W2 — the DEL-001 leaf
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
+        pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
         treasury: grant.treasury ?? undefined, // person-treasury SA (or absent) — relying app gates financial ops on it
         ...(grant.org ? { org: grant.org } : {}),

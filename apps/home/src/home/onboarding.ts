@@ -220,8 +220,14 @@ export async function givePermission(
     chargeNow?: boolean;
     chargeAmount?: bigint;
     edition?: string;
+    /** spec 272 recurring lane — when set, this connect is a SUBSCRIPTION: in addition to the first
+     *  period's push charge, mint a STANDING `treasury → payee` PULL mandate (delegate = payee) the
+     *  provider can redeem once per `periodSeconds` to renew, capped at `chargeAmount`/period and
+     *  `chargeAmount × periods` total. Returned as `pullDelegation`; the app stores it in the payee's
+     *  vault. (Unattended redemption needs the provider's signer — left to an owner-online step.) */
+    subscription?: { periodSeconds: number; periods?: number };
   },
-): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; settlementHash?: Hex }>> {
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex }>> {
   try {
     const signHash = await signHashFor(via, home.address, auth);
     const delegation = await issueSiteDelegation(home.address, delegate, signHash);
@@ -260,7 +266,25 @@ export async function givePermission(
       });
       if (charged.ok) settlementHash = charged.settlementHash;
     }
-    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, settlementHash };
+    // SUBSCRIPTION (spec 272 recurring): ALSO mint a standing PULL mandate (delegate = payee, so the
+    // provider redeems) from the SAME treasury, signed by the SAME credential. Per-period cap = the tier
+    // price (chargeAmount); window = the billing period; one redemption per window; aggregate bounds the
+    // number of auto-renewals. The app stores it in the payee's vault. This is the "person delegates the
+    // payee the ability to charge a subscription" half — distinct from the push delegation used above.
+    let pullDeleg: Awaited<ReturnType<typeof issuePaymentDelegation>> | undefined;
+    if (payment?.subscription && payment.chargeAmount) {
+      const perPeriod = payment.chargeAmount;
+      const periods = BigInt(Math.max(1, payment.subscription.periods ?? 12));
+      const aggregate = perPeriod * periods;
+      pullDeleg = await issuePaymentDelegation(payment.treasury, payment.payee, payment.payee, signHash, {
+        asset: payment.asset,
+        maxAmountPerCharge: perPeriod,
+        maxAggregate: aggregate <= payment.maxAggregate ? aggregate : payment.maxAggregate,
+        maxRedemptionsPerWindow: 1,
+        windowSeconds: payment.subscription.periodSeconds,
+      });
+    }
+    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
   }

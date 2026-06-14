@@ -181,7 +181,7 @@ export function OnboardingJourney({
       // ceremony (same credential). If they have no treasury yet, connect proceeds without payment —
       // they create a personal treasury in their home and reconnect.
       let payment:
-        | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string }
+        | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string; subscription?: { periodSeconds: number; periods?: number } }
         | undefined;
       const pc = relyingApp?.paymentConfig;
       // The member's person-treasury (if any), surfaced to the relying app so it can gate financial ops.
@@ -213,6 +213,8 @@ export function OnboardingJourney({
               // tier amount (enroll.payAmount) capped by the registered per-charge max; default = max.
               chargeAmount: (() => { const cap = BigInt(pc.maxAmountPerCharge); const req = api.enroll!.payAmount ? BigInt(api.enroll!.payAmount) : cap; return req < cap ? req : cap; })(),
               edition: 'lbsb',
+              // spec 272 recurring — a SUBSCRIPTION connect (sub_period set): also mint a standing pull mandate.
+              subscription: api.enroll!.subPeriod ? { periodSeconds: api.enroll!.subPeriod } : undefined,
             };
           }
         }
@@ -221,7 +223,7 @@ export function OnboardingJourney({
       // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
       const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
-      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr);
+      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,

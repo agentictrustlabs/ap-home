@@ -46,6 +46,10 @@ interface GrantBody {
    *  chargePayment). Opaque to the home; carried to the relying app, which verifies it on-chain + mints
    *  the access pass. */
   settlementHash?: string;
+  /** spec 272 recurring — the standing `treasury → payee` PULL mandate minted for a SUBSCRIPTION connect
+   *  (delegate = payee). Carried to the relying app, which stores it in the payee's vault for renewal. Like
+   *  `paymentDelegation`, it is ERC-1271-verified, NOT client.delegate-matched (its delegate is the payee). */
+  pullDelegation?: IncomingDelegation;
   /** The member's person-treasury SA address (or null if they have none yet). Resolved at connect from
    *  the home's managed-agent tree and carried to the relying app so it can gate ALL financial ops up
    *  front — a member with no treasury is told to create one rather than shown a no-op Buy-access flow. */
@@ -92,6 +96,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body.paymentDelegation) {
     const pv = await verifyDelegation(env, body.paymentDelegation);
     if (!pv.ok) return json({ error: `payment delegation proof failed: ${pv.reason}` }, 401);
+  }
+  // spec 272 recurring — same independent verification for the standing subscription PULL mandate.
+  if (body.pullDelegation) {
+    const pv = await verifyDelegation(env, body.pullDelegation);
+    if (!pv.ok) return json({ error: `pull delegation proof failed: ${pv.reason}` }, 401);
   }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
@@ -170,6 +179,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       delegation: body.delegation,
       sessionDelegation: body.sessionDelegation ?? null,
       paymentDelegation: body.paymentDelegation ?? null,
+      pullDelegation: body.pullDelegation ?? null,
       settlementHash: body.settlementHash ?? null,
       treasury: body.treasury ?? null,
       org: body.org ?? null,

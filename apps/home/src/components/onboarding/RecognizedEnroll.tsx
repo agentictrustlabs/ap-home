@@ -140,7 +140,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // resolve their PRE-CREATED person-treasury (approach A) and authorize a capped `treasury →
         // lbsb-treasury` payment delegation in the SAME ceremony. No treasury → connect without payment.
         let payment:
-          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string }
+          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string; subscription?: { periodSeconds: number; periods?: number } }
           | undefined;
         const pc = relyingApp?.paymentConfig;
         // Resolve the member's PRE-CREATED person-treasury ONCE for any connect (a recognized member has
@@ -175,11 +175,13 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             chargeNow: true,
             chargeAmount: amt,
             edition: 'lbsb',
+            // spec 272 recurring — a SUBSCRIPTION connect (sub_period set): also mint a standing pull mandate.
+            subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
         }
         const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
