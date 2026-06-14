@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, isKmsVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
@@ -27,7 +27,7 @@ import { readSsoCookie, setSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setFedcmLoginStatus } from '../../context/session';
-import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollApi } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -111,6 +111,24 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     if (!enroll || !home) return;
     setPhase('granting');
     try {
+      // spec 272 recurring — OWNER subscription collection. No grant/delegation: the owner signs the
+      // redemption of every DUE subscriber's standing pull mandate AS the collection treasury they custody,
+      // then we deliver the result back to the owner app. Reuses the recognized-owner auth resolved above.
+      if (enroll.template === 'subscription-collect') {
+        const cfg = relyingApp?.collectionConfig;
+        if (!cfg) return fail('this app is not configured for subscription collection');
+        if (!enroll.collectToken) return fail('missing owner token for collection');
+        const collectAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        const res = await collectDueSubscriptions(
+          cfg.treasury as Address, viaLower, collectAuth,
+          { asset: cfg.asset as Address, edition: cfg.edition, a2aBase: cfg.a2aBase, idToken: enroll.collectToken },
+        );
+        if (!res.ok) return fail(res.error);
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: res.collected, attempted: res.attempted }), 900);
+        return;
+      }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
       const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;

@@ -39,6 +39,16 @@ export interface RelyingApp {
     windowSeconds?: number;
     mode?: 'push' | 'pull';
   };
+  /** spec 272 recurring — for an OWNER app (e.g. demo-corpus) with the `subscription-collect` template:
+   *  where the owner-online collection ceremony redeems DUE subscribers' pull mandates. `treasury` is the
+   *  owner-custodied collection treasury (= the pull mandates' delegate/payee, e.g. lbsb-treasury.impact);
+   *  `a2aBase` is the content service exposing the owner-gated /admin/subscriptions/{due,collected}. */
+  collectionConfig?: {
+    treasury: `0x${string}`;
+    asset: `0x${string}`;
+    edition: string;
+    a2aBase: string;
+  };
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

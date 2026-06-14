@@ -249,6 +249,93 @@ export async function chargePayment(
   return { ok: true, settlementHash: res.txHash };
 }
 
+/** spec 272 recurring — the PULL-side mirror of chargePayment, for OWNER-online subscription collection.
+ *  The collection `treasury` (= the payee, e.g. lbsb-treasury.impact) is the delegate of the subscriber's
+ *  standing pull mandate, so IT is the redeemer: the owner (its custodian) signs `executeCall(treasury, …)`
+ *  via signHashFor — same all-custodian signer, no held key. The PaymentEnforcer moves `amount` USDC
+ *  payer-treasury → treasury, capped by the mandate's caveats. Returns the settlement tx hash per mandate. */
+export async function collectPayment(
+  treasury: Address,
+  pullDelegation: unknown,
+  signHash: SignHash,
+  opts: { asset: Address; amount: bigint; edition: string },
+): Promise<{ ok: true; settlementHash: Hex } | { ok: false; error: string }> {
+  const deleg = pullDelegation as { delegator?: Address; delegate?: Address };
+  if (!deleg?.delegator) return { ok: false, error: 'pull delegation missing delegator' };
+  if (deleg.delegate && deleg.delegate.toLowerCase() !== treasury.toLowerCase())
+    return { ok: false, error: 'pull delegation delegate ≠ collection treasury' };
+  const payer = deleg.delegator; // the subscriber's person-treasury (funds come FROM here)
+  // Demo convenience: ensure the subscriber's treasury can cover this period (mock USDC mint, permissionless),
+  // signed by the same owner credential. A real deployment would require the subscriber to maintain balance.
+  await fundTreasuryIfNeeded(treasury, payer, opts.asset, opts.amount, signHash);
+  const nonce = BigInt(Date.now());
+  const now = Math.floor(Date.now() / 1000);
+  const zero32 = ('0x' + '00'.repeat(32)) as Hex32;
+  const asset = { id: opts.asset, symbol: 'USDC', decimals: 6 };
+  const resourceHash = keccak256(toBytes(`x402:${opts.edition}:subscription`)) as Hex32;
+  const mandate = {
+    mandateId: computeMandateId({ payer, nonce, rail: 'x402', chain: CHAIN_ID }),
+    payer, payee: treasury, granter: payer, rail: 'x402',
+    amountPolicy: { kind: 'exact', amount: opts.amount, asset, chain: CHAIN_ID },
+    nonce, maxRedemptions: 1, validFrom: now, expiresAt: now + 3600,
+    contextBinding: { resource: { method: 'GET', url: `x402:${opts.edition}:subscription`, requestBodyHash: zero32 }, chain: CHAIN_ID, asset, nonce, validFrom: now, expiresAt: now + 3600 },
+    mode: 'closed', reasonHash: keccak256(toBytes(`subscription:${opts.edition}`)) as Hex32, signature: '0x',
+  } as PaymentMandate;
+  const plan = x402.buildRedemptionCalldata({
+    mandate, delegation: pullDelegation as never,
+    delegationManager: CONTRACTS.delegationManager, paymentEnforcer: CONTRACTS.paymentEnforcer,
+    asset: opts.asset, resourceHash,
+  });
+  const callData = encodeFunctionData({ abi: PAY_EXECUTE_ABI, functionName: 'execute', args: [plan.to, plan.value, plan.data] });
+  const res = await executeCall(treasury, signHash, callData);
+  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.txHash) return { ok: false, error: 'collection submitted but no settlement tx hash' };
+  return { ok: true, settlementHash: res.txHash };
+}
+
+/** spec 272 recurring — OWNER-online subscription collection, end to end. Fetches the DUE batch from the
+ *  content service (a2a, owner-gated by `idToken`), redeems each subscriber's standing pull mandate as the
+ *  collection `treasury` (signed by the owner credential — no held key), then posts the settlements back so
+ *  the service advances each period + mints the next pass. One owner ceremony bills every due subscriber. */
+export async function collectSubscriptions(opts: {
+  treasury: Address;
+  asset: Address;
+  edition: string;
+  a2aBase: string;
+  idToken: string;
+  signHash: SignHash;
+  onStep?: (s: string) => void;
+}): Promise<{ ok: boolean; attempted: number; collected: number; results: Array<{ subscriptionId?: number; subject?: string; ok: boolean; settlementHash?: Hex; error?: string }>; error?: string }> {
+  const base = opts.a2aBase.replace(/\/$/, '');
+  opts.onStep?.('Finding subscriptions due for renewal…');
+  const dueRes = await fetch(`${base}/admin/subscriptions/due`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id_token: opts.idToken, edition: opts.edition }),
+  }).then((r) => r.json()).catch(() => ({ ok: false, error: 'due-list request failed' })) as { ok?: boolean; due?: Array<{ id?: number; subject?: string; amount_per_period?: string; pull_mandate?: unknown }>; error?: string };
+  if (!dueRes.ok) return { ok: false, attempted: 0, collected: 0, results: [], error: dueRes.error ?? 'could not list due subscriptions' };
+  const due = dueRes.due ?? [];
+  const results: Array<{ subscriptionId?: number; subject?: string; ok: boolean; settlementHash?: Hex; error?: string }> = [];
+  for (let i = 0; i < due.length; i++) {
+    const d = due[i]!;
+    opts.onStep?.(`Charging subscription ${i + 1}/${due.length}…`);
+    if (!d.pull_mandate) { results.push({ subscriptionId: d.id, subject: d.subject, ok: false, error: 'no pull mandate stored' }); continue; }
+    const amount = (() => { try { return BigInt(d.amount_per_period ?? '0'); } catch { return 0n; } })();
+    if (amount <= 0n) { results.push({ subscriptionId: d.id, subject: d.subject, ok: false, error: 'invalid amount' }); continue; }
+    const r = await collectPayment(opts.treasury, d.pull_mandate, opts.signHash, { asset: opts.asset, amount, edition: opts.edition });
+    if (r.ok) results.push({ subscriptionId: d.id, subject: d.subject, ok: true, settlementHash: r.settlementHash });
+    else results.push({ subscriptionId: d.id, subject: d.subject, ok: false, error: r.error });
+  }
+  const settled = results.filter((x) => x.ok && x.settlementHash).map((x) => ({ subscriptionId: x.subscriptionId, subject: x.subject, settlementHash: x.settlementHash }));
+  if (settled.length) {
+    opts.onStep?.('Recording settlements + renewing periods…');
+    await fetch(`${base}/admin/subscriptions/collected`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id_token: opts.idToken, edition: opts.edition, results: settled }),
+    }).catch(() => undefined);
+  }
+  return { ok: true, attempted: due.length, collected: settled.length, results };
+}
+
 /** Claim a forced-unique `<base>[N].demo.agent` for the agent + set it as primary.
  *  register + setPrimaryName are BATCHED into one execute UserOp (one nonce, one signature):
  *  they must land together, and the batch avoids an inter-userOp race where the second op

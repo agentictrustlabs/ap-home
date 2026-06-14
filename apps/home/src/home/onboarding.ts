@@ -19,6 +19,7 @@ import {
   secureHomeWithGoogle,
   secureHomeGoogleNoName,
   chargePayment,
+  collectSubscriptions,
   AUD,
   type SignHash,
 } from '../connect-client';
@@ -287,6 +288,30 @@ export async function givePermission(
     return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
+  }
+}
+
+/**
+ * spec 272 recurring — OWNER-online subscription collection. The owner (custodian of the collection
+ * treasury, e.g. lbsb-treasury.impact) signs, with their own credential, the redemption of every DUE
+ * subscriber's standing pull mandate — one ceremony bills them all. signHashFor signs for the TREASURY
+ * (the redeemer/delegate), so the treasury's ERC-1271 validates the owner credential as its custodian.
+ * No held key: if the connecting person doesn't custody the treasury, every redemption simply fails.
+ */
+export async function collectDueSubscriptions(
+  treasury: Address,
+  via: Via,
+  auth: Auth | undefined,
+  opts: { asset: Address; edition: string; a2aBase: string; idToken: string },
+  onStep?: (s: string) => void,
+): Promise<Result<{ attempted: number; collected: number; results: Array<{ subscriptionId?: number; subject?: string; ok: boolean; settlementHash?: Hex; error?: string }> }>> {
+  try {
+    const signHash = await signHashFor(via, treasury, auth);
+    const res = await collectSubscriptions({ treasury, asset: opts.asset, edition: opts.edition, a2aBase: opts.a2aBase, idToken: opts.idToken, signHash, onStep });
+    if (!res.ok) return { ok: false, error: res.error ?? 'collection failed' };
+    return { ok: true, attempted: res.attempted, collected: res.collected, results: res.results };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'could not collect subscriptions' };
   }
 }
 

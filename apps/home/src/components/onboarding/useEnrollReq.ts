@@ -25,6 +25,7 @@ export interface EnrollReq {
   sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
   subPeriod?: number; // spec 272 recurring — when set, this is a SUBSCRIPTION: the billing-period length (seconds). The home also mints a standing pull mandate.
+  collectToken?: string; // spec 272 recurring — owner id_token passed by the owner app for the `subscription-collect` ceremony (authorizes the a2a due/collected calls).
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -63,6 +64,7 @@ export function parseEnrollReq(): EnrollReq | null {
       sessionKey: (p.get('session_key') as Address) ?? undefined,
       payAmount: /^\d+$/.test(p.get('pay_amount') ?? '') ? (p.get('pay_amount') as string) : undefined,
       subPeriod: /^\d+$/.test(p.get('sub_period') ?? '') ? Number(p.get('sub_period')) : undefined,
+      collectToken: p.get('collect_token') ?? undefined,
     };
   } catch {
     return null;
@@ -167,6 +169,22 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
   // exchange itself. Marker is only set for popupMode, so the plain full-page redirect (popup
   // blocked / mobile, greenfield 11) is unchanged, and apps that don't handle it just ignore it.
   if (popupMode) url.searchParams.set('ac_relay', '1');
+  window.location.href = url.toString();
+}
+
+/** spec 272 recurring — deliver a subscription-collection RESULT back to the owner app (no OIDC code).
+ *  Popup → postMessage {collected, attempted} + close; else full-page redirect with the result in query. */
+export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, result: { collected: number; attempted: number }): void {
+  if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
+    postEnrollToOpener(enroll, { type: 'AC_COLLECT', state: enroll.state, ...result });
+    window.close();
+    return;
+  }
+  const url = new URL(enroll.redirectUri);
+  url.searchParams.set('collect', '1');
+  url.searchParams.set('collected', String(result.collected));
+  url.searchParams.set('attempted', String(result.attempted));
+  url.searchParams.set('state', enroll.state);
   window.location.href = url.toString();
 }
 

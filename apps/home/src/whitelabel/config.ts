@@ -98,8 +98,18 @@ const faithImpact: WhiteLabelConfig = {
       name: 'Demo Corpus',
       redirect_uris: ['https://demo-corpus-production.richardpedersen3.workers.dev/'],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      // spec 272 recurring — `subscription-collect`: the corpus OWNER redeems DUE subscribers' standing
+      // pull mandates (owner-online, no held key), signed as the collection treasury they custody.
+      allowed_delegation_templates: ['site-login', 'org-create', 'subscription-collect'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
+      // and the content service exposing the owner-gated due/collected endpoints.
+      collectionConfig: {
+        treasury: '0xa9e0acecfbce08548358b4f5681b13a00a5cab7a',
+        asset: '0x8fb56ff3C13347DFC4E1287aE83E88deE5a7211C',
+        edition: 'lbsb',
+        a2aBase: 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
+      },
     },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
@@ -129,6 +139,20 @@ const faithImpact: WhiteLabelConfig = {
         'Touch your sign-in methods or recovery',
       ],
       expiryDays: 365,
+    },
+    // spec 272 recurring — the corpus OWNER collects due subscriptions: signs, with their own credential,
+    // the redemption of each due subscriber's standing pull mandate as the collection treasury they custody.
+    'subscription-collect': {
+      canDo: [
+        'Charge subscribers whose period is due, using the standing mandate each one already authorized',
+        'Send each charge only to your content treasury, capped by that mandate',
+      ],
+      cannotDo: [
+        'Charge more than a subscriber authorized, or charge a non-subscriber',
+        'Move funds anywhere other than your content treasury',
+        'Touch sign-in methods or recovery',
+      ],
+      expiryDays: 1,
     },
     // spec 247 — JP's adoption program reads + writes the data it holds for you (your
     // profile + program records) in YOUR vault, through this scoped grant. The records
