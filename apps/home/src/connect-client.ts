@@ -187,6 +187,25 @@ async function executeCall(
 }
 
 const PAY_EXECUTE_ABI = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' }], outputs: [] }] as const;
+const PAY_USDC_ABI = [
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] },
+] as const;
+
+/** Demo funding, ALL-CUSTODIAN: if the person-treasury holds less than `need` mock USDC, the person SA
+ *  mints a top-up to it (MockUSDC.mint is permissionless), signed by the SAME credential (signHash) and
+ *  gasless via executeCall. No SIWE-only window.ethereum, no service faucet, no held key. Non-fatal. */
+async function fundTreasuryIfNeeded(personSa: Address, treasury: Address, asset: Address, need: bigint, signHash: SignHash): Promise<void> {
+  try {
+    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const bal = (await pc.readContract({ address: asset, abi: PAY_USDC_ABI, functionName: 'balanceOf', args: [treasury] })) as bigint;
+    if (bal >= need) return;
+    const topUp = need > 1_000_000n ? need * 4n : 1_000_000n; // a generous buffer so it rarely re-mints
+    const mintData = encodeFunctionData({ abi: PAY_USDC_ABI, functionName: 'mint', args: [treasury, topUp] });
+    const fundCall = encodeFunctionData({ abi: PAY_EXECUTE_ABI, functionName: 'execute', args: [asset, 0n, mintData] });
+    await executeCall(personSa, signHash, fundCall);
+  } catch { /* non-fatal — the redemption fails loudly if truly underfunded */ }
+}
 
 /** spec 272 — charge an x402 payment IN the connect ceremony, ALL-CUSTODIAN. `signHash` is the same
  *  wallet/passkey/KMS signer (`signHashFor`) the ceremony already uses; the reader's person SA executes
@@ -203,6 +222,8 @@ export async function chargePayment(
   const deleg = delegation as { delegator?: Address };
   if (!deleg?.delegator) return { ok: false, error: 'payment delegation missing delegator' };
   const payer = deleg.delegator;
+  // Uniform funding (all custodians): top up the person-treasury if it can't cover this charge.
+  await fundTreasuryIfNeeded(personSa, payer, opts.asset, opts.amount, signHash);
   const nonce = BigInt(Date.now());
   const now = Math.floor(Date.now() / 1000);
   const zero32 = ('0x' + '00'.repeat(32)) as Hex32;
