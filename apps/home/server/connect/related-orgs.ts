@@ -5,9 +5,9 @@
 // audience to the calling `client_id`, extract the person SA from the session `sub`, and
 // return that person's related-agent links scoped to this client_id — from the private
 // Connect-home vault (KV). person↔org never travels as public graph state.
-import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
+import { createPublicClient, http, keccak256, toBytes, type Hex, type Address } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
+import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
@@ -104,6 +104,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // read/oversee the agent's vault). Persisted so OrgDetail can read a home-created org's data.
     stewardshipDelegation?: unknown;
     membershipDelegation?: unknown;
+    // AUDIT NEW-RAG-2 — the ERC-1271 write path binds the signature to a one-shot nonce + short expiry.
+    nonce?: string;
+    expiry?: number;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -141,15 +144,34 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       }
     }
   } else {
-    // ERC-1271 control-of-person proof (existing spec-247 external-custodian path).
-    // AUDIT NEW-RAG-2 (OPEN — remediation pending, coordinated demo-jp change): this challenge is a CONSTANT
-    // (no nonce / expiry / payload binding), so a single captured signature authorizes UNLIMITED writes to any
-    // link field forever (link poisoning / denial-of-recovery). The fix binds the challenge to (org, content
-    // hash, nonce, expiry) and adds a one-shot nonce store — but the demo-jp operator client signs this exact
-    // string today, so flipping it is a cross-app change. The home's OWN management uses the nonce-protected
-    // session-token branch above (not this path). Tracked in findings.yaml; do NOT widen this path meanwhile.
+    // ERC-1271 control-of-person proof (spec-247 external-custodian path, e.g. a demo-jp operator org).
+    // AUDIT NEW-RAG-2 — the signed challenge is BOUND to (person, org, content hash, one-shot nonce, expiry):
+    // a captured signature is good for ONE write, of exactly that content, within its short window. The
+    // server ALWAYS recomputes contentHash + the challenge from the persisted fields — a client digest is
+    // never trusted — and burns the nonce so it can't be replayed.
     if (!sig.startsWith('0x')) return jsonCors({ error: 'sig or Bearer session required' }, request, 400);
-    const challenge = keccak256(toBytes(`related-orgs:write:${person}`));
+    const nonce = (body?.nonce ?? '') as Hex;
+    const expiry = Number(body?.expiry ?? 0);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(nonce) || !Number.isFinite(expiry) || expiry <= 0) {
+      return jsonCors({ error: 'nonce (bytes32) + expiry (unix seconds) required for the signed write' }, request, 400);
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (expiry < nowSec) return jsonCors({ error: 'write authorization expired' }, request, 401);
+    if (expiry > nowSec + 3600) return jsonCors({ error: 'expiry too far in the future (max 1h)' }, request, 400);
+
+    // One-shot nonce: reject a replay of an already-used (person, nonce). TTL just past max expiry.
+    const nonceKey = `rag-nonce:${person}:${nonce.toLowerCase()}`;
+    if (await env.AUTH_CODES.get(nonceKey)) return jsonCors({ error: 'write nonce already used (replay)' }, request, 401);
+
+    // Recompute the bound challenge SERVER-SIDE from the persisted fields (never trust a client digest).
+    const contentHash = relatedAgentWriteContentHash({
+      orgAgent: org as Address,
+      orgName: (body?.orgName ?? '') as string,
+      purpose: (body?.purpose ?? '') as string,
+      requestedBy: (body?.requestedBy ?? '') as string,
+    });
+    const challenge = hashRelatedAgentWriteChallenge({ person: person as Address, orgAgent: org as Address, contentHash, nonce, expiry });
+
     const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
     let valid = false;
     try {
@@ -164,6 +186,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       valid = false;
     }
     if (!valid) return jsonCors({ error: 'not authorized for person (ERC-1271 check failed)' }, request, 401);
+    // Burn the nonce only AFTER a valid signature (so a bad-sig probe can't consume a victim's nonce).
+    await env.AUTH_CODES.put(nonceKey, '1', { expirationTtl: 3700 });
   }
 
   // AUDIT NEW-RAG-1 — the recoverable custody descriptor is client-supplied; VALIDATE it server-side
