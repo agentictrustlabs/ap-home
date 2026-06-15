@@ -45,7 +45,9 @@ async function getNonce(): Promise<string> {
 
 /** Connect a wallet, sign SIWE, resolve to an AgentSession (or signal bootstrap). */
 export async function siweLogin(): Promise<SiweOutcome> {
-  const address = await connectWallet();
+  // Force the wallet account picker — siweLogin is the custodian-CHOOSING sign-in, so the admin picks which
+  // account/custodian rather than silently defaulting to the wallet's active one (multi-custodian, spec 266).
+  const address = await connectWallet(true);
   const nonce = await getNonce();
   const message = buildMessage({
     domain: window.location.host,

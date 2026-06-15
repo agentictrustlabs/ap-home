@@ -17,7 +17,14 @@ export function hasWallet(): boolean {
   return typeof window !== 'undefined' && !!(window as unknown as { ethereum?: unknown }).ethereum;
 }
 
-export async function connectWallet(): Promise<Address> {
+export async function connectWallet(forceSelect = false): Promise<Address> {
+  // forceSelect: pop MetaMask's ACCOUNT PICKER even when a wallet is already connected. eth_requestAccounts
+  // silently returns the active account ("Rich Official"); wallet_requestPermissions always re-prompts, so a
+  // multi-custodian admin can pick the RIGHT account (e.g. demo-validator.impact's), not whatever's active.
+  if (forceSelect) {
+    try { await provider().request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }); }
+    catch { /* user cancelled or wallet lacks the method → fall through to the normal request */ }
+  }
   const accounts = (await provider().request({ method: 'eth_requestAccounts' })) as Address[];
   const account = accounts?.[0];
   if (!account) throw new Error('No wallet account selected.');
