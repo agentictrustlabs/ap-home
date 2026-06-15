@@ -100,7 +100,8 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       // spec 272 recurring — `subscription-collect`: the corpus OWNER redeems DUE subscribers' standing
       // pull mandates (owner-online, no held key), signed as the collection treasury they custody.
-      allowed_delegation_templates: ['site-login', 'org-create', 'subscription-collect'],
+      // spec 266 — `content-signer`: the owner authorizes each content issuer's Cloud-KMS signing key.
+      allowed_delegation_templates: ['site-login', 'org-create', 'subscription-collect', 'content-signer'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
       // and the content service exposing the owner-gated due/collected endpoints.
@@ -151,6 +152,20 @@ const faithImpact: WhiteLabelConfig = {
         'Charge more than a subscriber authorized, or charge a non-subscriber',
         'Move funds anywhere other than your content treasury',
         'Touch sign-in methods or recovery',
+      ],
+      expiryDays: 1,
+    },
+    // spec 266 — the corpus OWNER authorizes each content issuer's Cloud-KMS signing key: signs, with their
+    // own credential, a delegation binding each issuer SA (e.g. lbsb.impact) → its KMS content-signing key.
+    'content-signer': {
+      canDo: [
+        'Authorize a Cloud-KMS key to sign content on behalf of issuers you control (e.g. lbsb.impact)',
+        'Bind each authorization to a specific issuer + key, revocable later',
+      ],
+      cannotDo: [
+        'Expose or move any signing key (the KMS key never leaves Cloud KMS)',
+        'Authorize signing for an issuer you do not custody',
+        'Touch sign-in methods, funds, or recovery',
       ],
       expiryDays: 1,
     },

@@ -316,6 +316,50 @@ export async function collectDueSubscriptions(
 }
 
 /**
+ * spec 266 delegated content trust — OWNER authorizes per-edition Cloud-KMS content-signing keys. For each
+ * content issuer the owner custodies (e.g. bsb.impact, lbsb.impact), sign ONCE a delegation binding that
+ * issuer SA → its KMS key address; the content service stores it so the MCP signs descriptors/grants under
+ * the right issuer with NO held key. signHashFor(issuerSa) lets the owner's credential authorize each issuer.
+ */
+export async function authorizeContentSigningForOwner(
+  via: Via,
+  auth: Auth | undefined,
+  opts: { a2aBase: string; idToken: string },
+  onStep?: (s: string) => void,
+): Promise<Result<{ attempted: number; authorized: number; results: Array<{ issuerName: string; ok: boolean; error?: string }> }>> {
+  try {
+    const base = opts.a2aBase.replace(/\/$/, '');
+    onStep?.('Reading content issuers + their KMS keys…');
+    const keysRes = (await fetch(`${base}/admin/content-signer-keys`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id_token: opts.idToken }),
+    }).then((r) => r.json()).catch(() => ({ ok: false }))) as { ok?: boolean; signers?: Array<{ issuerName: string; issuerSa: Address; delegateKey: Address }>; error?: string };
+    if (!keysRes.ok) return { ok: false, error: keysRes.error ?? 'could not read content-signer keys' };
+    const signers = keysRes.signers ?? [];
+    const results: Array<{ issuerName: string; ok: boolean; error?: string }> = [];
+    const oneYear = 365 * 24 * 60 * 60;
+    for (let i = 0; i < signers.length; i++) {
+      const s = signers[i]!;
+      onStep?.(`Authorizing ${s.issuerName} (${i + 1}/${signers.length})…`);
+      try {
+        // Sign AS the issuer SA (the owner custodies it). The leaf binds issuerSa → its KMS key address.
+        const signHash = await signHashFor(via, s.issuerSa, auth);
+        const leaf = toWire(await issueSessionDelegation(s.issuerSa, s.delegateKey, signHash, oneYear));
+        const stored = (await fetch(`${base}/admin/store-content-signer`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id_token: opts.idToken, issuerName: s.issuerName, issuerSa: s.issuerSa, delegateKey: s.delegateKey, delegationLeaf: leaf }),
+        }).then((r) => r.json()).catch(() => ({ ok: false }))) as { ok?: boolean; error?: string };
+        results.push({ issuerName: s.issuerName, ok: !!stored.ok, error: stored.ok ? undefined : (stored.error ?? 'store failed') });
+      } catch (e) {
+        results.push({ issuerName: s.issuerName, ok: false, error: e instanceof Error ? e.message : 'sign failed' });
+      }
+    }
+    return { ok: true, attempted: signers.length, authorized: results.filter((r) => r.ok).length, results };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'could not authorize content signing' };
+  }
+}
+
+/**
  * ④ — Consent to a specific agreement. Sign a FIXED consent digest with YOUR credential
  * (passkey / wallet / Google KMS) so a relying app can prove ON CHAIN (ERC-1271) that you —
  * or an org you steward, given as `party` — agreed to this exact agreement. Unlike a delegation,

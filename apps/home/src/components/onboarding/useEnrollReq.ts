@@ -174,9 +174,9 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
 
 /** spec 272 recurring — deliver a subscription-collection RESULT back to the owner app (no OIDC code).
  *  Popup → postMessage {collected, attempted} + close; else full-page redirect with the result in query. */
-export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, result: { collected: number; attempted: number }): void {
+export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, result: { collected: number; attempted: number }, kind?: string): void {
   if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
-    postEnrollToOpener(enroll, { type: 'AC_COLLECT', state: enroll.state, ...result });
+    postEnrollToOpener(enroll, { type: 'AC_COLLECT', state: enroll.state, kind, ...result });
     window.close();
     return;
   }
@@ -184,6 +184,7 @@ export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, resu
   url.searchParams.set('collect', '1');
   url.searchParams.set('collected', String(result.collected));
   url.searchParams.set('attempted', String(result.attempted));
+  if (kind) url.searchParams.set('collect_kind', kind);
   url.searchParams.set('state', enroll.state);
   window.location.href = url.toString();
 }

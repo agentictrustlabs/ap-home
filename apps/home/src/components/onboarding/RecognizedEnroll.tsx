@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, isKmsVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
@@ -127,6 +127,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         setSsoCookie(token, viaLower);
         setPhase('connected');
         setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: res.collected, attempted: res.attempted }), 900);
+        return;
+      }
+      // spec 266 delegated content trust — OWNER authorizes each content issuer's Cloud-KMS signing key.
+      // No grant: the owner signs, per issuer they custody, the issuer SA → KMS-key delegation; the content
+      // service stores it. Reuses the recognized-owner auth + the relying app's collectionConfig.a2aBase.
+      if (enroll.template === 'content-signer') {
+        const cfg = relyingApp?.collectionConfig;
+        if (!cfg) return fail('this app is not configured for content-signer authorization');
+        if (!enroll.collectToken) return fail('missing owner token for content-signer authorization');
+        const csAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        const res = await authorizeContentSigningForOwner(viaLower, csAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
+        if (!res.ok) return fail(res.error);
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: res.authorized, attempted: res.attempted }, 'content-signer'), 900);
         return;
       }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
