@@ -1738,7 +1738,11 @@ export async function connectWithName(
 ): Promise<{ ok: true; token: string; name?: string } | { ok: false; error: string }> {
   let proof: Record<string, unknown>;
   if (via === 'wallet') {
-    const address = await connectWallet();
+    // FORCE the account picker (multi-custodian): connecting by NAME must let the user pick the wallet
+    // that actually custodies `${name}` — not silently take MetaMask's active account (which may be a
+    // different home's custodian, e.g. the platform deployer). Without this the SIWE binds to whatever's
+    // active and /connect/with-name rejects it as a non-custodian of name→SA. Mirrors siweLogin().
+    const address = await connectWallet(true);
     const nonce = await getNonce();
     const message = buildMessage({
       domain: window.location.host,
