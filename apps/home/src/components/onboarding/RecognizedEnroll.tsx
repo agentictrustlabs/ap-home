@@ -23,7 +23,7 @@ import { givePermission, createOrganization, collectDueSubscriptions, authorizeC
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
-import { readSsoCookie, setSsoCookie } from '../../lib/sso-cookie';
+import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setFedcmLoginStatus } from '../../context/session';
@@ -79,6 +79,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     if (ran.current || !enroll) return;
     ran.current = true;
     void (async () => {
+      // OIDC prompt=select_account/login — force the custodian chooser ONCE instead of silently reusing the
+      // active session. Critical for multi-custodian admin (each identity has its own SIWE/social/passkey
+      // custodian): authorizing demo-validator.impact must not default to the lbsb custodian's session.
+      if (enroll.prompt === 'select_account' || enroll.prompt === 'login') {
+        const k = `ap_chooser:${enroll.state}`;
+        if (!sessionStorage.getItem(k)) {
+          sessionStorage.setItem(k, '1'); // one-time: after the chooser + re-sign-in, proceed normally (no loop)
+          clearSsoCookie();
+          return onUnrecognized(); // → EntryExperience: wallet/SIWE · Google · YouVersion · passkey
+        }
+      }
       const sso = readSsoCookie();
       if (!sso?.token) return onUnrecognized(); // not signed in → credential-first entry
       const profile = await fetchProfile(sso.token).catch(() => null);
@@ -308,8 +319,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           onAuthorize={onAuthorize}
           onDecline={onDecline}
         />
-        <button className="btn-ghost onboarding-secondary" onClick={onUnrecognized}>
-          Not {home?.name || 'you'}? Use a different account
+        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
+          Not {home?.name || 'you'}? Use a different custodian
         </button>
       </div>
     </div>
