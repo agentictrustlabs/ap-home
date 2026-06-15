@@ -17,18 +17,23 @@ export function hasWallet(): boolean {
   return typeof window !== 'undefined' && !!(window as unknown as { ethereum?: unknown }).ethereum;
 }
 
-export async function connectWallet(forceSelect = false): Promise<Address> {
-  // forceSelect: pop MetaMask's ACCOUNT PICKER even when a wallet is already connected. eth_requestAccounts
-  // silently returns the active account ("Rich Official"); wallet_requestPermissions always re-prompts, so a
-  // multi-custodian admin can pick the RIGHT account (e.g. demo-validator.impact's), not whatever's active.
+/** All accounts the wallet has connected (order = wallet's, [0] = active). `forceSelect` pops MetaMask's
+ *  account picker (`wallet_requestPermissions`) even when already connected, so a multi-custodian admin can
+ *  expose the RIGHT account. Callers that sign FOR A SPECIFIC HOME should pick the connected account that
+ *  custodies it (not just [0] — eth_requestAccounts returns the active account first, which may be another
+ *  home's custodian like the platform deployer). */
+export async function connectWalletAccounts(forceSelect = false): Promise<Address[]> {
   if (forceSelect) {
     try { await provider().request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }); }
     catch { /* user cancelled or wallet lacks the method → fall through to the normal request */ }
   }
   const accounts = (await provider().request({ method: 'eth_requestAccounts' })) as Address[];
-  const account = accounts?.[0];
-  if (!account) throw new Error('No wallet account selected.');
-  return account;
+  if (!accounts?.length) throw new Error('No wallet account selected.');
+  return accounts;
+}
+
+export async function connectWallet(forceSelect = false): Promise<Address> {
+  return (await connectWalletAccounts(forceSelect))[0]!;
 }
 
 /** personal_sign(message, address) — EIP-191. `message` may be utf8 or 0x-hex. */

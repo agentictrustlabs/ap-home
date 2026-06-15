@@ -19,7 +19,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
-import { connectWallet, personalSign } from './lib/wallet';
+import { connectWallet, connectWalletAccounts, personalSign } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
@@ -1738,11 +1738,24 @@ export async function connectWithName(
 ): Promise<{ ok: true; token: string; name?: string } | { ok: false; error: string }> {
   let proof: Record<string, unknown>;
   if (via === 'wallet') {
-    // FORCE the account picker (multi-custodian): connecting by NAME must let the user pick the wallet
-    // that actually custodies `${name}` — not silently take MetaMask's active account (which may be a
-    // different home's custodian, e.g. the platform deployer). Without this the SIWE binds to whatever's
-    // active and /connect/with-name rejects it as a non-custodian of name→SA. Mirrors siweLogin().
-    const address = await connectWallet(true);
+    // Connecting by NAME must SIGN with the wallet that actually custodies `${name}` — not MetaMask's
+    // active account (which may be a different home's custodian, e.g. the platform deployer 0x31ed…).
+    // Force the account picker, then among ALL connected accounts pick the one that is an on-chain
+    // custodian of name→SA (eth_requestAccounts returns the active account FIRST, so [0] alone is wrong).
+    const accounts = await connectWalletAccounts(true);
+    let address: Address | undefined;
+    const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address };
+    if (info.agent) {
+      const accountsClient = agentAccountClient();
+      for (const a of accounts) {
+        try { if (await accountsClient.isCustodian(info.agent, a)) { address = a; break; } } catch { /* not deployed / read error → skip */ }
+      }
+      if (!address) {
+        return { ok: false, error: `None of your connected wallets control ${name}. In the wallet popup, connect the account that custodies it (then retry) — the active account isn’t a custodian.` };
+      }
+    } else {
+      address = accounts[0]; // name didn't resolve (shouldn't happen on the taken path) — fall back
+    }
     const nonce = await getNonce();
     const message = buildMessage({
       domain: window.location.host,
