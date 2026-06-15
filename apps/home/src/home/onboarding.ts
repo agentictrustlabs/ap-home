@@ -329,7 +329,7 @@ export async function authorizeContentSigningForOwner(
 ): Promise<Result<{ attempted: number; authorized: number; results: Array<{ issuerName: string; ok: boolean; error?: string }> }>> {
   try {
     const base = opts.a2aBase.replace(/\/$/, '');
-    onStep?.('Reading content issuers + their KMS keys…');
+    onStep?.('Reading content issuers + their HSM-backed KMS keys…');
     const keysRes = (await fetch(`${base}/admin/content-signer-keys`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id_token: opts.idToken }),
     }).then((r) => r.json()).catch(() => ({ ok: false }))) as { ok?: boolean; signers?: Array<{ issuerName: string; issuerSa: Address; delegateKey: Address }>; error?: string };

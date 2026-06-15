@@ -159,11 +159,11 @@ const faithImpact: WhiteLabelConfig = {
     // own credential, a delegation binding each issuer SA (e.g. lbsb.impact) → its KMS content-signing key.
     'content-signer': {
       canDo: [
-        'Authorize a Cloud-KMS key to sign content on behalf of issuers you control (e.g. lbsb.impact)',
+        'Authorize an HSM-backed Cloud KMS key to sign content on behalf of issuers you control (e.g. lbsb.impact)',
         'Bind each authorization to a specific issuer + key, revocable later',
       ],
       cannotDo: [
-        'Expose or move any signing key (the KMS key never leaves Cloud KMS)',
+        'Expose or move any signing key (the key never leaves the HSM-backed Cloud KMS)',
         'Authorize signing for an issuer you do not custody',
         'Touch sign-in methods, funds, or recovery',
       ],
