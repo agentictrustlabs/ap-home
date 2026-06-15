@@ -316,25 +316,29 @@ export async function collectDueSubscriptions(
 }
 
 /**
- * spec 266 delegated content trust — OWNER authorizes per-edition Cloud-KMS content-signing keys. For each
- * content issuer the owner custodies (e.g. bsb.impact, lbsb.impact), sign ONCE a delegation binding that
- * issuer SA → its KMS key address; the content service stores it so the MCP signs descriptors/grants under
- * the right issuer with NO held key. signHashFor(issuerSa) lets the owner's credential authorize each issuer.
+ * spec 266 delegated content trust — PER-CUSTODIAN: each signing identity (bsb.impact, lbsb.impact,
+ * demo-validator.impact) is authorized only by WHOEVER CUSTODIES that SA. The connected custodian signs ONCE
+ * a delegation binding their SA → its KMS key; the content service verifies the SA actually signed it
+ * (ERC-1271) before storing. `opts.targetSigner` scopes the ceremony to the single identity the custodian
+ * connected as, so each runs a clean "1 of 1" (you can only delegate authority you hold). NO held key.
  */
 export async function authorizeContentSigningForOwner(
   via: Via,
   auth: Auth | undefined,
-  opts: { a2aBase: string; idToken: string },
+  opts: { a2aBase: string; idToken: string; targetSigner?: string },
   onStep?: (s: string) => void,
 ): Promise<Result<{ attempted: number; authorized: number; results: Array<{ issuerName: string; ok: boolean; error?: string }> }>> {
   try {
     const base = opts.a2aBase.replace(/\/$/, '');
-    onStep?.('Reading content issuers + their HSM-backed KMS keys…');
+    onStep?.('Reading signing identities + their HSM-backed KMS keys…');
     const keysRes = (await fetch(`${base}/admin/content-signer-keys`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id_token: opts.idToken }),
     }).then((r) => r.json()).catch(() => ({ ok: false }))) as { ok?: boolean; signers?: Array<{ issuerName: string; issuerSa: Address; delegateKey: Address }>; error?: string };
     if (!keysRes.ok) return { ok: false, error: keysRes.error ?? 'could not read content-signer keys' };
-    const signers = keysRes.signers ?? [];
+    // Scope to the identity the custodian connected as — they can only authorize the SA they custody.
+    const all = keysRes.signers ?? [];
+    const signers = opts.targetSigner ? all.filter((s) => s.issuerName.toLowerCase() === opts.targetSigner!.toLowerCase()) : all;
+    if (opts.targetSigner && signers.length === 0) return { ok: false, error: `signing identity ${opts.targetSigner} not provisioned a key yet` };
     const results: Array<{ issuerName: string; ok: boolean; error?: string }> = [];
     const oneYear = 365 * 24 * 60 * 60;
     for (let i = 0; i < signers.length; i++) {

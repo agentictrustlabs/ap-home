@@ -137,7 +137,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!cfg) return fail('this app is not configured for content-signer authorization');
         if (!enroll.collectToken) return fail('missing owner token for content-signer authorization');
         const csAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
-        const res = await authorizeContentSigningForOwner(viaLower, csAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
+        const res = await authorizeContentSigningForOwner(viaLower, csAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken, targetSigner: enroll.contentSignerTarget });
         if (!res.ok) return fail(res.error);
         setSsoCookie(token, viaLower);
         setPhase('connected');

@@ -26,6 +26,7 @@ export interface EnrollReq {
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
   subPeriod?: number; // spec 272 recurring — when set, this is a SUBSCRIPTION: the billing-period length (seconds). The home also mints a standing pull mandate.
   collectToken?: string; // spec 272 recurring — owner id_token passed by the owner app for the `subscription-collect` ceremony (authorizes the a2a due/collected calls).
+  contentSignerTarget?: string; // spec 266 — the single signing identity (e.g. demo-validator.impact) this `content-signer` ceremony authorizes. Per-custodian: you authorize only the SA you connected as.
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -65,6 +66,7 @@ export function parseEnrollReq(): EnrollReq | null {
       payAmount: /^\d+$/.test(p.get('pay_amount') ?? '') ? (p.get('pay_amount') as string) : undefined,
       subPeriod: /^\d+$/.test(p.get('sub_period') ?? '') ? Number(p.get('sub_period')) : undefined,
       collectToken: p.get('collect_token') ?? undefined,
+      contentSignerTarget: p.get('content_signer_target') ?? undefined,
     };
   } catch {
     return null;
