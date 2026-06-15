@@ -79,11 +79,23 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     if (ran.current || !enroll) return;
     ran.current = true;
     void (async () => {
-      // OIDC prompt=select_account/login — force the custodian chooser ONCE instead of silently reusing the
-      // active session. Critical for multi-custodian admin (each identity has its own SIWE/social/passkey
-      // custodian): authorizing demo-validator.impact must not default to the lbsb custodian's session.
-      if (enroll.prompt === 'select_account' || enroll.prompt === 'login') {
-        const k = `ap_chooser:${enroll.state}`;
+      // Force the custodian chooser ONCE (clear the active session → credential-first entry) instead of
+      // silently reusing whatever session this browser already holds. Critical for multi-custodian admin
+      // (each identity has its own SIWE/social/passkey custodian): authorizing demo-validator.impact must
+      // never default to the lbsb/deployer custodian's leftover session. Triggers:
+      //   • OIDC prompt=select_account/login — the relying app explicitly asked to re-choose.
+      //   • a NAMELESS connect-type enroll (`agent_name` omitted on site-login / x402-pay) — the request
+      //     pins NO specific home, so we must NOT assume the active session's identity. A PINNED connect
+      //     (agent_name set) still one-taps. OWNER-operation templates (org-create / subscription-collect /
+      //     content-signer) deliberately reuse the recognized owner session, so they're exempt.
+      const ownerOp =
+        enroll.template === 'org-create' ||
+        enroll.template === 'subscription-collect' ||
+        enroll.template === 'content-signer';
+      const forceChooser =
+        enroll.prompt === 'select_account' || enroll.prompt === 'login' || (!enroll.name && !ownerOp);
+      if (forceChooser) {
+        const k = `ap_chooser:${enroll.state || enroll.codeChallenge}`; // per-attempt (state may be empty)
         if (!sessionStorage.getItem(k)) {
           sessionStorage.setItem(k, '1'); // one-time: after the chooser + re-sign-in, proceed normally (no loop)
           clearSsoCookie();
