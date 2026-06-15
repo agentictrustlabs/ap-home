@@ -16,6 +16,7 @@ import {
   signupWithName,
   passkeySignHash,
   googleSignHash,
+  connectCustodianWallet,
   secureHomeWithGoogle,
   secureHomeGoogleNoName,
   chargePayment,
@@ -133,7 +134,11 @@ export async function openHome(name: string, via: 'passkey' | 'wallet' = 'passke
  *  userOp with the member's CURRENT credential without re-deriving the signer logic. */
 export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
   if (via === 'wallet') {
-    const addr = await connectWallet();
+    // Sign with the wallet that CUSTODIES `sender` (the home SA) — not MetaMask's active account (which
+    // may be another home's custodian, e.g. the platform deployer). This is the relying-app GRANT signer,
+    // so the site/session/payment delegations must be signed by the home's actual custodian. Falls back to
+    // the active account only when no sender is known (shouldn't happen on the grant path).
+    const addr = sender ? await connectCustodianWallet(sender) : await connectWallet(true);
     return (h: Hex) => personalSign(addr, h);
   }
   if (isKmsVia(via)) {

@@ -1732,30 +1732,34 @@ export async function stepUpToAgent(
 /** Connect to the agent that OWNS `name`, proving control with a custody credential.
  *  Name-first: the agent-service name is the identity; the server resolves name→agent
  *  on-chain and verifies the credential is a custodian of it. */
+/** Connect the wallet (forcing the account picker) and return the connected account that is an on-chain
+ *  CUSTODIAN of `sa` — not just the active account. `eth_requestAccounts` returns the active account first,
+ *  which is often a DIFFERENT home's custodian (e.g. the platform deployer), so signing by-home/by-name must
+ *  select among ALL connected accounts. Throws (clear message) if none of them custodies `sa`. Shared by the
+ *  by-name sign-in (connectWithName) and the relying-app grant signer (signHashFor). */
+export async function connectCustodianWallet(sa: Address): Promise<Address> {
+  const accounts = await connectWalletAccounts(true);
+  const accountsClient = agentAccountClient();
+  for (const a of accounts) {
+    try { if (await accountsClient.isCustodian(sa, a)) return a; } catch { /* not deployed / read error → skip */ }
+  }
+  throw new Error('None of your connected wallets control this home. In the wallet popup, connect the account that custodies it (then retry) — the active account isn’t a custodian.');
+}
+
 export async function connectWithName(
   name: string,
   via: 'wallet' | 'passkey',
 ): Promise<{ ok: true; token: string; name?: string } | { ok: false; error: string }> {
   let proof: Record<string, unknown>;
   if (via === 'wallet') {
-    // Connecting by NAME must SIGN with the wallet that actually custodies `${name}` — not MetaMask's
-    // active account (which may be a different home's custodian, e.g. the platform deployer 0x31ed…).
-    // Force the account picker, then among ALL connected accounts pick the one that is an on-chain
-    // custodian of name→SA (eth_requestAccounts returns the active account FIRST, so [0] alone is wrong).
-    const accounts = await connectWalletAccounts(true);
-    let address: Address | undefined;
+    // Sign with the wallet that actually custodies `${name}` — not MetaMask's active account (which may be
+    // another home's custodian, e.g. the platform deployer). Resolve name→SA, then pick the connected
+    // custodian account (connectCustodianWallet).
     const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address };
-    if (info.agent) {
-      const accountsClient = agentAccountClient();
-      for (const a of accounts) {
-        try { if (await accountsClient.isCustodian(info.agent, a)) { address = a; break; } } catch { /* not deployed / read error → skip */ }
-      }
-      if (!address) {
-        return { ok: false, error: `None of your connected wallets control ${name}. In the wallet popup, connect the account that custodies it (then retry) — the active account isn’t a custodian.` };
-      }
-    } else {
-      address = accounts[0]; // name didn't resolve (shouldn't happen on the taken path) — fall back
-    }
+    if (!info.agent) return { ok: false, error: `Couldn’t resolve ${name}.` };
+    let address: Address;
+    try { address = await connectCustodianWallet(info.agent); }
+    catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'wallet connection failed' }; }
     const nonce = await getNonce();
     const message = buildMessage({
       domain: window.location.host,
