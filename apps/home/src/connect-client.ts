@@ -1751,6 +1751,7 @@ export async function connectCustodianWallet(sa: Address): Promise<Address> {
 export async function connectWithName(
   name: string,
   via: 'wallet' | 'passkey',
+  opts: { passkeyMode?: 'local' | 'discoverable' } = {},
 ): Promise<{ ok: true; token: string; name?: string } | { ok: false; error: string }> {
   let proof: Record<string, unknown>;
   if (via === 'wallet') {
@@ -1774,12 +1775,19 @@ export async function connectWithName(
     const signature = await personalSign(address, message);
     proof = { kind: 'siwe-eoa', message, signature };
   } else {
-    // Discoverable passkey connect (no localStorage): the platform offers any passkey registered for
-    // this home's RP — including one synced from the device where it was created — so a named sign-in
-    // works cross-browser/device, not only where the credential was cached. The server verifies the
-    // returned credentialIdDigest is an on-chain custodian of name→SA (an unrelated passkey is rejected).
+    // Default sign-in is LOCAL-FIRST: use the cached credential id when present. If the cache is absent,
+    // do not silently launch Windows' discoverable picker (it can hang then offer phone only). The explicit
+    // cross-device button passes `passkeyMode:'discoverable'`.
     const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
-    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge, { preferLocalDevice: true });
+    const cached = loadPasskey();
+    if (!cached && opts.passkeyMode !== 'discoverable') {
+      return {
+        ok: false,
+        error:
+          'This browser does not have the local passkey cache for this home. Use the synced/phone passkey option, or open the browser where this home was first secured.',
+      };
+    }
+    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge, { preferLocalDevice: opts.passkeyMode !== 'discoverable' });
     proof = { kind: 'passkey', credentialIdDigest, challenge, signature };
   }
   const r = await fetch('/connect/with-name', {

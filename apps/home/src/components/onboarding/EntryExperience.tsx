@@ -587,12 +587,12 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
     return () => { cancelled = true; };
   }, [name]);
 
-  async function go(via: 'passkey' | 'wallet') {
+  async function go(via: 'passkey' | 'wallet', passkeyMode: 'local' | 'discoverable' = 'local') {
     if (via === 'passkey' && redirectForPasskey('signin', name)) return;
     setBusy(true);
     setErr('');
     try {
-      const out = await openHome(name, via);
+      const out = await openHome(name, via, { passkeyMode });
       if (out.ok) await onSession(out.token, via);
       else setErr(out.error);
     } catch (e) {
@@ -667,6 +667,11 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
         <>
           {showPasskey && (
             <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
+          )}
+          {showPasskey && (
+            <button className="btn-ghost onboarding-secondary" onClick={() => go('passkey', 'discoverable')}>
+              Use synced or phone passkey
+            </button>
           )}
           {showWallet && (
             <button className={onlyWallet ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => go('wallet')}>

@@ -123,8 +123,12 @@ export async function secureHomeNoName(auth?: Auth): Promise<Result<{ home: Home
 }
 
 /** Open your home from this device (prove it's you → a session). `via` = the credential. */
-export async function openHome(name: string, via: 'passkey' | 'wallet' = 'passkey'): Promise<Result<{ token: string }>> {
-  const out = await connectWithName(name, via);
+export async function openHome(
+  name: string,
+  via: 'passkey' | 'wallet' = 'passkey',
+  opts: { passkeyMode?: 'local' | 'discoverable' } = {},
+): Promise<Result<{ token: string }>> {
+  const out = await connectWithName(name, via, opts);
   return out.ok ? { ok: true, token: out.token } : { ok: false, error: out.error };
 }
 
