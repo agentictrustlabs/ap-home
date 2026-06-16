@@ -173,22 +173,31 @@ export async function signWithDiscoverablePasskey(
   return signAssertionFromCredential(credential);
 }
 
-/** Discoverable named-CONNECT assertion (spec 233, Mechanism A): a single discoverable `get` (empty
- *  allowCredentials, NO localStorage) that returns BOTH the on-chain signature blob AND the
- *  `credentialIdDigest` the server needs to resolve which custodian signed (keccak256 of the
- *  credentialId — matches registration). Lets a NAMED passkey sign-in work on any browser/device the
- *  platform can surface the (synced) passkey on, not just the one that cached the credential locally —
- *  closing the gap where `connectWithName` dead-ended with "No passkey on this device". The server
- *  verifies the digest is an on-chain custodian of the name-resolved SA, so an unrelated passkey the
- *  platform might offer is rejected — no client-supplied pubkey, no device cache. */
+/** Named-CONNECT assertion (spec 233, Mechanism A): a single `get` that returns BOTH the on-chain
+ *  signature blob AND the `credentialIdDigest` the server needs to resolve which custodian signed
+ *  (keccak256 of the credentialId — matches registration). The server verifies the digest is an on-chain
+ *  custodian of the name-resolved SA, so an unrelated passkey the platform might offer is rejected — no
+ *  client-supplied pubkey.
+ *
+ *  LOCAL-FIRST HINT: when THIS browser cached the credential id, pass it as `allowCredentials` so the
+ *  platform uses the LOCAL authenticator directly (Windows Hello / Touch ID) instead of the cross-device
+ *  "use a phone" picker an EMPTY list triggers on Windows. `transports:['internal','hybrid']` keeps the
+ *  SAME credential usable via a synced phone too, so it's a hint, not a per-browser pin. A browser with no
+ *  cache passes `[]` (discoverable — the cross-browser/synced path 9fd8c03 added), so named sign-in still
+ *  works anywhere the platform can surface the passkey. One `get`, one server verify — not a second
+ *  mechanism/fallback (ADR-0013); the allowCredentials hint only biases the platform's chooser. */
 export async function connectAssertionDiscoverable(digest: Hex): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
+  const cached = loadPasskey();
+  const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
+    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', transports: ['internal', 'hybrid'] }]
+    : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
-      allowCredentials: [], // discoverable: the platform offers any passkey for this RP (incl. synced)
+      allowCredentials,
       userVerification: 'required',
       timeout: 60_000,
     },
