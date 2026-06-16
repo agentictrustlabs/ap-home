@@ -63,6 +63,27 @@ function redirectForPasskey(intent: 'start' | 'signin', name: string): boolean {
   return true;
 }
 
+// Same subdomain isolation, but for the RELYING-APP enroll path ("Use my Impact name" inside a
+// name-deferred enroll). The ROOT passkey ceremony must still run at the person's OWN subdomain
+// (RP ID = <label>.impact-agent.me) — but unlike redirectForPasskey we must carry the FULL OIDC
+// enroll request across the hop (so the grant can still be issued back to the relying app) and
+// inject the now-chosen `agent_name` (the request arrived name-deferred/empty). The subdomain
+// re-enters the SAME enroll, name-resolved, and creates/asserts the passkey at the correct RP ID.
+function redirectForEnrollName(name: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const label = nameLabel(name);
+  if (!label) return false;
+  const host = window.location.hostname;
+  const onCentral = host === CENTRAL_AUTH_DOMAIN || host.endsWith('.' + CENTRAL_AUTH_DOMAIN);
+  if (!onCentral) return false; // dev — RP is the dev host; no isolation hop
+  if (host === `${label}.${CENTRAL_AUTH_DOMAIN}`) return false; // already home → resolve in place
+  const u = new URL(personalAuthOrigin(label) + '/');
+  u.search = window.location.search; // preserve the whole OIDC request (client_id, delegate, PKCE, state, mode…)
+  u.searchParams.set('agent_name', toAgentName(label)); // resolve the name-deferred request to this name
+  window.location.href = u.toString();
+  return true;
+}
+
 type View =
   | { k: 'checking' }
   | { k: 'blocked' }
@@ -155,6 +176,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         else setView({ k: 'blocked' });
         return;
       }
+      // ROOT-passkey subdomain isolation (spec 229 P5): before running ANY person passkey ceremony
+      // (new bootstrap OR existing-home assertion), hop to <label>.impact-agent.me carrying the enroll
+      // request, so the RP ID is the person's own home — not the www/apex host. No-op once we're already
+      // on the subdomain (post-hop) and on dev hosts. org-create / incomplete returned above.
+      if (redirectForEnrollName(api.enroll!.name)) return;
       if (info.exists && info.agent) setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent, via: viaForHome(info) });
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
@@ -253,6 +279,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       if (api.enroll?.template === 'content-signer' || api.enroll?.template === 'subscription-collect') {
         setView({ k: 'signin', name }); return;
       }
+      // ROOT-passkey subdomain isolation (spec 229 P5): hop to <label>.impact-agent.me FIRST, carrying
+      // the enroll request, so the passkey is created/asserted at the person's own RP ID — not the
+      // www/apex host. On dev hosts / when already home this is a no-op and we resolve in place below.
+      if (redirectForEnrollName(name)) return;
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
       if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent, via: viaForHome(info) });
