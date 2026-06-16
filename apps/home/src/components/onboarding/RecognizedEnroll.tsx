@@ -22,7 +22,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
-import { fetchProfile, listManagedAgents } from '../../connect-client';
+import { fetchProfile, fetchOwnerProfile, listManagedAgents } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -113,7 +113,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           : undefined;
       const recogToken = sso?.token || ownerOpToken;
       if (!recogToken) return onUnrecognized(); // not signed in → credential-first entry
-      const profile = await fetchProfile(recogToken).catch(() => null);
+      // Same-origin demo-sso cookie → /me/profile (aud demo-sso). Owner-op relying-app id_token → the
+      // owner-profile route (verified against registered relying-app audiences). Both yield the owner SA.
+      const profile = await (sso?.token ? fetchProfile(sso.token) : fetchOwnerProfile(recogToken)).catch(() => null);
       const addr = addressOf(profile?.agent);
       // A valid, DEPLOYED member is required to authorize a delegation; anything else → sign in fresh.
       if (!profile || !addr || profile.deployed === false) return onUnrecognized();

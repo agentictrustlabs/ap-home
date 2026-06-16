@@ -13,6 +13,7 @@ import { getServer, json, type FnContext } from '../_lib/server-broker';
 import { basicProfile, sensitivePii } from '../../src/lib/pii';
 import { CONNECT_DOMAIN } from '../../src/lib/domain';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { whitelabel } from '../../src/whitelabel/config';
 
 /** Parse the SA address out of a CAIP-10 `eip155:<chain>:0x…` subject; null if it isn't one. */
 function addressFromSub(sub: string | undefined): Address | null {
@@ -22,6 +23,12 @@ function addressFromSub(sub: string | undefined): Address | null {
 
 /** The person MCP's own audience (same-origin demo; the server-client mints with this aud). */
 const AUD = 'demo-sso';
+
+/** Registered relying-app audiences (their OIDC `client_id`s). Used ONLY by the `owner-profile` route to
+ *  recognize an owner-op ceremony (content-signer / subscription-collect) from the relying-app id_token it
+ *  forwards, when no same-origin demo-sso cookie is present. Recognition only ROUTES the ceremony; the real
+ *  authorization is the owner-signed delegation leaf + each owner-gated a2a call's own verifyIdToken. */
+const RELYING_APP_AUDS: string[] = whitelabel.relyingApps.map((a) => a.client_id);
 
 /**
  * Is `origin` one of THIS site's own Connect origins (ADR-0021 app policy)? The apex + per-handle
@@ -52,6 +59,33 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   const { jwks, directory } = await getServer(env);
   const keys = await importJwks(jwks);
+
+  // OWNER-OP RECOGNITION (spec 266 content-signer / spec 272 subscription-collect): the bearer is a
+  // RELYING-APP id_token (aud = the app's client_id), forwarded by the ceremony when no same-origin
+  // demo-sso cookie is present at the ceremony origin. Verify it against each REGISTERED relying-app
+  // audience (never demo-sso) and return the owner profile so the ceremony can recognize + custody-route.
+  // This only ROUTES the ceremony — the real authorization is the owner-signed SA→key delegation leaf
+  // (only the SA's custodian can produce it) + each owner-gated a2a call's own verifyIdToken.
+  if (url.pathname.replace(/^\/me\/?/, '') === 'owner-profile') {
+    for (const aud of RELYING_APP_AUDS) {
+      const rv = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: (i) => i === iss || isOwnConnectOrigin(i) });
+      if (!rv.ok) continue;
+      const s = rv.session;
+      if (s.iss !== iss && !isOwnConnectOrigin(s.iss)) continue;
+      const addr = addressFromSub(s.sub);
+      let deployed = false;
+      if (addr) {
+        try {
+          deployed = await new AgentAccountClient({ rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID, entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory }).isDeployed(addr);
+        } catch { deployed = false; }
+      }
+      let nm: string | null = null;
+      try { nm = (await directory.agent(s.sub))?.facets?.name ?? null; } catch { nm = null; }
+      return json({ profile: basicProfile(s, nm, deployed) });
+    }
+    return json({ error: 'invalid owner token (no registered relying-app audience matched)' }, 401);
+  }
+
   // Verify signature/alg/aud/exp/owner (the alg-pin rejects HS256 BrokerSession tokens), then
   // accept the issuer if it's the request origin OR one of our own Connect origins — a Google
   // session is minted on the central origin but consumed on the member's per-handle subdomain.

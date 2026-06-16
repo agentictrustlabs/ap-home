@@ -1889,6 +1889,15 @@ export async function fetchProfile(token: string): Promise<BasicProfile | null> 
   return ((await r.json()) as { profile: BasicProfile }).profile;
 }
 
+/** Recognize an OWNER-OP ceremony's owner (content-signer / subscription-collect) from the relying-app
+ *  id_token it forwarded, when no same-origin demo-sso session cookie is present. Verified server-side
+ *  against the registered relying-app audiences (see server/me/handler.ts `owner-profile`). */
+export async function fetchOwnerProfile(token: string): Promise<BasicProfile | null> {
+  const r = await fetch('/me/owner-profile', { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) return null;
+  return ((await r.json()) as { profile: BasicProfile }).profile;
+}
+
 /** A related org the person holds (spec 246 / ADR-0025) — read from THEIR vault for the
  *  person's own home view (all orgs, all requesting apps). Carries no person→org graph. */
 export interface MyOrg {
