@@ -112,6 +112,17 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       return;
     }
     void (async () => {
+      // OWNER-operation ceremonies (content-signer spec 266 / subscription-collect spec 272) run on the
+      // owner's recognized HOME SESSION + the forwarded collectToken — they are NOT a named-home grant.
+      // Route them to the recognized ceremony REGARDLESS of any `agent_name` the relying app sent (with no
+      // cookie they fall to the entry and resume into the ceremony after sign-in, Step 3). This MUST come
+      // before the name resolution below: otherwise an owner-op carrying an agent_name would route to
+      // enroll-existing → OnboardingJourney, which has no owner-op branch and would silently run a
+      // site-login grant (one signature → "permission granted" → bare ?code, nothing stored).
+      if (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect') {
+        setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
+        return;
+      }
       // spec 257 §11: a name-deferred enroll arrives with an EMPTY `agent_name`. Show the
       // CREDENTIAL-FIRST entry (Continue with Google PRIMARY) — NOT the passkey-first journey
       // (whose "Get started" / empty-name "home" chip is wrong here). Google deploys a NAMELESS SA
@@ -191,7 +202,13 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <OrgConsent personAgent={view.agent} api={api} />;
   }
   if (view.k === 'signin') {
-    return <SignInView name={view.name} onSession={async (t, via) => { await openSession(t, via, false); }} />;
+    return <SignInView name={view.name} onSession={async (t, via) => {
+      await openSession(t, via, false);
+      // Step 3 — signing in for an OWNER-OP ceremony establishes the home session; re-enter the
+      // recognized path to run the ceremony (not a grant) on it.
+      const t2 = api.enroll?.template;
+      if (t2 === 'content-signer' || t2 === 'subscription-collect') setView({ k: 'enroll-recognized' });
+    }} />;
   }
   // spec 257 W1 — credential-first front door (the self-serve default). Social/passkey resolve the
   // home with no name; "Use my Impact name" demotes to the name-first fallback.
@@ -231,6 +248,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // enroll path (existing home → sign in + grant; new → the named journey which handles passkey).
   if (view.k === 'enroll-name') {
     return <NameStart enrollApi={api} reason={view.reason} onStart={async (name) => {
+      // OWNER-ops never take the named grant path (no owner-op branch in OnboardingJourney). Sign in to
+      // the named home, then resume the recognized ceremony on that session (Step 3 — SignInView onSession).
+      if (api.enroll?.template === 'content-signer' || api.enroll?.template === 'subscription-collect') {
+        setView({ k: 'signin', name }); return;
+      }
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
       if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent, via: viaForHome(info) });
