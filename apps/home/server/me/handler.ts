@@ -6,14 +6,13 @@
 // importJwks + verifyAgentSession — app-layer verify per spec 227 §7/U1), then
 // gates on the session's assurance (P1-E). Token via `Authorization: Bearer` or
 // `?token=`. Exact `aud` match (P1-F); fail-closed everywhere.
-import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
+import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, json, type FnContext } from '../_lib/server-broker';
 import { basicProfile, sensitivePii } from '../../src/lib/pii';
 import { CONNECT_DOMAIN } from '../../src/lib/domain';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { whitelabel } from '../../src/whitelabel/config';
 
 /** Parse the SA address out of a CAIP-10 `eip155:<chain>:0x…` subject; null if it isn't one. */
 function addressFromSub(sub: string | undefined): Address | null {
@@ -23,12 +22,6 @@ function addressFromSub(sub: string | undefined): Address | null {
 
 /** The person MCP's own audience (same-origin demo; the server-client mints with this aud). */
 const AUD = 'demo-sso';
-
-/** Registered relying-app audiences (their OIDC `client_id`s). Used ONLY by the `owner-profile` route to
- *  recognize an owner-op ceremony (content-signer / subscription-collect) from the relying-app id_token it
- *  forwards, when no same-origin demo-sso cookie is present. Recognition only ROUTES the ceremony; the real
- *  authorization is the owner-signed delegation leaf + each owner-gated a2a call's own verifyIdToken. */
-const RELYING_APP_AUDS: string[] = whitelabel.relyingApps.map((a) => a.client_id);
 
 /**
  * Is `origin` one of THIS site's own Connect origins (ADR-0021 app policy)? The apex + per-handle
@@ -59,34 +52,6 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   const { jwks, directory } = await getServer(env);
   const keys = await importJwks(jwks);
-
-  // OWNER-OP RECOGNITION (spec 266 content-signer / spec 272 subscription-collect): the bearer is a
-  // RELYING-APP OIDC id_token (aud = the app's client_id), forwarded by the ceremony when no same-origin
-  // demo-sso cookie is present at the ceremony origin. It is a plain id_token (mintIdToken: iss/sub/aud/
-  // agent_name) — NOT an AgentSession — so verify it with verifyIdToken against the token's OWN aud,
-  // gated to a REGISTERED relying app + an own-Connect issuer. Return the owner profile so the ceremony
-  // can recognize + custody-route. This only ROUTES — the real authorization is the owner-signed SA→key
-  // delegation leaf (only the SA's custodian can produce it) + each owner-gated a2a call's verifyIdToken.
-  if (url.pathname.replace(/^\/me\/?/, '') === 'owner-profile') {
-    let pre: { iss?: string; aud?: string };
-    try { pre = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')); } catch { return json({ error: 'malformed token' }, 401); }
-    if (!pre.iss || !(pre.iss === iss || isOwnConnectOrigin(pre.iss))) return json({ error: 'issuer not trusted' }, 401);
-    if (!pre.aud || !RELYING_APP_AUDS.includes(pre.aud)) return json({ error: 'aud is not a registered relying app' }, 401);
-    const rv = await verifyIdToken(token, { keys, expectedIss: pre.iss, expectedAud: pre.aud });
-    if (!rv.ok) return json({ error: `invalid owner token: ${rv.reason}` }, 401);
-    const addr = addressFromSub(rv.claims.sub);
-    if (!addr) return json({ error: 'token sub is not a CAIP-10 SA' }, 401);
-    let deployed = false;
-    try {
-      deployed = await new AgentAccountClient({ rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID, entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory }).isDeployed(addr);
-    } catch { deployed = false; }
-    let nm: string | null = (rv.claims as { agent_name?: string }).agent_name ?? null;
-    if (!nm) { try { nm = (await directory.agent(rv.claims.sub))?.facets?.name ?? null; } catch { nm = null; } }
-    // The OIDC id_token carries no credential kind. Owner-op SERVICE-AGENT custodians sign the SA→key leaf
-    // CLIENT-SIDE via their wallet (SIWE/EOA) — route to the wallet signer. (passkey/social owner-op
-    // custodians would need the credential carried explicitly; not used by the demo's service agents.)
-    return json({ profile: { agent: rv.claims.sub, name: nm, credential: 'siwe-eoa', access: 'standard', deployed } });
-  }
 
   // Verify signature/alg/aud/exp/owner (the alg-pin rejects HS256 BrokerSession tokens), then
   // accept the issuer if it's the request origin OR one of our own Connect origins — a Google

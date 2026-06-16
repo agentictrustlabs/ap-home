@@ -39,6 +39,25 @@ export function readPendingEnroll(): PendingEnroll | null {
   }
 }
 
+/** Rebuild the enroll request as a query string (the raw URL was lost across the Google redirect). Used
+ *  ONLY to re-enter an OWNER-OP ceremony on the freshly-established home session (Step 3) — never to run a
+ *  grant. parseEnrollReq() fail-closes (→ blocked) if any mandatory field is missing, so this can't widen
+ *  authority. */
+function enrollReqToQuery(e: EnrollReq): string {
+  const p = new URLSearchParams();
+  p.set('client_id', e.aud);
+  p.set('redirect_uri', e.redirectUri);
+  p.set('delegate', e.delegate);
+  p.set('code_challenge', e.codeChallenge);
+  p.set('delegation_template', e.template);
+  p.set('agent_name', e.name ?? '');
+  if (e.state) p.set('state', e.state);
+  if (e.nonce) p.set('nonce', e.nonce);
+  if (e.collectToken) p.set('collect_token', e.collectToken);
+  if (e.contentSignerTarget) p.set('content_signer_target', e.contentSignerTarget);
+  return p.toString();
+}
+
 type Phase = 'securing' | 'mismatch' | 'consent' | 'granting' | 'connected' | 'error';
 
 export function GoogleEnrollResume() {
@@ -74,6 +93,17 @@ export function GoogleEnrollResume() {
     if (ran.current || !pending || !token) return;
     ran.current = true;
     void (async () => {
+      // OWNER-OP (content-signer / subscription-collect) resumed via Google: the standard grant below is
+      // WRONG for these (it would deliver a bare ?code). The Google sign-in just established a home
+      // session — persist it cross-subdomain and RE-ENTER the enroll, so the recognized ceremony runs on
+      // this session (Step 3, uniform with wallet/passkey). Fail-closed: never fall through to a grant.
+      if (enroll && (enroll.template === 'content-signer' || enroll.template === 'subscription-collect')) {
+        setSsoCookie(token, 'Google');
+        setFedcmLoginStatus('logged-in');
+        clearStash();
+        window.location.href = '/?' + enrollReqToQuery(enroll);
+        return;
+      }
       // spec 257 §11: gate on DEPLOYMENT, not name — a RETURNING NAMELESS member has a deployed
       // SA but `agentName === null`, and must take the existing-home branch (NOT re-run secure-home
       // on an already-deployed SA). A brand-new member (no SA on-chain yet) is deployed below.

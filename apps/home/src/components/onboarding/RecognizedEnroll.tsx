@@ -22,7 +22,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
-import { fetchProfile, fetchOwnerProfile, listManagedAgents } from '../../connect-client';
+import { fetchProfile, listManagedAgents } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -39,6 +39,21 @@ function addressOf(caip10: string | undefined): Address | null {
   if (!caip10) return null;
   const tail = caip10.split(':').pop();
   return tail && /^0x[0-9a-fA-F]{40}$/.test(tail) ? (tail as Address) : null;
+}
+
+/** The `sub` claim of a JWT, by client-side payload decode. Used ONLY to BIND an owner-op to the owner the
+ *  relying app authenticated (the real authz is the owner-signed leaf + the a2a calls' server-side
+ *  verifyIdToken). Returns undefined when the token is absent or unparseable. */
+function idTokenSub(jwt: string | undefined): string | undefined {
+  if (!jwt) return undefined;
+  try {
+    const payload = jwt.split('.')[1];
+    if (!payload) return undefined;
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: unknown };
+    return typeof claims.sub === 'string' ? claims.sub : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Pick the signing credential from how the session ACTUALLY authenticated
@@ -103,25 +118,33 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         }
       }
       const sso = readSsoCookie();
-      // OWNER ops (content-signer / subscription-collect) carry the owner's id_token (collectToken).
-      // Recognize the owner from it when the cross-subdomain ap_sso cookie isn't present at this origin
-      // (EntryExperience already routed us here for that case). Wallet/passkey still sign client-side;
-      // only KMS/social sign server-side, using this same owner id_token the relying app authorized.
-      const ownerOpToken =
-        enroll.template === 'content-signer' || enroll.template === 'subscription-collect'
-          ? enroll.collectToken
-          : undefined;
-      const recogToken = sso?.token || ownerOpToken;
-      if (!recogToken) return onUnrecognized(); // not signed in → credential-first entry
-      // Same-origin demo-sso cookie → /me/profile (aud demo-sso). Owner-op relying-app id_token → the
-      // owner-profile route (verified against registered relying-app audiences). Both yield the owner SA.
-      const profile = await (sso?.token ? fetchProfile(sso.token) : fetchOwnerProfile(recogToken)).catch(() => null);
+      // OWNER ops (content-signer / subscription-collect, spec 266/272) MUST run on a genuine HOME SESSION:
+      // it is the authoritative carrier of (a) the SA, (b) the real credential kind (principal.kind → how to
+      // sign), and (c) a token that authorizes SERVER-SIDE (social/KMS) leaf signing — uniformly across
+      // passkey / social / SIWE. The relying-app `collectToken` is only a BINDING HINT + the downstream a2a
+      // bearer, never the identity source (an id_token has no credential kind and can't authorize KMS).
+      // No cookie → onUnrecognized → credential-first entry; after sign-in, EntryExperience re-enters the
+      // recognized path (Step 3) and we run the ceremony on that fresh home session.
+      if (!sso?.token) return onUnrecognized(); // not signed in → credential-first entry
+      const profile = await fetchProfile(sso.token).catch(() => null);
       const addr = addressOf(profile?.agent);
       // A valid, DEPLOYED member is required to authorize a delegation; anything else → sign in fresh.
       if (!profile || !addr || profile.deployed === false) return onUnrecognized();
+      // BIND the owner-op to the owner the relying app authenticated: the home session's SA MUST equal the
+      // `collectToken` subject. Otherwise a relying app could start an owner-op for a DIFFERENT owner than
+      // the one it authenticated. Mismatch → reject (the user must sign in as the named owner / decline).
+      if (enroll.template === 'content-signer' || enroll.template === 'subscription-collect') {
+        const want = addressOf(idTokenSub(enroll.collectToken));
+        if (!want) return fail('This authorization request is missing its owner token.');
+        if (want.toLowerCase() !== addr.toLowerCase()) {
+          return fail(
+            `This authorization is for a different owner than your current session. Sign out and sign back in as the owner of ${want}.`,
+          );
+        }
+      }
       // Sign with the credential that actually authenticated this session (wallet/passkey/KMS), not the
       // cookie's defaulted via — which sent a wallet member to passkey at authorize time.
-      const v = viaFromCredential(profile.credential, sso?.via);
+      const v = viaFromCredential(profile.credential, sso.via);
 
       // passkey is rpId-bound to the home subdomain — hop there if we're not already on it (the passkey
       // can't assert at the apex). Google/KMS + wallet sign on any origin, so they authorize in place.
@@ -136,7 +159,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
       setHome({ address: addr, name: profile.name ?? '' });
       setViaLower(v);
-      setToken(recogToken);
+      setToken(sso.token);
       setPhase('consent');
     })();
   }, [enroll, onUnrecognized]);

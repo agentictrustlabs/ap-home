@@ -122,15 +122,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
         // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
         // null here — recognition reads the cookie directly, the same recovery org-create already does.)
-        //
-        // OWNER-operation templates (content-signer / subscription-collect) additionally carry the owner's
-        // id_token (`collectToken`). RecognizedEnroll can recognize the owner from THAT even when the
-        // ap_sso cookie isn't present at this origin (e.g. the ceremony was started from a relying app on
-        // a different subdomain) — so the ceremony RUNS instead of falling through to a bare grant code.
-        const ownerOpWithToken =
-          (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect') &&
-          !!api.enroll!.collectToken;
-        setView({ k: readSsoCookie() || ownerOpWithToken ? 'enroll-recognized' : 'enroll-entry' });
+        // OWNER-operation templates (content-signer / subscription-collect) need a genuine home session
+        // too — with no cookie they fall to the entry and resume into the recognized ceremony after a
+        // sign-in (Step 3, see the enroll-entry onSession below).
+        setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
       const info = await nameInfo(api.enroll!.name);
@@ -220,7 +215,15 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       <CredentialFirstStart
         enrollApi={api}
         onUseName={(reason) => setView({ k: 'enroll-name', reason })}
-        onSession={async (t, via) => { await openSession(t, via, false); }}
+        onSession={async (t, via) => {
+          await openSession(t, via, false);
+          // Step 3 (spec: owner-op ceremony runs on the home session) — an OWNER-operation enroll
+          // (content-signer / subscription-collect) reaches the entry only when there was no ap_sso
+          // session. The member just signed in, so ap_sso now exists: re-enter the recognized path and
+          // run the ceremony on this genuine home session (no relying-app-token credential reconstruction).
+          const t2 = api.enroll?.template;
+          if (t2 === 'content-signer' || t2 === 'subscription-collect') setView({ k: 'enroll-recognized' });
+        }}
       />
     );
   }
