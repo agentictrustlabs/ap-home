@@ -191,8 +191,11 @@ export async function connectAssertionDiscoverable(digest: Hex): Promise<{ signa
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
+  // NO `transports` on the descriptor (matches the old local-first signAssertion): listing 'hybrid'
+  // makes Windows offer the cross-device "use a phone" flow — exactly what we're avoiding. With just the
+  // credential id, the platform uses the LOCAL authenticator (Windows Hello / Touch ID) directly.
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
-    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', transports: ['internal', 'hybrid'] }]
+    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key' }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
   const credential = (await navigator.credentials.get({
     publicKey: {
