@@ -186,11 +186,19 @@ export async function signWithDiscoverablePasskey(
  *  path 9fd8c03 added), so named sign-in still works anywhere the platform can surface the passkey. One
  *  `get`, one server verify — not a second mechanism/fallback (ADR-0013); the allowCredentials hint only
  *  biases the platform's chooser. */
-export async function connectAssertionDiscoverable(digest: Hex): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
+export async function connectAssertionDiscoverable(
+  digest: Hex,
+  opts: { requireLocalCache?: boolean } = {},
+): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
+  if (!cached && opts.requireLocalCache) {
+    throw new Error(
+      'No local passkey is cached for this home in this browser. Open this home on the device/browser where you created the passkey, or choose a cross-device passkey sign-in explicitly.',
+    );
+  }
   // NO `transports` on the descriptor (matches the old local-first signAssertion): listing 'hybrid'
   // makes Windows offer the cross-device "use a phone" flow — exactly what we're avoiding. With just the
   // credential id, the platform uses the LOCAL authenticator (Windows Hello / Touch ID) directly.

@@ -20,7 +20,7 @@ import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
 import { connectWallet, connectWalletAccounts, personalSign } from './lib/wallet';
-import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
+import { registerPasskey, signWithPasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
@@ -379,12 +379,19 @@ export type PasskeyOutcome =
 
 /** A signHash backed by the ROOT passkey.
  *
- * Local-first: when this browser has the credential id cached, use an allowCredentials assertion with
- * that exact id. On Windows this goes straight to the local platform authenticator instead of the
- * cross-device phone picker. If the cache is absent (new browser/device), fall back to the discoverable
- * WebAuthn path so synced/cross-device passkeys still work.
+ * Local-only for signing ceremonies: when this browser has the credential id cached, use an
+ * allowCredentials assertion with that exact id. On Windows this goes straight to the local platform
+ * authenticator instead of the cross-device phone picker. If the cache is absent, fail fast rather than
+ * firing a discoverable WebAuthn prompt that can hang and then offer only phone/hybrid.
  */
-export const passkeySignHash: SignHash = (hash) => (loadPasskey() ? signWithPasskey(hash) : signWithDiscoverablePasskey(hash));
+export const passkeySignHash: SignHash = async (hash) => {
+  if (!loadPasskey()) {
+    throw new Error(
+      'No local passkey is cached for this home in this browser. Open this home on the device/browser where you created the passkey.',
+    );
+  }
+  return signWithPasskey(hash);
+};
 
 // ── Google × KMS custody (spec 235): the server signs with the per-subject custodian ──
 //
@@ -1777,7 +1784,7 @@ export async function connectWithName(
     // works cross-browser/device, not only where the credential was cached. The server verifies the
     // returned credentialIdDigest is an on-chain custodian of name→SA (an unrelated passkey is rejected).
     const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
-    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge);
+    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge, { requireLocalCache: true });
     proof = { kind: 'passkey', credentialIdDigest, challenge, signature };
   }
   const r = await fetch('/connect/with-name', {
