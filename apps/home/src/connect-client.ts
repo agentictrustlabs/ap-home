@@ -377,14 +377,14 @@ export type PasskeyOutcome =
   | { status: 'bootstrap'; passkey: DemoPasskey }
   | { status: 'disambiguate' | 'rejected'; passkey?: DemoPasskey; reason?: string };
 
-/** A signHash backed by the ROOT passkey via a DISCOVERABLE WebAuthn assertion
- *  (spec 233, Mechanism A): empty allowCredentials, no localStorage — the platform
- *  offers the (possibly synced) passkey for this RP, so ROOT-signed ceremonies work
- *  on any device that has the passkey, not just the one that created it. The SA
- *  verifies the signature on-chain by credentialIdDigest, so a discovered key only
- *  works if it is genuinely a custodian. (`signWithPasskey` — localStorage-cached —
- *  is retained for callers that already hold the local passkey object.) */
-export const passkeySignHash: SignHash = (hash) => signWithDiscoverablePasskey(hash);
+/** A signHash backed by the ROOT passkey.
+ *
+ * Local-first: when this browser has the credential id cached, use an allowCredentials assertion with
+ * that exact id. On Windows this goes straight to the local platform authenticator instead of the
+ * cross-device phone picker. If the cache is absent (new browser/device), fall back to the discoverable
+ * WebAuthn path so synced/cross-device passkeys still work.
+ */
+export const passkeySignHash: SignHash = (hash) => (loadPasskey() ? signWithPasskey(hash) : signWithDiscoverablePasskey(hash));
 
 // ── Google × KMS custody (spec 235): the server signs with the per-subject custodian ──
 //

@@ -181,11 +181,11 @@ export async function signWithDiscoverablePasskey(
  *
  *  LOCAL-FIRST HINT: when THIS browser cached the credential id, pass it as `allowCredentials` so the
  *  platform uses the LOCAL authenticator directly (Windows Hello / Touch ID) instead of the cross-device
- *  "use a phone" picker an EMPTY list triggers on Windows. `transports:['internal','hybrid']` keeps the
- *  SAME credential usable via a synced phone too, so it's a hint, not a per-browser pin. A browser with no
- *  cache passes `[]` (discoverable — the cross-browser/synced path 9fd8c03 added), so named sign-in still
- *  works anywhere the platform can surface the passkey. One `get`, one server verify — not a second
- *  mechanism/fallback (ADR-0013); the allowCredentials hint only biases the platform's chooser. */
+ *  "use a phone" picker an EMPTY list triggers on Windows. Do NOT set `transports`: including `hybrid`
+ *  invites the phone flow. A browser with no cache passes `[]` (discoverable — the cross-browser/synced
+ *  path 9fd8c03 added), so named sign-in still works anywhere the platform can surface the passkey. One
+ *  `get`, one server verify — not a second mechanism/fallback (ADR-0013); the allowCredentials hint only
+ *  biases the platform's chooser. */
 export async function connectAssertionDiscoverable(digest: Hex): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
