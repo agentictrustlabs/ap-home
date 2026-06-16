@@ -122,7 +122,15 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
         // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
         // null here — recognition reads the cookie directly, the same recovery org-create already does.)
-        setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
+        //
+        // OWNER-operation templates (content-signer / subscription-collect) additionally carry the owner's
+        // id_token (`collectToken`). RecognizedEnroll can recognize the owner from THAT even when the
+        // ap_sso cookie isn't present at this origin (e.g. the ceremony was started from a relying app on
+        // a different subdomain) — so the ceremony RUNS instead of falling through to a bare grant code.
+        const ownerOpWithToken =
+          (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect') &&
+          !!api.enroll!.collectToken;
+        setView({ k: readSsoCookie() || ownerOpWithToken ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
       const info = await nameInfo(api.enroll!.name);

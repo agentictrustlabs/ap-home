@@ -103,14 +103,23 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         }
       }
       const sso = readSsoCookie();
-      if (!sso?.token) return onUnrecognized(); // not signed in → credential-first entry
-      const profile = await fetchProfile(sso.token).catch(() => null);
+      // OWNER ops (content-signer / subscription-collect) carry the owner's id_token (collectToken).
+      // Recognize the owner from it when the cross-subdomain ap_sso cookie isn't present at this origin
+      // (EntryExperience already routed us here for that case). Wallet/passkey still sign client-side;
+      // only KMS/social sign server-side, using this same owner id_token the relying app authorized.
+      const ownerOpToken =
+        enroll.template === 'content-signer' || enroll.template === 'subscription-collect'
+          ? enroll.collectToken
+          : undefined;
+      const recogToken = sso?.token || ownerOpToken;
+      if (!recogToken) return onUnrecognized(); // not signed in → credential-first entry
+      const profile = await fetchProfile(recogToken).catch(() => null);
       const addr = addressOf(profile?.agent);
       // A valid, DEPLOYED member is required to authorize a delegation; anything else → sign in fresh.
       if (!profile || !addr || profile.deployed === false) return onUnrecognized();
       // Sign with the credential that actually authenticated this session (wallet/passkey/KMS), not the
       // cookie's defaulted via — which sent a wallet member to passkey at authorize time.
-      const v = viaFromCredential(profile.credential, sso.via);
+      const v = viaFromCredential(profile.credential, sso?.via);
 
       // passkey is rpId-bound to the home subdomain — hop there if we're not already on it (the passkey
       // can't assert at the apex). Google/KMS + wallet sign on any origin, so they authorize in place.
@@ -125,7 +134,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
       setHome({ address: addr, name: profile.name ?? '' });
       setViaLower(v);
-      setToken(sso.token);
+      setToken(recogToken);
       setPhase('consent');
     })();
   }, [enroll, onUnrecognized]);
