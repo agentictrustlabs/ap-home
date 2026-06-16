@@ -21,8 +21,8 @@ export interface DemoPasskey {
 interface StoredPasskey {
   credentialIdDigest: Hex;
   credentialIdB64: string;
-  pubKeyX: string;
-  pubKeyY: string;
+  pubKeyX?: string;
+  pubKeyY?: string;
   label: string;
 }
 
@@ -36,8 +36,8 @@ const toStored = (p: DemoPasskey): StoredPasskey => ({
 const fromStored = (s: StoredPasskey): DemoPasskey => ({
   credentialIdDigest: s.credentialIdDigest,
   credentialIdB64: s.credentialIdB64,
-  pubKeyX: BigInt(s.pubKeyX),
-  pubKeyY: BigInt(s.pubKeyY),
+  pubKeyX: BigInt(s.pubKeyX ?? '0'),
+  pubKeyY: BigInt(s.pubKeyY ?? '0'),
   label: s.label,
 });
 
@@ -60,6 +60,26 @@ function b64uDecode(s: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+function b64uEncode(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function cacheAssertionCredential(rawId: ArrayBuffer, label = ''): Hex {
+  const bytes = new Uint8Array(rawId);
+  const credentialIdDigest = keccak256(bytesToHex(bytes));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      credentialIdDigest,
+      credentialIdB64: b64uEncode(bytes),
+      label,
+    } satisfies StoredPasskey),
+  );
+  return credentialIdDigest;
 }
 function hexToBytes(hex: Hex): Uint8Array {
   const s = hex.startsWith('0x') ? hex.slice(2) : hex;
@@ -150,6 +170,7 @@ export async function signWithPasskey(digest: Hex): Promise<Hex> {
 export async function signWithDiscoverablePasskey(
   digest: Hex,
   expectedCredentialIdDigest?: Hex,
+  opts: { preferLocalDevice?: boolean } = {},
 ): Promise<Hex> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
@@ -158,6 +179,7 @@ export async function signWithDiscoverablePasskey(
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
       allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
+      ...(opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
@@ -170,6 +192,7 @@ export async function signWithDiscoverablePasskey(
     }
   }
   // The platform tells us which credential signed — use its rawId, not a cache.
+  cacheAssertionCredential(credential.rawId);
   return signAssertionFromCredential(credential);
 }
 
@@ -188,17 +211,12 @@ export async function signWithDiscoverablePasskey(
  *  biases the platform's chooser. */
 export async function connectAssertionDiscoverable(
   digest: Hex,
-  opts: { requireLocalCache?: boolean } = {},
+  opts: { preferLocalDevice?: boolean } = {},
 ): Promise<{ signature: Hex; credentialIdDigest: Hex }> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
-  if (!cached && opts.requireLocalCache) {
-    throw new Error(
-      'No local passkey is cached for this home in this browser. Open this home on the device/browser where you created the passkey, or choose a cross-device passkey sign-in explicitly.',
-    );
-  }
   // NO `transports` on the descriptor (matches the old local-first signAssertion): listing 'hybrid'
   // makes Windows offer the cross-device "use a phone" flow — exactly what we're avoiding. With just the
   // credential id, the platform uses the LOCAL authenticator (Windows Hello / Touch ID) directly.
@@ -209,12 +227,13 @@ export async function connectAssertionDiscoverable(
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
       allowCredentials,
+      ...(!cached && opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error('no passkey available on this device');
-  const credentialIdDigest = keccak256(bytesToHex(new Uint8Array(credential.rawId)));
+  const credentialIdDigest = cacheAssertionCredential(credential.rawId);
   return { signature: signAssertionFromCredential(credential), credentialIdDigest };
 }
 
