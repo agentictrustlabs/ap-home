@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const DEMO_A2A_URL = process.env.DEMO_A2A_URL || 'https://demo-a2a-production.richardpedersen3.workers.dev';
+// spec 278 P5: the vault-key ceremony POSTs the signed VaultKeyAuthorization to demo-mcp's
+// /custody/vault-key/bind. Proxy it same-origin (the demo-mcp bind route has no CORS) — same
+// pattern as /a2a. Production MUST set DEMO_MCP_URL; the fallback is solo-dev convenience only.
+const DEMO_MCP_URL = process.env.DEMO_MCP_URL || 'https://demo-mcp-production.richardpedersen3.workers.dev';
 
 // EXT-001 / EXT-009 — security headers baseline applied to every route. A strict CSP
 // with nonces will land in a follow-up wave (the OIDC SPA mixes inline event handlers
@@ -51,7 +55,11 @@ const nextConfig = {
   // production deployments MUST set `DEMO_A2A_URL` explicitly. The fallback is
   // retained only for solo-dev convenience and is not part of the deployment surface.
   async rewrites() {
-    return [{ source: '/a2a/:path*', destination: `${DEMO_A2A_URL}/:path*` }];
+    return [
+      { source: '/a2a/:path*', destination: `${DEMO_A2A_URL}/:path*` },
+      // spec 278 P5 — vault-key ceremony → demo-mcp (server-side proxy; dodges CORS on /bind).
+      { source: '/mcp-bind/:path*', destination: `${DEMO_MCP_URL}/:path*` },
+    ];
   },
   async headers() {
     return [

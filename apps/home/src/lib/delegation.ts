@@ -12,6 +12,7 @@ import {
   encodeAllowedTargetsTerms,
   encodeValueTerms,
   buildPaymentMandateCaveats,
+  buildVaultKeyUseCaveat,
   hashDelegation,
   buildSessionDelegation,
   ROOT_AUTHORITY,
@@ -102,6 +103,52 @@ export function buildApprovedSiteDelegation(
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch
   return { delegation: d, digest };
+}
+
+// ─── spec 278 P5 — vault-key authorization (person SA → demo-mcp) ──────────────────────────────
+
+export interface VaultKeyCeremonyParams {
+  vaultId: string;
+  /** The person's KEK resource name (provisioned by the operator via spec 276 ap-provision-gcp). */
+  kmsKeyRef: string;
+  /** demo-mcp's authorized delegate key (the binding's allowedServerId surface). */
+  serverKey: Address;
+  allowedResources: string[];
+  classificationCeiling: string;
+  ops: ('read' | 'write')[];
+  validitySeconds?: number;
+}
+
+/** Build the unsigned `VaultKeyAuthorization` (person SA → demo-mcp, one non-subdelegable
+ *  VAULT_KEY_USE caveat) + its EIP-712 digest + the binding `expiresAt`. The person's ROOT
+ *  credential signs `digest`; the signed delegation is POSTed to /custody/vault-key/bind
+ *  (spec 278 §3.3). Mirrors `issueSiteDelegation`'s build → hash → sign shape. */
+export function buildVaultKeyAuthorization(
+  owner: Address,
+  p: VaultKeyCeremonyParams,
+): { delegation: Delegation; digest: Hex; expiresAt: string } {
+  const validUntil = Math.floor(Date.now() / 1000) + (p.validitySeconds ?? 60 * 60 * 24 * 90);
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveat = buildVaultKeyUseCaveat({
+    vaultId: p.vaultId,
+    kmsKeyRef: p.kmsKeyRef,
+    resources: p.allowedResources,
+    classificationCeiling: p.classificationCeiling,
+    ops: p.ops,
+    noSubdelegation: true,
+  });
+  const d: Delegation = {
+    delegator: owner,
+    delegate: p.serverKey,
+    authority: ROOT_AUTHORITY,
+    caveats: [caveat],
+    salt,
+    signature: '0x',
+  };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  return { delegation: d, digest, expiresAt: new Date(validUntil * 1000).toISOString() };
 }
 
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────

@@ -85,6 +85,17 @@ export interface PersonVault {
   vault: Vault;
 }
 
+// Delegation `salt` is a bigint, which JSON can't represent — it travels + persists as a
+// string (wire form). These two keep the conversion in ONE place: store/hash the wire form;
+// coerce salt → bigint whenever a Delegation is reconstructed for `hashDelegation`.
+function delegationToWire(d: Delegation): Record<string, unknown> {
+  return { ...d, salt: d.salt.toString() };
+}
+function delegationFromWire(json: string): Delegation {
+  const w = JSON.parse(json) as Record<string, unknown>;
+  return { ...(w as object), salt: BigInt(w.salt as string) } as Delegation;
+}
+
 /**
  * Resolve the per-person vault for an owner: the binding + its per-person-KEK-backed
  * `Vault` + the presented authorization. Returns `null` when no binding exists — the
@@ -106,7 +117,7 @@ export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promi
   });
   return {
     binding: bindingFromRow(row),
-    authorization: JSON.parse(row.authorization_json) as Delegation,
+    authorization: delegationFromWire(row.authorization_json), // salt → bigint for hashDelegation
     vault: createDemoVault(env.DB, wrapper),
   };
 }
@@ -217,7 +228,10 @@ export async function verifyAndStoreBinding(
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (input.allowedResources.length === 0) return { ok: false, reason: 'no resources' };
   if (input.ops.length === 0) return { ok: false, reason: 'no ops' };
-  const authorizationHash = (await sha256Hex(canonicalize(input.authorization as unknown))) as Sha256;
+  // Hash + persist the WIRE form (salt as string) — canonicalize/JSON.stringify can't serialize
+  // a bigint. `input.authorization` keeps salt as bigint for the verifier's hashDelegation.
+  const wire = delegationToWire(input.authorization);
+  const authorizationHash = (await sha256Hex(canonicalize(wire))) as Sha256;
   const candidate: VaultKeyBindingV1 = {
     type: 'VaultKeyBindingV1',
     vaultId: input.vaultId,
@@ -259,7 +273,7 @@ export async function verifyAndStoreBinding(
     classification_ceiling: input.classificationCeiling,
     ops: JSON.stringify(input.ops),
     expires_at: input.expiresAt,
-    authorization_json: JSON.stringify(input.authorization),
+    authorization_json: JSON.stringify(wire),
     authorization_hash: authorizationHash,
   });
   return { ok: true };

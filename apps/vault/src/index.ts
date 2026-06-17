@@ -867,10 +867,22 @@ app.post('/custody/vault-key/bind', async (c) => {
   if (!owner || !vaultId || !kmsKeyRef || !classificationCeiling || !expiresAt || allowedResources.length === 0 || ops.length === 0 || authorization == null) {
     return c.json({ error: 'invalid_request', error_description: 'owner, vaultId, kmsKeyRef, allowedResources, classificationCeiling, ops, expiresAt, authorization required' }, 400);
   }
+  // The authorization arrives in WIRE form (salt serialized as a string — bigint isn't JSON).
+  // Coerce salt back to bigint so hashDelegation recomputes the EXACT digest the person SA signed.
+  const rawSalt = (authorization as { salt?: unknown }).salt;
+  if (typeof rawSalt !== 'string' && typeof rawSalt !== 'number' && typeof rawSalt !== 'bigint') {
+    return c.json({ error: 'invalid_request', error_description: 'authorization.salt required' }, 400);
+  }
+  let normalizedAuthorization: Delegation;
+  try {
+    normalizedAuthorization = { ...(authorization as object), salt: BigInt(rawSalt) } as Delegation;
+  } catch {
+    return c.json({ error: 'invalid_request', error_description: 'authorization.salt malformed' }, 400);
+  }
   try {
     const res = await verifyAndStoreBinding(c.env, {
       owner, vaultId, kmsKeyRef, allowedResources, classificationCeiling, ops, expiresAt,
-      authorization: authorization as Delegation,
+      authorization: normalizedAuthorization,
     });
     if (!res.ok) return c.json({ ok: false, error: 'authorization_invalid', reason: res.reason }, 401);
     return c.json({ ok: true, owner, kmsKeyRef, server_id: VAULT_SERVER_ID });

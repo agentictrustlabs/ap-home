@@ -26,7 +26,7 @@ import {
 } from '../connect-client';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
-import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, OPEN_DELEGATION, toWire, type DelegationWire } from '../lib/delegation';
+import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
@@ -388,5 +388,48 @@ export async function signConsent(party: Address, digest: Hex, via: Via = 'passk
     return { ok: true, signature };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not sign consent' };
+  }
+}
+
+/**
+ * ⑤ — spec 278 P5 vault-key ceremony. Authorize demo-mcp to wield your per-person vault KEK:
+ * build a `VaultKeyAuthorization` (person SA → demo-mcp, one non-subdelegable VAULT_KEY_USE
+ * caveat), sign its EIP-712 digest with YOUR credential (passkey / wallet / Google KMS — same
+ * `signHashFor` rail as `signConsent`), and POST the signed authorization to demo-mcp's
+ * `/custody/vault-key/bind` (same-origin via the `/mcp-bind` proxy). On success the person's
+ * vault flips from fail-closed to live. The KEK (`kmsKeyRef`) is provisioned out-of-band by the
+ * operator (spec 276 ap-provision-gcp); the home never holds key material — only signs the grant.
+ */
+export async function bindVaultKey(
+  owner: Address,
+  params: VaultKeyCeremonyParams,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ kmsKeyRef: string }>> {
+  try {
+    const { delegation, digest, expiresAt } = buildVaultKeyAuthorization(owner, params);
+    const signHash = await signHashFor(via, owner, auth);
+    delegation.signature = await signHash(digest); // person SA signs the authorization (ERC-1271)
+    const res = await fetch('/mcp-bind/custody/vault-key/bind', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        owner,
+        vaultId: params.vaultId,
+        kmsKeyRef: params.kmsKeyRef,
+        allowedResources: params.allowedResources,
+        classificationCeiling: params.classificationCeiling,
+        ops: params.ops,
+        expiresAt,
+        authorization: toWire(delegation),
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string; error?: string };
+    if (!res.ok || data.ok !== true) {
+      return { ok: false, error: data.reason ?? data.error ?? `vault-key bind failed (HTTP ${res.status})` };
+    }
+    return { ok: true, kmsKeyRef: params.kmsKeyRef };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'vault-key bind failed' };
   }
 }
