@@ -15,37 +15,18 @@ export interface Profile {
   updated_at: string;
 }
 
-export async function upsertDemoProfile(db: D1Database, address: string): Promise<Profile> {
-  const addr = address.toLowerCase();
-  const existing = await db
-    .prepare('SELECT * FROM profiles WHERE owner_address = ?')
-    .bind(addr)
-    .first<Profile>();
-  if (existing) return existing;
-
-  const seeded: Profile = {
-    owner_address: addr,
-    full_name: `Demo User (${address.slice(0, 6)}…${address.slice(-4)})`,
-    email: `${address.slice(2, 10)}@demo.agenticprimitives.local`,
+/** Pure seed builder (no DB write) — the encrypted vault adapter materializes +
+ *  seals the demo profile into `vault_objects` on first read (the plaintext
+ *  `profiles` table was dropped in migration 0007). */
+export function buildSeedProfile(owner: string): Profile {
+  return {
+    owner_address: owner.toLowerCase(),
+    full_name: `Demo User (${owner.slice(0, 6)}…${owner.slice(-4)})`,
+    email: `${owner.slice(2, 10)}@demo.agenticprimitives.local`,
     phone: '+1-555-0100',
     notes: 'Seeded by demo-mcp.',
     updated_at: new Date().toISOString(),
   };
-  await db
-    .prepare(
-      `INSERT INTO profiles (owner_address, full_name, email, phone, notes) VALUES (?, ?, ?, ?, ?)`,
-    )
-    .bind(seeded.owner_address, seeded.full_name, seeded.email, seeded.phone, seeded.notes)
-    .run();
-  return seeded;
-}
-
-export async function getProfile(db: D1Database, address: string): Promise<Profile | undefined> {
-  const row = await db
-    .prepare('SELECT * FROM profiles WHERE owner_address = ?')
-    .bind(address.toLowerCase())
-    .first<Profile>();
-  return row ?? undefined;
 }
 
 // JtiStore backed by D1. INSERT…ON CONFLICT…RETURNING gives us atomic

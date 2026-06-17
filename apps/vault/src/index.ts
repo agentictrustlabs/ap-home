@@ -23,13 +23,13 @@ import {
 } from '@agenticprimitives/audit';
 import type { Address } from '@agenticprimitives/types';
 import {
-  upsertDemoProfile,
-  getProfile,
+  type Profile,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
 import {
   demoVault,
+  RESOURCE_PROFILE,
   RESOURCE_PERSON_PII,
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
@@ -460,11 +460,14 @@ app.post('/tools/get_profile', async (c) => {
   const handler = withDelegation<Args>(
     baseConfig(c.env),
     async ({ principal }) => {
-      await upsertDemoProfile(c.env.DB, principal);
-      const profile = await getProfile(c.env.DB, principal);
+      // Profile now lives in the encrypted vault (resource `profile`, pii.low),
+      // sealed on first read — no plaintext `profiles` table. Low-risk T1 read:
+      // encryption-at-rest via the vault, no entitlement/KAS gate (the principal
+      // IS the owner, same as before).
+      const obj = await demoVault(c.env).read<Profile>({ owner: principal, resource: RESOURCE_PROFILE });
       // Label the owner with its `.agent` name (single-call resolve).
       const owner_name = await resolveAgentName(c.env, principal);
-      return { ok: true, profile, owner_name };
+      return { ok: true, profile: obj?.data ?? null, owner_name };
     },
     {
       toolName: 'get_profile',
@@ -900,8 +903,9 @@ if (process.env.NODE_ENV !== 'production') {
   app.post('/_dev/seed', async (c) => {
     const { address } = (await c.req.json()) as { address?: string };
     if (typeof address !== 'string') return c.json({ error: 'address required' }, 400);
-    const profile = await upsertDemoProfile(c.env.DB, address);
-    return c.json({ ok: true, profile });
+    // Reading materializes + seals the profile seed into the vault (seed-on-read).
+    const obj = await demoVault(c.env).read<Profile>({ owner: address, resource: RESOURCE_PROFILE });
+    return c.json({ ok: true, profile: obj?.data ?? null });
   });
 }
 

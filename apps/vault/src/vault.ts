@@ -18,8 +18,10 @@ import type { Vault, VaultObject, VaultReadRequest, VaultWriteRequest, VaultRef,
 import { sealEnvelope, openEnvelope, projectFields } from '@agenticprimitives/vault';
 import { LocalAesProvider } from '@agenticprimitives/key-custody';
 import {
+  type Profile,
   type PersonPii,
   type OrgSensitive,
+  buildSeedProfile,
   buildSeedPii,
   buildSeedOrgSensitive,
   getVaultObjectRow,
@@ -28,12 +30,14 @@ import {
   listVaultObjectRows,
 } from './db.js';
 
+export const RESOURCE_PROFILE = 'profile';
 export const RESOURCE_PERSON_PII = 'person-pii';
 export const RESOURCE_ORG_SENSITIVE = 'org-sensitive';
 /** Generic per-agent vault records are addressed as `vault:<recordType>`. */
 export const VAULT_RECORD_PREFIX = 'vault:';
 
 const CLASSIFICATION: Record<string, VaultClassification> = {
+  [RESOURCE_PROFILE]: 'pii.low',
   [RESOURCE_PERSON_PII]: 'pii.sensitive',
   [RESOURCE_ORG_SENSITIVE]: 'regulated.high',
 };
@@ -114,9 +118,10 @@ export function createDemoVault(db: D1Database, wrapper: DekWrapper): Vault {
         };
       }
 
-      // Absent → seed-on-read for the typed PII/org resources (sealed fresh).
-      let seed: PersonPii | OrgSensitive | null = null;
-      if (req.resource === RESOURCE_PERSON_PII) seed = buildSeedPii(owner);
+      // Absent → seed-on-read for the typed profile/PII/org resources (sealed fresh).
+      let seed: Profile | PersonPii | OrgSensitive | null = null;
+      if (req.resource === RESOURCE_PROFILE) seed = buildSeedProfile(owner);
+      else if (req.resource === RESOURCE_PERSON_PII) seed = buildSeedPii(owner);
       else if (req.resource === RESOURCE_ORG_SENSITIVE) seed = buildSeedOrgSensitive(owner);
       if (seed === null) return null; // generic vault:<type> has no seed
 
