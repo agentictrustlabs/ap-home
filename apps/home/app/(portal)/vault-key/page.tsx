@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
-import { bindVaultKey, type Via } from '../../../src/home/onboarding';
+import { bindVaultKey, resolveVia, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 
 const MCP_BIND = '/mcp-bind';
@@ -28,7 +28,7 @@ interface ServerInfo {
 }
 
 export default function VaultKeyPage() {
-  const { agentAddress, agentName, session } = useSession();
+  const { agentAddress, agentName, session, profile } = useSession();
   const [prep, setPrep] = useState<'loading' | 'ready' | 'error'>('loading');
   const [prepError, setPrepError] = useState<string | null>(null);
   const [kmsKeyRef, setKmsKeyRef] = useState('');
@@ -38,10 +38,9 @@ export default function VaultKeyPage() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
-  const via = useMemo<Via>(() => {
-    const v = (session?.via ?? 'passkey').toLowerCase();
-    return v === 'wallet' ? 'wallet' : v === 'google' ? 'google' : 'passkey';
-  }, [session?.via]);
+  // Resolve the signing credential from the agent's ACTUAL custody credential, not the cookie `via`
+  // (which defaults to passkey → a WebAuthn prompt that fails for a Google/social-custodied agent).
+  const via = useMemo<Via>(() => resolveVia(profile?.credential, session?.via), [profile?.credential, session?.via]);
 
   // Auto-prepare: provision the KEK (idempotent) + discover the server delegate/scope.
   useEffect(() => {

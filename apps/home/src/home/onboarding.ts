@@ -43,6 +43,29 @@ export function isKmsVia(via: Via): boolean {
   return via === 'google' || via === 'youversion';
 }
 
+/**
+ * Resolve the credential to SIGN with for an agent. Prefer the agent's ACTUAL on-chain custody
+ * credential (`BasicProfile.credential`) over the session/cookie `via` — the cookie `via` defaults
+ * to `passkey` and would wrongly trigger a WebAuthn prompt for a Google/social-custodied agent (which
+ * has no passkey). Mirrors RecognizedEnroll's resolver so every signing surface routes custody the
+ * same way. Falls back to the cookie `via`, then `passkey`.
+ */
+export function resolveVia(credential: string | undefined, cookieVia: string | undefined): Via {
+  const c = (credential || '').toLowerCase();
+  const v = (cookieVia || '').toLowerCase();
+  if (c.includes('passkey')) return 'passkey';
+  if (c.includes('siwe') || c.includes('eoa') || c.includes('wallet') || c.includes('hardware')) return 'wallet';
+  if (c.includes('youversion')) return 'youversion';
+  if (c.includes('google')) return 'google';
+  // A Google/YouVersion session's credential kind is `'oidc'` (server-side KMS custody — see
+  // server/oidc/{google,youversion}/callback.ts). Both sign via KMS using the session token (the
+  // custodian is derived server-side from the session's iss/sub), so map `oidc`/`kms` to a KMS via —
+  // distinguishing the label by the cookie via, defaulting to google. This is what stops a social
+  // agent from being mis-routed to a (nonexistent) passkey.
+  if (c.includes('oidc') || c.includes('kms')) return v === 'youversion' ? 'youversion' : 'google';
+  return v === 'wallet' || v === 'google' || v === 'youversion' || v === 'passkey' ? (v as Via) : 'passkey';
+}
+
 /** ①a — your device becomes your key (passkey path only; wallet/Google have no create step). */
 export async function createHomeKey(name: string): Promise<DemoPasskey> {
   return createSecureHomePasskey(name);
