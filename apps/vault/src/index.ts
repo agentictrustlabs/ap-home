@@ -16,6 +16,7 @@ import { declareTool } from '@agenticprimitives/tool-policy';
 import {
   createConsoleAuditSink,
   composeSinks,
+  composeFailHardSinks,
   buildEvent,
   createPiiGuardrailSink,
   type AuditSink,
@@ -81,6 +82,50 @@ function buildAuditSink(env: Env): AuditSink {
  */
 function getCorrelationId(c: { req: { header: (k: string) => string | undefined } }): string | undefined {
   return c.req.header('X-Correlation-Id') ?? c.req.header('cf-ray') ?? undefined;
+}
+
+// spec 277 Phase 5 — REQUIRED (fail-hard) audit for sensitive key-release/decrypt.
+// Unlike buildAuditSink (fail-soft telemetry), this composes the durable D1 sink
+// fail-HARD: if the commit can't persist, the write throws and the caller fails
+// closed (no decrypt, no data). PII guardrail still redacts — events carry only
+// ids/refs/field-names, never raw PII (spec §16). Action vocabulary is demo-mcp's
+// own (documented in docs/audit/guide.md): key_release.approved, vault.object.decrypted.
+function requiredAuditSink(env: Env): AuditSink {
+  return composeFailHardSinks(createPiiGuardrailSink(createD1AuditSink(env.DB), { mode: 'redact' }));
+}
+
+/** Emit a required (fail-hard) audit event; returns false if it could not commit
+ *  (the caller must then fail closed and NOT release plaintext). */
+async function recordRequiredRelease(
+  env: Env,
+  correlationId: string | undefined,
+  ev: { principal: string; resource: string; servedBy: string; fields?: string[]; classification: string; grantId?: string; jti?: string },
+): Promise<boolean> {
+  try {
+    await requiredAuditSink(env).write(
+      buildEvent({
+        action: 'key_release.approved',
+        outcome: 'success',
+        actor: { type: 'service', id: ev.principal },
+        subject: { type: 'vault-object', id: `${ev.principal.toLowerCase()}:${ev.resource}` },
+        correlationId,
+        context: {
+          resource: ev.resource,
+          // flat scalar context (audit events index flat keys; never raw PII)
+          fields: ev.fields && ev.fields.length > 0 ? ev.fields.join(',') : null,
+          fieldCount: ev.fields ? ev.fields.length : 0,
+          classification: ev.classification,
+          grantId: ev.grantId ?? null,
+          jti: ev.jti ?? null,
+          servedBy: ev.servedBy,
+        },
+      }),
+    );
+    return true;
+  } catch (e) {
+    console.error('[demo-mcp] required audit failed — failing closed (no decrypt):', e instanceof Error ? e.message : String(e));
+    return false;
+  }
 }
 
 export interface Env {
@@ -410,7 +455,14 @@ app.post('/tools/get_pii', async (c) => {
       if (release.decision === 'deny') {
         return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_pii' };
       }
-      // KAS authorized → the vault decrypts (Phase 2) only the released fields (Phase 3).
+      // Phase 5: REQUIRED (fail-hard) audit BEFORE decrypt — if the durable commit
+      // fails, fail closed (no decrypt, no PII released).
+      const audited = await recordRequiredRelease(c.env, getCorrelationId(c), {
+        principal, resource: RESOURCE_PERSON_PII, servedBy: 'demo-mcp:get_pii',
+        fields: release.releasedFields, classification: 'pii.sensitive', grantId: release.grantId, jti: release.jti,
+      });
+      if (!audited) return { ok: false, error: 'audit_required_failed', served_by: 'demo-mcp:get_pii' };
+      // KAS authorized + audit committed → the vault decrypts (Phase 2) only the released fields (Phase 3).
       const vault = demoVault(c.env);
       const obj = await vault.read<PersonPii>({ owner: principal, resource: RESOURCE_PERSON_PII, fields: release.releasedFields });
       const record = obj?.data ?? null;
@@ -499,6 +551,11 @@ app.post('/tools/get_org_sensitive', async (c) => {
       if (release.decision === 'deny') {
         return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_org_sensitive' };
       }
+      const audited = await recordRequiredRelease(c.env, getCorrelationId(c), {
+        principal, resource: RESOURCE_ORG_SENSITIVE, servedBy: 'demo-mcp:get_org_sensitive',
+        fields: release.releasedFields, classification: 'regulated.high', grantId: release.grantId, jti: release.jti,
+      });
+      if (!audited) return { ok: false, error: 'audit_required_failed', served_by: 'demo-mcp:get_org_sensitive' };
       const vault = demoVault(c.env);
       const obj = await vault.read<OrgSensitive>({ owner: principal, resource: RESOURCE_ORG_SENSITIVE, fields: release.releasedFields });
       const record = obj?.data ?? null;
