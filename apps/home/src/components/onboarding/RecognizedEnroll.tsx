@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, isKmsVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
@@ -273,6 +273,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!granted.ok) return fail(granted.error);
         code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       }
+      // spec 278 — keep the member's encrypted vault on. SILENT for social (KMS) custodians only +
+      // skipped if already bound, so this one-tap recognized path never sprouts a passkey/wallet
+      // gesture (those members activate during the full journey or from /vault-key). Best-effort.
+      if (isKmsVia(viaLower)) { try { await activateVaultIfNeeded(home.address, viaLower, { token }); } catch { /* non-fatal */ } }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
       setFedcmLoginStatus('logged-in');

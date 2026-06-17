@@ -16,7 +16,7 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, activateVault, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, activateVault, activateVaultIfNeeded, type Via } from '../../home/onboarding';
 import { listManagedAgents } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
@@ -251,6 +251,12 @@ export function OnboardingJourney({
       // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
       const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
+      // spec 278 — also turn on the member's encrypted vault while enrolling (skipped if already
+      // bound, so returning members aren't re-prompted). Best-effort: a vault hiccup must NOT block
+      // connecting to the app — they can also activate later from /profile.
+      setBusy('Activating your private vault…');
+      try { await activateVaultIfNeeded(home.address, via); } catch { /* non-fatal */ }
+      setBusy(fmt(c.authorizeStepBusy, { app: appName }));
       const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {

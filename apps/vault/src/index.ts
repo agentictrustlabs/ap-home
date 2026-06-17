@@ -34,7 +34,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import type { Delegation } from '@agenticprimitives/delegation';
 import { demoEntitlementResolver } from './entitlements';
@@ -903,6 +903,19 @@ app.post('/custody/vault-key/bind', async (c) => {
 // system-supplied: the KEK is operator-provisioned (so we provision-on-demand + return the ref) and
 // the delegate is THIS server's (so we advertise it). With both auto-filled the ceremony is just a
 // signature. (serverKey isn't yet pinned by the read verifier — hardening follow-up.)
+// GET /custody/vault-key/is-bound?owner=0x… — does this owner already have a live binding? Lets
+// onboarding skip the activation step (and any signature) for already-activated returning members.
+app.get('/custody/vault-key/is-bound', async (c) => {
+  const owner = c.req.query('owner');
+  if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+    return c.json({ ok: false, error: 'invalid_request', error_description: 'owner (0x address) query param required' }, 400);
+  }
+  // Per-owner + state-changing-over-time (a ceremony flips it) ⇒ never cache (a stale 404/false at
+  // the edge would make onboarding re-prompt or wrongly skip).
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true, owner, bound: await isVaultKeyBound(c.env, owner) });
+});
+
 app.get('/custody/vault-key/server-info', (c) =>
   c.json({
     serverId: VAULT_SERVER_ID,

@@ -123,6 +123,18 @@ export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promi
 }
 
 /**
+ * Lightweight "does this owner already have a LIVE vault-key binding?" check — used by onboarding
+ * to skip the activation step for members who are already bound (so returning members aren't
+ * re-prompted). A revoked binding is excluded by the query; an expired one is treated as unbound.
+ */
+export async function isVaultKeyBound(env: Pick<VaultKeyEnv, 'DB'>, owner: string): Promise<boolean> {
+  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+  if (!row) return false;
+  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return false;
+  return true;
+}
+
+/**
  * The real vault-key authorization verifier (spec 278 §5). The scope engine
  * (key-authorization) handles owner/server/vault/resource/op/ceiling/expiry; this
  * injected check (1) requires a `VAULT_KEY_USE` caveat whose `kmsKeyRef` matches the

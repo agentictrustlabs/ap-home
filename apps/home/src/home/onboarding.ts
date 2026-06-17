@@ -479,3 +479,27 @@ export async function activateVault(
     return { ok: false, error: e instanceof Error ? e.message : 'vault activation failed' };
   }
 }
+
+/** Does this owner already have a live vault-key binding at demo-mcp? */
+export async function isVaultBound(owner: Address): Promise<boolean> {
+  try {
+    const r = (await fetch(`/mcp-bind/custody/vault-key/is-bound?owner=${owner}`).then((x) => x.json())) as { bound?: boolean };
+    return r?.bound === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Activate the vault ONLY if the owner isn't already bound — so returning/already-activated members
+ * are never re-prompted (preserves the one-tap recognized-enroll flow). Best-effort by design:
+ * enroll flows call this fire-and-forget so a vault hiccup never blocks connecting to a relying app.
+ */
+export async function activateVaultIfNeeded(
+  owner: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ kmsKeyRef?: string; skipped?: boolean }>> {
+  if (await isVaultBound(owner)) return { ok: true, skipped: true };
+  return activateVault(owner, via, auth);
+}
