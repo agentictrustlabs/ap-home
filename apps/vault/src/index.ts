@@ -262,6 +262,12 @@ export interface Env {
    * authority. Required for `/oauth/token` + `/mcp`; when unset those routes fail closed.
    */
   OAUTH_SIGNING_SECRET?: string;
+  /**
+   * Enables the OPEN demo authorization endpoint (`/oauth/token`). Fail-closed: the route
+   * 404s unless this is exactly 'true'. The testnet demo sets it (mock seed data only); a
+   * real production leaves it unset and wires a real authorization server + JWKS instead.
+   */
+  DEMO_OAUTH_MINT_ENABLED?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -762,38 +768,40 @@ function protectedResourceResponse(c: { req: { url: string }; env: Env }): Respo
 app.get('/.well-known/oauth-protected-resource', (c) => protectedResourceResponse(c));
 app.get('/.well-known/oauth-protected-resource/mcp', (c) => protectedResourceResponse(c));
 
-// Demo authorization endpoint (dev-only — same posture as the _dev/seed route).
-// Stands in for a real authorization server: it authenticates NOTHING and mints
-// a token for the requested principal, so it is an OPEN, testnet-only hole and
-// MUST NOT exist on a production Worker. Guarding the REGISTRATION means the
-// route is simply absent in production (Hono 404s) and the production preflight
-// statically detects it as a properly-guarded dev route. A production deployment
-// replaces this with a real AS + JWKS; nothing in @agenticprimitives/mcp-oauth
-// changes. (On the deployed demo Worker NODE_ENV is unset, so the route exists.)
-if (process.env.NODE_ENV !== 'production') {
-  app.post('/oauth/token', async (c) => {
-    if (!c.env.OAUTH_SIGNING_SECRET) return c.json({ error: 'unsupported', error_description: 'OAuth ingress not configured (OAUTH_SIGNING_SECRET unset)' }, 501);
-    let body: Record<string, unknown> = {};
-    try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
-    const principal = typeof body.principal === 'string' ? body.principal : undefined;
-    if (!principal) return c.json({ error: 'invalid_request', error_description: 'principal required (demo authorization endpoint)' }, 400);
-    const scopeRaw = body.scope;
-    const scopes = Array.isArray(scopeRaw)
-      ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
-      : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
-    const result = await mintDemoMcpToken(c.env, {
-      principal,
-      audience: c.env.MCP_AUDIENCE,
-      issuer: new URL(c.req.url).origin,
-      clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
-      scopes,
-      fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
-      purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
-      ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
-    });
-    return c.json(result);
+// Demo authorization endpoint. Stands in for a real authorization server: it
+// authenticates NOTHING and mints a token for the requested principal, so it is
+// an OPEN mint and MUST stay off in any real deployment. It is gated FAIL-CLOSED
+// on the explicit `DEMO_OAUTH_MINT_ENABLED` flag (not NODE_ENV — `wrangler deploy`
+// defines NODE_ENV='production', which would tree-shake a registration-time guard
+// and 404 the route on the demo Worker too). The route always registers (Workers
+// can't read `c.env` at module load), but the handler returns 404 unless the flag
+// is 'true'. The demo sets it; a real production leaves it unset (mint disabled)
+// and wires a real AS + JWKS — nothing in @agenticprimitives/mcp-oauth changes.
+// SAFE for the demo: all vault data is deterministic MOCK seed data derived from
+// the address (no real PII), consistent with the demo's other accepted testnet holes.
+app.post('/oauth/token', async (c) => {
+  if (c.env.DEMO_OAUTH_MINT_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
+  if (!c.env.OAUTH_SIGNING_SECRET) return c.json({ error: 'unsupported', error_description: 'OAuth ingress not configured (OAUTH_SIGNING_SECRET unset)' }, 501);
+  let body: Record<string, unknown> = {};
+  try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
+  const principal = typeof body.principal === 'string' ? body.principal : undefined;
+  if (!principal) return c.json({ error: 'invalid_request', error_description: 'principal required (demo authorization endpoint)' }, 400);
+  const scopeRaw = body.scope;
+  const scopes = Array.isArray(scopeRaw)
+    ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
+    : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
+  const result = await mintDemoMcpToken(c.env, {
+    principal,
+    audience: c.env.MCP_AUDIENCE,
+    issuer: new URL(c.req.url).origin,
+    clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
+    scopes,
+    fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
+    purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
+    ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
   });
-}
+  return c.json(result);
+});
 
 // Public bearer-gated MCP tool call. Validates the token's claims (signature
 // injected via HS256), resolves the grant bundle from the vault (anti-swap hash

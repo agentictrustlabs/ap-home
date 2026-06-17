@@ -117,6 +117,9 @@ const mcpVars: Record<string, string> = {
   // (authorization endpoint + /mcp bearer validation). Deterministic dev value;
   // production sets a wrangler secret via set-cloudflare-secrets.sh.
   OAUTH_SIGNING_SECRET: '0x' + 'ee'.repeat(32),
+  // spec 277 Phase 6: enable the open /oauth/token demo authorization endpoint
+  // locally (fail-closed behind this flag). Mirrors wrangler.toml [vars].
+  DEMO_OAUTH_MINT_ENABLED: 'true',
 };
 
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars);

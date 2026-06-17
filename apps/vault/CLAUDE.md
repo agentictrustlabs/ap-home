@@ -10,8 +10,9 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
 
 - MCP tool routes used by demos (service-MAC `/tools/*`).
 - OAuth ingress for public HTTP MCP clients (spec 277 Phase 6): RFC 9728 discovery
-  (`/.well-known/oauth-protected-resource[/mcp]`), a dev-only demo authorization
-  endpoint (`/oauth/token`), and a bearer-gated `/mcp` route. OAuth is ONLY ingress —
+  (`/.well-known/oauth-protected-resource[/mcp]`), an open demo authorization
+  endpoint (`/oauth/token`, fail-closed behind `DEMO_OAUTH_MINT_ENABLED`), and a
+  bearer-gated `/mcp` route. OAuth is ONLY ingress —
   the real authority chain (`readSensitive`: entitlement → KAS → required audit →
   decrypt) re-runs server-side off the grant bundle's principal. App-side HS256
   sign/verify + the vault-backed grant-bundle store live in `src/oauth.ts`.

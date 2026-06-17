@@ -29,6 +29,10 @@ MCP_AUDIENCE = "urn:mcp:server:person"
 # LocalAesProvider guard reads it. Replace with a managed KMS backend before
 # any real-value data. VAULT_MASTER_KEY itself is a wrangler SECRET, not a var.
 A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
+# spec 277 Phase 6: enable the OPEN demo authorization endpoint (/oauth/token).
+# Fail-closed — the route 404s unless this is 'true'. Testnet demo only (mock
+# seed data); a real production leaves it unset and wires a real AS + JWKS.
+DEMO_OAUTH_MINT_ENABLED = "true"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Production environment — Worker name: "demo-mcp-production"
@@ -48,6 +52,9 @@ A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 CHAIN_ID = "84532"
 A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 MCP_AUDIENCE = "urn:mcp:server:person"
+# Testnet demo: enable the open /oauth/token demo authorization endpoint (mock
+# seed data only). A real production deployment removes this + wires a real AS.
+DEMO_OAUTH_MINT_ENABLED = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"
