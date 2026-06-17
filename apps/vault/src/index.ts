@@ -751,6 +751,33 @@ const OAUTH_TOOL_SPECS: Record<string, SensitiveReadSpec> = {
   get_org_sensitive: { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive' },
 };
 
+// CORS for the OAuth ingress — public HTTP MCP clients (incl. browsers, e.g.
+// demo-web-pro) call these routes cross-origin. Auth is by Bearer header, NOT
+// cookies, so we echo the request Origin and DON'T allow credentials (no
+// ambient-authority surface). Applies ONLY to the OAuth routes; the service-MAC
+// /tools/* worker-to-worker path is unaffected. Short-circuits the OPTIONS
+// preflight; otherwise tags the handler's response with the CORS headers.
+const OAUTH_CORS_PATHS = ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/oauth/token', '/mcp'];
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type',
+    'access-control-max-age': '600',
+    vary: 'Origin',
+  };
+}
+for (const path of OAUTH_CORS_PATHS) {
+  app.use(path, async (c, next) => {
+    const origin = c.req.header('Origin') ?? '*';
+    if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    await next();
+    const merged = new Headers(c.res.headers);
+    for (const [k, v] of Object.entries(corsHeaders(origin))) merged.set(k, v);
+    c.res = new Response(c.res.body, { status: c.res.status, statusText: c.res.statusText, headers: merged });
+  });
+}
+
 function protectedResourceResponse(c: { req: { url: string }; env: Env }): Response {
   const origin = new URL(c.req.url).origin;
   return serveProtectedResourceMetadata(
