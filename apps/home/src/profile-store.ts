@@ -1,9 +1,10 @@
-// The Impact home's profile store (the member's vault, demo-grade). Keyed on the agent
-// address so it's stable across sessions and across sign-in methods. Community-wide
-// profile fields — relying apps query via the delegation and may request the member fill
-// in missing fields at /profile. In production this becomes a backend MCP that only the
-// member's home credentials can open; for the prototype it's localStorage at the home
-// origin (`<name>.impact-agent.me`).
+// The Impact home's profile store — the member's COMMUNITY CONTACT profile (name/email/phone/org),
+// re-used across community apps. spec 278: this is now persisted in the member's PER-PERSON ENCRYPTED
+// vault at demo-mcp (the `vault:impact-profile` record, sealed under the member's own GCP Cloud KMS
+// KEK), NOT browser localStorage. The home holds no key material and no copy: it reads/writes over the
+// same-origin `/mcp-bind` proxy by minting an OAuth token for the logged-in member and calling the
+// owner-reads/writes-own `get_impact_profile` / `set_impact_profile` tools. No binding (the member
+// hasn't run the connected-custodian ceremony at /vault-key) ⇒ fail-closed (`vault_key_unauthorized`).
 
 import type { Address } from '@agenticprimitives/types';
 
@@ -43,6 +44,14 @@ export interface ImpactStoredProfile {
 
 export type ImpactProfileFieldKey = keyof ImpactContactProfile;
 
+/** Raised when the member has no vault-key binding yet (must run the /vault-key ceremony first). */
+export class VaultKeyUnauthorizedError extends Error {
+  constructor() {
+    super('vault_key_unauthorized');
+    this.name = 'VaultKeyUnauthorizedError';
+  }
+}
+
 export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 'email' | 'tel' | 'text'; placeholder: string; help: string }[] = [
   { key: 'firstName',           label: 'First name',            type: 'text',  placeholder: 'Rich',                     help: 'Used to greet you across community apps.' },
   { key: 'lastName',            label: 'Last name',             type: 'text',  placeholder: 'Pedersen',                 help: 'Used together with your first name to render a friendly display name.' },
@@ -54,25 +63,52 @@ export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 
   { key: 'organizationCountry', label: 'Organization country',  type: 'text',  placeholder: 'United States',            help: 'Where your organization is based.' },
 ];
 
-const KEY = (addr: Address): string => `agenticprimitives:impact-profile:${addr.toLowerCase()}`;
+// ─── demo-mcp vault access (same-origin /mcp-bind proxy → DEMO_MCP_URL) ──────────────────────
+// The open demo authorization endpoint mints an OAuth token bound to the principal's grant bundle
+// (itself stored under the principal's KEK — so minting already requires a live binding). The token
+// then authorizes owner-reads/writes-own on the /mcp ingress; demo-mcp re-derives the principal from
+// the token and gates every op on the per-person vault-key authorization (read/write).
 
-export function loadImpactProfile(addr: Address): ImpactStoredProfile {
-  try {
-    const raw = localStorage.getItem(KEY(addr));
-    if (raw) {
-      const p = JSON.parse(raw) as ImpactStoredProfile;
-      if (p?.v === 1) return p;
-    }
-  } catch {
-    /* ignore */
-  }
+const MCP_BIND = '/mcp-bind';
+
+async function mintToken(principal: Address): Promise<string> {
+  const res = await fetch(`${MCP_BIND}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ principal }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
+  if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (!res.ok || !body.access_token) throw new Error(`mint failed: ${body.error ?? res.status}`);
+  return body.access_token;
+}
+
+async function callMcp(token: string, tool: string, args?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const res = await fetch(`${MCP_BIND}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ tool, args: args ?? {} }),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  return body;
+}
+
+/** Read the member's encrypted community profile from their vault. Returns an empty profile if the
+ *  member has never saved one. Throws `VaultKeyUnauthorizedError` if they haven't activated their
+ *  vault key (run the /vault-key ceremony) yet. */
+export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProfile> {
+  const token = await mintToken(addr);
+  const out = await callMcp(token, 'get_impact_profile');
+  const record = out.record as ImpactStoredProfile | null | undefined;
+  if (record && record.v === 1) return record;
   return { v: 1 };
 }
 
-export function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): void {
-  try {
-    localStorage.setItem(KEY(addr), JSON.stringify(profile));
-  } catch {
-    /* ignore */
-  }
+/** Seal the member's community profile into their vault under their own KEK. Throws
+ *  `VaultKeyUnauthorizedError` if they haven't activated their vault key yet. */
+export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
+  const token = await mintToken(addr);
+  const out = await callMcp(token, 'set_impact_profile', { data: profile });
+  if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
 }

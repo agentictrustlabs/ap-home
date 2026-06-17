@@ -16,7 +16,7 @@ import { useSession } from '../../../src/context/session';
 import { bindVaultKey, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 
-const DEFAULT_RESOURCES = ['person-pii', 'org-sensitive', 'profile'];
+const DEFAULT_RESOURCES = ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'];
 const DEFAULT_CEILING = 'regulated.high';
 
 export default function VaultKeyPage() {

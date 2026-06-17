@@ -962,8 +962,29 @@ app.post('/mcp', async (c) => {
   let body: Record<string, unknown> = {};
   try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
   const tool = typeof body.tool === 'string' ? body.tool : (typeof body.method === 'string' ? body.method : '');
+
+  // spec 278 — the home's community contact profile (`ImpactContactProfile`) is a per-person
+  // ENCRYPTED vault record (`vault:impact-profile`), distinct from the seeded person-pii. The
+  // Personal Trust Home reads (`/you`) + writes (`/profile`) it over this OAuth ingress on the
+  // owner's own behalf (ap_principal). Both ops are binding-gated (read / write op on the person's
+  // vault-key authorization); no binding ⇒ fail closed. Sealed/opened under the person's GCP KEK.
+  if (tool === 'get_impact_profile' || tool === 'set_impact_profile') {
+    const resource = `${VAULT_RECORD_PREFIX}impact-profile`;
+    if (tool === 'set_impact_profile') {
+      const data = (body.args as { data?: unknown } | undefined)?.data ?? null;
+      const gate = await authorizePersonVaultOp(c.env, principal, resource, 'write', 'internal');
+      if (!gate.ok) return c.json({ ok: false, error: gate.error, served_by: 'demo-mcp:set_impact_profile' });
+      await gate.pv.vault.write({ owner: principal, resource, data });
+      return c.json({ ok: true, tool, principal, served_by: 'demo-mcp:set_impact_profile' });
+    }
+    const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'pii.low');
+    if (!gate.ok) return c.json({ ok: false, error: gate.error, served_by: 'demo-mcp:get_impact_profile' });
+    const obj = await gate.pv.vault.read({ owner: principal, resource });
+    return c.json({ ok: true, tool, principal, record: obj?.data ?? null, served_by: 'demo-mcp:get_impact_profile' });
+  }
+
   const spec = OAUTH_TOOL_SPECS[tool];
-  if (!spec) return c.json({ ok: false, error: 'unknown_tool', tool, supported: Object.keys(OAUTH_TOOL_SPECS) }, 400);
+  if (!spec) return c.json({ ok: false, error: 'unknown_tool', tool, supported: [...Object.keys(OAUTH_TOOL_SPECS), 'get_impact_profile', 'set_impact_profile'] }, 400);
   const rawArgs = (body.args ?? body.params) as { fields?: string[]; purpose?: string } | undefined;
 
   const r = await readSensitive(

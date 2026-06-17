@@ -8,15 +8,17 @@
 //     pre-highlights the requested fields, shows a "JP Adopt is asking for these" banner,
 //     and on save redirects back with the profile fields as query params on `return`.
 //
-// Profile lives in localStorage at this Impact origin (`<name>.impact-agent.me`) keyed
-// on the agent address — community-wide, re-used across every relying app. In production
-// this becomes a backend MCP the member alone can open. The "fields back via URL on
-// return" is a demo limitation; production uses a delegated server-to-server read.
+// Profile lives in the member's PER-PERSON ENCRYPTED vault at demo-mcp (spec 278 — the
+// `vault:impact-profile` record, sealed under the member's own GCP KMS KEK), read/written over
+// the same-origin `/mcp-bind` proxy. Community-wide, re-used across every relying app. No copy is
+// held at the home. Until the member activates their vault key (the /vault-key ceremony), the
+// vault is fail-closed and this page prompts them to do so. The "fields back via URL on return"
+// is a demo limitation; production uses a delegated server-to-server read.
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
 import {
-  loadImpactProfile, saveImpactProfile, PROFILE_FIELDS,
+  loadImpactProfile, saveImpactProfile, PROFILE_FIELDS, VaultKeyUnauthorizedError,
   type ImpactStoredProfile, type ImpactContactProfile, type ImpactProfileFieldKey,
 } from '../../../src/profile-store';
 import { relyingAllowed } from '../../../src/components/onboarding/useEnrollReq';
@@ -67,9 +69,13 @@ function sameOrigin(a: string, b: string): boolean {
 export default function ProfilePage() {
   const { agentAddress, agentName } = useSession();
   const [request, setRequest] = useState<RelyingRequest | null>(null);
+  const [stored, setStored] = useState<ImpactStoredProfile | null>(null);
   const [contact, setContact] = useState<ImpactContactProfile>({});
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [needsVaultKey, setNeedsVaultKey] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Parse the relying-app handoff (if any) + load existing profile once we have the address.
   useEffect(() => {
@@ -78,8 +84,23 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!agentAddress) return;
-    const p = loadImpactProfile(agentAddress);
-    setContact(p.contact ?? {});
+    let cancelled = false;
+    setLoading(true);
+    setNeedsVaultKey(false);
+    setLoadError(null);
+    loadImpactProfile(agentAddress)
+      .then((p) => {
+        if (cancelled) return;
+        setStored(p);
+        setContact(p.contact ?? {});
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof VaultKeyUnauthorizedError) setNeedsVaultKey(true);
+        else setLoadError('Could not load your profile from your encrypted vault. Try again.');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [agentAddress]);
 
   const requiredKeys = useMemo<Set<ImpactProfileFieldKey>>(() => new Set(request?.required ?? []), [request]);
@@ -98,9 +119,19 @@ export default function ProfilePage() {
     if (!agentAddress) return;
     if (missingRequired.length > 0) return;
     setSubmitting(true);
+    setSavedNotice(null);
     try {
-      const next: ImpactStoredProfile = { v: 1, contact };
-      saveImpactProfile(agentAddress, next);
+      // Preserve any attestations already on the stored profile (e.g. WEA) — only contact changes here.
+      const next: ImpactStoredProfile = { v: 1, contact, attestations: stored?.attestations };
+      try {
+        await saveImpactProfile(agentAddress, next);
+        setStored(next);
+      } catch (err) {
+        if (err instanceof VaultKeyUnauthorizedError) { setNeedsVaultKey(true); return; }
+        setSavedNotice(null);
+        setLoadError('Could not save to your encrypted vault. Try again.');
+        return;
+      }
       if (request) {
         // Hand the saved fields back to the relying app via query params on the registered
         // redirect URI. Demo limitation — production uses a delegated read API (no PII in URLs).
@@ -144,6 +175,31 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {loadError && (
+        <div role="alert" style={{ ...savedStyle, background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>{loadError}</div>
+      )}
+
+      {needsVaultKey && (
+        <div role="status" style={bannerStyle}>
+          <span style={bannerIconStyle} aria-hidden="true"><UserIcon size={18} /></span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, color: 'var(--c-g900, #0f172a)' }}>Activate your vault key first</div>
+            <div style={{ fontSize: '.85rem', color: 'var(--c-g600, #475569)', marginTop: '.15rem' }}>
+              Your profile is kept in your private, end-to-end encrypted vault — not in this browser. Activate your
+              vault key once and you can edit it here, sealed under your own key.
+            </div>
+            <a href="/vault-key" style={{ ...primaryBtn, display: 'inline-block', marginTop: '.7rem', textDecoration: 'none' }}>
+              Activate vault key →
+            </a>
+          </div>
+        </div>
+      )}
+
+      {loading && !needsVaultKey && (
+        <div style={helpStyle}>Loading your profile from your encrypted vault…</div>
+      )}
+
+      {!needsVaultKey && !loading && (
       <form onSubmit={handleSubmit} className="profile-form" style={formStyle}>
         {PROFILE_FIELDS.map((f) => {
           const isRequired = requiredKeys.has(f.key);
@@ -193,6 +249,7 @@ export default function ProfilePage() {
           )}
         </div>
       </form>
+      )}
     </SectionShell>
   );
 }

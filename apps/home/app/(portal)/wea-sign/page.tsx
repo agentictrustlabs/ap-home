@@ -58,8 +58,12 @@ export default function WeaSignPage() {
   useEffect(() => { setRequest(parseRelyingRequest()); }, []);
   useEffect(() => {
     if (!agentAddress) return;
-    const p = loadImpactProfile(agentAddress);
-    setExisting(p.attestations?.wea ?? null);
+    let cancelled = false;
+    // Best-effort: an un-activated vault (no binding) just means no prior attestation to show.
+    loadImpactProfile(agentAddress)
+      .then((p) => { if (!cancelled) setExisting(p.attestations?.wea ?? null); })
+      .catch(() => { /* vault locked / unreachable → treat as not-yet-signed */ });
+    return () => { cancelled = true; };
   }, [agentAddress]);
 
   const alreadySigned = !!existing;
@@ -80,12 +84,12 @@ export default function WeaSignPage() {
         att = existing;
       } else {
         att = await buildWeaAttestation({ sessionToken: session.token });
-        const existingProfile = loadImpactProfile(agentAddress);
+        const existingProfile = await loadImpactProfile(agentAddress);
         const next: ImpactStoredProfile = {
           ...existingProfile,
           attestations: { ...(existingProfile.attestations ?? {}), wea: att },
         };
-        saveImpactProfile(agentAddress, next);
+        await saveImpactProfile(agentAddress, next);
         setExisting(att);
       }
       if (request) {
