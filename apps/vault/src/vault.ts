@@ -6,7 +6,7 @@
 // `vault_objects` table (base64 ciphertext + wrapped DEK + crypto metadata).
 // No plaintext PII at rest. The PII/org seeds are materialized + sealed on
 // first read (the legacy plaintext person_pii/org_sensitive/vault_records tables
-// are retired). The tool handlers don't change — they still call vault.read/write.
+// were dropped in migration 0006). The tool handlers call vault.read/write only.
 //
 // Crypto backend (testnet-demo grade): LocalAesProvider keyed by VAULT_MASTER_KEY.
 // On Workers `NODE_ENV` is unset, so LocalAesProvider fails closed unless the
