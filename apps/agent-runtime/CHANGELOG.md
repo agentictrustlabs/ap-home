@@ -1,5 +1,26 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.9
+
+### Patch Changes
+
+- Updated dependencies [4be81e2]
+- Updated dependencies [463fe8a]
+- Updated dependencies [ab65637]
+- Updated dependencies [56289ef]
+- Updated dependencies [09aaaed]
+  - @agenticprimitives/agent-account@1.0.0-alpha.11
+  - @agenticprimitives/agent-naming@1.0.0-alpha.11
+  - @agenticprimitives/connect@1.0.0-alpha.11
+  - @agenticprimitives/connect-auth@1.0.0-alpha.11
+  - @agenticprimitives/delegation@1.0.0-alpha.11
+  - @agenticprimitives/key-custody@1.0.0-alpha.11
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.11
+  - @agenticprimitives/a2a@0.0.0-alpha.7
+  - @agenticprimitives/related-agents@0.0.0-alpha.7
+  - @agenticprimitives/types@1.0.0-alpha.11
+  - @agenticprimitives/audit@1.0.0-alpha.11
+
 ## 0.0.2-alpha.8
 
 ### Patch Changes
