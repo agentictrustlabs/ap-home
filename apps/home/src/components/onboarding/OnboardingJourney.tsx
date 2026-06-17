@@ -16,7 +16,7 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, activateVault, type Via } from '../../home/onboarding';
 import { listManagedAgents } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
@@ -34,7 +34,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
-type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'grant' | 'connected' | 'error';
+type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'vault-activate' | 'grant' | 'connected' | 'error';
 
 export function OnboardingJourney({
   variant,
@@ -147,20 +147,48 @@ export function OnboardingJourney({
     }
   }
 
-  // After the receipts: relying-app → permission consent; self-serve → open your home.
+  // After the receipts: relying-app → permission consent; self-serve → activate your private vault.
   async function onContinue() {
     if (hasApp) {
       setScreen('grant');
       return;
     }
     if (!home) return;
+    setError('');
+    setScreen('vault-activate');
+  }
+
+  // Self-serve final step — turn on the per-person encrypted vault (spec 278). One signature with
+  // the SAME credential (passkey/wallet locally; Google via KMS). Provision + delegate discovery are
+  // system-supplied. Fail-soft: the member can skip and activate later from /profile, so a vault
+  // hiccup never traps them out of their freshly-created home.
+  async function onActivateVault() {
+    if (!home) return;
+    setBusy(via === 'google' ? 'Activating your private vault…' : `Activating your private vault — confirm with your ${via}…`);
+    setError('');
+    const act = await activateVault(home.address, via);
+    if (!act.ok) {
+      setBusy(null);
+      setError(`Couldn't activate your vault (${act.error}). You can retry, or skip and turn it on later from your profile.`);
+      return;
+    }
+    await proceedToHome();
+  }
+
+  async function onSkipVault() {
+    setError('');
+    await proceedToHome();
+  }
+
+  async function proceedToHome() {
+    if (!home) return;
     setBusy('Opening your home…');
     try {
       const out = await openHome(home.name, via === 'wallet' ? 'wallet' : 'passkey');
-      if (!out.ok) return fail(out.error, 'receipts');
+      if (!out.ok) return fail(out.error, 'vault-activate');
       await openSession(out.token, via, true);
     } catch (e) {
-      fail(e, 'receipts');
+      fail(e, 'vault-activate');
     }
   }
 
@@ -392,7 +420,7 @@ export function OnboardingJourney({
     const registered = home ? homeLabel(home.name) : base;
     return (
       <Frame>
-        <OnboardingProgress total={hasApp ? 3 : 2} current={2} label={c.communityStepTitle} />
+        <OnboardingProgress total={3} current={2} label={c.communityStepTitle} />
         <div className="celebrate">
           <BrandShield size={52} />
           <h1 className="onboarding-h1">Your home is ready</h1>
@@ -400,6 +428,29 @@ export function OnboardingJourney({
         <ReceiptCard title={c.portalStepReceipt} body="Secured ✓ · yours alone" />
         <ReceiptCard title={fmt(c.communityStepReceipt, { name: registered })} body={`You're known as ${registered}`} />
         <button className="btn-primary" onClick={onContinue}>Continue</button>
+      </Frame>
+    );
+  }
+
+  if (screen === 'vault-activate') {
+    return (
+      <Frame>
+        <OnboardingProgress total={3} current={3} label="Activate your vault" />
+        <div className="celebrate">
+          <BrandShield size={52} />
+          <h1 className="onboarding-h1">Activate your private vault</h1>
+        </div>
+        <p className="onboarding-sub">
+          One sign turns on your private, end-to-end encrypted vault. Your profile and data are sealed
+          under your own key — only you authorize who can read them, and you can revoke it anytime.
+        </p>
+        {error && <p className="onboarding-hint taken">{error}</p>}
+        <button className="btn-primary" onClick={onActivateVault} disabled={!!busy}>
+          {busy ?? 'Sign + activate my vault'}
+        </button>
+        <button className="btn-ghost onboarding-secondary" onClick={onSkipVault} disabled={!!busy}>
+          Skip for now
+        </button>
       </Frame>
     );
   }

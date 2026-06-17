@@ -17,7 +17,7 @@
 // identical whether the member stays nameless or later claims a custom one. ADR-0013: ONE
 // mechanism — deploy nameless, claim on demand; no silent auto-name fallback.
 import { useEffect, useRef, useState } from 'react';
-import { secureHome, secureHomeNoName } from '../../home/onboarding';
+import { secureHome, secureHomeNoName, activateVault } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel, toAgentName } from '../../lib/domain';
@@ -72,6 +72,9 @@ export function GoogleSecureHome() {
         setPhase('error');
         return;
       }
+      // spec 278 — turn on the per-person encrypted vault now (Google signs via KMS, no gesture).
+      // Best-effort: a vault hiccup must not block the home from being secured (retry at /profile).
+      void activateVault(res.home.address, 'google', { token: session.token });
       clearPendingName();
       setSecuredName(''); // nameless — the "You're in." beat shows no handle
       setPhase('done');
@@ -92,6 +95,7 @@ export function GoogleSecureHome() {
         setPhase('error');
         return;
       }
+      void activateVault(res.home.address, 'google', { token: session.token }); // spec 278 — best-effort
       clearPendingName();
       setSecuredName(res.home.name);
       setPhase('done');

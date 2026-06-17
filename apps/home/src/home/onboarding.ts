@@ -433,3 +433,49 @@ export async function bindVaultKey(
     return { ok: false, error: e instanceof Error ? e.message : 'vault-key bind failed' };
   }
 }
+
+/**
+ * One-call vault activation: provision the owner's per-person KEK (idempotent), discover this
+ * server's delegate + authorized scope, then `bindVaultKey`. This is the whole spec-278 ceremony
+ * behind a single function so onboarding (and the standalone /vault-key page) can fold it in — the
+ * person just signs. Everything except the signature is system-supplied. `via`/`auth` follow the
+ * same credential rail as the rest of onboarding (passkey/wallet sign locally; Google signs via KMS
+ * with the session token).
+ */
+export async function activateVault(
+  owner: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ kmsKeyRef: string }>> {
+  try {
+    const info = (await fetch('/mcp-bind/custody/vault-key/server-info').then((r) => r.json())) as {
+      serverKey?: string;
+      defaultResources?: string[];
+      classificationCeiling?: string;
+      ops?: ('read' | 'write')[];
+    };
+    const prov = (await fetch('/mcp-bind/custody/vault-key/provision', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner }),
+    }).then((r) => r.json())) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
+    if (!prov?.ok || !prov.kmsKeyRef) {
+      return { ok: false, error: prov?.error_description ?? prov?.detail ?? 'could not provision vault key' };
+    }
+    return bindVaultKey(
+      owner,
+      {
+        vaultId: 'demo-mcp',
+        kmsKeyRef: prov.kmsKeyRef,
+        serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+        allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'],
+        classificationCeiling: info.classificationCeiling ?? 'regulated.high',
+        ops: info.ops ?? ['read', 'write'],
+      },
+      via,
+      auth,
+    );
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'vault activation failed' };
+  }
+}
