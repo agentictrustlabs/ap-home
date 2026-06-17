@@ -8,7 +8,13 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
 
 ## What this app owns
 
-- MCP tool routes used by demos.
+- MCP tool routes used by demos (service-MAC `/tools/*`).
+- OAuth ingress for public HTTP MCP clients (spec 277 Phase 6): RFC 9728 discovery
+  (`/.well-known/oauth-protected-resource[/mcp]`), a dev-only demo authorization
+  endpoint (`/oauth/token`), and a bearer-gated `/mcp` route. OAuth is ONLY ingress —
+  the real authority chain (`readSensitive`: entitlement → KAS → required audit →
+  decrypt) re-runs server-side off the grant bundle's principal. App-side HS256
+  sign/verify + the vault-backed grant-bundle store live in `src/oauth.ts`.
 - D1-backed demo data and local migrations.
 - Delegation/JTI replay checks as app wiring around package primitives.
 - Audit demo guide in `docs/audit/guide.md`.

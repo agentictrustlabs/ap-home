@@ -113,6 +113,10 @@ const mcpVars: Record<string, string> = {
   VALUE_ENFORCER: d.valueEnforcer,
   // Audit C1: shared MAC secret matching demo-a2a's value above.
   A2A_MAC_SECRET: DEV_SECRETS.A2A_MAC_SECRET,
+  // spec 277 Phase 6: HS256 signing secret for the demo OAuth ingress
+  // (authorization endpoint + /mcp bearer validation). Deterministic dev value;
+  // production sets a wrangler secret via set-cloudflare-secrets.sh.
+  OAUTH_SIGNING_SECRET: '0x' + 'ee'.repeat(32),
 };
 
 writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars);

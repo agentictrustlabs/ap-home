@@ -25,8 +25,6 @@ import type { Address } from '@agenticprimitives/types';
 import {
   upsertDemoProfile,
   getProfile,
-  type PersonPii,
-  type OrgSensitive,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
@@ -37,8 +35,20 @@ import {
   VAULT_RECORD_PREFIX,
 } from './vault';
 import { demoEntitlementResolver } from './entitlements';
+import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
 import { resolveAgentName } from './naming';
+import {
+  createProtectedResourceMetadata,
+  serveProtectedResourceMetadata,
+  validateMcpBearerToken,
+  resolveGrantBundleFromToken,
+  parseBearer,
+  buildUnauthorizedResponse,
+  buildInsufficientScopeResponse,
+  MCP_OAUTH_SCOPES,
+} from '@agenticprimitives/mcp-oauth';
+import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from './oauth';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
 //   - console (surfaces in `wrangler tail` for live ops debugging)
@@ -128,6 +138,73 @@ async function recordRequiredRelease(
   }
 }
 
+// spec 277 — the shared sensitive-read authority chain (entitlement → one-time
+// DecryptGrant/KAS → required fail-hard audit → projected decrypt). Both the
+// service-MAC tool routes (get_pii/get_org_sensitive) AND the public OAuth /mcp
+// route run the SAME chain keyed by `principal` — OAuth is only ingress, never
+// authority (spec 277 §6). The handler never decrypts directly.
+interface SensitiveReadSpec {
+  resource: string;
+  classification: EntitlementClassification;
+  toolName: string;
+  servedBy: string;
+}
+type SensitiveReadResult =
+  | { ok: false; error: string; reason?: string; served_by: string }
+  | { ok: true; record: unknown; subject_name: string | null };
+
+async function readSensitive(
+  env: Env,
+  ctx: { principal: string; args?: { fields?: string[]; purpose?: string }; correlationId: string | undefined; audience: string },
+  spec: SensitiveReadSpec,
+): Promise<SensitiveReadResult> {
+  const { principal, args } = ctx;
+  const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
+  const purpose = typeof args?.purpose === 'string' ? args.purpose : undefined;
+
+  // Phase 3: resolve the entitlement BEFORE decrypting; allowedFields scopes the projection.
+  const decision = await demoEntitlementResolver().resolve({
+    actor: principal,
+    principal,
+    audience: ctx.audience,
+    resource: spec.resource,
+    action: 'read',
+    fields: requestedFields,
+    purpose,
+    classification: spec.classification,
+    at: new Date(),
+  });
+  if (decision.decision === 'deny') return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: spec.servedBy };
+
+  // Phase 4: one-time DecryptGrant gated by the KAS — releasedFields scopes the projection.
+  const release = await authorizeDecrypt({
+    principal,
+    audience: ctx.audience,
+    serverId: 'demo-mcp',
+    toolName: spec.toolName,
+    args: args ?? {},
+    resource: spec.resource,
+    classification: spec.classification,
+    allowedFields: decision.allowedFields,
+    purpose,
+    entitlementIds: decision.matchedCredentials,
+  });
+  if (release.decision === 'deny') return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: spec.servedBy };
+
+  // Phase 5: REQUIRED (fail-hard) audit BEFORE decrypt — if it can't commit, fail closed.
+  const audited = await recordRequiredRelease(env, ctx.correlationId, {
+    principal, resource: spec.resource, servedBy: spec.servedBy,
+    fields: release.releasedFields, classification: spec.classification, grantId: release.grantId, jti: release.jti,
+  });
+  if (!audited) return { ok: false, error: 'audit_required_failed', served_by: spec.servedBy };
+
+  // KAS authorized + audit committed → vault decrypts (Phase 2) only the released fields (Phase 3).
+  const vault = demoVault(env);
+  const obj = await vault.read({ owner: principal, resource: spec.resource, fields: release.releasedFields });
+  const subject_name = await resolveAgentName(env, principal);
+  return { ok: true, record: obj?.data ?? null, subject_name };
+}
+
 export interface Env {
   DB: D1Database;
 
@@ -175,6 +252,16 @@ export interface Env {
    * this binding var into `process.env` (where the guard reads it). 'true' for the demo only.
    */
   A2A_ALLOW_LOCAL_ENVELOPE_KEY?: string;
+
+  // ─── OAuth ingress (spec 277 Phase 6) ─────────────────────────────────
+  /**
+   * HS256 signing secret for the demo MCP authorization endpoint. Stands in for a real
+   * authorization server + JWKS (demo-grade): the OAuth `/mcp` route is ONLY a public-client
+   * ingress adapter — the real authority chain (entitlement → KAS → required audit → decrypt)
+   * re-runs server-side off the grant bundle's principal, so the token is never trusted as
+   * authority. Required for `/oauth/token` + `/mcp`; when unset those routes fail closed.
+   */
+  OAUTH_SIGNING_SECRET?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -421,59 +508,13 @@ app.post('/tools/get_pii', async (c) => {
   const handler = withDelegation<Args>(
     baseConfig(c.env),
     async ({ principal, args }) => {
-      // Phase 3: resolve the entitlement BEFORE decrypting; allowedFields scopes
-      // the projection. Demo policy: owner-reads-own (actor == principal) → full.
-      const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
-      const decision = await demoEntitlementResolver().resolve({
-        actor: principal,
-        principal,
-        audience: c.env.MCP_AUDIENCE,
-        resource: RESOURCE_PERSON_PII,
-        action: 'read',
-        fields: requestedFields,
-        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
-        classification: 'pii.sensitive',
-        at: new Date(),
-      });
-      if (decision.decision === 'deny') {
-        return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_pii' };
-      }
-      // Phase 4: request a one-time DecryptGrant and gate the decrypt on the KAS —
-      // handlers never decrypt PII directly. releasedFields scopes the projection.
-      const release = await authorizeDecrypt({
-        principal,
-        audience: c.env.MCP_AUDIENCE,
-        serverId: 'demo-mcp',
-        toolName: 'get_pii',
-        args: args ?? {},
-        resource: RESOURCE_PERSON_PII,
-        classification: 'pii.sensitive',
-        allowedFields: decision.allowedFields,
-        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
-        entitlementIds: decision.matchedCredentials,
-      });
-      if (release.decision === 'deny') {
-        return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_pii' };
-      }
-      // Phase 5: REQUIRED (fail-hard) audit BEFORE decrypt — if the durable commit
-      // fails, fail closed (no decrypt, no PII released).
-      const audited = await recordRequiredRelease(c.env, getCorrelationId(c), {
-        principal, resource: RESOURCE_PERSON_PII, servedBy: 'demo-mcp:get_pii',
-        fields: release.releasedFields, classification: 'pii.sensitive', grantId: release.grantId, jti: release.jti,
-      });
-      if (!audited) return { ok: false, error: 'audit_required_failed', served_by: 'demo-mcp:get_pii' };
-      // KAS authorized + audit committed → the vault decrypts (Phase 2) only the released fields (Phase 3).
-      const vault = demoVault(c.env);
-      const obj = await vault.read<PersonPii>({ owner: principal, resource: RESOURCE_PERSON_PII, fields: release.releasedFields });
-      const record = obj?.data ?? null;
-      const subject_name = await resolveAgentName(c.env, principal);
-      return {
-        ok: true,
-        subject: principal,
-        subject_name,
-        record,
-        served_by: 'demo-mcp:get_pii',
-      };
+      const r = await readSensitive(
+        c.env,
+        { principal, args, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
+        { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive', toolName: 'get_pii', servedBy: 'demo-mcp:get_pii' },
+      );
+      if (!r.ok) return r;
+      return { ok: true, subject: principal, subject_name: r.subject_name, record: r.record, served_by: 'demo-mcp:get_pii' };
     },
     {
       toolName: 'get_pii',
@@ -521,52 +562,13 @@ app.post('/tools/get_org_sensitive', async (c) => {
   const handler = withDelegation<Args>(
     baseConfig(c.env),
     async ({ principal, args }) => {
-      const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
-      const decision = await demoEntitlementResolver().resolve({
-        actor: principal,
-        principal,
-        audience: c.env.MCP_AUDIENCE,
-        resource: RESOURCE_ORG_SENSITIVE,
-        action: 'read',
-        fields: requestedFields,
-        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
-        classification: 'regulated.high',
-        at: new Date(),
-      });
-      if (decision.decision === 'deny') {
-        return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_org_sensitive' };
-      }
-      const release = await authorizeDecrypt({
-        principal,
-        audience: c.env.MCP_AUDIENCE,
-        serverId: 'demo-mcp',
-        toolName: 'get_org_sensitive',
-        args: args ?? {},
-        resource: RESOURCE_ORG_SENSITIVE,
-        classification: 'regulated.high',
-        allowedFields: decision.allowedFields,
-        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
-        entitlementIds: decision.matchedCredentials,
-      });
-      if (release.decision === 'deny') {
-        return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_org_sensitive' };
-      }
-      const audited = await recordRequiredRelease(c.env, getCorrelationId(c), {
-        principal, resource: RESOURCE_ORG_SENSITIVE, servedBy: 'demo-mcp:get_org_sensitive',
-        fields: release.releasedFields, classification: 'regulated.high', grantId: release.grantId, jti: release.jti,
-      });
-      if (!audited) return { ok: false, error: 'audit_required_failed', served_by: 'demo-mcp:get_org_sensitive' };
-      const vault = demoVault(c.env);
-      const obj = await vault.read<OrgSensitive>({ owner: principal, resource: RESOURCE_ORG_SENSITIVE, fields: release.releasedFields });
-      const record = obj?.data ?? null;
-      const org_name = await resolveAgentName(c.env, principal);
-      return {
-        ok: true,
-        org: principal,
-        org_name,
-        record,
-        served_by: 'demo-mcp:get_org_sensitive',
-      };
+      const r = await readSensitive(
+        c.env,
+        { principal, args, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
+        { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive' },
+      );
+      if (!r.ok) return r;
+      return { ok: true, org: principal, org_name: r.subject_name, record: r.record, served_by: 'demo-mcp:get_org_sensitive' };
     },
     {
       toolName: 'get_org_sensitive',
@@ -720,6 +722,122 @@ app.post('/tools/list_vault_record', async (c) => {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
+});
+
+// ─── OAuth ingress for public HTTP MCP clients (spec 277 Phase 6) ────────
+//
+// OAuth here is ONLY a compatibility adapter for public HTTP MCP clients — NOT
+// the authority model. A validated bearer token carries a ref+hash to an
+// Agentic Grant Bundle (stored encrypted in the vault); the REAL delegated-vault
+// chain (`readSensitive`: entitlement → KAS → required audit → projected
+// decrypt) re-runs server-side off the bundle's principal. Inbound tokens are
+// never reused downstream (spec 277 §6–§8, §15).
+//
+//   GET  /.well-known/oauth-protected-resource[/mcp]   discovery (RFC 9728)
+//   POST /oauth/token                                  demo authorization (mint; dev-only)
+//   POST /mcp                                          bearer-gated tool call
+
+// The OAuth-exposed tools and their sensitive-read specs (same chain as the
+// service-MAC routes). Field authority is NOT in scopes — it lives in the
+// entitlement/grant bundle (spec 277 §6.2).
+const OAUTH_TOOL_SPECS: Record<string, SensitiveReadSpec> = {
+  get_pii: { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive', toolName: 'get_pii', servedBy: 'demo-mcp:get_pii' },
+  get_org_sensitive: { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive' },
+};
+
+function protectedResourceResponse(c: { req: { url: string }; env: Env }): Response {
+  const origin = new URL(c.req.url).origin;
+  return serveProtectedResourceMetadata(
+    createProtectedResourceMetadata({
+      resource: c.env.MCP_AUDIENCE,
+      authorizationServers: [origin],
+      scopesSupported: [...MCP_OAUTH_SCOPES],
+      resourceDocumentation: `${origin}/health`,
+    }),
+  );
+}
+
+// RFC 9728 discovery. MCP clients probe both the bare path and the
+// resource-suffixed `/mcp` variant; serve identical metadata for each.
+app.get('/.well-known/oauth-protected-resource', (c) => protectedResourceResponse(c));
+app.get('/.well-known/oauth-protected-resource/mcp', (c) => protectedResourceResponse(c));
+
+// Demo authorization endpoint (dev-only — same posture as the _dev/seed route).
+// Stands in for a real authorization server: it authenticates NOTHING and mints
+// a token for the requested principal, so it is an OPEN, testnet-only hole and
+// MUST NOT exist on a production Worker. Guarding the REGISTRATION means the
+// route is simply absent in production (Hono 404s) and the production preflight
+// statically detects it as a properly-guarded dev route. A production deployment
+// replaces this with a real AS + JWKS; nothing in @agenticprimitives/mcp-oauth
+// changes. (On the deployed demo Worker NODE_ENV is unset, so the route exists.)
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/oauth/token', async (c) => {
+    if (!c.env.OAUTH_SIGNING_SECRET) return c.json({ error: 'unsupported', error_description: 'OAuth ingress not configured (OAUTH_SIGNING_SECRET unset)' }, 501);
+    let body: Record<string, unknown> = {};
+    try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
+    const principal = typeof body.principal === 'string' ? body.principal : undefined;
+    if (!principal) return c.json({ error: 'invalid_request', error_description: 'principal required (demo authorization endpoint)' }, 400);
+    const scopeRaw = body.scope;
+    const scopes = Array.isArray(scopeRaw)
+      ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
+      : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
+    const result = await mintDemoMcpToken(c.env, {
+      principal,
+      audience: c.env.MCP_AUDIENCE,
+      issuer: new URL(c.req.url).origin,
+      clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
+      scopes,
+      fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
+      purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
+      ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
+    });
+    return c.json(result);
+  });
+}
+
+// Public bearer-gated MCP tool call. Validates the token's claims (signature
+// injected via HS256), resolves the grant bundle from the vault (anti-swap hash
+// check inside), then runs the SAME authority chain as the service-MAC routes.
+app.post('/mcp', async (c) => {
+  const metaUrl = new URL('/.well-known/oauth-protected-resource', c.req.url).toString();
+  if (!c.env.OAUTH_SIGNING_SECRET) return c.json({ error: 'unsupported', error_description: 'OAuth ingress not configured' }, 501);
+
+  const validation = await validateMcpBearerToken(parseBearer(c.req.header('authorization')), {
+    verify: createHs256Verify(c.env.OAUTH_SIGNING_SECRET),
+    audience: c.env.MCP_AUDIENCE,
+    requiredScopes: ['mcp:invoke'],
+    requireGrantBinding: true,
+  });
+  if (!validation.ok) {
+    if (validation.reason === 'insufficient_scope') {
+      return buildInsufficientScopeResponse({ missingScopes: validation.missingScopes ?? [], resourceMetadataUrl: metaUrl });
+    }
+    return buildUnauthorizedResponse({ resourceMetadataUrl: metaUrl, errorDescription: validation.reason });
+  }
+  const claims = validation.claims;
+  const principal = claims.ap_principal;
+  if (!principal) return buildUnauthorizedResponse({ resourceMetadataUrl: metaUrl, errorDescription: 'grant_principal_missing' });
+
+  // Resolve + validate the referenced grant bundle out of the encrypted vault.
+  const resolved = await resolveGrantBundleFromToken(claims, createVaultGrantBundleStore(c.env, principal));
+  if (!resolved.ok) return buildUnauthorizedResponse({ resourceMetadataUrl: metaUrl, errorDescription: `grant_${resolved.reason}` });
+
+  let body: Record<string, unknown> = {};
+  try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
+  const tool = typeof body.tool === 'string' ? body.tool : (typeof body.method === 'string' ? body.method : '');
+  const spec = OAUTH_TOOL_SPECS[tool];
+  if (!spec) return c.json({ ok: false, error: 'unknown_tool', tool, supported: Object.keys(OAUTH_TOOL_SPECS) }, 400);
+  const rawArgs = (body.args ?? body.params) as { fields?: string[]; purpose?: string } | undefined;
+
+  const r = await readSensitive(
+    c.env,
+    { principal, args: rawArgs, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
+    spec,
+  );
+  // Authority denials (entitlement/KAS/required-audit) return 200 with {ok:false},
+  // matching the service-MAC tool routes — they are policy outcomes, not transport errors.
+  if (!r.ok) return c.json(r);
+  return c.json({ ok: true, tool, principal, name: r.subject_name, record: r.record, served_by: spec.servedBy, grant_ref: resolved.bundle.id });
 });
 
 // R7.4: pre-declare update_profile so the preflight (N10.2) doesn't flag

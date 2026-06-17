@@ -131,6 +131,18 @@ printf '%s' "$VAULT_MASTER_KEY" \
 unset VAULT_MASTER_KEY
 echo "  ✓ VAULT_MASTER_KEY  (demo-mcp)"
 
+# 7. OAUTH_SIGNING_SECRET — demo-mcp ONLY. HS256 signing secret for the OAuth
+#    ingress (spec 277 Phase 6): the demo authorization endpoint mints tokens
+#    with it and /mcp validates bearer tokens against it. Honored from
+#    $OAUTH_SIGNING_SECRET if set; otherwise a fresh 32-byte value is generated.
+#    Demo-grade — stands in for a real authorization server + JWKS; the token is
+#    never trusted as authority (the entitlement→KAS→audit chain re-runs server-side).
+OAUTH_SIGNING_SECRET="${OAUTH_SIGNING_SECRET:-$(openssl rand -hex 32)}"
+printf '%s' "$OAUTH_SIGNING_SECRET" \
+  | (cd apps/demo-mcp && wrangler secret put OAUTH_SIGNING_SECRET --env "$ENV") >/dev/null
+unset OAUTH_SIGNING_SECRET
+echo "  ✓ OAUTH_SIGNING_SECRET  (demo-mcp)"
+
 echo ""
 echo "Fresh A2A master EOA address: $A2A_ADDR"
 echo "  (private key was piped directly to Cloudflare — never stored locally,"

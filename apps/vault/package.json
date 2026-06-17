@@ -19,6 +19,7 @@
     "@agenticprimitives/entitlements": "workspace:*",
     "@agenticprimitives/key-authorization": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
+    "@agenticprimitives/mcp-oauth": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/tool-policy": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
