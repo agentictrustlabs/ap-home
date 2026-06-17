@@ -24,15 +24,27 @@ ap-provision-gcp \
 #   roles/cloudkms.signer/cryptoKeyEncrypterDecrypter scoped to THAT key only.
 ```
 
-> Note: the spec-276 helper provisions **asymmetric signing** keys today; the vault KEK is a
-> **symmetric** ENCRYPT_DECRYPT key (`GOOGLE_SYMMETRIC_ENCRYPTION`). Provision the symmetric
-> key the same way (`--purpose=encryption`) or via the console; the per-key IAM rule is identical.
+Or **gcloud-free** (backlog B1) — `executeGcpProvision` with `createGcpRestStepExecutor` mints the
+symmetric vault KEK over the Cloud KMS REST API (Workers-safe, idempotent), keyed by the person SA:
 
-Set the runtime credential on demo-mcp (already wired in `set-cloudflare-secrets.sh` for the
-gcp-kms backend):
+```ts
+import { executeGcpProvision, createGcpRestStepExecutor } from '@agenticprimitives/key-custody/provision-gcp';
+const { keyMap } = await executeGcpProvision(
+  { project, location, keyRing, identities: [personSA], runtimeServiceAccount, purpose: 'encrypt-decrypt' },
+  createGcpRestStepExecutor({ serviceAccountJson }),   // SA JSON or base64 (B4)
+);
+// keyMap[personSA] === the version-less cryptoKey resource → the binding's kmsKeyRef
+// purpose:'encrypt-decrypt' ⇒ GOOGLE_SYMMETRIC_ENCRYPTION + roles/cloudkms.cryptoKeyEncrypterDecrypter (B3)
+```
+
+Then write the runtime secret to demo-mcp + the demo-mcp URL to the home (backlog B6 writers — no
+echo, fail-closed; values come from env/stdin, never argv):
 
 ```bash
-GCP_SERVICE_ACCOUNT_JSON=... pnpm tsx scripts/set-cloudflare-secrets.sh   # sets it on demo-mcp
+# GCP creds → demo-mcp (Cloudflare Worker secret, via wrangler stdin):
+GCP_SA=... ; printf '%s' "$GCP_SA" | pnpm deploy:secret cloudflare --worker demo-mcp --env production --name GCP_SERVICE_ACCOUNT_JSON
+# demo-mcp URL → the home (Vercel project env, via REST API — NOT `vercel env add`):
+VERCEL_TOKEN=... printf '%s' "$DEMO_MCP_URL" | pnpm deploy:secret vercel --project demo-sso-next --name DEMO_MCP_URL --target production
 ```
 
 ## 2. Person — sign the `VaultKeyAuthorization` (connected custodian)
