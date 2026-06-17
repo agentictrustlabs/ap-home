@@ -337,3 +337,120 @@ export async function listVaultRecords(
     .all<{ record_type: string; updated_at: string }>();
   return res.results ?? [];
 }
+
+// ─── spec 277 Phase 2 — envelope-encrypted vault storage ───────────────
+//
+// Pure seed builders (no DB write) so the encrypted vault adapter can
+// materialize the demo PII/org defaults and seal them into `vault_objects`
+// directly. Defaults match the legacy plaintext seed (upsertDemoPii /
+// upsertDemoOrgSensitive) so behavior is unchanged.
+
+export function buildSeedPii(subject: string): PersonPii {
+  const addr = subject.toLowerCase();
+  return {
+    subject_address: addr,
+    full_name: `Demo Person (${subject.slice(0, 6)}…${subject.slice(-4)})`,
+    email: `${subject.slice(2, 10).toLowerCase()}@demo.agenticprimitives.local`,
+    phone: '+1-555-0142',
+    dob: '1985-06-15',
+    ssn_last4: subject.slice(-4),
+    postal_address: '1 Demo Way, Springfield, IL 62701',
+    notes: 'Seeded by demo-mcp.',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function buildSeedOrgSensitive(orgAddress: string): OrgSensitive {
+  return {
+    org_address: orgAddress.toLowerCase(),
+    legal_name: 'Acme Construction LLC',
+    ein: '87-4421099',
+    incorporated_in: 'Delaware',
+    ytd_revenue_usd: 12_840_000,
+    active_contracts: 14,
+    pending_litigation: 0,
+    primary_banking: 'Chase Business · acct ****8821',
+    notes: 'Seeded by demo-mcp.',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export interface VaultObjectRow {
+  owner_address: string;
+  resource: string;
+  classification: string;
+  ciphertext_b64: string;
+  wrapped_dek_b64: string;
+  crypto_meta: string; // JSON: { alg, dekKid, keyVersion, aadHash }
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/** Read one live encrypted vault object; `null` if absent or tombstoned. */
+export async function getVaultObjectRow(
+  db: D1Database,
+  owner: string,
+  resource: string,
+): Promise<VaultObjectRow | null> {
+  return (
+    (await db
+      .prepare(
+        'SELECT * FROM vault_objects WHERE owner_address = ? AND resource = ? AND deleted_at IS NULL',
+      )
+      .bind(owner.toLowerCase(), resource)
+      .first<VaultObjectRow>()) ?? null
+  );
+}
+
+/** Upsert an encrypted vault object (clears any tombstone). */
+export async function putVaultObjectRow(
+  db: D1Database,
+  row: Pick<VaultObjectRow, 'owner_address' | 'resource' | 'classification' | 'ciphertext_b64' | 'wrapped_dek_b64' | 'crypto_meta'>,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(owner_address, resource) DO UPDATE SET
+         classification = excluded.classification,
+         ciphertext_b64 = excluded.ciphertext_b64,
+         wrapped_dek_b64 = excluded.wrapped_dek_b64,
+         crypto_meta = excluded.crypto_meta,
+         updated_at = CURRENT_TIMESTAMP,
+         deleted_at = NULL`,
+    )
+    .bind(
+      row.owner_address.toLowerCase(),
+      row.resource,
+      row.classification,
+      row.ciphertext_b64,
+      row.wrapped_dek_b64,
+      row.crypto_meta,
+    )
+    .run();
+}
+
+/** Soft-delete (tombstone) an encrypted vault object. */
+export async function tombstoneVaultObjectRow(db: D1Database, owner: string, resource: string): Promise<void> {
+  await db
+    .prepare(
+      'UPDATE vault_objects SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE owner_address = ? AND resource = ?',
+    )
+    .bind(owner.toLowerCase(), resource)
+    .run();
+}
+
+/** Enumerate the owner's live encrypted vault objects (no payloads). */
+export async function listVaultObjectRows(
+  db: D1Database,
+  owner: string,
+): Promise<Array<{ resource: string; classification: string; updated_at: string }>> {
+  const res = await db
+    .prepare(
+      'SELECT resource, classification, updated_at FROM vault_objects WHERE owner_address = ? AND deleted_at IS NULL ORDER BY resource',
+    )
+    .bind(owner.toLowerCase())
+    .all<{ resource: string; classification: string; updated_at: string }>();
+  return res.results ?? [];
+}

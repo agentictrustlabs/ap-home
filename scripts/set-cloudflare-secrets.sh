@@ -120,6 +120,17 @@ printf '%s' "$BASE_SEPOLIA_RPC" \
   | (cd apps/demo-mcp && wrangler secret put RPC_URL --env "$ENV") >/dev/null
 echo "  ✓ RPC_URL  (demo-mcp)"
 
+# 6. VAULT_MASTER_KEY — demo-mcp ONLY. Master secret for the vault's LocalAesProvider
+#    DEK-wrapping backend (spec 277 Phase 2 envelope encryption). Honored from
+#    $VAULT_MASTER_KEY if set; otherwise a fresh 32-byte value is generated so the
+#    secret exists. TESTNET-DEMO GRADE — a managed KMS backend MUST replace this
+#    before any real-value data lands (A2A_ALLOW_LOCAL_ENVELOPE_KEY logs a warning).
+VAULT_MASTER_KEY="${VAULT_MASTER_KEY:-$(openssl rand -hex 32)}"
+printf '%s' "$VAULT_MASTER_KEY" \
+  | (cd apps/demo-mcp && wrangler secret put VAULT_MASTER_KEY --env "$ENV") >/dev/null
+unset VAULT_MASTER_KEY
+echo "  ✓ VAULT_MASTER_KEY  (demo-mcp)"
+
 echo ""
 echo "Fresh A2A master EOA address: $A2A_ADDR"
 echo "  (private key was piped directly to Cloudflare — never stored locally,"

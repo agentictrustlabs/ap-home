@@ -16,10 +16,12 @@
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
+    "@agenticprimitives/entitlements": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/tool-policy": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
+    "@agenticprimitives/vault": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "hono": "^4.12.23"
   },

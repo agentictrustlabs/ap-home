@@ -24,6 +24,11 @@ migrations_dir = "migrations"
 RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = "31337"
 MCP_AUDIENCE = "urn:mcp:server:person"
+# spec 277 Phase 2: acknowledge local-AES vault envelope keys (testnet demo).
+# The vault adapter bridges this into process.env where key-custody's
+# LocalAesProvider guard reads it. Replace with a managed KMS backend before
+# any real-value data. VAULT_MASTER_KEY itself is a wrangler SECRET, not a var.
+A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Production environment — Worker name: "demo-mcp-production"
@@ -41,6 +46,7 @@ MCP_AUDIENCE = "urn:mcp:server:person"
 # RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
 # the rationale. Set as a wrangler secret instead.
 CHAIN_ID = "84532"
+A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 MCP_AUDIENCE = "urn:mcp:server:person"
 
 [[env.production.d1_databases]]

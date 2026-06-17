@@ -24,16 +24,18 @@ import type { Address } from '@agenticprimitives/types';
 import {
   upsertDemoProfile,
   getProfile,
-  upsertDemoPii,
-  getPii,
-  upsertDemoOrgSensitive,
-  getOrgSensitive,
-  getVaultRecord,
-  setVaultRecord,
-  listVaultRecords,
+  type PersonPii,
+  type OrgSensitive,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
+import {
+  demoVault,
+  RESOURCE_PERSON_PII,
+  RESOURCE_ORG_SENSITIVE,
+  VAULT_RECORD_PREFIX,
+} from './vault';
+import { demoEntitlementResolver } from './entitlements';
 import { resolveAgentName } from './naming';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
@@ -113,6 +115,20 @@ export interface Env {
    * its presence.
    */
   A2A_MAC_SECRET?: string;
+
+  // ─── Vault envelope encryption (spec 277 Phase 2) ─────────────────────
+  /**
+   * Master secret (hex, ≥32 bytes) for the LocalAesProvider DEK-wrapping backend the vault
+   * adapter uses to envelope-encrypt PII at rest. Testnet-demo grade — a managed KMS backend
+   * MUST replace this before any real-value data. Seeded by set-cloudflare-secrets.sh.
+   */
+  VAULT_MASTER_KEY?: string;
+  /**
+   * Acknowledge local-AES envelope keys on a prod-like runtime. On Workers `NODE_ENV` is unset, so
+   * key-custody's LocalAesProvider fails closed unless this opt-in is set; the vault adapter bridges
+   * this binding var into `process.env` (where the guard reads it). 'true' for the demo only.
+   */
+  A2A_ALLOW_LOCAL_ENVELOPE_KEY?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -355,13 +371,32 @@ app.post('/tools/get_pii', async (c) => {
   const body = c.get('parsedBody');
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
-  type Args = { args?: Record<string, unknown> };
+  type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     baseConfig(c.env),
-    async ({ principal }) => {
-      // Lazy-seed so the first access for a freshly-claimed seat works.
-      await upsertDemoPii(c.env.DB, principal);
-      const record = await getPii(c.env.DB, principal);
+    async ({ principal, args }) => {
+      // Phase 3: resolve the entitlement BEFORE decrypting; allowedFields scopes
+      // the projection. Demo policy: owner-reads-own (actor == principal) → full.
+      const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
+      const decision = await demoEntitlementResolver().resolve({
+        actor: principal,
+        principal,
+        audience: c.env.MCP_AUDIENCE,
+        resource: RESOURCE_PERSON_PII,
+        action: 'read',
+        fields: requestedFields,
+        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
+        classification: 'pii.sensitive',
+        at: new Date(),
+      });
+      if (decision.decision === 'deny') {
+        return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_pii' };
+      }
+      // All PII access flows through the vault seam; the adapter decrypts (Phase 2)
+      // and physically projects only the entitled fields (Phase 3).
+      const vault = demoVault(c.env);
+      const obj = await vault.read<PersonPii>({ owner: principal, resource: RESOURCE_PERSON_PII, fields: decision.allowedFields });
+      const record = obj?.data ?? null;
       const subject_name = await resolveAgentName(c.env, principal);
       return {
         ok: true,
@@ -413,12 +448,28 @@ app.post('/tools/get_org_sensitive', async (c) => {
   const body = c.get('parsedBody');
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
-  type Args = { args?: Record<string, unknown> };
+  type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     baseConfig(c.env),
-    async ({ principal }) => {
-      await upsertDemoOrgSensitive(c.env.DB, principal);
-      const record = await getOrgSensitive(c.env.DB, principal);
+    async ({ principal, args }) => {
+      const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
+      const decision = await demoEntitlementResolver().resolve({
+        actor: principal,
+        principal,
+        audience: c.env.MCP_AUDIENCE,
+        resource: RESOURCE_ORG_SENSITIVE,
+        action: 'read',
+        fields: requestedFields,
+        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
+        classification: 'regulated.high',
+        at: new Date(),
+      });
+      if (decision.decision === 'deny') {
+        return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_org_sensitive' };
+      }
+      const vault = demoVault(c.env);
+      const obj = await vault.read<OrgSensitive>({ owner: principal, resource: RESOURCE_ORG_SENSITIVE, fields: decision.allowedFields });
+      const record = obj?.data ?? null;
       const org_name = await resolveAgentName(c.env, principal);
       return {
         ok: true,
@@ -477,8 +528,9 @@ app.post('/tools/get_vault_record', async (c) => {
       async ({ principal, args }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
-        const data = await getVaultRecord(c.env.DB, principal, recordType);
-        return { ok: true, owner: principal, recordType, data, served_by: 'demo-mcp:get_vault_record' };
+        const vault = demoVault(c.env);
+        const obj = await vault.read({ owner: principal, resource: `${VAULT_RECORD_PREFIX}${recordType}` });
+        return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: 'demo-mcp:get_vault_record' };
       },
       {
         toolName: 'get_vault_record',
@@ -517,7 +569,8 @@ app.post('/tools/set_vault_record', async (c) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
         // `data === null` is a soft-delete (tombstone) by contract.
-        await setVaultRecord(c.env.DB, principal, recordType, args?.data ?? null);
+        const vault = demoVault(c.env);
+        await vault.write({ owner: principal, resource: `${VAULT_RECORD_PREFIX}${recordType}`, data: args?.data ?? null });
         return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
       },
       {
@@ -554,7 +607,12 @@ app.post('/tools/list_vault_record', async (c) => {
     const handler = withDelegation<Args>(
       vaultConfig(c.env, body.enforceBinding),
       async ({ principal }) => {
-        const records = await listVaultRecords(c.env.DB, principal);
+        // Map the vault refs back to the established { record_type, updated_at } shape.
+        const vault = demoVault(c.env);
+        const refs = await vault.list(principal);
+        const records = refs
+          .filter((r) => r.resource.startsWith(VAULT_RECORD_PREFIX))
+          .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
         return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
       },
       {
