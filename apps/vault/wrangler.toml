@@ -24,11 +24,9 @@ migrations_dir = "migrations"
 RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = "31337"
 MCP_AUDIENCE = "urn:mcp:server:person"
-# spec 277 Phase 2: acknowledge local-AES vault envelope keys (testnet demo).
-# The vault adapter bridges this into process.env where key-custody's
-# LocalAesProvider guard reads it. Replace with a managed KMS backend before
-# any real-value data. VAULT_MASTER_KEY itself is a wrangler SECRET, not a var.
-A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
+# spec 278 P4: the vault is per-person-keyed (no global VAULT_MASTER_KEY / local-aes).
+# Each person's KEK lives in GCP Cloud KMS, resolved from their VaultKeyBinding;
+# GCP_SERVICE_ACCOUNT_JSON is a wrangler SECRET (set by set-cloudflare-secrets.sh).
 # spec 277 Phase 6: enable the OPEN demo authorization endpoint (/oauth/token).
 # Fail-closed — the route 404s unless this is 'true'. Testnet demo only (mock
 # seed data); a real production leaves it unset and wires a real AS + JWKS.
@@ -50,7 +48,6 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 # RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
 # the rationale. Set as a wrangler secret instead.
 CHAIN_ID = "84532"
-A2A_ALLOW_LOCAL_ENVELOPE_KEY = "true"
 MCP_AUDIENCE = "urn:mcp:server:person"
 # Testnet demo: enable the open /oauth/token demo authorization endpoint (mock
 # seed data only). A real production deployment removes this + wires a real AS.

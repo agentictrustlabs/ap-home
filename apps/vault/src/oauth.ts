@@ -30,12 +30,12 @@ import {
   type GrantBundleStore,
   type Sha256,
 } from '@agenticprimitives/mcp-oauth';
-import { demoVault } from './vault.js';
+import { resolvePersonVault, type VaultKeyEnv } from './vault-key.js';
 
-interface OAuthEnv {
-  DB: D1Database;
-  VAULT_MASTER_KEY?: string;
-  A2A_ALLOW_LOCAL_ENVELOPE_KEY?: string;
+// spec 278: the grant bundle is per-person data → stored under the principal's KEK
+// (resolved from their VaultKeyBinding). OAuthEnv therefore carries the VaultKeyEnv
+// fields. No binding ⇒ no bundle storage (mint fails closed).
+interface OAuthEnv extends VaultKeyEnv {
   OAUTH_SIGNING_SECRET?: string;
 }
 
@@ -127,10 +127,12 @@ export function grantBundleResource(grantId: string): string {
 }
 
 export function createVaultGrantBundleStore(env: OAuthEnv, owner: string): GrantBundleStore {
-  const vault = demoVault(env);
   return {
     async get(id: string): Promise<McpGrantBundleV1 | null> {
-      const obj = await vault.read<McpGrantBundleV1>({ owner, resource: grantBundleResource(id) });
+      // spec 278: the bundle lives under the owner's per-person KEK. No binding ⇒ null (fail-closed).
+      const pv = await resolvePersonVault(env, owner);
+      if (!pv) return null;
+      const obj = await pv.vault.read<McpGrantBundleV1>({ owner, resource: grantBundleResource(id) });
       return obj?.data ?? null;
     },
   };
@@ -204,8 +206,14 @@ export async function mintDemoMcpToken(env: OAuthEnv, input: MintDemoTokenInput)
     status: 'active',
   });
 
-  // Dogfood the vault: store the bundle encrypted under the principal.
-  await demoVault(env).write({
+  // Store the bundle encrypted under the principal's PER-PERSON KEK (spec 278). The
+  // principal must already hold a vault-key binding (from the ceremony) — minting a
+  // token for a person with no binding fails closed (no global key for person data).
+  const pv = await resolvePersonVault(env, input.principal);
+  if (!pv) {
+    throw new Error('mintDemoMcpToken: principal has no vault-key binding (spec 278); run the connected-custodian ceremony before issuing tokens.');
+  }
+  await pv.vault.write({
     owner: input.principal,
     resource: grantBundleResource(id),
     data: bundle,

@@ -247,3 +247,73 @@ export async function listVaultObjectRows(
     .all<{ resource: string; classification: string; updated_at: string }>();
   return res.results ?? [];
 }
+
+// ─── spec 278 P4 — per-person vault key bindings ──────────────────────────
+
+export interface VaultKeyBindingRow {
+  owner_address: string;
+  server_id: string;
+  vault_id: string;
+  kms_key_ref: string;
+  allowed_resources: string; // JSON string[]
+  classification_ceiling: string;
+  ops: string; // JSON ('read'|'write')[]
+  expires_at: string;
+  authorization_json: string; // the signed VaultKeyAuthorization delegation (JSON)
+  authorization_hash: string;
+  created_at: string;
+  updated_at: string;
+  revoked_at: string | null;
+}
+
+/** Read the live (non-revoked) vault-key binding for an owner on this server, or null. */
+export async function getVaultKeyBindingRow(
+  db: D1Database,
+  owner: string,
+  serverId: string,
+): Promise<VaultKeyBindingRow | null> {
+  return (
+    (await db
+      .prepare(
+        'SELECT * FROM vault_key_bindings WHERE owner_address = ? AND server_id = ? AND revoked_at IS NULL',
+      )
+      .bind(owner.toLowerCase(), serverId)
+      .first<VaultKeyBindingRow>()) ?? null
+  );
+}
+
+/** Upsert a vault-key binding (created by the connected-custodian ceremony, P5). */
+export async function putVaultKeyBindingRow(
+  db: D1Database,
+  row: Omit<VaultKeyBindingRow, 'created_at' | 'updated_at' | 'revoked_at'>,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO vault_key_bindings (owner_address, server_id, vault_id, kms_key_ref, allowed_resources, classification_ceiling, ops, expires_at, authorization_json, authorization_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(owner_address, server_id) DO UPDATE SET
+         vault_id = excluded.vault_id,
+         kms_key_ref = excluded.kms_key_ref,
+         allowed_resources = excluded.allowed_resources,
+         classification_ceiling = excluded.classification_ceiling,
+         ops = excluded.ops,
+         expires_at = excluded.expires_at,
+         authorization_json = excluded.authorization_json,
+         authorization_hash = excluded.authorization_hash,
+         updated_at = CURRENT_TIMESTAMP,
+         revoked_at = NULL`,
+    )
+    .bind(
+      row.owner_address.toLowerCase(),
+      row.server_id,
+      row.vault_id,
+      row.kms_key_ref,
+      row.allowed_resources,
+      row.classification_ceiling,
+      row.ops,
+      row.expires_at,
+      row.authorization_json,
+      row.authorization_hash,
+    )
+    .run();
+}

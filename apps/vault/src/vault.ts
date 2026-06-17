@@ -16,7 +16,6 @@
 
 import type { Vault, VaultObject, VaultReadRequest, VaultWriteRequest, VaultRef, VaultClassification, DekWrapper } from '@agenticprimitives/vault';
 import { sealEnvelope, openEnvelope, projectFields } from '@agenticprimitives/vault';
-import { LocalAesProvider } from '@agenticprimitives/key-custody';
 import {
   type Profile,
   type PersonPii,
@@ -59,25 +58,10 @@ function b64decode(s: string): Uint8Array {
   return out;
 }
 
-interface VaultEnv {
-  DB: D1Database;
-  VAULT_MASTER_KEY?: string;
-  A2A_ALLOW_LOCAL_ENVELOPE_KEY?: string;
-}
-
-/** Build the encrypted demo-mcp Vault from the Worker env. */
-export function demoVault(env: VaultEnv): Vault {
-  // Bridge the binding opt-in into process.env, where LocalAesProvider's
-  // production guard reads it (Workers don't expose wrangler vars on process.env).
-  if (env.A2A_ALLOW_LOCAL_ENVELOPE_KEY === 'true' && typeof process !== 'undefined' && process.env) {
-    process.env.A2A_ALLOW_LOCAL_ENVELOPE_KEY = 'true';
-  }
-  if (!env.VAULT_MASTER_KEY) {
-    throw new Error('demoVault: VAULT_MASTER_KEY is required to envelope-encrypt the vault (spec 277 Phase 2).');
-  }
-  const wrapper: DekWrapper = new LocalAesProvider({ sessionSecretHex: env.VAULT_MASTER_KEY });
-  return createDemoVault(env.DB, wrapper);
-}
+// spec 278 P4 — there is NO `demoVault(env)` global anymore. A single global
+// DEK-wrapping key that decrypts every owner is exactly what VKB-D1 forbids. The
+// Vault is built per-person from that person's KEK via `resolvePersonVault`
+// (src/vault-key.ts), which calls `createDemoVault(db, perPersonWrapper)` below.
 
 /** The encrypted adapter (wrapper injected — testable + KMS-swappable). */
 export function createDemoVault(db: D1Database, wrapper: DekWrapper): Vault {

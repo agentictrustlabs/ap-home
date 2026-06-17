@@ -28,12 +28,13 @@ import {
   createD1AuditSink,
 } from './db';
 import {
-  demoVault,
   RESOURCE_PROFILE,
   RESOURCE_PERSON_PII,
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
+import { resolvePersonVault, buildVaultKeyVerifier, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { demoEntitlementResolver } from './entitlements';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
@@ -162,6 +163,11 @@ async function readSensitive(
   const requestedFields = Array.isArray(args?.fields) ? args!.fields : undefined;
   const purpose = typeof args?.purpose === 'string' ? args.purpose : undefined;
 
+  // spec 278: resolve the person's vault-key binding FIRST. No binding ⇒ fail closed —
+  // there is no global key for person data (VKB-D1). The binding selects the person's KEK.
+  const pv = await resolvePersonVault(env, principal);
+  if (!pv) return { ok: false, error: 'vault_key_unauthorized', served_by: spec.servedBy };
+
   // Phase 3: resolve the entitlement BEFORE decrypting; allowedFields scopes the projection.
   const decision = await demoEntitlementResolver().resolve({
     actor: principal,
@@ -176,11 +182,12 @@ async function readSensitive(
   });
   if (decision.decision === 'deny') return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: spec.servedBy };
 
-  // Phase 4: one-time DecryptGrant gated by the KAS — releasedFields scopes the projection.
+  // Phase 4 + spec 278: one-time DecryptGrant gated by the KAS, which ALSO requires the
+  // per-person vault-key authorization (the person SA authorized THIS host to wield the KEK).
   const release = await authorizeDecrypt({
     principal,
     audience: ctx.audience,
-    serverId: 'demo-mcp',
+    serverId: VAULT_SERVER_ID,
     toolName: spec.toolName,
     args: args ?? {},
     resource: spec.resource,
@@ -188,8 +195,12 @@ async function readSensitive(
     allowedFields: decision.allowedFields,
     purpose,
     entitlementIds: decision.matchedCredentials,
+    vaultKeyAuthorization: { verifier: buildVaultKeyVerifier(env), authorization: pv.authorization, binding: pv.binding },
   });
-  if (release.decision === 'deny') return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: spec.servedBy };
+  if (release.decision === 'deny') {
+    const error = release.reason === 'vault_key_unauthorized' ? 'vault_key_unauthorized' : 'key_release_denied';
+    return { ok: false, error, reason: release.reason, served_by: spec.servedBy };
+  }
 
   // Phase 5: REQUIRED (fail-hard) audit BEFORE decrypt — if it can't commit, fail closed.
   const audited = await recordRequiredRelease(env, ctx.correlationId, {
@@ -198,11 +209,32 @@ async function readSensitive(
   });
   if (!audited) return { ok: false, error: 'audit_required_failed', served_by: spec.servedBy };
 
-  // KAS authorized + audit committed → vault decrypts (Phase 2) only the released fields (Phase 3).
-  const vault = demoVault(env);
-  const obj = await vault.read({ owner: principal, resource: spec.resource, fields: release.releasedFields });
+  // Authorized + audit committed → the person's KEK-backed vault decrypts only the released fields.
+  const obj = await pv.vault.read({ owner: principal, resource: spec.resource, fields: release.releasedFields });
   const subject_name = await resolveAgentName(env, principal);
   return { ok: true, record: obj?.data ?? null, subject_name };
+}
+
+// spec 278 — gate a SIMPLE vault op (profile read, generic record read/write — paths that
+// don't mint a one-time DecryptGrant) on the per-person binding + vault-key authorization.
+// No binding ⇒ fail closed (VKB-D1). Returns the per-person Vault on allow.
+async function authorizePersonVaultOp(
+  env: Env,
+  owner: string,
+  resource: string,
+  op: 'read' | 'write',
+  classification: string,
+): Promise<{ ok: true; pv: PersonVault } | { ok: false; error: 'vault_key_unauthorized' }> {
+  const pv = await resolvePersonVault(env, owner);
+  if (!pv) return { ok: false, error: 'vault_key_unauthorized' };
+  const verdict = await verifyVaultKeyAuthorization({
+    verifier: buildVaultKeyVerifier(env),
+    authorization: pv.authorization,
+    binding: pv.binding,
+    request: { vaultId: pv.binding.vaultId, ownerPersonSA: owner, serverId: VAULT_SERVER_ID, resource, op, classification },
+  });
+  if (!verdict.ok) return { ok: false, error: 'vault_key_unauthorized' };
+  return { ok: true, pv };
 }
 
 export interface Env {
@@ -239,19 +271,15 @@ export interface Env {
    */
   A2A_MAC_SECRET?: string;
 
-  // ─── Vault envelope encryption (spec 277 Phase 2) ─────────────────────
+  // ─── Per-person vault key custody (spec 278 P4) ───────────────────────
   /**
-   * Master secret (hex, ≥32 bytes) for the LocalAesProvider DEK-wrapping backend the vault
-   * adapter uses to envelope-encrypt PII at rest. Testnet-demo grade — a managed KMS backend
-   * MUST replace this before any real-value data. Seeded by set-cloudflare-secrets.sh.
+   * Service-account JSON for the GCP Cloud KMS project that holds the per-person KEKs.
+   * Each person's vault is wrapped under THAT person's KEK (resolved from their
+   * VaultKeyBinding via `selectVaultKeyProvider`); there is NO global vault master key
+   * (VKB-D1). Required to wield any binding's KEK. (The legacy `VAULT_MASTER_KEY` +
+   * `A2A_ALLOW_LOCAL_ENVELOPE_KEY` global-key path was removed in spec 278 P4.)
    */
-  VAULT_MASTER_KEY?: string;
-  /**
-   * Acknowledge local-AES envelope keys on a prod-like runtime. On Workers `NODE_ENV` is unset, so
-   * key-custody's LocalAesProvider fails closed unless this opt-in is set; the vault adapter bridges
-   * this binding var into `process.env` (where the guard reads it). 'true' for the demo only.
-   */
-  A2A_ALLOW_LOCAL_ENVELOPE_KEY?: string;
+  GCP_SERVICE_ACCOUNT_JSON?: string;
 
   // ─── OAuth ingress (spec 277 Phase 6) ─────────────────────────────────
   /**
@@ -460,11 +488,11 @@ app.post('/tools/get_profile', async (c) => {
   const handler = withDelegation<Args>(
     baseConfig(c.env),
     async ({ principal }) => {
-      // Profile now lives in the encrypted vault (resource `profile`, pii.low),
-      // sealed on first read — no plaintext `profiles` table. Low-risk T1 read:
-      // encryption-at-rest via the vault, no entitlement/KAS gate (the principal
-      // IS the owner, same as before).
-      const obj = await demoVault(c.env).read<Profile>({ owner: principal, resource: RESOURCE_PROFILE });
+      // Profile lives in the encrypted vault (resource `profile`, pii.low). spec 278:
+      // gated on the person's vault-key binding + authorization — no binding ⇒ fail closed.
+      const gate = await authorizePersonVaultOp(c.env, principal, RESOURCE_PROFILE, 'read', 'pii.low');
+      if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:get_profile' };
+      const obj = await gate.pv.vault.read<Profile>({ owner: principal, resource: RESOURCE_PROFILE });
       // Label the owner with its `.agent` name (single-call resolve).
       const owner_name = await resolveAgentName(c.env, principal);
       return { ok: true, profile: obj?.data ?? null, owner_name };
@@ -628,8 +656,10 @@ app.post('/tools/get_vault_record', async (c) => {
       async ({ principal, args }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
-        const vault = demoVault(c.env);
-        const obj = await vault.read({ owner: principal, resource: `${VAULT_RECORD_PREFIX}${recordType}` });
+        const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
+        const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'internal');
+        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:get_vault_record' };
+        const obj = await gate.pv.vault.read({ owner: principal, resource });
         return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: 'demo-mcp:get_vault_record' };
       },
       {
@@ -668,9 +698,12 @@ app.post('/tools/set_vault_record', async (c) => {
       async ({ principal, args }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
+        const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
+        // spec 278 write gate: sealing requires op:'write' on the person's vault-key authorization.
+        const gate = await authorizePersonVaultOp(c.env, principal, resource, 'write', 'internal');
+        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:set_vault_record' };
         // `data === null` is a soft-delete (tombstone) by contract.
-        const vault = demoVault(c.env);
-        await vault.write({ owner: principal, resource: `${VAULT_RECORD_PREFIX}${recordType}`, data: args?.data ?? null });
+        await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
         return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
       },
       {
@@ -707,9 +740,12 @@ app.post('/tools/list_vault_record', async (c) => {
     const handler = withDelegation<Args>(
       vaultConfig(c.env, body.enforceBinding),
       async ({ principal }) => {
+        // spec 278: listing the owner's own records still requires the vault-key binding
+        // (the listing comes from the per-person-KEK vault). `vault:` prefix → 'internal'.
+        const gate = await authorizePersonVaultOp(c.env, principal, VAULT_RECORD_PREFIX, 'read', 'internal');
+        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:list_vault_record' };
         // Map the vault refs back to the established { record_type, updated_at } shape.
-        const vault = demoVault(c.env);
-        const refs = await vault.list(principal);
+        const refs = await gate.pv.vault.list(principal);
         const records = refs
           .filter((r) => r.resource.startsWith(VAULT_RECORD_PREFIX))
           .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
@@ -820,17 +856,23 @@ app.post('/oauth/token', async (c) => {
   const scopes = Array.isArray(scopeRaw)
     ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
     : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
-  const result = await mintDemoMcpToken(c.env, {
-    principal,
-    audience: c.env.MCP_AUDIENCE,
-    issuer: new URL(c.req.url).origin,
-    clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
-    scopes,
-    fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
-    purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
-    ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
-  });
-  return c.json(result);
+  try {
+    const result = await mintDemoMcpToken(c.env, {
+      principal,
+      audience: c.env.MCP_AUDIENCE,
+      issuer: new URL(c.req.url).origin,
+      clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
+      scopes,
+      fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
+      purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
+      ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
+    });
+    return c.json(result);
+  } catch (e) {
+    // spec 278: minting stores the grant bundle under the principal's per-person KEK,
+    // which requires a vault-key binding. No binding ⇒ fail closed (409), not a 500.
+    return c.json({ error: 'vault_key_unauthorized', error_description: e instanceof Error ? e.message : String(e) }, 409);
+  }
 });
 
 // Public bearer-gated MCP tool call. Validates the token's claims (signature
@@ -903,8 +945,10 @@ if (process.env.NODE_ENV !== 'production') {
   app.post('/_dev/seed', async (c) => {
     const { address } = (await c.req.json()) as { address?: string };
     if (typeof address !== 'string') return c.json({ error: 'address required' }, 400);
-    // Reading materializes + seals the profile seed into the vault (seed-on-read).
-    const obj = await demoVault(c.env).read<Profile>({ owner: address, resource: RESOURCE_PROFILE });
+    // spec 278: seeding materializes the profile under the person's KEK — requires a binding.
+    const pv = await resolvePersonVault(c.env, address);
+    if (!pv) return c.json({ ok: false, error: 'vault_key_unauthorized', detail: 'no vault-key binding for this address; run the connected-custodian ceremony first (spec 278 P5)' }, 409);
+    const obj = await pv.vault.read<Profile>({ owner: address, resource: RESOURCE_PROFILE });
     return c.json({ ok: true, profile: obj?.data ?? null });
   });
 }

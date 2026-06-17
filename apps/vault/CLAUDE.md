@@ -16,6 +16,12 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
   the real authority chain (`readSensitive`: entitlement → KAS → required audit →
   decrypt) re-runs server-side off the grant bundle's principal. App-side HS256
   sign/verify + the vault-backed grant-bundle store live in `src/oauth.ts`.
+- Per-person vault key custody (spec 278 P4): every vault op resolves the owner's
+  `VaultKeyBinding` (`src/vault-key.ts` → `resolvePersonVault`) and wields that person's
+  GCP-KMS KEK via `selectVaultKeyProvider`; the person-SA-signed `VaultKeyAuthorization`
+  is verified per op (ERC-1271 via the `UniversalSignatureValidator`). NO global vault
+  master key — no binding ⇒ `vault_key_unauthorized` (fail-closed, VKB-D1). Bindings are
+  created by the connected-custodian ceremony (P5); `GCP_SERVICE_ACCOUNT_JSON` is required.
 - D1-backed demo data and local migrations.
 - Delegation/JTI replay checks as app wiring around package primitives.
 - Audit demo guide in `docs/audit/guide.md`.

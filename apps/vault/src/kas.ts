@@ -14,9 +14,12 @@
 
 import {
   createDecryptGrant,
-  createLocalDevKeyAuthorizationService,
+  verifyDecryptGrant,
+  createInMemoryReplayStore,
   sha256Hex,
   type KeyReleaseDecision,
+  type VaultKeyAuthorizationVerifier,
+  type VaultKeyBindingV1,
 } from '@agenticprimitives/key-authorization';
 
 export interface AuthorizeDecryptInput {
@@ -34,6 +37,17 @@ export interface AuthorizeDecryptInput {
   /** The entitlement credential ids that matched (bound into the grant by hash). */
   entitlementIds?: string[];
   ttlSeconds?: number;
+  /**
+   * spec 278 — the per-person vault-key authorization (REQUIRED for person data). The KAS
+   * additionally requires this to pass before release: the host may wield the person's KEK
+   * only because the person SA authorized it (verified per op). No binding ⇒ the caller never
+   * reaches here (it fails closed earlier).
+   */
+  vaultKeyAuthorization: {
+    verifier: VaultKeyAuthorizationVerifier;
+    authorization: unknown;
+    binding: VaultKeyBindingV1;
+  };
 }
 
 /** Build a one-time DecryptGrant for the (already entitlement-approved) read and
@@ -71,9 +85,10 @@ export async function authorizeDecrypt(input: AuthorizeDecryptInput): Promise<Ke
     replay: { jti: globalThis.crypto.randomUUID() },
   });
 
-  // Fresh per-call KAS (in-memory replay) — see module note on cross-request grants.
-  const kas = createLocalDevKeyAuthorizationService();
-  return kas.authorize(
+  // Fresh per-call replay store — see module note on cross-request grants. The
+  // vault-key authorization (spec 278) is checked alongside the grant, BEFORE the
+  // one-time JTI is consumed, so a vault-key denial never burns the JTI.
+  return verifyDecryptGrant(
     grant,
     {
       audience: input.audience,
@@ -85,6 +100,10 @@ export async function authorizeDecrypt(input: AuthorizeDecryptInput): Promise<Ke
       purpose: input.purpose,
       classification: input.classification,
     },
-    now,
+    {
+      now,
+      replayStore: createInMemoryReplayStore(),
+      vaultKeyAuthorization: input.vaultKeyAuthorization,
+    },
   );
 }
