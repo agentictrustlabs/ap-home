@@ -36,6 +36,7 @@ import {
   VAULT_RECORD_PREFIX,
 } from './vault';
 import { demoEntitlementResolver } from './entitlements';
+import { authorizeDecrypt } from './kas';
 import { resolveAgentName } from './naming';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
@@ -392,10 +393,26 @@ app.post('/tools/get_pii', async (c) => {
       if (decision.decision === 'deny') {
         return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_pii' };
       }
-      // All PII access flows through the vault seam; the adapter decrypts (Phase 2)
-      // and physically projects only the entitled fields (Phase 3).
+      // Phase 4: request a one-time DecryptGrant and gate the decrypt on the KAS —
+      // handlers never decrypt PII directly. releasedFields scopes the projection.
+      const release = await authorizeDecrypt({
+        principal,
+        audience: c.env.MCP_AUDIENCE,
+        serverId: 'demo-mcp',
+        toolName: 'get_pii',
+        args: args ?? {},
+        resource: RESOURCE_PERSON_PII,
+        classification: 'pii.sensitive',
+        allowedFields: decision.allowedFields,
+        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
+        entitlementIds: decision.matchedCredentials,
+      });
+      if (release.decision === 'deny') {
+        return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_pii' };
+      }
+      // KAS authorized → the vault decrypts (Phase 2) only the released fields (Phase 3).
       const vault = demoVault(c.env);
-      const obj = await vault.read<PersonPii>({ owner: principal, resource: RESOURCE_PERSON_PII, fields: decision.allowedFields });
+      const obj = await vault.read<PersonPii>({ owner: principal, resource: RESOURCE_PERSON_PII, fields: release.releasedFields });
       const record = obj?.data ?? null;
       const subject_name = await resolveAgentName(c.env, principal);
       return {
@@ -467,8 +484,23 @@ app.post('/tools/get_org_sensitive', async (c) => {
       if (decision.decision === 'deny') {
         return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: 'demo-mcp:get_org_sensitive' };
       }
+      const release = await authorizeDecrypt({
+        principal,
+        audience: c.env.MCP_AUDIENCE,
+        serverId: 'demo-mcp',
+        toolName: 'get_org_sensitive',
+        args: args ?? {},
+        resource: RESOURCE_ORG_SENSITIVE,
+        classification: 'regulated.high',
+        allowedFields: decision.allowedFields,
+        purpose: typeof args?.purpose === 'string' ? args.purpose : undefined,
+        entitlementIds: decision.matchedCredentials,
+      });
+      if (release.decision === 'deny') {
+        return { ok: false, error: 'key_release_denied', reason: release.reason, served_by: 'demo-mcp:get_org_sensitive' };
+      }
       const vault = demoVault(c.env);
-      const obj = await vault.read<OrgSensitive>({ owner: principal, resource: RESOURCE_ORG_SENSITIVE, fields: decision.allowedFields });
+      const obj = await vault.read<OrgSensitive>({ owner: principal, resource: RESOURCE_ORG_SENSITIVE, fields: release.releasedFields });
       const record = obj?.data ?? null;
       const org_name = await resolveAgentName(c.env, principal);
       return {
