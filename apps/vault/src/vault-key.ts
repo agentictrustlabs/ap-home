@@ -22,12 +22,16 @@ import {
 import {
   hashDelegation,
   decodeVaultKeyUseTerms,
+  buildVaultKeyUseCaveat,
   VAULT_KEY_USE_ENFORCER,
+  ROOT_AUTHORITY,
   type Delegation,
+  type Hex,
 } from '@agenticprimitives/delegation';
 import { selectVaultKeyProvider } from '@agenticprimitives/key-custody';
+import { canonicalize, sha256Hex, type Sha256 } from '@agenticprimitives/key-authorization';
 import { createDemoVault } from './vault.js';
-import { getVaultKeyBindingRow, type VaultKeyBindingRow } from './db.js';
+import { getVaultKeyBindingRow, putVaultKeyBindingRow, type VaultKeyBindingRow } from './db.js';
 
 /** The host id a person SA authorizes in its VaultKeyBinding. */
 export const VAULT_SERVER_ID = 'demo-mcp';
@@ -150,4 +154,113 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
       return ok === true;
     },
   });
+}
+
+// ─── spec 278 P5 — connected-custodian ceremony (host side) ───────────────
+
+export interface VaultKeyBindingParams {
+  owner: string;            // the person SA (delegator)
+  vaultId: string;
+  kmsKeyRef: string;        // the per-person KEK (provisioned via spec 276 ap-provision-gcp)
+  serverKey: string;        // the host's authorized delegate key/address (binding's allowedServerId surface)
+  allowedResources: string[];
+  classificationCeiling: string;
+  ops: ('read' | 'write')[];
+  expiresAt: string;        // ISO
+  salt: bigint;
+}
+
+/**
+ * Build the UNSIGNED `VaultKeyAuthorization` delegation (delegator = person SA, delegate =
+ * the host's key) carrying a `VAULT_KEY_USE` caveat, plus the EIP-712 digest the person SA
+ * signs in the ceremony. The connected custodian (passkey / SA custody) signs `digest`; the
+ * resulting signed delegation is POSTed to `/custody/vault-key/bind`.
+ */
+export function buildVaultKeyAuthorization(
+  env: Pick<VaultKeyEnv, 'CHAIN_ID' | 'DELEGATION_MANAGER'>,
+  p: VaultKeyBindingParams,
+): { authorization: Delegation; digest: Hex } {
+  const caveat = buildVaultKeyUseCaveat({
+    vaultId: p.vaultId,
+    kmsKeyRef: p.kmsKeyRef,
+    resources: p.allowedResources,
+    classificationCeiling: p.classificationCeiling,
+    ops: p.ops,
+    noSubdelegation: true,
+  });
+  const authorization: Delegation = {
+    delegator: p.owner as Address,
+    delegate: p.serverKey as Address,
+    authority: ROOT_AUTHORITY,
+    caveats: [caveat],
+    salt: p.salt,
+    signature: '0x',
+  };
+  const digest = hashDelegation(authorization, Number(env.CHAIN_ID), p_delegationManager(env));
+  return { authorization, digest };
+}
+
+function p_delegationManager(env: Pick<VaultKeyEnv, 'DELEGATION_MANAGER'>): Address {
+  return env.DELEGATION_MANAGER as Address;
+}
+
+/**
+ * Verify a person-SA-signed `VaultKeyAuthorization` against the requested binding params and,
+ * on success, persist the `VaultKeyBinding` (the host side of the ceremony). Reuses the REAL
+ * verifier — the authorization must carry a matching `VAULT_KEY_USE` caveat AND be signed by
+ * the owner SA (ERC-1271 via the UniversalSignatureValidator). Fail-closed on any mismatch.
+ * Idempotent: re-binding the same (owner, server) upserts.
+ */
+export async function verifyAndStoreBinding(
+  env: VaultKeyEnv,
+  input: Omit<VaultKeyBindingParams, 'serverKey' | 'salt'> & { authorization: Delegation },
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (input.allowedResources.length === 0) return { ok: false, reason: 'no resources' };
+  if (input.ops.length === 0) return { ok: false, reason: 'no ops' };
+  const authorizationHash = (await sha256Hex(canonicalize(input.authorization as unknown))) as Sha256;
+  const candidate: VaultKeyBindingV1 = {
+    type: 'VaultKeyBindingV1',
+    vaultId: input.vaultId,
+    ownerPersonSA: input.owner,
+    kmsKeyRef: input.kmsKeyRef,
+    allowedServerId: VAULT_SERVER_ID,
+    allowedResources: input.allowedResources,
+    classificationCeiling: input.classificationCeiling,
+    ops: input.ops,
+    expiresAt: input.expiresAt,
+    rotationPolicy: { mode: 'manual', retainPriorKeys: true },
+    noSubdelegation: true,
+    authorizationRef: `urn:ap:vault-key-auth:${input.owner}`,
+    authorizationHash,
+  };
+  // Validate the authorization end-to-end (caveat match + owner signature) using an
+  // in-scope probe request (first authorized resource + op).
+  const verdict = await buildVaultKeyVerifier(env).verify({
+    authorization: input.authorization,
+    binding: candidate,
+    request: {
+      vaultId: input.vaultId,
+      ownerPersonSA: input.owner,
+      serverId: VAULT_SERVER_ID,
+      resource: input.allowedResources[0]!,
+      op: input.ops[0]!,
+      classification: input.classificationCeiling,
+    },
+    now: new Date(),
+  });
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+
+  await putVaultKeyBindingRow(env.DB, {
+    owner_address: input.owner,
+    server_id: VAULT_SERVER_ID,
+    vault_id: input.vaultId,
+    kms_key_ref: input.kmsKeyRef,
+    allowed_resources: JSON.stringify(input.allowedResources),
+    classification_ceiling: input.classificationCeiling,
+    ops: JSON.stringify(input.ops),
+    expires_at: input.expiresAt,
+    authorization_json: JSON.stringify(input.authorization),
+    authorization_hash: authorizationHash,
+  });
+  return { ok: true };
 }

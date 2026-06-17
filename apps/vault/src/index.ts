@@ -33,8 +33,9 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
+import type { Delegation } from '@agenticprimitives/delegation';
 import { demoEntitlementResolver } from './entitlements';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
@@ -833,6 +834,50 @@ function protectedResourceResponse(c: { req: { url: string }; env: Env }): Respo
 // resource-suffixed `/mcp` variant; serve identical metadata for each.
 app.get('/.well-known/oauth-protected-resource', (c) => protectedResourceResponse(c));
 app.get('/.well-known/oauth-protected-resource/mcp', (c) => protectedResourceResponse(c));
+
+// ─── Connected-custodian vault-key binding (spec 278 P5) ──────────────────
+//
+// The HOST side of the ceremony. A person completes the connected-custodian flow
+// (their SA signs a VAULT_KEY_USE authorization naming this server + their KEK) and
+// POSTs the signed authorization here. We VERIFY it (the owner SA actually signed it
+// — ERC-1271 via the UniversalSignatureValidator — and its caveat matches the KEK +
+// scope) and persist the VaultKeyBinding. The signed authorization IS the owner's
+// consent, so verifying it gates the write — no separate auth. Until a binding exists,
+// every vault op for that owner is fail-closed (VKB-D1). The per-person KEK itself is
+// provisioned out-of-band via spec 276 `ap-provision-gcp` (see docs/vault-key/ceremony.md).
+app.post('/custody/vault-key/bind', async (c) => {
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: 'malformed body' }, 400);
+  }
+  const owner = typeof body.owner === 'string' ? body.owner : undefined;
+  const vaultId = typeof body.vaultId === 'string' ? body.vaultId : undefined;
+  const kmsKeyRef = typeof body.kmsKeyRef === 'string' ? body.kmsKeyRef : undefined;
+  const allowedResources = Array.isArray(body.allowedResources)
+    ? body.allowedResources.filter((r): r is string => typeof r === 'string')
+    : [];
+  const classificationCeiling = typeof body.classificationCeiling === 'string' ? body.classificationCeiling : undefined;
+  const ops = Array.isArray(body.ops)
+    ? body.ops.filter((o): o is 'read' | 'write' => o === 'read' || o === 'write')
+    : [];
+  const expiresAt = typeof body.expiresAt === 'string' ? body.expiresAt : undefined;
+  const authorization = body.authorization;
+  if (!owner || !vaultId || !kmsKeyRef || !classificationCeiling || !expiresAt || allowedResources.length === 0 || ops.length === 0 || authorization == null) {
+    return c.json({ error: 'invalid_request', error_description: 'owner, vaultId, kmsKeyRef, allowedResources, classificationCeiling, ops, expiresAt, authorization required' }, 400);
+  }
+  try {
+    const res = await verifyAndStoreBinding(c.env, {
+      owner, vaultId, kmsKeyRef, allowedResources, classificationCeiling, ops, expiresAt,
+      authorization: authorization as Delegation,
+    });
+    if (!res.ok) return c.json({ ok: false, error: 'authorization_invalid', reason: res.reason }, 401);
+    return c.json({ ok: true, owner, kmsKeyRef, server_id: VAULT_SERVER_ID });
+  } catch (e) {
+    return c.json({ ok: false, error: 'bind_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
 
 // Demo authorization endpoint. Stands in for a real authorization server: it
 // authenticates NOTHING and mints a token for the requested principal, so it is
