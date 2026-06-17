@@ -1,18 +1,19 @@
-// demo-mcp's encrypted Vault adapter (spec 277 Phase 2).
+// demo-mcp's encrypted Vault adapter (spec 277 Phase 2; per-person keying spec 278 P4).
 //
 // Implements the `@agenticprimitives/vault` `Vault` interface with envelope
 // encryption: payloads are AES-256-GCM sealed (sealEnvelope) under a per-object
-// DEK wrapped by key-custody's LocalAesProvider, and stored in the D1
+// DEK wrapped by the OWNER's KEK (the injected `wrapper`), and stored in the D1
 // `vault_objects` table (base64 ciphertext + wrapped DEK + crypto metadata).
 // No plaintext PII at rest. The PII/org seeds are materialized + sealed on
 // first read (the legacy plaintext person_pii/org_sensitive/vault_records tables
 // were dropped in migration 0006). The tool handlers call vault.read/write only.
 //
-// Crypto backend (testnet-demo grade): LocalAesProvider keyed by VAULT_MASTER_KEY.
-// On Workers `NODE_ENV` is unset, so LocalAesProvider fails closed unless the
-// A2A_ALLOW_LOCAL_ENVELOPE_KEY opt-in is set; wrangler vars live on the binding
-// env, not process.env (where the guard reads), so we bridge it. A managed KMS
-// backend MUST replace LocalAes before any real-value data.
+// Crypto backend: the wrapper is built per-person by `resolvePersonVault`
+// (src/vault-key.ts → `selectVaultKeyProvider`), which resolves the owner's
+// `VaultKeyBinding` and wields that person's GCP Cloud KMS KEK. There is NO
+// global key (VKB-D1) — no binding ⇒ fail-closed (`vault_key_unauthorized`).
+// This adapter never selects a backend; it just seals/opens under the wrapper
+// it is handed (see the per-person construction note at `createDemoVault`).
 
 import type { Vault, VaultObject, VaultReadRequest, VaultWriteRequest, VaultRef, VaultClassification, DekWrapper } from '@agenticprimitives/vault';
 import { sealEnvelope, openEnvelope, projectFields } from '@agenticprimitives/vault';
