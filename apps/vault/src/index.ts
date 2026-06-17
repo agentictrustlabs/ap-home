@@ -12,6 +12,7 @@ import {
 } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
+import { executeGcpProvision, createGcpRestStepExecutor } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import {
   createConsoleAuditSink,
@@ -281,6 +282,13 @@ export interface Env {
    * `A2A_ALLOW_LOCAL_ENVELOPE_KEY` global-key path was removed in spec 278 P4.)
    */
   GCP_SERVICE_ACCOUNT_JSON?: string;
+  /** GCP Cloud KMS location + key ring for on-demand KEK provisioning (POST /custody/vault-key/provision).
+   *  Default us-east1 / vault-keks. project_id + runtime SA are read from GCP_SERVICE_ACCOUNT_JSON. */
+  GCP_KEK_LOCATION?: string;
+  GCP_KEK_KEYRING?: string;
+  /** This server's authorized delegate, advertised by GET /custody/vault-key/server-info so the
+   *  ceremony auto-fills it. Default is a placeholder (the read verifier doesn't pin it yet). */
+  VAULT_KEY_SERVER_DELEGATE?: string;
 
   // ─── OAuth ingress (spec 277 Phase 6) ─────────────────────────────────
   /**
@@ -888,6 +896,63 @@ app.post('/custody/vault-key/bind', async (c) => {
     return c.json({ ok: true, owner, kmsKeyRef, server_id: VAULT_SERVER_ID });
   } catch (e) {
     return c.json({ ok: false, error: 'bind_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// spec 278 — one-click ceremony support. The two values a person used to hand-enter are both
+// system-supplied: the KEK is operator-provisioned (so we provision-on-demand + return the ref) and
+// the delegate is THIS server's (so we advertise it). With both auto-filled the ceremony is just a
+// signature. (serverKey isn't yet pinned by the read verifier — hardening follow-up.)
+app.get('/custody/vault-key/server-info', (c) =>
+  c.json({
+    serverId: VAULT_SERVER_ID,
+    vaultId: VAULT_SERVER_ID,
+    serverKey: (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim() || '0x0000000000000000000000000000000000000001',
+    defaultResources: [RESOURCE_PERSON_PII, RESOURCE_ORG_SENSITIVE, RESOURCE_PROFILE, `${VAULT_RECORD_PREFIX}impact-profile`],
+    classificationCeiling: 'regulated.high',
+    ops: ['read', 'write'],
+  }),
+);
+
+// POST /custody/vault-key/provision { owner } — provision (idempotent) the owner's per-person
+// symmetric KEK in GCP Cloud KMS and return its resource name (the kmsKeyRef the ceremony binds).
+// Per-SA key id ⇒ re-calling is a no-op (409 → skip). project_id + runtime SA come from the same
+// GCP_SERVICE_ACCOUNT_JSON demo-mcp wields KEKs with (it holds roles/cloudkms.admin); location +
+// key ring are config (GCP_KEK_LOCATION / GCP_KEK_KEYRING). NOTE (demo): open + cost-bearing
+// (creates a real GCP key per distinct owner) — testnet-acceptable; a real deployment gates this
+// operator-only or pre-provisions out of band.
+app.post('/custody/vault-key/provision', async (c) => {
+  if (!c.env.GCP_SERVICE_ACCOUNT_JSON) {
+    return c.json({ error: 'unsupported', error_description: 'GCP_SERVICE_ACCOUNT_JSON unset (provisioning unavailable)' }, 501);
+  }
+  let body: Record<string, unknown> = {};
+  try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
+  const owner = typeof body.owner === 'string' ? body.owner : undefined;
+  if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+    return c.json({ error: 'invalid_request', error_description: 'owner (0x address) required' }, 400);
+  }
+  let sa: { project_id?: string; client_email?: string };
+  try {
+    const raw = c.env.GCP_SERVICE_ACCOUNT_JSON.trim();
+    sa = JSON.parse(raw.startsWith('{') ? raw : atob(raw)) as { project_id?: string; client_email?: string };
+  } catch {
+    return c.json({ error: 'misconfigured', error_description: 'GCP_SERVICE_ACCOUNT_JSON not parseable' }, 500);
+  }
+  if (!sa.project_id || !sa.client_email) {
+    return c.json({ error: 'misconfigured', error_description: 'service account JSON missing project_id/client_email' }, 500);
+  }
+  const location = (c.env.GCP_KEK_LOCATION ?? '').trim() || 'us-east1';
+  const keyRing = (c.env.GCP_KEK_KEYRING ?? '').trim() || 'vault-keks';
+  try {
+    const result = await executeGcpProvision(
+      { project: sa.project_id, location, keyRing, identities: [owner], runtimeServiceAccount: sa.client_email, purpose: 'encrypt-decrypt' },
+      createGcpRestStepExecutor({ serviceAccountJson: c.env.GCP_SERVICE_ACCOUNT_JSON }),
+    );
+    const kmsKeyRef = result.keyMap[owner];
+    if (!kmsKeyRef) return c.json({ ok: false, error: 'provision_failed', error_description: 'no key in provisioning result' }, 500);
+    return c.json({ ok: true, owner, kmsKeyRef, alreadyExisted: result.alreadyExisted });
+  } catch (e) {
+    return c.json({ ok: false, error: 'provision_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

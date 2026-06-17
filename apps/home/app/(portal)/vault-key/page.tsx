@@ -1,5 +1,5 @@
 'use client';
-// spec 278 P5 — vault-key ceremony (connected custodian).
+// spec 278 P5 — vault-key ceremony (connected custodian), ONE-CLICK.
 //
 // Authorize demo-mcp to wield your PER-PERSON vault KEK. You sign a `VaultKeyAuthorization`
 // (person SA → demo-mcp, one non-subdelegable VAULT_KEY_USE caveat) with YOUR credential
@@ -8,21 +8,31 @@
 // from fail-closed to live. There is no global key — until you sign this, demo-mcp cannot
 // decrypt your data at all (VKB-D1).
 //
-// The KEK (`kmsKeyRef`) is provisioned out-of-band by the operator (spec 276 ap-provision-gcp)
-// and supplied here; the home holds no key material — it only signs the grant.
+// The person no longer hand-enters anything: on load we ask demo-mcp to provision (idempotent)
+// this person's KEK (`/custody/vault-key/provision` → kmsKeyRef) and to advertise the server's
+// delegate + authorized scope (`/custody/vault-key/server-info`). The home holds no key material —
+// it only signs the grant. So the ceremony is a single click: review + sign.
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
 import { bindVaultKey, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 
-const DEFAULT_RESOURCES = ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'];
-const DEFAULT_CEILING = 'regulated.high';
+const MCP_BIND = '/mcp-bind';
+
+interface ServerInfo {
+  serverKey: string;
+  defaultResources: string[];
+  classificationCeiling: string;
+  ops: ('read' | 'write')[];
+}
 
 export default function VaultKeyPage() {
   const { agentAddress, agentName, session } = useSession();
+  const [prep, setPrep] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [prepError, setPrepError] = useState<string | null>(null);
   const [kmsKeyRef, setKmsKeyRef] = useState('');
-  const [serverKey, setServerKey] = useState('');
+  const [info, setInfo] = useState<ServerInfo | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,11 +43,46 @@ export default function VaultKeyPage() {
     return v === 'wallet' ? 'wallet' : v === 'google' ? 'google' : 'passkey';
   }, [session?.via]);
 
-  const canSubmit = !!agentAddress && agreed && /^0x[0-9a-fA-F]{40}$/.test(serverKey) && kmsKeyRef.trim().length > 0 && !busy;
+  // Auto-prepare: provision the KEK (idempotent) + discover the server delegate/scope.
+  useEffect(() => {
+    if (!agentAddress) return;
+    let cancelled = false;
+    setPrep('loading');
+    setPrepError(null);
+    (async () => {
+      const infoRes = await fetch(`${MCP_BIND}/custody/vault-key/server-info`).then((r) => r.json());
+      const provRes = await fetch(`${MCP_BIND}/custody/vault-key/provision`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner: agentAddress }),
+      }).then((r) => r.json());
+      if (cancelled) return;
+      if (!provRes?.ok || !provRes.kmsKeyRef) {
+        setPrepError(provRes?.error_description ?? provRes?.detail ?? 'could not provision your vault key');
+        setPrep('error');
+        return;
+      }
+      setKmsKeyRef(provRes.kmsKeyRef);
+      setInfo({
+        serverKey: infoRes.serverKey,
+        defaultResources: infoRes.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'],
+        classificationCeiling: infoRes.classificationCeiling ?? 'regulated.high',
+        ops: infoRes.ops ?? ['read', 'write'],
+      });
+      setPrep('ready');
+    })().catch((e) => {
+      if (cancelled) return;
+      setPrepError(e instanceof Error ? e.message : 'could not prepare your vault key');
+      setPrep('error');
+    });
+    return () => { cancelled = true; };
+  }, [agentAddress]);
+
+  const canSubmit = !!agentAddress && prep === 'ready' && agreed && !!info && !busy;
 
   async function handleSubmit(e: FormEvent): Promise<void> {
     e.preventDefault();
-    if (!agentAddress) return;
+    if (!agentAddress || !info) return;
     setBusy(true);
     setError(null);
     setDone(null);
@@ -47,18 +92,15 @@ export default function VaultKeyPage() {
         {
           vaultId: 'demo-mcp',
           kmsKeyRef: kmsKeyRef.trim(),
-          serverKey: serverKey.trim() as `0x${string}`,
-          allowedResources: DEFAULT_RESOURCES,
-          classificationCeiling: DEFAULT_CEILING,
-          ops: ['read', 'write'],
+          serverKey: info.serverKey as `0x${string}`,
+          allowedResources: info.defaultResources,
+          classificationCeiling: info.classificationCeiling,
+          ops: info.ops,
         },
         via,
         session?.token ? { token: session.token } : undefined,
       );
-      if (!out.ok) {
-        setError(out.error);
-        return;
-      }
+      if (!out.ok) { setError(out.error); return; }
       setDone(out.kmsKeyRef);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'vault-key bind failed');
@@ -75,26 +117,27 @@ export default function VaultKeyPage() {
         <div>
           <p>✅ Your vault is live. demo-mcp may now decrypt your data only under your own KEK,
             and only because you authorized it — revocable at any time.</p>
-          <p className="muted small">KEK: <code>{done}</code></p>
+          <p className="muted small">Your profile and data are now sealed under your own key. Head to{' '}
+            <a href="/profile">your profile</a> to fill it in.</p>
+        </div>
+      ) : prep === 'loading' ? (
+        <p>Preparing your private vault key…</p>
+      ) : prep === 'error' ? (
+        <div>
+          <p className="err">Could not prepare your vault key: {prepError}</p>
+          <button onClick={() => location.reload()}>Try again</button>
         </div>
       ) : (
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p>
             You are <strong>{agentName ?? agentAddress}</strong>. Signing below authorizes
             <strong> demo-mcp</strong> to wield your per-person vault key for{' '}
-            <code>{DEFAULT_RESOURCES.join(', ')}</code> (read + write, ceiling{' '}
-            <code>{DEFAULT_CEILING}</code>). Non-subdelegable. Until you do, your vault is fail-closed.
+            <code>{info?.defaultResources.join(', ')}</code> (read + write, ceiling{' '}
+            <code>{info?.classificationCeiling}</code>). Non-subdelegable. Until you do, your vault is fail-closed.
           </p>
-          <label>
-            KEK resource name (from the operator&apos;s provisioning)
-            <input value={kmsKeyRef} onChange={(e) => setKmsKeyRef(e.target.value)}
-              placeholder="projects/…/cryptoKeys/person-…" style={{ width: '100%' }} />
-          </label>
-          <label>
-            demo-mcp delegate key
-            <input value={serverKey} onChange={(e) => setServerKey(e.target.value)}
-              placeholder="0x…" style={{ width: '100%' }} />
-          </label>
+          <p className="muted small">
+            Your key has been provisioned in your name. You don&apos;t need to enter anything — just review and sign.
+          </p>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
             I authorize demo-mcp to use this key for my vault (signed with my {via} credential).
