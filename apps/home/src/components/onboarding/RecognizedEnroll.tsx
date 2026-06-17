@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, resolveVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
@@ -54,20 +54,6 @@ function idTokenSub(jwt: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** Pick the signing credential from how the session ACTUALLY authenticated
- *  (`profile.credential` = session.principal.kind: `siwe-eoa` | `passkey` | `google` | `youversion`),
- *  NOT a stale/generic cookie `via` — which defaulted to passkey and forced passkey signing even for a
- *  wallet home. Falls back to the cookie hint, then passkey, only when the kind is unrecognized. */
-function viaFromCredential(credential: string | undefined, cookieVia: string | undefined): Via {
-  const c = (credential || '').toLowerCase();
-  if (c.includes('passkey')) return 'passkey';
-  if (c.includes('siwe') || c.includes('eoa') || c.includes('wallet')) return 'wallet';
-  if (c.includes('youversion')) return 'youversion';
-  if (c.includes('google')) return 'google';
-  const v = (cookieVia || '').toLowerCase();
-  return v === 'wallet' || v === 'google' || v === 'youversion' || v === 'passkey' ? (v as Via) : 'passkey';
 }
 
 export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUnrecognized: () => void }) {
@@ -144,7 +130,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
       // Sign with the credential that actually authenticated this session (wallet/passkey/KMS), not the
       // cookie's defaulted via — which sent a wallet member to passkey at authorize time.
-      const v = viaFromCredential(profile.credential, sso.via);
+      const v = resolveVia(profile.credential, sso.via);
 
       // passkey is rpId-bound to the home subdomain — hop there if we're not already on it (the passkey
       // can't assert at the apex). Google/KMS + wallet sign on any origin, so they authorize in place.

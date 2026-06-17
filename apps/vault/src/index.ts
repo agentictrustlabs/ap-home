@@ -286,6 +286,10 @@ export interface Env {
    *  Default us-east1 / vault-keks. project_id + runtime SA are read from GCP_SERVICE_ACCOUNT_JSON. */
   GCP_KEK_LOCATION?: string;
   GCP_KEK_KEYRING?: string;
+  /** Gates POST /custody/vault-key/provision (on-demand KEK creation — wields the admin credential).
+   *  Fail-closed: the route 404s unless this is 'true'. The demo sets it; production leaves it unset
+   *  and provisions out of band. */
+  DEMO_VAULT_PROVISION_ENABLED?: string;
   /** This server's authorized delegate, advertised by GET /custody/vault-key/server-info so the
    *  ceremony auto-fills it. Default is a placeholder (the read verifier doesn't pin it yet). */
   VAULT_KEY_SERVER_DELEGATE?: string;
@@ -931,10 +935,15 @@ app.get('/custody/vault-key/server-info', (c) =>
 // symmetric KEK in GCP Cloud KMS and return its resource name (the kmsKeyRef the ceremony binds).
 // Per-SA key id ⇒ re-calling is a no-op (409 → skip). project_id + runtime SA come from the same
 // GCP_SERVICE_ACCOUNT_JSON demo-mcp wields KEKs with (it holds roles/cloudkms.admin); location +
-// key ring are config (GCP_KEK_LOCATION / GCP_KEK_KEYRING). NOTE (demo): open + cost-bearing
-// (creates a real GCP key per distinct owner) — testnet-acceptable; a real deployment gates this
-// operator-only or pre-provisions out of band.
+// key ring are config (GCP_KEK_LOCATION / GCP_KEK_KEYRING).
+//
+// FAIL-CLOSED behind DEMO_VAULT_PROVISION_ENABLED (mirrors DEMO_OAUTH_MINT_ENABLED): this endpoint
+// wields an ADMIN credential and creates a real (cost-bearing) GCP key per distinct owner — an open
+// mint is a testnet-only convenience. The demo sets the flag so the one-click ceremony can
+// auto-provision; a real deployment leaves it UNSET (route 404s) and provisions out of band
+// (operator-side `provision-vault-kek.ts`, ideally with a least-privilege/separate admin credential).
 app.post('/custody/vault-key/provision', async (c) => {
+  if (c.env.DEMO_VAULT_PROVISION_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
   if (!c.env.GCP_SERVICE_ACCOUNT_JSON) {
     return c.json({ error: 'unsupported', error_description: 'GCP_SERVICE_ACCOUNT_JSON unset (provisioning unavailable)' }, 501);
   }

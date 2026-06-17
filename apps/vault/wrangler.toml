@@ -31,6 +31,10 @@ MCP_AUDIENCE = "urn:mcp:server:person"
 # Fail-closed — the route 404s unless this is 'true'. Testnet demo only (mock
 # seed data); a real production leaves it unset and wires a real AS + JWKS.
 DEMO_OAUTH_MINT_ENABLED = "true"
+# spec 278: enable the on-demand KEK provisioning endpoint (/custody/vault-key/provision).
+# Fail-closed — 404s unless 'true'. Testnet-only convenience (wields the admin credential +
+# creates a cost-bearing GCP key per owner); production leaves it unset + provisions out of band.
+DEMO_VAULT_PROVISION_ENABLED = "true"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Production environment — Worker name: "demo-mcp-production"
@@ -52,6 +56,9 @@ MCP_AUDIENCE = "urn:mcp:server:person"
 # Testnet demo: enable the open /oauth/token demo authorization endpoint (mock
 # seed data only). A real production deployment removes this + wires a real AS.
 DEMO_OAUTH_MINT_ENABLED = "true"
+# Testnet demo: enable on-demand KEK provisioning (the one-click ceremony auto-provisions).
+# A real production deployment OMITS this — provisioning is operator-only, out of band.
+DEMO_VAULT_PROVISION_ENABLED = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"
