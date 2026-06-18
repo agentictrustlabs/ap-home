@@ -9,6 +9,7 @@ import { AUD, fetchProfile, type BasicProfile } from '../connect-client';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
+import { disconnectWallet } from '../lib/wallet';
 
 export interface Session {
   token: string;
@@ -112,6 +113,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
     clearSsoCookie(); // sign out across *.impact-agent.me
     setFedcmLoginStatus('logged-out'); // FedCM shows the login_url affordance instead of erroring
+    // Also drop the dApp from MetaMask's "Connected sites" (EIP-2255). Best-effort + silent —
+    // no-ops without a prompt for non-wallet (Google/passkey) sessions that have no permission to revoke.
+    void disconnectWallet();
     setPhase('anon');
   }, []);
 

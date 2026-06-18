@@ -40,3 +40,17 @@ export async function connectWallet(forceSelect = false): Promise<Address> {
 export async function personalSign(address: Address, message: string): Promise<Hex> {
   return (await provider().request({ method: 'personal_sign', params: [message, address] })) as Hex;
 }
+
+/** Revoke this dApp's wallet connection (EIP-2255 `wallet_revokePermissions`) so it disappears from
+ *  MetaMask's "Connected sites" on sign-out. A dApp disconnect otherwise only clears LOCAL state — the
+ *  wallet keeps the `eth_accounts` permission. Best-effort + silent: no wallet, a wallet without the
+ *  method (older MetaMask / other wallets), or no permission to revoke (the dApp was never
+ *  wallet-connected — e.g. a Google/passkey session) all no-op without prompting the user. */
+export async function disconnectWallet(): Promise<void> {
+  if (!hasWallet()) return;
+  try {
+    await provider().request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] });
+  } catch {
+    /* unsupported / nothing to revoke — ignore (no prompt is shown in either case) */
+  }
+}
