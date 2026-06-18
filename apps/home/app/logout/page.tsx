@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
 import { setFedcmLoginStatus, SESSION_KEY } from '../../src/context/session';
 import { isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
+import { disconnectWallet } from '../../src/lib/wallet';
 
 export default function LogoutPage() {
   useEffect(() => {
@@ -21,6 +22,9 @@ export default function LogoutPage() {
     }
     clearSsoCookie(); // end the cross-subdomain `.impact-agent.me` SSO session
     setFedcmLoginStatus('logged-out'); // FedCM: don't auto-recognize / show the chooser next time
+    // This page tears the session down directly (not via session.signOut), so also drop the dApp
+    // from MetaMask's "Connected sites" here (EIP-2255). Best-effort + silent; no-op for non-wallet.
+    void disconnectWallet();
 
     // Anti open-redirect: only bounce back to a REGISTERED relying-app origin; otherwise the apex.
     let dest = '/';
