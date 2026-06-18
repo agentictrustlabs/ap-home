@@ -103,6 +103,12 @@ export async function authorizeDecrypt(input: AuthorizeDecryptInput): Promise<Ke
     {
       now,
       replayStore: createInMemoryReplayStore(),
+      // EXT-KA-1: the grant is SELF-AUTHORED in-process just above (it never crosses a trust
+      // boundary), so there is no external signature to verify. The real authority gate is the
+      // person-SA-signed vaultKeyAuthorization (verified via ERC-1271), supplied below. This is the
+      // documented, greppable opt-out — a cross-trust consumer of a client-supplied grant must instead
+      // pass verifySignature.
+      allowUnsignedGrant: true,
       vaultKeyAuthorization: input.vaultKeyAuthorization,
     },
   );
