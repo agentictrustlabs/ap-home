@@ -22,14 +22,39 @@ export function hasWallet(): boolean {
  *  expose the RIGHT account. Callers that sign FOR A SPECIFIC HOME should pick the connected account that
  *  custodies it (not just [0] — eth_requestAccounts returns the active account first, which may be another
  *  home's custodian like the platform deployer). */
-export async function connectWalletAccounts(forceSelect = false): Promise<Address[]> {
+export async function connectWalletAccounts(forceSelect = false, restrictTo?: Address): Promise<Address[]> {
   if (forceSelect) {
-    try { await provider().request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }); }
+    // restrictTo (EIP-2255 caveat): when we KNOW the account that custodies this home (remembered from a
+    // prior sign-in — see remember/recallHomeEoa), ask MetaMask to default the picker to JUST that account
+    // so the member doesn't have to hunt for it (esp. after a disconnect cleared MetaMask's memory). MetaMask
+    // versions vary in honoring this; it's a best-effort hint — connectCustodianWallet still validates
+    // on-chain. Falls back to the plain account picker.
+    const eth_accounts = restrictTo ? { restrictReturnedAccounts: [restrictTo] } : {};
+    try { await provider().request({ method: 'wallet_requestPermissions', params: [{ eth_accounts }] }); }
     catch { /* user cancelled or wallet lacks the method → fall through to the normal request */ }
   }
   const accounts = (await provider().request({ method: 'eth_requestAccounts' })) as Address[];
   if (!accounts?.length) throw new Error('No wallet account selected.');
   return accounts;
+}
+
+// Per-home memory of the EOA that custodies a given name. AgentAccount has no `owner()` getter (it's a
+// multi-credential custodian SET — only count + isCustodian(addr)), so we can't read the custodian address
+// FROM the chain; instead the home remembers the EOA it used on a successful by-name sign-in, and defaults
+// the picker to it next time. Survives the wallet-disconnect revoke (this is the home's own localStorage).
+const EOA_KEY = (name: string): string => `agenticprimitives:demo-sso:home-eoa:${name.toLowerCase()}`;
+
+export function rememberHomeEoa(name: string, address: Address): void {
+  try { localStorage.setItem(EOA_KEY(name), address); } catch { /* storage blocked — fine */ }
+}
+
+export function recallHomeEoa(name: string): Address | undefined {
+  try {
+    const v = localStorage.getItem(EOA_KEY(name));
+    return v && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v as Address) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function connectWallet(forceSelect = false): Promise<Address> {

@@ -19,7 +19,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
-import { connectWallet, connectWalletAccounts, personalSign } from './lib/wallet';
+import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
@@ -1739,8 +1739,10 @@ export async function stepUpToAgent(
  *  which is often a DIFFERENT home's custodian (e.g. the platform deployer), so signing by-home/by-name must
  *  select among ALL connected accounts. Throws (clear message) if none of them custodies `sa`. Shared by the
  *  by-name sign-in (connectWithName) and the relying-app grant signer (signHashFor). */
-export async function connectCustodianWallet(sa: Address): Promise<Address> {
-  const accounts = await connectWalletAccounts(true);
+export async function connectCustodianWallet(sa: Address, restrictTo?: Address): Promise<Address> {
+  // `restrictTo` (the remembered custodian EOA for this home) defaults MetaMask's picker to that account —
+  // helpful after a disconnect cleared its memory. It's a hint only; we still verify isCustodian on-chain.
+  const accounts = await connectWalletAccounts(true, restrictTo);
   const accountsClient = agentAccountClient();
   for (const a of accounts) {
     try { if (await accountsClient.isCustodian(sa, a)) return a; } catch { /* not deployed / read error → skip */ }
@@ -1761,8 +1763,10 @@ export async function connectWithName(
     const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address };
     if (!info.agent) return { ok: false, error: `Couldn’t resolve ${name}.` };
     let address: Address;
-    try { address = await connectCustodianWallet(info.agent); }
+    // Default the picker to the EOA we last used for THIS name (no owner() on the SA to read it from chain).
+    try { address = await connectCustodianWallet(info.agent, recallHomeEoa(name)); }
     catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'wallet connection failed' }; }
+    rememberHomeEoa(name, address); // remember the custodian EOA so next sign-in defaults straight to it
     const nonce = await getNonce();
     const message = buildMessage({
       domain: window.location.host,
