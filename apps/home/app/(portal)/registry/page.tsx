@@ -1,8 +1,9 @@
 'use client';
-// Registry — the discovery registry view (spec 279). Lists every named agent under the home's TLD with
-// its AgentRegistryBase registration (registered? status? card/binding-proof hashes), and lets a steward
-// register a named agent they custody. Reads are storage-view only (ADR-0012); registration is a
-// custody-authorized on-chain write (RB-01: msg.sender == subjectAgent) via the home's one-prompt ceremony.
+// Registry — the discovery registry view (spec 279). Lists candidate named agents and their discovery
+// registration, fetched THROUGH the discovery agent (demo-discovery-a2a → demo-discovery-mcp → GraphDB) —
+// the home is a consumer of the knowledge base, it does not read the chain at scale (ADR-0012). Lets a
+// steward register a named agent they custody: a custody-authorized on-chain write (RB-01: msg.sender ==
+// subjectAgent) via the home's one-prompt ceremony, reflected here after the next index.
 // Styling is self-contained inline (the app's class system has no card/btn/badge classes).
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useSession } from '../../../src/context/session';
@@ -12,7 +13,6 @@ import { registerAgent } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const shortHash = (h?: string) => (h ? `${h.slice(0, 14)}…${h.slice(-4)}` : '—');
 
 const cardSty: CSSProperties = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 1px 3px rgba(15,23,42,.07)', padding: '1rem 1.1rem' };
 const btnSty: CSSProperties = { padding: '.5rem .9rem', borderRadius: 10, fontWeight: 700, fontSize: '.85rem', cursor: 'pointer', border: '1.5px solid #c7d2fe', background: '#fff', color: '#4f46e5', font: 'inherit' };
@@ -30,11 +30,7 @@ function Badge({ kind, children }: { kind: BadgeKind; children: React.ReactNode 
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.72rem', fontWeight: 800, padding: '.2rem .55rem', borderRadius: 999, border: '1px solid', ...BADGE[kind] }}>{children}</span>;
 }
 function StatusBadge({ row }: { row: AgentRegistryRow }) {
-  if (!row.registered) return <Badge kind="neutral">not registered</Badge>;
-  if (row.live) return <Badge kind="ok">● registered · active</Badge>;
-  if (row.status === 'revoked') return <Badge kind="err">✕ revoked</Badge>;
-  if (row.status === 'suspended') return <Badge kind="warn">⏸ suspended</Badge>;
-  return <Badge kind="warn">○ {row.status === 'active' ? 'expired' : row.status}</Badge>;
+  return row.registered ? <Badge kind="ok">● registered</Badge> : <Badge kind="neutral">not registered</Badge>;
 }
 
 export default function RegistryPage() {
@@ -56,10 +52,10 @@ export default function RegistryPage() {
   return (
     <SectionShell
       title="Registry"
-      description="Every named agent on Base Sepolia and its discovery registration. Reads come straight from agent-naming + AgentRegistryBase; register an agent you steward to make it discoverable."
+      description="Candidate named agents and their discovery registration, served by the discovery agent over the knowledge base. Register an agent you steward to make it discoverable."
     >
       <p style={{ fontSize: '.8rem', color: '#64748b', marginBottom: '1rem' }}>
-        registry <code style={mono}>{shortAddr(REGISTRY.address)}</code> · chain {REGISTRY.chainId}
+        via {REGISTRY.source} · registry <code style={mono}>{shortAddr(REGISTRY.address)}</code>
         {rows && ` · ${rows.length} named agents · ${registered} registered`}
       </p>
 
@@ -69,7 +65,7 @@ export default function RegistryPage() {
       />
 
       {err ? <div style={cardSty}><b style={{ color: '#b91c1c' }}>Read error</b> <span style={{ color: '#64748b' }}>{err}</span></div>
-        : !rows ? <p style={{ color: '#64748b' }}>Reading agent-naming + the registry…</p>
+        : !rows ? <p style={{ color: '#64748b' }}>Asking the discovery agent…</p>
         : (
           <div style={{ display: 'grid', gap: '.7rem' }}>
             {filtered.map((r) => {
@@ -82,17 +78,11 @@ export default function RegistryPage() {
                       <div style={{ ...mono, fontSize: '.74rem', color: '#64748b', marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
+                      {!r.shaclConforms && <Badge kind="warn">SHACL ⚠</Badge>}
                       <StatusBadge row={r} />
                       {!r.registered && <button style={btnPrimarySty} onClick={() => setRegisterFor(r)} disabled={!r.name}>Register</button>}
                     </div>
                   </div>
-                  {r.registered && (
-                    <dl style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '.25rem .8rem', fontSize: '.82rem', marginTop: '.7rem' }}>
-                      <dt style={{ color: '#64748b' }}>cardHash</dt><dd style={mono}>{shortHash(r.cardHash)}</dd>
-                      <dt style={{ color: '#64748b' }}>bindingProofHash</dt><dd style={mono}>{shortHash(r.bindingProofHash)}</dd>
-                      <dt style={{ color: '#64748b' }}>expires</dt><dd>{r.expiresAt ? new Date(r.expiresAt * 1000).toISOString().slice(0, 10) : 'non-expiring'}</dd>
-                    </dl>
-                  )}
                 </div>
               );
             })}
