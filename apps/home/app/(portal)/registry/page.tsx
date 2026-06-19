@@ -2,8 +2,9 @@
 // Registry — the discovery registry view (spec 279). Lists every named agent under the home's TLD with
 // its AgentRegistryBase registration (registered? status? card/binding-proof hashes), and lets a steward
 // register a named agent they custody. Reads are storage-view only (ADR-0012); registration is a
-// custody-authorized on-chain write (RB-01: msg.sender == subjectAgent) driven by the home's ceremony.
-import { useEffect, useState } from 'react';
+// custody-authorized on-chain write (RB-01: msg.sender == subjectAgent) via the home's one-prompt ceremony.
+// Styling is self-contained inline (the app's class system has no card/btn/badge classes).
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, REGISTRY, type AgentRegistryRow } from '../../../src/lib/registry';
@@ -13,12 +14,27 @@ import { signHashFor, type Via } from '../../../src/home/onboarding';
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const shortHash = (h?: string) => (h ? `${h.slice(0, 14)}…${h.slice(-4)}` : '—');
 
+const cardSty: CSSProperties = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 1px 3px rgba(15,23,42,.07)', padding: '1rem 1.1rem' };
+const btnSty: CSSProperties = { padding: '.5rem .9rem', borderRadius: 10, fontWeight: 700, fontSize: '.85rem', cursor: 'pointer', border: '1.5px solid #c7d2fe', background: '#fff', color: '#4f46e5', font: 'inherit' };
+const btnPrimarySty: CSSProperties = { ...btnSty, background: '#4f46e5', color: '#fff', border: '1.5px solid #4f46e5' };
+const mono: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' };
+
+type BadgeKind = 'ok' | 'warn' | 'err' | 'neutral';
+const BADGE: Record<BadgeKind, CSSProperties> = {
+  ok: { color: '#047857', background: '#ecfdf5', borderColor: '#6ee7b7' },
+  warn: { color: '#b45309', background: '#fffbeb', borderColor: '#fcd34d' },
+  err: { color: '#b91c1c', background: '#fef2f2', borderColor: '#fca5a5' },
+  neutral: { color: '#475569', background: '#f1f5f9', borderColor: '#e2e8f0' },
+};
+function Badge({ kind, children }: { kind: BadgeKind; children: React.ReactNode }) {
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.72rem', fontWeight: 800, padding: '.2rem .55rem', borderRadius: 999, border: '1px solid', ...BADGE[kind] }}>{children}</span>;
+}
 function StatusBadge({ row }: { row: AgentRegistryRow }) {
-  if (!row.registered) return <span className="badge badge-soon">not registered</span>;
-  if (row.live) return <span className="badge badge-live">● registered · active</span>;
-  if (row.status === 'revoked') return <span className="badge badge-err">✕ revoked</span>;
-  if (row.status === 'suspended') return <span className="badge badge-warn">⏸ suspended</span>;
-  return <span className="badge badge-warn">○ {row.status === 'active' ? 'expired' : row.status}</span>;
+  if (!row.registered) return <Badge kind="neutral">not registered</Badge>;
+  if (row.live) return <Badge kind="ok">● registered · active</Badge>;
+  if (row.status === 'revoked') return <Badge kind="err">✕ revoked</Badge>;
+  if (row.status === 'suspended') return <Badge kind="warn">⏸ suspended</Badge>;
+  return <Badge kind="warn">○ {row.status === 'active' ? 'expired' : row.status}</Badge>;
 }
 
 export default function RegistryPage() {
@@ -28,7 +44,7 @@ export default function RegistryPage() {
   const [q, setQ] = useState('');
   const [registerFor, setRegisterFor] = useState<AgentRegistryRow | null>(null);
 
-  const refresh = () => { setRows(null); loadRegistry().then(setRows).catch((e) => setErr(String(e))); };
+  const refresh = () => { setRows(null); setErr(null); loadRegistry().then(setRows).catch((e) => setErr(String(e))); };
   useEffect(() => { loadRegistry().then(setRows).catch((e) => setErr(String(e))); }, []);
 
   const filtered = (rows ?? []).filter((r) => {
@@ -43,7 +59,7 @@ export default function RegistryPage() {
       description="Every named agent on Base Sepolia and its discovery registration. Reads come straight from agent-naming + AgentRegistryBase; register an agent you steward to make it discoverable."
     >
       <p style={{ fontSize: '.8rem', color: '#64748b', marginBottom: '1rem' }}>
-        registry <code>{shortAddr(REGISTRY.address)}</code> · chain {REGISTRY.chainId}
+        registry <code style={mono}>{shortAddr(REGISTRY.address)}</code> · chain {REGISTRY.chainId}
         {rows && ` · ${rows.length} named agents · ${registered} registered`}
       </p>
 
@@ -52,28 +68,28 @@ export default function RegistryPage() {
         style={{ width: '100%', padding: '.6rem .8rem', borderRadius: 10, border: '1.5px solid #cbd5e1', font: 'inherit', marginBottom: '1.2rem' }}
       />
 
-      {err ? <div className="card"><b style={{ color: '#b91c1c' }}>Read error</b> <span style={{ color: '#64748b' }}>{err}</span></div>
+      {err ? <div style={cardSty}><b style={{ color: '#b91c1c' }}>Read error</b> <span style={{ color: '#64748b' }}>{err}</span></div>
         : !rows ? <p style={{ color: '#64748b' }}>Reading agent-naming + the registry…</p>
         : (
           <div style={{ display: 'grid', gap: '.7rem' }}>
             {filtered.map((r) => {
               const isMine = agentAddress && r.subjectAgent.toLowerCase() === agentAddress.toLowerCase();
               return (
-                <div key={r.subjectAgent} className="card" style={{ padding: '1rem 1.1rem' }}>
+                <div key={r.subjectAgent} style={cardSty}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>
                     <div>
-                      <strong>{r.name ?? '(unnamed)'}</strong>{isMine && <span className="badge" style={{ marginLeft: '.5rem' }}>you</span>}
-                      <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: '#64748b', marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
+                      <strong>{r.name ?? '(unnamed)'}</strong>{isMine && <span style={{ marginLeft: '.5rem' }}><Badge kind="neutral">you</Badge></span>}
+                      <div style={{ ...mono, fontSize: '.74rem', color: '#64748b', marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
                       <StatusBadge row={r} />
-                      {!r.registered && <button className="btn btn-primary" onClick={() => setRegisterFor(r)} disabled={!r.name}>Register</button>}
+                      {!r.registered && <button style={btnPrimarySty} onClick={() => setRegisterFor(r)} disabled={!r.name}>Register</button>}
                     </div>
                   </div>
                   {r.registered && (
                     <dl style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '.25rem .8rem', fontSize: '.82rem', marginTop: '.7rem' }}>
-                      <dt style={{ color: '#64748b' }}>cardHash</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>{shortHash(r.cardHash)}</dd>
-                      <dt style={{ color: '#64748b' }}>bindingProofHash</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>{shortHash(r.bindingProofHash)}</dd>
+                      <dt style={{ color: '#64748b' }}>cardHash</dt><dd style={mono}>{shortHash(r.cardHash)}</dd>
+                      <dt style={{ color: '#64748b' }}>bindingProofHash</dt><dd style={mono}>{shortHash(r.bindingProofHash)}</dd>
                       <dt style={{ color: '#64748b' }}>expires</dt><dd>{r.expiresAt ? new Date(r.expiresAt * 1000).toISOString().slice(0, 10) : 'non-expiring'}</dd>
                     </dl>
                   )}
@@ -120,34 +136,34 @@ function RegisterPanel({ row, via: viaStr, token, onClose, onDone }: {
   };
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }} onClick={busy ? undefined : onClose}>
-      <div className="card" style={{ maxWidth: 540, width: '100%', padding: '1.4rem' }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0 }}>Register {row.name}</h3>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }} onClick={busy ? undefined : onClose}>
+      <div style={{ ...cardSty, maxWidth: 540, width: '100%', padding: '1.5rem', boxShadow: '0 24px 60px rgba(15,23,42,.35)' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0, marginBottom: '.6rem' }}>Register {row.name}</h3>
         {txHash !== null ? (
           <>
             <p style={{ fontSize: '.9rem', color: '#047857' }}><strong>Registered ✓</strong> — {row.name} is now in the discovery registry.</p>
-            {txHash && <p style={{ fontSize: '.78rem', color: '#64748b', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-all' }}>tx {txHash}</p>}
+            {txHash && <p style={{ ...mono, fontSize: '.78rem', color: '#64748b', wordBreak: 'break-all' }}>tx {txHash}</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-primary" onClick={onDone}>Done</button>
+              <button style={btnPrimarySty} onClick={onDone}>Done</button>
             </div>
           </>
         ) : (
           <>
-            <p style={{ fontSize: '.88rem', color: '#475569' }}>
+            <p style={{ fontSize: '.88rem', color: '#475569', marginTop: 0 }}>
               Make <strong>{row.name}</strong> discoverable. Its Smart Agent registers the entry itself — one custody prompt, gasless.
             </p>
             <dl style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '.3rem .8rem', fontSize: '.82rem', margin: '1rem 0' }}>
               <dt style={{ color: '#64748b' }}>registry</dt><dd>{REGISTRY.registryId}</dd>
-              <dt style={{ color: '#64748b' }}>entryId</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>urn:ap:registry-entry:{row.name}</dd>
-              <dt style={{ color: '#64748b' }}>subjectAgent</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>{shortAddr(row.subjectAgent)}</dd>
+              <dt style={{ color: '#64748b' }}>entryId</dt><dd style={mono}>urn:ap:registry-entry:{row.name}</dd>
+              <dt style={{ color: '#64748b' }}>subjectAgent</dt><dd style={mono}>{shortAddr(row.subjectAgent)}</dd>
             </dl>
             <p style={{ fontSize: '.8rem', color: '#64748b' }}>
-              The agent (custodied by you) executes <code>registerEntry</code> — <code>msg.sender == subjectAgent</code> (RB-01) — signed by your {via} credential, sponsored by the paymaster.
+              The agent (custodied by you) executes <code style={mono}>registerEntry</code> — <code style={mono}>msg.sender == subjectAgent</code> (RB-01) — signed by your {via} credential, sponsored by the paymaster.
             </p>
             {error && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.6rem' }}>{error}</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
-              <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-              <button className="btn btn-primary" onClick={run} disabled={busy || !row.name}>{busy ? 'Registering…' : 'Sign & register'}</button>
+              <button style={btnSty} onClick={onClose} disabled={busy}>Cancel</button>
+              <button style={btnPrimarySty} onClick={run} disabled={busy || !row.name}>{busy ? 'Registering…' : 'Sign & register'}</button>
             </div>
           </>
         )}
