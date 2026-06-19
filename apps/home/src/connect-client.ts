@@ -533,6 +533,28 @@ function agentAccountClient(): AgentAccountClient {
   });
 }
 
+// ── Connected credential resolver (Registry "you" / Register gating) ──
+//
+// The custody CHECK itself is answered MCP-side over the knowledge base (ADR-0040, see
+// `src/lib/registry.ts` → discovery agent `/custody`). The home only resolves the viewer's OWN on-chain
+// custody identifier — the value it presents for itself — from local session state. Google/KMS custody is
+// the per-(iss,sub) C_sub derived server-side, so it is NOT resolved here; those rows fall back to the
+// on-chain ceremony's own RB-01 / ERC-1271 gate. Returns null when it can't be determined client-side.
+export type ConnectedCredential = { kind: 'passkey'; digest: Hex } | { kind: 'eoa'; address: Address };
+
+export function connectedCredential(via: string | undefined, name: string | null): ConnectedCredential | null {
+  const v = (via ?? '').toLowerCase();
+  if (v === 'wallet') {
+    const eoa = name ? recallHomeEoa(name) : undefined;
+    return eoa ? { kind: 'eoa', address: eoa } : null;
+  }
+  if (v === 'passkey') {
+    const p = loadPasskey();
+    return p && p.pubKeyX ? { kind: 'passkey', digest: p.credentialIdDigest } : null;
+  }
+  return null; // Google/KMS (or unknown): C_sub is server-side; chain enforces at register time.
+}
+
 async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
   const rpIdHash = await derivePasskeyRpIdHash();
   return agentAccountClient().getAddressForAgentAccount({

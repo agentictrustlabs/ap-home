@@ -5,11 +5,11 @@
 // steward register a named agent they custody: a custody-authorized on-chain write (RB-01: msg.sender ==
 // subjectAgent) via the home's one-prompt ceremony, reflected here after the next index.
 // Styling is self-contained inline (the app's class system has no card/btn/badge classes).
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { loadRegistry, REGISTRY, type AgentRegistryRow } from '../../../src/lib/registry';
-import { registerAgent } from '../../../src/connect-client';
+import { loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../src/lib/registry';
+import { connectedCredential, registerAgent } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -34,14 +34,28 @@ function StatusBadge({ row }: { row: AgentRegistryRow }) {
 }
 
 export default function RegistryPage() {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, agentName } = useSession();
   const [rows, setRows] = useState<AgentRegistryRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [registerFor, setRegisterFor] = useState<AgentRegistryRow | null>(null);
 
-  const refresh = () => { setRows(null); setErr(null); loadRegistry().then(setRows).catch((e) => setErr(String(e))); };
-  useEffect(() => { loadRegistry().then(setRows).catch((e) => setErr(String(e))); }, []);
+  // Can we pre-check custody client-side? (passkey/wallet yes; Google/KMS resolves C_sub server-side, so
+  // we leave its rows ungated and let the on-chain ceremony enforce RB-01 at register time.)
+  const canCheckCustody = useMemo(() => !!connectedCredential(session?.via, agentName), [session?.via, agentName]);
+
+  const load = useCallback(async () => {
+    setRows(null); setErr(null);
+    try {
+      const base = await loadRegistry();
+      setRows(base); // render the list immediately…
+      const marked = await markCustody(base, session?.via, agentName); // …then refine with custody
+      setRows(marked);
+    } catch (e) { setErr(String(e)); }
+  }, [session?.via, agentName]);
+
+  const refresh = () => { void load(); };
+  useEffect(() => { void load(); }, [load]);
 
   const filtered = (rows ?? []).filter((r) => {
     const t = q.trim().toLowerCase();
@@ -69,18 +83,23 @@ export default function RegistryPage() {
         : (
           <div style={{ display: 'grid', gap: '.7rem' }}>
             {filtered.map((r) => {
-              const isMine = agentAddress && r.subjectAgent.toLowerCase() === agentAddress.toLowerCase();
+              // Custodied by you = the on-chain custody check said so, OR it's your own person SA (always
+              // shown, even if registered/unchecked).
+              const isMine = r.mine === true || (!!agentAddress && r.subjectAgent.toLowerCase() === agentAddress.toLowerCase());
+              // Offer Register only for agents you steward. When we can't pre-check (Google/KMS) we leave it
+              // available for any not-registered agent — the on-chain ceremony rejects non-custodians.
+              const canRegister = !r.registered && r.name && (isMine || !canCheckCustody);
               return (
                 <div key={r.subjectAgent} style={cardSty}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>
                     <div>
-                      <strong>{r.name ?? '(unnamed)'}</strong>{isMine && <span style={{ marginLeft: '.5rem' }}><Badge kind="neutral">you</Badge></span>}
+                      <strong>{r.name ?? '(unnamed)'}</strong>{isMine && <span style={{ marginLeft: '.5rem' }}><Badge kind="neutral">you steward</Badge></span>}
                       <div style={{ ...mono, fontSize: '.74rem', color: '#64748b', marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
                       {!r.shaclConforms && <Badge kind="warn">SHACL ⚠</Badge>}
                       <StatusBadge row={r} />
-                      {!r.registered && <button style={btnPrimarySty} onClick={() => setRegisterFor(r)} disabled={!r.name}>Register</button>}
+                      {canRegister && <button style={btnPrimarySty} onClick={() => setRegisterFor(r)}>Register</button>}
                     </div>
                   </div>
                 </div>
