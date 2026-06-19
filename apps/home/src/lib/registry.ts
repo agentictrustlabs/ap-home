@@ -65,6 +65,17 @@ async function pool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): 
   return out;
 }
 
+/** Retry a read on transient RPC failure (the public Base Sepolia RPC rate-limits bursts; a silent
+ *  catch-to-default would DROP agents from the list). Returns `fallback` only after all tries fail —
+ *  so a 429 retries instead of vanishing an agent. */
+async function read<T>(fn: () => Promise<T>, fallback: T, tries = 5): Promise<T> {
+  for (let t = 0; t < tries; t++) {
+    try { return await fn(); }
+    catch { if (t < tries - 1) await new Promise((r) => setTimeout(r, 250 * (t + 1))); }
+  }
+  return fallback;
+}
+
 async function entryFor(name: string): Promise<Pick<AgentRegistryRow, 'registered' | 'status' | 'live' | 'cardHash' | 'bindingProofHash' | 'expiresAt'>> {
   const r = urn(DISCOVERY_REGISTRY_ID);
   const e = urn(`urn:ap:registry-entry:${name}`);
@@ -83,12 +94,14 @@ async function entryFor(name: string): Promise<Pick<AgentRegistryRow, 'registere
 export async function loadRegistry(tlds: string[] = [AGENT_NAME_PARENT], maxDepth = 3): Promise<AgentRegistryRow[]> {
   const acc = new Map<string, AgentRegistryRow>();
   const visit = async (parent: Hex, depth: number): Promise<void> => {
-    const lhs = (await client().readContract({ address: CONTRACTS.agentNameRegistry, abi: NAME_REGISTRY_ABI, functionName: 'childLabelhashes', args: [parent] }).catch(() => [] as readonly Hex[])) as readonly Hex[];
-    const nodes = await pool([...lhs], 4, (lh) => client().readContract({ address: CONTRACTS.agentNameRegistry, abi: NAME_REGISTRY_ABI, functionName: 'childNode', args: [parent, lh] }) as Promise<Hex>);
-    await pool(nodes, 4, async (node) => {
-      const sa = (await client().readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_ABI, functionName: 'resolveName', args: [node] }).catch(() => ZERO)) as Address;
+    // Reads are retried (not silently dropped) so the public RPC's rate-limiting can't omit an agent.
+    const lhs = await read(() => client().readContract({ address: CONTRACTS.agentNameRegistry, abi: NAME_REGISTRY_ABI, functionName: 'childLabelhashes', args: [parent] }) as Promise<readonly Hex[]>, [] as readonly Hex[]);
+    const nodes = await pool([...lhs], 3, (lh) => read(() => client().readContract({ address: CONTRACTS.agentNameRegistry, abi: NAME_REGISTRY_ABI, functionName: 'childNode', args: [parent, lh] }) as Promise<Hex>, ROOT));
+    await pool(nodes, 3, async (node) => {
+      if (node === ROOT) return;
+      const sa = await read(() => client().readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_ABI, functionName: 'resolveName', args: [node] }) as Promise<Address>, ZERO as Address);
       if (sa && sa !== ZERO && !acc.has(sa.toLowerCase())) {
-        const name = ((await client().readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_ABI, functionName: 'reverseResolveString', args: [sa] }).catch(() => '')) as string) || null;
+        const name = (await read(() => client().readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_ABI, functionName: 'reverseResolveString', args: [sa] }) as Promise<string>, '')) || null;
         const entry = name ? await entryFor(name) : { registered: false, status: 'none' as const, live: false };
         acc.set(sa.toLowerCase(), { name, subjectAgent: sa, node, ...entry });
       }
