@@ -62,8 +62,9 @@ export async function markCustody(rows: AgentRegistryRow[], via: string | undefi
   const value = cred.kind === 'passkey' ? cred.digest : cred.address;
   const credKey = `${cred.kind}:${value.toLowerCase()}`;
   const ck = (sa: string) => `${credKey}|${sa.toLowerCase()}`;
-  const targets = rows.filter((r) => !r.registered);
-  const unknown = targets.filter((r) => custodyCache.get(ck(r.subjectAgent)) === undefined);
+  // Check custody for EVERY row — the "you steward" badge applies whether or not the agent is registered.
+  // (The Register button is gated separately; it just doesn't show for already-registered rows.)
+  const unknown = rows.filter((r) => custodyCache.get(ck(r.subjectAgent)) === undefined);
   if (unknown.length) {
     try {
       const res = await fetch(`${A2A_URL}/custody`, {
