@@ -38,4 +38,7 @@ export const CONTRACTS = {
   approvedHashRegistry: DEPLOYED.approvedHashRegistry as Address,
   // Demo USDC (spec 272/243) — the treasury views read its balanceOf for each treasury SA.
   mockUsdc: DEPLOYED.mockUsdc as Address,
+  // spec 279 — AgentRegistryBase: the SA-anchored discovery registry the Registry tab reads
+  // (registry entries per named agent) + registers named agents into.
+  agentRegistryBase: DEPLOYED.agentRegistryBase as Address,
 } as const satisfies Record<string, Address>;

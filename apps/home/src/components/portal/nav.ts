@@ -52,6 +52,8 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): 
   if (wl.services.devices) {
     portal.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   }
+  // Discovery registry (spec 279): every named agent + its registration; register named agents into it.
+  portal.push({ id: 'registry', label: 'Registry', href: '/registry', Icon: DatabaseIcon, status: 'live' });
   portal.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'soon' });
 
   return [
