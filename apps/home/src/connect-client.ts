@@ -23,6 +23,8 @@ import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, re
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
+import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
+import { hashAgentCard, type AgentCard } from '@agenticprimitives/agent-profile';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
@@ -1944,6 +1946,36 @@ export async function listMyReceivedDelegations(token: string): Promise<Received
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as { received?: ReceivedDelegation[] };
   return b.received ?? [];
+}
+
+/** Register a named agent into the discovery registry (spec 279), ALL-CUSTODIAN. The agent's own SA
+ *  executes `registerEntry` (RB-01: msg.sender == subjectAgent), signed by `signHash` (the same passkey/
+ *  wallet/KMS credential the home uses for delegations + payments) and sponsored by the paymaster, gasless
+ *  via `executeCall` — ONE custody prompt. The entry's cardHash + bindingProofHash are hashes of the card
+ *  + binding-proof BODIES (no extra signature needed on-chain); the SA-signed bundles for off-chain
+ *  re-verification are a follow-on (publish-by-hash). The `impact-agents` registry is open (no membership
+ *  hook), so any agent may self-register. */
+export const DISCOVERY_REGISTRY_ID = 'urn:ap:registry:impact-agents';
+export async function registerAgent(
+  sa: Address,
+  name: string,
+  signHash: SignHash,
+): Promise<{ ok: true; txHash?: Hex; cardHash: string; bindingProofHash: string } | { ok: false; error: string }> {
+  const issuedAt = new Date().toISOString();
+  const card: AgentCard = { type: 'service', displayName: name };
+  const cardHash = hashAgentCard(card);
+  const registryId = DISCOVERY_REGISTRY_ID as RegistryId;
+  const entryId = `urn:ap:registry-entry:${name}` as RegistryEntryId;
+  const bindingProofHash = await hashBindingProofBody({ registryId, entryId, subjectAgent: sa, cardHash, claimHashes: [], issuedAt });
+  const call = buildRegisterEntryCall({
+    registry: CONTRACTS.agentRegistryBase, registryId, entryId, subjectAgent: sa,
+    cardHash, bindingProofHash, claimHashes: [], expiresAt: 0,
+  });
+  // The SA executes registerEntry itself (execute(target,value,data)) — so msg.sender == subjectAgent.
+  const executeData = encodeFunctionData({ abi: PAY_EXECUTE_ABI, functionName: 'execute', args: [call.to, 0n, call.data] });
+  const res = await executeCall(sa, signHash, executeData);
+  if (!res.ok) return res;
+  return { ok: true, txHash: res.txHash, cardHash, bindingProofHash };
 }
 
 /** List ALL the connected person's organizations (private vault credentials), for the

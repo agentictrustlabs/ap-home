@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, REGISTRY, type AgentRegistryRow } from '../../../src/lib/registry';
+import { registerAgent } from '../../../src/connect-client';
+import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const shortHash = (h?: string) => (h ? `${h.slice(0, 14)}…${h.slice(-4)}` : '—');
@@ -20,12 +22,13 @@ function StatusBadge({ row }: { row: AgentRegistryRow }) {
 }
 
 export default function RegistryPage() {
-  const { agentAddress } = useSession();
+  const { session, agentAddress } = useSession();
   const [rows, setRows] = useState<AgentRegistryRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [registerFor, setRegisterFor] = useState<AgentRegistryRow | null>(null);
 
+  const refresh = () => { setRows(null); loadRegistry().then(setRows).catch((e) => setErr(String(e))); };
   useEffect(() => { loadRegistry().then(setRows).catch((e) => setErr(String(e))); }, []);
 
   const filtered = (rows ?? []).filter((r) => {
@@ -81,37 +84,73 @@ export default function RegistryPage() {
           </div>
         )}
 
-      {registerFor && <RegisterPanel row={registerFor} onClose={() => setRegisterFor(null)} />}
+      {registerFor && (
+        <RegisterPanel
+          row={registerFor}
+          via={session?.via ?? 'passkey'}
+          token={session?.token ?? null}
+          onClose={() => setRegisterFor(null)}
+          onDone={() => { setRegisterFor(null); refresh(); }}
+        />
+      )}
     </SectionShell>
   );
 }
 
-/** Registration plan + ceremony entry. The card + binding proof are signed by the agent's SA (ERC-1271)
- *  and registerEntry is executed BY the SA (RB-01) via the home's custody ceremony. */
-function RegisterPanel({ row, onClose }: { row: AgentRegistryRow; onClose: () => void }) {
+/** Register ceremony: the agent's SA executes registerEntry itself (RB-01), signed by the home credential
+ *  (signHashFor) and sponsored — ONE custody prompt, gasless. */
+function RegisterPanel({ row, via: viaStr, token, onClose, onDone }: {
+  row: AgentRegistryRow; via: string; token: string | null; onClose: () => void; onDone: () => void;
+}) {
+  const via: Via = viaStr.toLowerCase() === 'wallet' ? 'wallet' : viaStr.toLowerCase() === 'google' ? 'google' : 'passkey';
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const run = async () => {
+    if (!row.name) return;
+    setBusy(true); setError(null);
+    try {
+      const signHash = await signHashFor(via, row.subjectAgent, token ? { token } : undefined);
+      const res = await registerAgent(row.subjectAgent, row.name, signHash);
+      if (res.ok) setTxHash(res.txHash ?? '');
+      else setError(res.error);
+    } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }} onClick={onClose}>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }} onClick={busy ? undefined : onClose}>
       <div className="card" style={{ maxWidth: 540, width: '100%', padding: '1.4rem' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>Register {row.name}</h3>
-        <p style={{ fontSize: '.88rem', color: '#475569' }}>
-          Make <strong>{row.name}</strong> discoverable by writing its entry into the registry. Its Smart Agent signs a card + a binding proof, then registers the entry itself.
-        </p>
-        <dl style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '.3rem .8rem', fontSize: '.82rem', margin: '1rem 0' }}>
-          <dt style={{ color: '#64748b' }}>registry</dt><dd>{REGISTRY.registryId}</dd>
-          <dt style={{ color: '#64748b' }}>entryId</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>urn:ap:registry-entry:{row.name}</dd>
-          <dt style={{ color: '#64748b' }}>subjectAgent</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>{shortAddr(row.subjectAgent)}</dd>
-        </dl>
-        <ol style={{ fontSize: '.84rem', color: '#475569', paddingLeft: '1.1rem', margin: '0 0 1rem' }}>
-          <li>Sign the agent card (ERC-1271) — proves cardHash → this agent.</li>
-          <li>Sign the binding proof — binds the entry to the agent + card.</li>
-          <li>The agent executes <code>registerEntry</code> (one passkey ceremony).</li>
-        </ol>
-        <p className="soon" style={{ display: 'block', fontSize: '.8rem' }}>
-          The signing + on-chain registerEntry runs through this home's custody ceremony (the SA must be the caller, RB-01). That wiring is the next step — this panel confirms the exact entry to be written.
-        </p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
-          <button className="btn" onClick={onClose}>Close</button>
-        </div>
+        {txHash !== null ? (
+          <>
+            <p style={{ fontSize: '.9rem', color: '#047857' }}><strong>Registered ✓</strong> — {row.name} is now in the discovery registry.</p>
+            {txHash && <p style={{ fontSize: '.78rem', color: '#64748b', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-all' }}>tx {txHash}</p>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button className="btn btn-primary" onClick={onDone}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: '.88rem', color: '#475569' }}>
+              Make <strong>{row.name}</strong> discoverable. Its Smart Agent registers the entry itself — one custody prompt, gasless.
+            </p>
+            <dl style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '.3rem .8rem', fontSize: '.82rem', margin: '1rem 0' }}>
+              <dt style={{ color: '#64748b' }}>registry</dt><dd>{REGISTRY.registryId}</dd>
+              <dt style={{ color: '#64748b' }}>entryId</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>urn:ap:registry-entry:{row.name}</dd>
+              <dt style={{ color: '#64748b' }}>subjectAgent</dt><dd style={{ fontFamily: 'ui-monospace, monospace' }}>{shortAddr(row.subjectAgent)}</dd>
+            </dl>
+            <p style={{ fontSize: '.8rem', color: '#64748b' }}>
+              The agent (custodied by you) executes <code>registerEntry</code> — <code>msg.sender == subjectAgent</code> (RB-01) — signed by your {via} credential, sponsored by the paymaster.
+            </p>
+            {error && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.6rem' }}>{error}</p>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
+              <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="btn btn-primary" onClick={run} disabled={busy || !row.name}>{busy ? 'Registering…' : 'Sign & register'}</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
