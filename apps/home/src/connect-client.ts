@@ -26,6 +26,7 @@ import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard } from '@agenticprimitives/agent-profile';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
+import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
 /** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
@@ -369,6 +370,7 @@ export async function claimName(
   const batch = buildExecuteBatchCallData([register, setPrimary]);
   const res = await executeCall(agent, signHash, batch, { minNonce, attempts: 10 });
   if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
+  requestReindex([agent]); // auto-index: surface the freshly-named agent in discovery immediately
   return { ok: true, name: picked.name };
 }
 
@@ -957,6 +959,7 @@ export async function createChildAgentForSite(
   // deploy op); membership is re-minted later from the person's home or on first need.
   const membershipDelegation: DelegationWire | undefined = undefined;
 
+  requestReindex([childAgent]); // auto-index: the new org/child agent appears in discovery immediately
   return {
     ok: true,
     result: {
@@ -1117,6 +1120,7 @@ export async function createManagedAgent(
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
   }
 
+  requestReindex([child]); // auto-index: the new managed agent (treasury/org) appears in discovery now
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
 }
 
@@ -1160,6 +1164,7 @@ export async function nameManagedAgent(
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `named on-chain (${claim.name}) but vault save failed: ${e.error ?? save.status}` };
   }
+  requestReindex([input.agent]); // auto-index: the now-named managed agent appears in discovery
   return { ok: true, name: claim.name };
 }
 
@@ -1229,6 +1234,7 @@ async function createManagedAgentSocial(
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
   }
+  requestReindex([child]); // auto-index: the new managed agent (treasury/org, Google path) appears now
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
 }
 
@@ -1265,6 +1271,7 @@ async function nameManagedAgentSocial(
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `named on-chain (${b.name}) but vault save failed: ${e.error ?? save.status}` };
   }
+  requestReindex([input.agent]); // auto-index: the now-named managed agent (Google path) appears
   return { ok: true, name: b.name };
 }
 
@@ -1997,6 +2004,7 @@ export async function registerAgent(
   const executeData = encodeFunctionData({ abi: PAY_EXECUTE_ABI, functionName: 'execute', args: [call.to, 0n, call.data] });
   const res = await executeCall(sa, signHash, executeData);
   if (!res.ok) return res;
+  requestReindex([sa]); // auto-index: re-project so the `registry` facet flips to registered in discovery
   return { ok: true, txHash: res.txHash, cardHash, bindingProofHash };
 }
 
