@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../src/lib/registry';
-import { connectedCredential, registerAgent } from '../../../src/connect-client';
+import { canCheckCustody, registerAgent } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -40,19 +40,19 @@ export default function RegistryPage() {
   const [q, setQ] = useState('');
   const [registerFor, setRegisterFor] = useState<AgentRegistryRow | null>(null);
 
-  // Can we pre-check custody client-side? (passkey/wallet yes; Google/KMS resolves C_sub server-side, so
-  // we leave its rows ungated and let the on-chain ceremony enforce RB-01 at register time.)
-  const canCheckCustody = useMemo(() => !!connectedCredential(session?.via, agentName), [session?.via, agentName]);
+  // Can we pre-check custody? passkey/wallet from local state; Google/social via the KMS C_sub (needs the
+  // session token). If not, leave Register open and let the on-chain ceremony enforce RB-01.
+  const canCheck = useMemo(() => canCheckCustody(session?.via, agentName, session?.token), [session?.via, agentName, session?.token]);
 
   const load = useCallback(async () => {
     setRows(null); setErr(null);
     try {
       const base = await loadRegistry();
       setRows(base); // render the list immediately…
-      const marked = await markCustody(base, session?.via, agentName); // …then refine with custody
+      const marked = await markCustody(base, session?.via, agentName, session?.token); // …then refine with custody
       setRows(marked);
     } catch (e) { setErr(String(e)); }
-  }, [session?.via, agentName]);
+  }, [session?.via, agentName, session?.token]);
 
   const refresh = () => { void load(); };
   useEffect(() => { void load(); }, [load]);
@@ -88,7 +88,7 @@ export default function RegistryPage() {
               const isMine = r.mine === true || (!!agentAddress && r.subjectAgent.toLowerCase() === agentAddress.toLowerCase());
               // Offer Register only for agents you steward. When we can't pre-check (Google/KMS) we leave it
               // available for any not-registered agent — the on-chain ceremony rejects non-custodians.
-              const canRegister = !r.registered && r.name && (isMine || !canCheckCustody);
+              const canRegister = !r.registered && r.name && (isMine || !canCheck);
               return (
                 <div key={r.subjectAgent} style={cardSty}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>

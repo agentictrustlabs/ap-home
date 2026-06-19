@@ -2650,6 +2650,33 @@ app.post('/custody/google/sign', async (c) => {
 });
 
 /**
+ * POST /custody/google/custodian  (browser, custody-session authenticated, CSRF)
+ * Body: { session }  → { ok, custodian }
+ *
+ * Read-only sibling of /sign: verify the custody session and DERIVE the member's KMS custodian C_sub
+ * WITHOUT signing. Lets the home learn the viewer's own on-chain custody identifier — e.g. so the
+ * discovery custody check can ask "which agents does my C_sub custody?" (C_sub is a public on-chain
+ * address; deriving it releases nothing the chain doesn't, and it does NOT sign).
+ */
+app.post('/custody/google/custodian', async (c) => {
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session required' }, 400);
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+  try {
+    const { cSub } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env),
+      rotation: gate.rotation,
+    });
+    return c.json({ ok: true, custodian: cSub });
+  } catch (e) {
+    return c.json({ ok: false, error: 'derive_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
  * POST /custody/google/sign-site-delegation  (Connect broker → a2a, BRIDGE-authenticated)
  * Body: { custodyToken, delegate, sender }  → { ok, delegation, custodian }
  *

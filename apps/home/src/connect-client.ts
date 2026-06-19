@@ -539,11 +539,15 @@ function agentAccountClient(): AgentAccountClient {
 //
 // The custody CHECK itself is answered MCP-side over the knowledge base (ADR-0040, see
 // `src/lib/registry.ts` → discovery agent `/custody`). The home only resolves the viewer's OWN on-chain
-// custody identifier — the value it presents for itself — from local session state. Google/KMS custody is
-// the per-(iss,sub) C_sub derived server-side, so it is NOT resolved here; those rows fall back to the
-// on-chain ceremony's own RB-01 / ERC-1271 gate. Returns null when it can't be determined client-side.
+// custody identifier — the value it presents for itself. passkey/wallet resolve from local state; a
+// Google/social member is custodied by their per-(iss,sub) KMS C_sub (derived server-side), so we ask
+// demo-a2a for it with the custody session (`resolveCredential`, async). Their agents are all custodied by
+// that one C_sub, so the same value matches every agent they steward.
 export type ConnectedCredential = { kind: 'passkey'; digest: Hex } | { kind: 'eoa'; address: Address };
 
+const isSocialVia = (via: string | undefined) => { const v = (via ?? '').toLowerCase(); return v === 'google' || v === 'youversion'; };
+
+/** Sync, local-only resolution (passkey/wallet). Returns null for social (use `resolveCredential`). */
 export function connectedCredential(via: string | undefined, name: string | null): ConnectedCredential | null {
   const v = (via ?? '').toLowerCase();
   if (v === 'wallet') {
@@ -554,7 +558,37 @@ export function connectedCredential(via: string | undefined, name: string | null
     const p = loadPasskey();
     return p && p.pubKeyX ? { kind: 'passkey', digest: p.credentialIdDigest } : null;
   }
-  return null; // Google/KMS (or unknown): C_sub is server-side; chain enforces at register time.
+  return null;
+}
+
+/** Ask demo-a2a for the connected Google/social member's KMS custodian C_sub (a public on-chain address;
+ *  derived, not signed). Custody-session authenticated, CSRF — mirrors googleSignHash. */
+export async function resolveGoogleCustodian(sessionToken: string): Promise<Address | null> {
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/custody/google/custodian', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: sessionToken }),
+  });
+  const b = (await res.json().catch(() => ({}))) as { ok?: boolean; custodian?: Address };
+  return res.ok && b.ok && b.custodian ? b.custodian : null;
+}
+
+/** Full resolution incl. social: passkey/wallet locally, Google/YouVersion via C_sub (needs the session
+ *  token). Returns null when the viewer credential can't be determined (then the chain still gates). */
+export async function resolveCredential(via: string | undefined, name: string | null, token?: string | null): Promise<ConnectedCredential | null> {
+  if (isSocialVia(via)) {
+    if (!token) return null;
+    const cSub = await resolveGoogleCustodian(token).catch(() => null);
+    return cSub ? { kind: 'eoa', address: cSub } : null;
+  }
+  return connectedCredential(via, name);
+}
+
+/** Can we pre-check custody for this session? (true → gate Register by ownership; false → leave it open.) */
+export function canCheckCustody(via: string | undefined, name: string | null, token?: string | null): boolean {
+  return isSocialVia(via) ? !!token : !!connectedCredential(via, name);
 }
 
 async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {

@@ -9,7 +9,7 @@
 
 import type { Address } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS } from './chain';
-import { connectedCredential } from '../connect-client';
+import { resolveCredential } from '../connect-client';
 
 const A2A_URL = (process.env.NEXT_PUBLIC_DISCOVERY_A2A_URL as string | undefined) ?? 'https://demo-discovery-a2a.richardpedersen3.workers.dev';
 export const DISCOVERY_REGISTRY_ID = 'urn:ap:registry:impact-agents';
@@ -56,8 +56,8 @@ export async function loadRegistry(): Promise<AgentRegistryRow[]> {
  *  on-chain register ceremony still gates by RB-01 / ERC-1271. */
 const custodyCache = new Map<string, boolean>();
 
-export async function markCustody(rows: AgentRegistryRow[], via: string | undefined, name: string | null): Promise<AgentRegistryRow[]> {
-  const cred = connectedCredential(via, name);
+export async function markCustody(rows: AgentRegistryRow[], via: string | undefined, name: string | null, token?: string | null): Promise<AgentRegistryRow[]> {
+  const cred = await resolveCredential(via, name, token);
   if (!cred) return rows;
   const value = cred.kind === 'passkey' ? cred.digest : cred.address;
   const credKey = `${cred.kind}:${value.toLowerCase()}`;
