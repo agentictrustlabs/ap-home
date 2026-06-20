@@ -1821,7 +1821,13 @@ export async function connectCustodianWallet(sa: Address, restrictTo?: Address):
   for (const a of accounts) {
     try { if (await accountsClient.isCustodian(sa, a)) return a; } catch { /* not deployed / read error → skip */ }
   }
-  throw new Error('None of your connected wallets control this home. In the wallet popup, connect the account that custodies it (then retry) — the active account isn’t a custodian.');
+  // Name the EXACT account to connect when we know it (the published connection address / remembered EOA,
+  // spec 280) — MetaMask can't be forced to an account, so the next-best thing is telling the user precisely
+  // which one to pick. Falls back to a generic message when no expected address is known.
+  const which = restrictTo
+    ? `In MetaMask, open the account menu → “Connect more accounts” and connect ${restrictTo}, then retry.`
+    : 'In the wallet popup, connect the account that custodies it, then retry.';
+  throw new Error(`None of your connected wallets control this home. ${which} The active account isn’t a custodian.`);
 }
 
 export async function connectWithName(
