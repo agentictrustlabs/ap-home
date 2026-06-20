@@ -1834,11 +1834,13 @@ export async function connectWithName(
     // Sign with the wallet that actually custodies `${name}` — not MetaMask's active account (which may be
     // another home's custodian, e.g. the platform deployer). Resolve name→SA, then pick the connected
     // custodian account (connectCustodianWallet).
-    const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address };
+    const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address; connectionAddress?: Address };
     if (!info.agent) return { ok: false, error: `Couldn’t resolve ${name}.` };
     let address: Address;
-    // Default the picker to the EOA we last used for THIS name (no owner() on the SA to read it from chain).
-    try { address = await connectCustodianWallet(info.agent, recallHomeEoa(name)); }
+    // Default the picker to the EOA we last used for THIS name, falling back to the owner-PUBLISHED
+    // connection address (spec 280) when local memory is empty — the cross-device / fresh-browser fix
+    // (AgentAccount has no owner() to read the custodian from chain). Still validated by connectCustodianWallet.
+    try { address = await connectCustodianWallet(info.agent, recallHomeEoa(name) ?? info.connectionAddress); }
     catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'wallet connection failed' }; }
     rememberHomeEoa(name, address); // remember the custodian EOA so next sign-in defaults straight to it
     const nonce = await getNonce();

@@ -23,7 +23,9 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { HomeResolvedView } from './HomeResolvedView';
 
-interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean }
+interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null }
+/** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
+const CONNECTION_LABEL: Record<string, string> = { wallet: 'wallet', google: 'Google', youversion: 'YouVersion', passkey: 'passkey', multi: 'any of the below' };
 async function nameInfo(name: string): Promise<NameInfo> {
   try {
     return (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json()) as NameInfo;
@@ -695,6 +697,11 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
         // A named-home sign-in uses THIS home's own credential(s). Google is NOT shown — it
         // resolves the member's separate Google home, not this named one.
         <>
+          {info?.connectionKind && CONNECTION_LABEL[info.connectionKind] && (
+            <p className="onboarding-hint" style={{ fontSize: '.8rem', color: '#64748b' }}>
+              ↳ {nameLabel(name)} publishes <strong>{CONNECTION_LABEL[info.connectionKind]}</strong> as its connection.
+            </p>
+          )}
           {showPasskey && (
             <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
           )}
