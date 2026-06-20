@@ -47,11 +47,25 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // hence `hasEoa: false, hasPasskey: false` for orphans — but that is a
   // weaker signal than the explicit `deployed` boolean. Per ADR-0013 this
   // is a single read; no fallback path if `getCode` fails.
-  const [custodianCount, pkCount, deployed] = await Promise.all([
+  const [custodianCount, pkCount, deployed, connection] = await Promise.all([
     accounts.custodianCount(agent),
     accounts.passkeyCount(agent),
     accounts.isDeployed(agent),
+    // Connection-bootstrap record (spec 280): the opt-in, owner-published `how-to-connect` hint.
+    // null when the owner hasn't published one — the UI then shows all credential buttons (ADR-0013:
+    // one read, absence is an answer, no second mechanism).
+    naming.getConnectionInfo(name).catch(() => null),
   ]);
   const eoaCount = custodianCount - pkCount;
-  return json({ exists: true, name, agent, deployed, hasEoa: eoaCount > 0n, hasPasskey: pkCount > 0n });
+  return json({
+    exists: true,
+    name,
+    agent,
+    deployed,
+    hasEoa: eoaCount > 0n,
+    hasPasskey: pkCount > 0n,
+    // spec 280 — published connection bootstrap (kind + optional pre-select address). Null if unset.
+    connectionKind: connection?.kind ?? null,
+    connectionAddress: connection?.address ?? null,
+  });
 };

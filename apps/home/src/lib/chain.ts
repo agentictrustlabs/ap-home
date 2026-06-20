@@ -21,6 +21,7 @@ export const CONTRACTS = {
   agentAccountImplementation: DEPLOYED.agentAccountImplementation as Address,
   agentNameRegistry: DEPLOYED.agentNameRegistry as Address,
   agentNameUniversalResolver: DEPLOYED.agentNameUniversalResolver as Address,
+  agentNameResolver: DEPLOYED.agentNameResolver as Address,
   custodyPolicy: DEPLOYED.custodyPolicy as Address,
   permissionlessSubregistry: DEPLOYED.permissionlessSubregistry as Address,
   agentRelationship: DEPLOYED.agentRelationship as Address,

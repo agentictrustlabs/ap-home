@@ -1,7 +1,16 @@
 // Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
-import { buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
+import {
+  buildSubregistryRegisterCall,
+  buildSetPrimaryNameCall,
+  buildSetBytes32AttributeCall,
+  buildSetAddressAttributeCall,
+  namehash,
+  PREDICATE_ID,
+  CONNECTION_KIND_ID,
+  type ConnectionKind,
+} from '@agenticprimitives/agent-naming';
 import {
   buildExecuteCallData,
   buildExecuteBatchCallData,
@@ -2040,6 +2049,32 @@ export async function registerAgent(
   if (!res.ok) return res;
   requestReindex([sa]); // auto-index: re-project so the `registry` facet flips to registered in discovery
   return { ok: true, txHash: res.txHash, cardHash, bindingProofHash };
+}
+
+/** Publish the connection-bootstrap record (spec 280) for a name the caller stewards — the OPT-IN,
+ *  owner-authorized, PUBLIC `name → how-to-connect` association. The agent's OWN SA writes its resolver
+ *  attributes (`_requireAuth → msg.sender == registry.owner(node)` = the SA), signed by `signHash` (the
+ *  same root credential) + sponsored, gasless via `executeCall` — ONE prompt. `connectionKind` is always
+ *  set; `connectionAddress` (the EOA / C_sub pre-select hint) is written ONLY when the caller explicitly
+ *  passes it (the public-address opt-in). Never call this automatically — it is a deliberate UI action. */
+export async function setConnectionInfo(
+  sa: Address,
+  name: string,
+  kind: ConnectionKind,
+  signHash: SignHash,
+  opts: { address?: Address } = {},
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const node = namehash(name);
+  const resolver = CONTRACTS.agentNameResolver;
+  const calls: ContractCall[] = [
+    buildSetBytes32AttributeCall({ resolver, node, predicate: PREDICATE_ID.connectionKind, value: CONNECTION_KIND_ID[kind] }),
+  ];
+  if (opts.address) {
+    calls.push(buildSetAddressAttributeCall({ resolver, node, predicate: PREDICATE_ID.connectionAddress, value: opts.address }));
+  }
+  const res = await executeCall(sa, signHash, buildExecuteBatchCallData(calls));
+  if (!res.ok) return res;
+  return { ok: true, txHash: res.txHash };
 }
 
 /** List ALL the connected person's organizations (private vault credentials), for the
