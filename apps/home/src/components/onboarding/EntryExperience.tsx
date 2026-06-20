@@ -697,9 +697,16 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
         // A named-home sign-in uses THIS home's own credential(s). Google is NOT shown — it
         // resolves the member's separate Google home, not this named one.
         <>
-          {info?.connectionKind && CONNECTION_LABEL[info.connectionKind] && (
-            <p className="onboarding-hint" style={{ fontSize: '.8rem', color: '#64748b' }}>
-              ↳ {nameLabel(name)} publishes <strong>{CONNECTION_LABEL[info.connectionKind]}</strong> as its connection.
+          {(info?.connectionAddress || (info?.connectionKind && CONNECTION_LABEL[info.connectionKind])) && (
+            <p className="onboarding-hint" style={{ fontSize: '.8rem', color: '#475569' }}>
+              ↳ Connect {nameLabel(name)} with{info?.connectionKind && CONNECTION_LABEL[info.connectionKind] ? <> its <strong>{CONNECTION_LABEL[info.connectionKind]}</strong></> : ' your published'} credential
+              {info?.connectionAddress && (
+                <> · account{' '}
+                  <code title={info.connectionAddress} style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                    {`${info.connectionAddress.slice(0, 6)}…${info.connectionAddress.slice(-4)}`}
+                  </code>
+                </>
+              )}
             </p>
           )}
           {showPasskey && (
