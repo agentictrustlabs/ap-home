@@ -2108,6 +2108,19 @@ export async function getSkills(sa: Address): Promise<string[]> {
  *  if already registered — AlreadyRegistered — hence the isRegistered gate). The asserted labels are what
  *  the discovery indexer projects + the matcher ranks on; the agent's full PRIVATE claim set stays in its
  *  vault (Phase 2b). Fires the discovery re-index. */
+/** Broadcast a batch of contract calls as ONE userOp on `sa` (spec 283/284 connect-treasury BIND step).
+ *  Thin exported wrapper over the internal executeCall — lets the ceremony broadcast arbitrary
+ *  ContractCalls (e.g. a2aEndpoint/mcpEndpoint naming-record writes) without re-implementing build→sign→
+ *  submit. Empty calls is a no-op success. */
+export async function executeCalls(
+  sa: Address,
+  signHash: SignHash,
+  calls: ContractCall[],
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  if (calls.length === 0) return { ok: true };
+  return executeCall(sa, signHash, buildExecuteBatchCallData(calls));
+}
+
 export async function setSkills(
   sa: Address,
   name: string,

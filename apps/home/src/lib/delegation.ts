@@ -88,6 +88,24 @@ export async function issueSiteDelegation(
   return d;
 }
 
+/** Issue `delegator → delegateSA` with CALLER-SUPPLIED caveats, signed by `signHash` (spec 283/284
+ *  connect-treasury AUTHORIZE step — a scoped, monotonic host grant). Unlike issueSiteDelegation the
+ *  caveats are explicit (e.g. lowered from a TreasuryAuthorityScope via connect-treasury.scopeToHostCaveats). */
+export async function issueScopedDelegation(
+  delegator: Address,
+  delegateSA: Address,
+  caveats: Caveat[],
+  signHash: SignHash,
+): Promise<Delegation> {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const d: Delegation = { delegator, delegate: delegateSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest);
+  return d;
+}
+
 /** spec 253 — build a `delegator → delegateSA` site delegation WITHOUT an off-chain signature.
  *  Returns the delegation (wire signature = the `0x03` sentinel) plus its EIP-712 `digest`, so
  *  the caller batches `approvedHashRegistry.approveHash(digest)` into the DELEGATOR's own userOp.
