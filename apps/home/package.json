@@ -20,6 +20,7 @@
     "@agenticprimitives/fedcm-idp": "workspace:*",
     "@agenticprimitives/contracts": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
+    "@agenticprimitives/treasury-service-agent": "workspace:*",
     "@agenticprimitives/identity-directory": "workspace:*",
     "@agenticprimitives/identity-directory-adapters": "workspace:*",
     "@agenticprimitives/payments": "workspace:*",

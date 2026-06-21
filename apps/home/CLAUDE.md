@@ -26,6 +26,7 @@ claiming, and the delegations it signs on the member's behalf.
 | OIDC broker / token / grant | `server/connect/*.ts` (`name.ts`, `grant.ts`, `token.ts`, `nonce.ts`) |
 | The onboarding journey (passkey/wallet/Google) | `src/components/onboarding/*` + `src/home/onboarding.ts` |
 | Delegations the home signs (site + DEL-001 leaf) | `src/lib/delegation.ts` (spec 270 v4) |
+| Connect a service SA (treasury/discovery) to its A2A+MCP hosts | `src/lib/connect-treasury.ts` (spec 283/284 ceremony: bind endpoint records → mint scoped host delegation → publish skills; pure+injectable, UI page TBD) |
 | Name label / TLD handling | `src/home/types.ts` (`homeLabel`) + `src/lib/domain.ts` (`AGENT_NAME_PARENT = 'impact'`) |
 | White-label config | `src/whitelabel/config.ts` (spec 234) |
 
