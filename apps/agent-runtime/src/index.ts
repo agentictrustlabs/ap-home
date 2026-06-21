@@ -53,7 +53,7 @@ import {
   caip10,
 } from './custody-google';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, buildA2aAgentCard, AGENT_NAME_PARENT } from './host-context';
+import { resolveAgentHost, buildA2aAgentCard, skillsFromLabels, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -184,6 +184,8 @@ export interface Env {
   // view call — no eth_getLogs walk, no fallback (ADR-0012 / ADR-0013).
   AGENT_NAME_REGISTRY?: string;
   AGENT_NAME_UNIVERSAL_RESOLVER?: string;
+  /** AgentProfileResolver — read `atl:skills` to surface publicly-asserted skills on the A2A card (spec 282). */
+  PROFILE_RESOLVER?: string;
   /** Permissionless `.agent` subregistry (spec 234 W2). Address is consumed by
    *  clients (`apps/demo-sso-next/src/connect-client.ts::buildClaimCallData`) to
    *  build the `register + setPrimary` `executeBatch` inside the deploy userOp —
@@ -644,7 +646,22 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
   if (ctx.label && !ctx.agent) {
     return c.json({ error: 'agent_not_found', detail: `no Smart Agent for ${ctx.name}` }, 404);
   }
-  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID)));
+  // spec 282 — surface the agent's PUBLICLY-ASSERTED skills (atl:skills profile property) on the card,
+  // the same set discovery ranks on. Best-effort read; absence → no skills (the card still serves).
+  let skills: A2aSkill[] = [];
+  if (ctx.agent && c.env.PROFILE_RESOLVER && c.env.RPC_URL) {
+    try {
+      const client = createPublicClient({ transport: http(c.env.RPC_URL) });
+      const csv = (await client.readContract({
+        address: c.env.PROFILE_RESOLVER as Address,
+        abi: [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const,
+        functionName: 'getStringProperty',
+        args: [ctx.agent, keccak256(toBytes('atl:skills'))],
+      })) as string;
+      skills = skillsFromLabels(csv);
+    } catch { /* best-effort — serve the card without skills */ }
+  }
+  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills));
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias

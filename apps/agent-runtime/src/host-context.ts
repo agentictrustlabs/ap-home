@@ -94,13 +94,26 @@ export async function resolveAgentHost(
   return { label, agent, name, publicOrigin };
 }
 
+/** One A2A skill-card entry (A2A protocol shape). */
+export interface A2aSkill { id: string; name: string; description?: string; tags?: string[] }
+
+/** Map an agent's publicly-asserted skill labels (spec 282 `atl:skills`, comma-joined) to A2A skill cards. */
+export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
+  if (!csv) return [];
+  return csv.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 64).map((label) => ({
+    id: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+    name: label,
+    tags: ['skill'],
+  }));
+}
+
 /**
  * Build an A2A v1.0 AgentCard (shape ported from agentic-trust atp-agent
  * `buildAgentCard`). Agent-bound when `ctx.agent` is set; generic otherwise.
- * `skills` is intentionally minimal for the demo — the discovery + routing
- * substrate is what spec 231 ships; the skill catalogue is future work.
+ * `skills` are the agent's PUBLICLY-ASSERTED skills (spec 282) — the same `atl:skills`
+ * the discovery matcher ranks on, surfaced here on the standard A2A card.
  */
-export function buildA2aAgentCard(ctx: AgentHostContext, chainId: number): Record<string, unknown> {
+export function buildA2aAgentCard(ctx: AgentHostContext, chainId: number, skills: A2aSkill[] = []): Record<string, unknown> {
   const origin = ctx.publicOrigin.replace(/\/$/, '');
   const messageEndpoint = `${origin}/api/a2a`;
   const bound = Boolean(ctx.agent);
@@ -119,7 +132,7 @@ export function buildA2aAgentCard(ctx: AgentHostContext, chainId: number): Recor
     capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: false },
     defaultInputModes: ['text/plain', 'application/json'],
     defaultOutputModes: ['text/plain', 'application/json'],
-    skills: [],
+    skills,
     supportsExtendedAgentCard: false,
     chainId,
   };
