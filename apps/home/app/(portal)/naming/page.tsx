@@ -9,8 +9,10 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
-import { setConnectionInfo, resolveCredential } from '../../../src/connect-client';
+import { setConnectionInfo, resolveCredential, claimName } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
+import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
+import type { Address } from '@agenticprimitives/types';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -36,11 +38,22 @@ interface NameRow extends AgentRegistryRow {
   connectionAddress: string | null;
 }
 
+const toViaForSign = (via: string | undefined): Via => {
+  const v = (via ?? '').toLowerCase();
+  if (v === 'wallet') return 'wallet';
+  if (v === 'google') return 'google';
+  if (v === 'youversion') return 'youversion';
+  return 'passkey';
+};
+
 export default function NamingPage() {
-  const { session, agentName } = useSession();
+  const { session, agentName, agentAddress, agentDeployed, refreshProfile } = useSession();
   const [rows, setRows] = useState<NameRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<NameRow | null>(null);
+  // The connected home is deployed but NAMELESS (spec 257 name-deferral, e.g. Google onboarding) → offer
+  // the nameless→named transition right here, then chain into "publish connection".
+  const isNameless = !!agentAddress && agentDeployed && !agentName;
 
   const load = useCallback(async () => {
     setRows(null); setErr(null);
@@ -64,6 +77,22 @@ export default function NamingPage() {
       title="Naming Service"
       description="Manage the names you steward. Publish an opt-in connection record so you can re-connect to your agent by name on a new device — you choose what's shared."
     >
+      {/* Nameless → named transition (spec 257/280). Deployed-but-unnamed home: claim a name, then
+          optionally publish a connection — all from here. */}
+      {isNameless && agentAddress && (
+        <ClaimNameCard
+          agent={agentAddress}
+          via={toViaForSign(session?.via)}
+          token={session?.token ?? null}
+          onNamed={(claimedName) => {
+            void refreshProfile();
+            void load();
+            // Chain straight into "publish connection" for the freshly-named agent.
+            setEditFor({ name: claimedName, subjectAgent: agentAddress, registered: false, shaclConforms: true, mine: true, connectionKind: null, connectionAddress: null });
+          }}
+        />
+      )}
+
       <div style={{ ...cardSty, background: '#fffbeb', borderColor: '#fcd34d', marginBottom: '1.1rem', fontSize: '.82rem', color: '#92400e' }}>
         <strong>Connection records are public.</strong> They live on the public naming service so a returning person can
         discover how to connect — there is no private way to do this (you have no credential yet at that point). Publishing
@@ -177,6 +206,57 @@ function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Nameless → named (spec 257). Claim a public name for the deployed-but-unnamed home, signed by the
+ *  member's current credential, gasless — then `onNamed` chains into the publish-connection step. Reuses
+ *  the existing `claimName` primitive (which also fires the discovery re-index). */
+function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Via; token: string | null; onNamed: (name: string) => void }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const label = nameLabel(value);
+
+  const claim = async () => {
+    if (!label) return;
+    setBusy(true); setErr(null);
+    try {
+      const signHash = await signHashFor(via, agent, token ? { token } : undefined);
+      const res = await claimName(agent, signHash, label, (s) => setStep(s));
+      if (res.ok) onNamed(res.name);
+      else setErr(res.error);
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: '#c7d2fe' }}>
+      <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Give your home a public name</h3>
+      <p style={{ fontSize: '.85rem', color: '#475569', marginTop: 0 }}>
+        Your agent is deployed but <strong>unnamed</strong>. Claim a name so others can find it — and so you can
+        re-connect by name on a new device. Your Smart Agent address doesn’t change; the name is a facet pointing at it.
+      </p>
+      {busy ? (
+        <p style={{ color: '#64748b' }}>{step || 'Claiming your name…'}</p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              value={value}
+              onChange={(e) => setValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+              placeholder="e.g. rich-pedersen" autoCapitalize="none" spellCheck={false} aria-label="Your public name"
+              style={{ flex: 1, minWidth: 180, padding: '.6rem .8rem', borderRadius: 10, border: '1.5px solid #cbd5e1', font: 'inherit' }}
+            />
+            <button style={btnPrimarySty} onClick={claim} disabled={!label}>Claim name</button>
+          </div>
+          {label && <p style={{ ...mono, fontSize: '.78rem', color: '#64748b', marginTop: '.4rem' }}>→ {label}.{CONNECT_DOMAIN}</p>}
+          {err && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.4rem' }}>{err}</p>}
+          <p style={{ fontSize: '.78rem', color: '#94a3b8', marginTop: '.5rem' }}>After naming, you can publish an opt-in connection record so you can sign back in by name.</p>
+        </>
+      )}
     </div>
   );
 }
