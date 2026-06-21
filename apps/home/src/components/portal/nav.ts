@@ -3,7 +3,7 @@
 // agent kinds appear and whether they're live. Imported only by the shell (PortalShell).
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import {
-  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
+  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -56,6 +56,8 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): 
   portal.push({ id: 'registry', label: 'Registry', href: '/registry', Icon: DatabaseIcon, status: 'live' });
   // Agent Naming Service (spec 280): manage the names you steward + publish opt-in connection bootstrap.
   portal.push({ id: 'naming', label: 'Naming Service', href: '/naming', Icon: TagIcon, status: 'live' });
+  // Skills (spec 282): manage skills privately + assert a public subset for discovery.
+  portal.push({ id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' });
   portal.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'soon' });
 
   return [

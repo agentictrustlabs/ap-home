@@ -41,6 +41,9 @@ export const DatabaseIcon: IconComponent = (p) => (
 export const TagIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3H4a1 1 0 0 0-1 1v5.59A2 2 0 0 0 3.83 11l9.58 9.59a2 2 0 0 0 2.83 0l4.35-4.35a2 2 0 0 0 0-2.83Z" /><circle cx="7.5" cy="7.5" r="1.5" /></Svg>
 );
+export const AwardIcon: IconComponent = (p) => (
+  <Svg {...p}><circle cx="12" cy="8" r="6" /><path d="M8.21 13.89 7 23l5-3 5 3-1.21-9.12" /></Svg>
+);
 export const LinkIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8" /></Svg>
 );

@@ -33,7 +33,7 @@ import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectA
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
-import { hashAgentCard, type AgentCard } from '@agenticprimitives/agent-profile';
+import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
@@ -2086,6 +2086,51 @@ export async function setConnectionInfo(
   }
   const res = await executeCall(sa, signHash, buildExecuteBatchCallData(calls));
   if (!res.ok) return res;
+  return { ok: true, txHash: res.txHash };
+}
+
+// ── Public skill assertion (spec 282) — the agent's OWN SA writes its `atl:skills` profile property ──
+/** On-chain id for the publicly-asserted skills property (mirrors AgentProfilePredicates.ATL_SKILLS). */
+const ATL_SKILLS: Hex = keccak256(toBytes('atl:skills'));
+
+/** Read the agent's currently-asserted PUBLIC skills (comma-joined labels), for prefilling the UI. */
+export async function getSkills(sa: Address): Promise<string[]> {
+  try {
+    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const v = (await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [sa, ATL_SKILLS] })) as string;
+    return v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+/** Assert PUBLIC skills (spec 282): the agent's own SA writes `atl:skills` on AgentProfileResolver
+ *  (`onlyAgent` → msg.sender == SA via executeCall), signed by `signHash`, gasless. `setStringProperty`
+ *  is `onlyRegistered`, so we first `register` the profile in the SAME batch if needed (register reverts
+ *  if already registered — AlreadyRegistered — hence the isRegistered gate). The asserted labels are what
+ *  the discovery indexer projects + the matcher ranks on; the agent's full PRIVATE claim set stays in its
+ *  vault (Phase 2b). Fires the discovery re-index. */
+export async function setSkills(
+  sa: Address,
+  name: string,
+  skills: string[],
+  signHash: SignHash,
+  opts: { displayName?: string } = {},
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const resolver = CONTRACTS.agentProfileResolver;
+  const value = skills.map((s) => s.trim()).filter(Boolean).join(', ');
+  const calls: ContractCall[] = [];
+  // onlyRegistered gate — register the profile first (in-batch) if the SA has no profile yet.
+  let registered = false;
+  try {
+    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    registered = (await pc.readContract({ address: resolver, abi: agentProfileResolverAbi, functionName: 'isRegistered', args: [sa] })) as boolean;
+  } catch { /* default to not-registered → include register (safe: a never-registered SA needs it) */ }
+  if (!registered) {
+    calls.push(buildRegisterProfileCall({ profileResolver: resolver, agent: sa, displayName: opts.displayName ?? (name.split('.')[0] ?? '') }));
+  }
+  calls.push({ to: resolver, value: 0n, data: encodeFunctionData({ abi: agentProfileResolverAbi, functionName: 'setStringProperty', args: [sa, ATL_SKILLS, value] }) });
+  const res = await executeCall(sa, signHash, buildExecuteBatchCallData(calls));
+  if (!res.ok) return res;
+  requestReindex([sa]); // auto-index: project the asserted skills so the matcher ranks on them
   return { ok: true, txHash: res.txHash };
 }
 
