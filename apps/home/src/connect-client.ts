@@ -556,17 +556,21 @@ export type ConnectedCredential = { kind: 'passkey'; digest: Hex } | { kind: 'eo
 
 const isSocialVia = (via: string | undefined) => { const v = (via ?? '').toLowerCase(); return v === 'google' || v === 'youversion'; };
 
-/** Sync, local-only resolution (passkey/wallet). Returns null for social (use `resolveCredential`). */
+/** Sync, local-only resolution (passkey/wallet). Returns null for social (use `resolveCredential`).
+ *  Robust to an AMBIGUOUS session `via`: a restored cross-subdomain SSO session carries via='sso' (or a
+ *  cookie via), not 'passkey'/'wallet', so we don't branch solely on it — we use whatever local credential
+ *  exists. For the read-only custody CHECK the passkey `credentialIdDigest` is the only thing needed
+ *  (pubKeyX is NOT required — a sign-in assertion caches the digest even when the pubkey isn't re-derived). */
 export function connectedCredential(via: string | undefined, name: string | null): ConnectedCredential | null {
   const v = (via ?? '').toLowerCase();
-  if (v === 'wallet') {
-    const eoa = name ? recallHomeEoa(name) : undefined;
-    return eoa ? { kind: 'eoa', address: eoa } : null;
-  }
-  if (v === 'passkey') {
-    const p = loadPasskey();
-    return p && p.pubKeyX ? { kind: 'passkey', digest: p.credentialIdDigest } : null;
-  }
+  const eoa = name ? recallHomeEoa(name) : undefined;
+  // Wallet session → the remembered custodian EOA for this name.
+  if (v === 'wallet') return eoa ? { kind: 'eoa', address: eoa } : null;
+  // Passkey (or any restored/ambiguous session that has a local passkey) → its credentialIdDigest.
+  const pk = loadPasskey();
+  if (pk?.credentialIdDigest) return { kind: 'passkey', digest: pk.credentialIdDigest };
+  // Last resort for an ambiguous session with a remembered wallet but no local passkey.
+  if (eoa) return { kind: 'eoa', address: eoa };
   return null;
 }
 
