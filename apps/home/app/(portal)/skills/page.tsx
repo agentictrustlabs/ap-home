@@ -1,19 +1,20 @@
 'use client';
-// Skills (spec 282). Two-tier: your full skill set is PRIVATE (managed here; the per-SA vault is Phase 2b),
-// and you assert a chosen subset PUBLICLY so the discovery matcher (spec 281) can rank you for a need. The
-// public assertion is the agent's own `atl:skills` profile property (owner-signed, gasless) — projected by
-// the indexer, ranked by /discover. Your Smart Agent address is unchanged; skills are a public facet.
-// Self-contained inline styles (the app's class system has no card/chip classes).
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+// Skills (spec 282). Two tiers, both managed here:
+//   • PRIVATE — your full skill claims live in your agent's Connect-home vault (session-authorized; the
+//     per-SA MCP vault is the production target). Never public.
+//   • PUBLIC  — you toggle which claims to ASSERT publicly; the asserted labels become your agent's
+//     `atl:skills` profile property (owner-signed, gasless), which the discovery matcher (spec 281) ranks.
+// Your Smart Agent address is unchanged; skills are a facet. Works for person/org/service/treasury SAs.
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { getSkills, setSkills } from '../../../src/connect-client';
+import { listSkillClaims, saveSkillClaims, setSkills, getSkills, type SkillClaim } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const cardSty: CSSProperties = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 1px 3px rgba(15,23,42,.07)', padding: '1rem 1.1rem' };
 const btnSty: CSSProperties = { padding: '.5rem .9rem', borderRadius: 10, fontWeight: 700, fontSize: '.85rem', cursor: 'pointer', border: '1.5px solid #c7d2fe', background: '#fff', color: '#4f46e5', font: 'inherit' };
 const btnPrimarySty: CSSProperties = { ...btnSty, background: '#4f46e5', color: '#fff', border: '1.5px solid #4f46e5' };
-const chipSty: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontSize: '.82rem', fontWeight: 600, padding: '.3rem .7rem', borderRadius: 999, border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca' };
+const pill = (on: boolean): CSSProperties => ({ fontSize: '.72rem', fontWeight: 800, padding: '.2rem .55rem', borderRadius: 999, border: '1px solid', cursor: 'pointer', ...(on ? { color: '#047857', background: '#ecfdf5', borderColor: '#6ee7b7' } : { color: '#64748b', background: '#f1f5f9', borderColor: '#e2e8f0' }) });
 
 const toViaForSign = (via: string | undefined): Via => {
   const v = (via ?? '').toLowerCase();
@@ -23,77 +24,102 @@ const toViaForSign = (via: string | undefined): Via => {
   return 'passkey';
 };
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ');
+const assertedLabels = (cs: SkillClaim[]) => cs.filter((c) => c.asserted).map((c) => c.label).sort();
 
 export default function SkillsPage() {
   const { session, agentAddress, agentName, agentDeployed } = useSession();
-  const [skills, setSkillsState] = useState<string[]>([]);
-  const [published, setPublished] = useState<string[]>([]);
+  const [claims, setClaims] = useState<SkillClaim[]>([]);
+  const [publishedPublic, setPublishedPublic] = useState<string[]>([]); // currently on-chain asserted set
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'save' | 'publish' | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!agentAddress) { setLoading(false); return; }
+    if (!agentAddress || !session?.token) { setLoading(false); return; }
     setLoading(true);
-    const cur = await getSkills(agentAddress);
-    setSkillsState(cur); setPublished(cur); setLoading(false);
-  }, [agentAddress]);
+    const [vault, onChain] = await Promise.all([listSkillClaims(session.token), getSkills(agentAddress)]);
+    setClaims(vault); setPublishedPublic(onChain.slice().sort()); setLoading(false);
+  }, [agentAddress, session?.token]);
   useEffect(() => { void load(); }, [load]);
 
-  const add = () => { const v = norm(input); if (v && !skills.some((s) => s.toLowerCase() === v.toLowerCase())) setSkillsState([...skills, v]); setInput(''); };
-  const remove = (s: string) => setSkillsState(skills.filter((x) => x !== s));
-  const dirty = skills.join('||') !== published.join('||');
+  const add = () => { const v = norm(input); if (v && !claims.some((c) => c.label.toLowerCase() === v.toLowerCase())) setClaims([...claims, { label: v, relation: 'hasSkill', asserted: false, createdAt: Date.now() }]); setInput(''); };
+  const remove = (label: string) => setClaims(claims.filter((c) => c.label !== label));
+  const toggle = (label: string) => setClaims(claims.map((c) => (c.label === label ? { ...c, asserted: !c.asserted } : c)));
 
-  const publish = async () => {
-    if (!agentAddress || !agentName) return;
-    setBusy(true); setErr(null); setMsg(null);
+  const publicChanged = useMemo(() => assertedLabels(claims).join('||') !== publishedPublic.join('||'), [claims, publishedPublic]);
+
+  // Save the private vault set (no prompt). The public assertion is a separate, owner-signed step.
+  const savePrivate = async () => {
+    if (!session?.token) return;
+    setBusy('save'); setErr(null); setMsg(null);
+    const res = await saveSkillClaims(session.token, claims);
+    if (res.ok) setMsg('Saved to your private vault.'); else setErr(res.error);
+    setBusy(null);
+  };
+
+  // Publish the ASSERTED subset on-chain (owner-signed) so discovery ranks you for it. Also re-saves private.
+  const publishPublic = async () => {
+    if (!agentAddress || !agentName || !session?.token) return;
+    setBusy('publish'); setErr(null); setMsg(null);
     try {
-      const signHash = await signHashFor(toViaForSign(session?.via), agentAddress, session?.token ? { token: session.token } : undefined);
-      const res = await setSkills(agentAddress, agentName, skills, signHash);
-      if (res.ok) { setPublished(skills); setMsg('Skills published — discovery will rank you for these within seconds.'); }
+      await saveSkillClaims(session.token, claims); // keep the vault in sync first
+      const labels = assertedLabels(claims);
+      const signHash = await signHashFor(toViaForSign(session.via), agentAddress, { token: session.token });
+      const res = await setSkills(agentAddress, agentName, labels, signHash);
+      if (res.ok) { setPublishedPublic(labels); setMsg(labels.length ? 'Published — discovery will rank you for your asserted skills within seconds.' : 'Cleared your public skills.'); }
       else setErr(res.error);
     } catch (e) { setErr(String((e as Error)?.message ?? e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   return (
     <SectionShell
       title="Skills"
-      description="Publish the skills your agent can be discovered by. The matcher ranks you when someone's intent or a required-skill mandate matches what you've asserted."
+      description="Manage your skill claims privately, and assert a chosen subset publicly so discovery can rank you when an intent or required-skill mandate matches."
     >
       <div style={{ ...cardSty, background: '#eff6ff', borderColor: '#bfdbfe', marginBottom: '1.1rem', fontSize: '.82rem', color: '#1e40af' }}>
-        Skills you publish here are <strong>public</strong> (a profile facet of your Smart Agent) so discovery can match you.
-        Your full skill set — proficiency, who endorsed you — stays <strong>private</strong> in your agent's vault; only the
-        labels you assert here are public. Works the same for a person, organization, or service/treasury agent.
+        Your skill claims are <strong>private</strong> (held in your agent's vault). Toggle a claim <strong>Public</strong> to
+        assert it — only asserted labels become a public facet of your Smart Agent and feed discovery. Same for a person,
+        organization, or service/treasury agent.
       </div>
 
       {!agentAddress ? <p style={{ color: '#64748b' }}>Sign in to manage your agent's skills.</p>
-        : !agentName ? <p style={{ color: '#64748b' }}>Your home needs a public name first (Naming Service tab) before it can publish skills.</p>
-        : agentDeployed === false ? <p style={{ color: '#64748b' }}>Your agent isn't deployed yet.</p>
-        : loading ? <p style={{ color: '#64748b' }}>Loading your published skills…</p>
+        : !agentName ? <p style={{ color: '#64748b' }}>Your home needs a public name first (Naming Service tab) before asserting skills publicly.</p>
+        : loading ? <p style={{ color: '#64748b' }}>Loading your skill claims…</p>
         : (
           <div style={cardSty}>
-            <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: skills.length ? '.8rem' : 0 }}>
-              {skills.map((s) => (
-                <span key={s} style={chipSty}>{s}<button onClick={() => remove(s)} aria-label={`remove ${s}`} style={{ border: 'none', background: 'none', color: '#6366f1', cursor: 'pointer', fontWeight: 800, fontSize: '1rem', lineHeight: 1, padding: 0 }}>×</button></span>
+            <div style={{ display: 'grid', gap: '.5rem', marginBottom: claims.length ? '.9rem' : 0 }}>
+              {claims.map((c) => (
+                <div key={c.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.6rem', padding: '.5rem .7rem', border: '1px solid #e2e8f0', borderRadius: 10 }}>
+                  <span style={{ fontWeight: 600, fontSize: '.9rem' }}>{c.label}</span>
+                  <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
+                    <span style={pill(c.asserted)} role="button" onClick={() => toggle(c.label)} title="Toggle public assertion">{c.asserted ? '● Public' : '○ Private'}</span>
+                    <button onClick={() => remove(c.label)} aria-label={`remove ${c.label}`} style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+                  </div>
+                </div>
               ))}
-              {skills.length === 0 && <span style={{ color: '#94a3b8', fontSize: '.85rem' }}>No skills yet — add a few capabilities others could discover you by.</span>}
+              {claims.length === 0 && <span style={{ color: '#94a3b8', fontSize: '.85rem' }}>No skill claims yet — add capabilities you can be discovered by.</span>}
             </div>
             <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-                placeholder="e.g. accounting, treasury management, smart contracts"
+                placeholder="e.g. treasury management, accounting, solidity audits"
                 style={{ flex: 1, minWidth: 200, padding: '.6rem .8rem', borderRadius: 10, border: '1.5px solid #cbd5e1', font: 'inherit' }}
               />
               <button style={btnSty} onClick={add} disabled={!norm(input)}>Add</button>
-              <button style={btnPrimarySty} onClick={publish} disabled={busy || !dirty}>{busy ? 'Publishing…' : 'Publish skills'}</button>
+            </div>
+            <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+              <button style={btnSty} onClick={savePrivate} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save private'}</button>
+              <button style={btnPrimarySty} onClick={publishPublic} disabled={!!busy || !publicChanged} title={publicChanged ? '' : 'Public assertions are up to date'}>
+                {busy === 'publish' ? 'Publishing…' : 'Publish public assertions'}
+              </button>
             </div>
             <p style={{ fontSize: '.78rem', color: '#64748b', marginTop: '.7rem' }}>
-              Your agent signs the update itself (<code>msg.sender == agent</code>) with your {toViaForSign(session?.via)} credential, sponsored — one prompt.
+              Publishing writes your asserted labels on-chain — your agent signs it (<code>msg.sender == agent</code>) with your {toViaForSign(session?.via)} credential, sponsored. One prompt.
             </p>
             {msg && <p style={{ fontSize: '.82rem', color: '#047857', marginTop: '.4rem' }}>{msg}</p>}
             {err && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.4rem' }}>{err}</p>}

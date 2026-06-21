@@ -2134,6 +2134,30 @@ export async function setSkills(
   return { ok: true, txHash: res.txHash };
 }
 
+// ── Private skill-claim vault (spec 282 Phase 2b) — the PRIVATE tier ──────────────────────────────
+// The full claim set lives in the person's Connect-home vault (KV, session-authorized) — never public.
+// Each claim has an `asserted` flag; the asserted subset's labels are what `setSkills` publishes on-chain.
+export interface SkillClaim { label: string; skillId?: string; relation?: string; proficiency?: number; asserted: boolean; createdAt?: number }
+
+/** Read the person's private skill claims from the home vault (session token). */
+export async function listSkillClaims(token: string): Promise<SkillClaim[]> {
+  const r = await fetch('/connect/skills', { headers: { authorization: `Bearer ${token}` } });
+  if (!r.ok) return [];
+  const b = (await r.json().catch(() => ({}))) as { skills?: SkillClaim[] };
+  return b.skills ?? [];
+}
+
+/** Persist the full private claim set to the home vault (session-authorized; no on-chain write). */
+export async function saveSkillClaims(token: string, skills: SkillClaim[]): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await fetch('/connect/skills', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ skills }),
+  });
+  const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  return r.ok && b.ok ? { ok: true } : { ok: false, error: b.error ?? `save failed (HTTP ${r.status})` };
+}
+
 /** List ALL the connected person's organizations (private vault credentials), for the
  *  /you portal. Same-origin, authorized by the home session token (aud = the home aud). */
 export async function listMyOrgs(token: string): Promise<MyOrg[]> {
