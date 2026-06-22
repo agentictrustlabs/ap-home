@@ -13,6 +13,7 @@ import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, 
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
+import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -234,13 +235,16 @@ export function NameAgentForm({
   );
 }
 
-/** A treasury card — name (or "unnamed" + name-it slot), address, live balance, explorer, fund action. */
+/** A treasury card — name (or "unnamed" + name-it slot), address, live balance, explorer, fund action, and
+ *  (for NAMED treasuries) a "Connect to hosts" popup that runs the bind → authorize → publish ceremony with
+ *  the treasury already selected (spec 283/284). */
 function TreasuryCard({
   name, address, sublabel, nameSlot, person, via, token, refreshKey, onFunded,
 }: {
   name: string; address: string; sublabel?: string; nameSlot?: React.ReactNode;
   person?: string | null; via?: string; token?: string | null; refreshKey?: number; onFunded?: () => void;
 }) {
+  const [connectOpen, setConnectOpen] = useState(false);
   return (
     <div className="manage-card">
       <div className="manage-card-head">
@@ -253,7 +257,18 @@ function TreasuryCard({
         <a href={EXPLORER + address} target="_blank" rel="noreferrer">explorer ↗</a>
       </p>
       {!name && nameSlot}
-      {token && person && onFunded && <FundForm treasury={address} person={person} via={via ?? ''} token={token} onDone={onFunded} />}
+      <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+        {token && person && onFunded && <FundForm treasury={address} person={person} via={via ?? ''} token={token} onDone={onFunded} />}
+        {name && token && (
+          <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.78rem', padding: '.25rem .55rem' }} onClick={() => setConnectOpen(true)}>
+            Connect to hosts
+          </button>
+        )}
+      </div>
+      {connectOpen && token && (
+        <ConnectTreasuryModal treasury={address} name={name} person={person} via={via} token={token}
+          onClose={() => setConnectOpen(false)} onDone={onFunded} />
+      )}
     </div>
   );
 }
