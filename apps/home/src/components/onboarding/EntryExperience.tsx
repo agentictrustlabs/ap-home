@@ -640,6 +640,12 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
   const showWallet = info ? !!info.hasEoa : true;
   const onlyWallet = info ? !!info.hasEoa && !info.hasPasskey : false;
   const notFound = info ? info.exists === false : false;
+  // A SOCIAL (OIDC) custodian — YouVersion / Google — signs via the KMS path, NOT a user wallet. Its
+  // custodian address is KMS-derived and LOOKS like an EOA (so hasEoa=true), which would otherwise make a
+  // youversion/google home wrongly offer "Continue with wallet". The connection-bootstrap kind (spec 280)
+  // is the authoritative signer signal, so it drives the CTA.
+  const socialKind: 'google' | 'youversion' | null =
+    info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ? info.connectionKind : null;
 
   // Recognized: the member already has a live session for THIS home → one tap, no fresh credential.
   if (recognized) {
@@ -709,15 +715,24 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
               )}
             </p>
           )}
+          {/* Social (OIDC/KMS) custodian → the credential's own sign-in is the primary CTA. */}
+          {socialKind === 'youversion' && (
+            <button className="btn-primary" onClick={() => continueWithYouVersion(name)}>Continue with YouVersion</button>
+          )}
+          {socialKind === 'google' && (
+            <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Continue with Google</button>
+          )}
           {showPasskey && (
-            <button className="btn-primary" onClick={() => go('passkey')}>Continue with passkey</button>
+            <button className={socialKind ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
           )}
           {showPasskey && (
             <button className="btn-ghost onboarding-secondary" onClick={() => go('passkey', 'discoverable')}>
               Use synced or phone passkey
             </button>
           )}
-          {showWallet && (
+          {/* A social (OIDC/KMS) custodian is NOT a user wallet — suppress the misleading wallet CTA for it
+              (its KMS address only LOOKS like an EOA). */}
+          {showWallet && !socialKind && (
             <button className={onlyWallet ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => go('wallet')}>
               Continue with wallet
             </button>
