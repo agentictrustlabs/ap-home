@@ -61,7 +61,9 @@ export function ConnectTreasuryModal({
   const derived = useMemo(() => deriveEndpoints(name), [name]);
   const [a2aEndpoint, setA2a] = useState(derived.a2a);
   const [mcpEndpoint, setMcp] = useState(derived.mcp);
-  const [hostDelegate, setHostDelegate] = useState('');
+  // Single-tenant default: the host acts AS this treasury, so the delegate is the treasury's OWN SA. Override
+  // only if the host has its own operator SA. Pre-filling removes the "what do I put here?" guess.
+  const [hostDelegate, setHostDelegate] = useState(treasury);
   const [profile, setProfile] = useState<TreasuryProfileId>('payments');
   const [phase, setPhase] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [step, setStep] = useState('');
@@ -147,9 +149,12 @@ export function ConnectTreasuryModal({
         <label style={label}>MCP endpoint
           <input style={field} placeholder={`https://mcp.<label>.${A2A_DOMAIN}`} value={mcpEndpoint} onChange={(e) => setMcp(e.target.value)} disabled={phase === 'running'} />
         </label>
-        <label style={label}>Host delegate SA (the host the treasury authorizes)
+        <label style={label}>Host delegate SA (the agent the treasury authorizes to act for it)
           <input style={field} placeholder="0x…" value={hostDelegate} onChange={(e) => setHostDelegate(e.target.value)} disabled={phase === 'running'} />
         </label>
+        <p style={{ margin: '.3rem 0 0', fontSize: '.74rem', color: '#94a3b8' }}>
+          Defaults to this treasury&apos;s own address — single-tenant, so the host acts as the treasury. Change it only if the host runs under a separate operator SA.
+        </p>
         <label style={label}>Profile to publish
           <select style={field} value={profile} onChange={(e) => setProfile(e.target.value as TreasuryProfileId)} disabled={phase === 'running'}>
             {PROFILES.map((p) => <option key={p} value={p}>{p}</option>)}
