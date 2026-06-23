@@ -29,7 +29,7 @@ setup; after it, `vercel --prod` redeploys.
 
 4. **Broker key + env vars** (see `.env.example` for the full list)
    ```bash
-   node ../demo-sso/scripts/gen-broker-key.mjs     # → BROKER_PRIVATE_JWK + kid
+   node scripts/gen-broker-key.mjs     # → BROKER_PRIVATE_JWK + kid
    vercel env add BROKER_PRIVATE_JWK production     # paste the JWK (mark Sensitive)
    vercel env add BROKER_KID production             # e.g. broker-1
    vercel env add RPC_URL production                # Base Sepolia (keyed RPC; Sensitive)

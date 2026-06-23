@@ -2,7 +2,7 @@
 
 **Your trust home: one origin that holds the ceremonies, signs the delegations, and hands out nothing else.**
 
-This Next.js app is the white-label **Agentic Trust Site + Personal Trust Home** ([spec 234](../../specs/234-white-label-agentic-trust-site.md), [spec 232](../../specs/232-demo-sso-vercel-nextjs-migration.md)) — the central home that the relying apps in this repo ([`demo-jp`](../demo-jp), [`demo-gs`](../demo-gs), [`demo-org`](../demo-org)) connect to. It is the production-shaped successor to [`demo-sso`](../demo-sso): the OIDC broker, the credential ceremonies, the name claiming, and the delegations the home signs on a member's behalf all live here, behind one origin.
+This Next.js app is the white-label **Agentic Trust Site + Personal Trust Home** ([spec 234](../../specs/234-white-label-agentic-trust-site.md), [spec 232](../../specs/232-demo-sso-vercel-nextjs-migration.md)) — the central home that the relying apps in this repo ([`demo-jp`](../demo-jp), [`demo-gs`](../demo-gs), [`demo-org`](../demo-org)) connect to. It is the production-shaped successor to the retired `demo-sso` app: the OIDC broker, the credential ceremonies, the name claiming, and the delegations the home signs on a member's behalf all live here, behind one origin.
 
 ## The chain it proves
 
@@ -30,7 +30,7 @@ The surface: OIDC broker routes (`/connect/*`, `/token`, `/jwks`, `/oidc/*`), Fe
 pnpm --filter @agenticprimitives-demo/sso-next dev   # next dev on http://localhost:5373
 ```
 
-Environment (broker key, RPC, redirect allowlist, optional Google OIDC) follows `.env.example`; key generation reuses `../demo-sso/scripts/gen-broker-key.mjs`. Full setup: [DEPLOY.md](./DEPLOY.md).
+Environment (broker key, RPC, redirect allowlist, optional Google OIDC) follows `.env.example`; key generation reuses `scripts/gen-broker-key.mjs`. Full setup: [DEPLOY.md](./DEPLOY.md).
 
 **Deploy:** this app ships exclusively via GitHub → Vercel — a merge to `master` auto-deploys it. There is no CLI or wrangler deploy path; the Cloudflare deploy script in this repo deliberately excludes it.
 
