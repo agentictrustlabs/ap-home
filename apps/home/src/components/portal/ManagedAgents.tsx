@@ -14,6 +14,7 @@ import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
+import { ConnectedHosts } from './ConnectedHosts';
 
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -265,6 +266,8 @@ function TreasuryCard({
           </button>
         )}
       </div>
+      {/* The relationship picture — shows only once the treasury has bound its A2A + MCP hosts on-chain. */}
+      {name && <ConnectedHosts name={name} address={address} />}
       {connectOpen && token && (
         <ConnectTreasuryModal treasury={address} name={name} person={person} via={via} token={token}
           onClose={() => setConnectOpen(false)} onDone={onFunded} />
