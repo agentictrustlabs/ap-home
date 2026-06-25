@@ -77,8 +77,10 @@ import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtim
 import {
   composeSinks,
   createConsoleAuditSink,
+  createPiiGuardrailSink,
   type AuditSink,
 } from '@agenticprimitives/audit';
+import { createD1AuditSink } from './audit-d1.js';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -120,24 +122,34 @@ function getInMemoryNonceStore(): NonceStore {
 }
 
 /**
- * Audit sink for demo-a2a (C3 pass 5b). Console-only for now — demo-a2a has
- * no D1 binding, so audit rows surface in `wrangler tail`. demo-mcp persists
- * its half of the trail in D1. The system audit doc tracks "unify a2a + mcp
- * audit destination" as a follow-up (audit_id N15 candidate); the security
- * invariant satisfied today is "every signing/minting op produces an audit
- * event", regardless of destination.
+ * Audit sink for demo-a2a (spec 291 §6c). Unifies the A2A audit destination with
+ * MCP: when a D1 `DB` binding is present, A2A persists to the SAME `audit_events`
+ * schema demo-mcp uses (PII-guarded before the durable write), so both halves of
+ * the trail are queryable together. Without the binding (no infra yet) it falls
+ * back to console-only — no behavior change. Activate by creating the D1 DB +
+ * adding the `[[d1_databases]] binding="DB"` to wrangler.toml + applying the
+ * migration in `migrations/`.
  *
- * composeSinks isolates per-sink failures (when more sinks are added the
- * fan-out won't blackhole if one of them throws).
+ * composeSinks isolates per-sink failures (fail-soft telemetry). Security-
+ * critical events should be emitted through a composeFailHardSinks wrapper at
+ * their call site, as on the MCP key-release path.
  */
-function buildAuditSink(_env: Env): AuditSink {
-  return composeSinks(createConsoleAuditSink({ prefix: '[AUDIT a2a]' }));
+function buildAuditSink(env: Env): AuditSink {
+  const console = createConsoleAuditSink({ prefix: '[AUDIT a2a]' });
+  if (env.DB) {
+    return composeSinks(console, createPiiGuardrailSink(createD1AuditSink(env.DB), { mode: 'redact' }));
+  }
+  return composeSinks(console);
 }
 
 export { SessionStoreDO };
 export { A2aTaskDO } from './a2a-task-do.js';
 
 export interface Env {
+  // Durable, queryable audit destination (spec 291 §6c). Optional: when unbound
+  // (no D1 yet) the audit sink is console-only. Same `audit_events` schema as
+  // demo-mcp so A2A + MCP rows query together. See migrations/0001_audit_events.sql.
+  DB?: D1Database;
   // Durable Object binding (declared in wrangler.toml)
   SESSIONS: DurableObjectNamespace;
   // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
