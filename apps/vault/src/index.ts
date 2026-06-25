@@ -36,7 +36,7 @@ import {
 } from './vault';
 import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
-import type { Delegation } from '@agenticprimitives/delegation';
+import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
 import { demoEntitlementResolver } from './entitlements';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
@@ -49,6 +49,7 @@ import {
   parseBearer,
   buildUnauthorizedResponse,
   buildInsufficientScopeResponse,
+  buildInvalidInvocationProofResponse,
   MCP_OAUTH_SCOPES,
 } from '@agenticprimitives/mcp-oauth';
 import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from './oauth';
@@ -309,6 +310,14 @@ export interface Env {
    * real production leaves it unset and wires a real authorization server + JWKS instead.
    */
   DEMO_OAUTH_MINT_ENABLED?: string;
+  /**
+   * Spec 287 — enables the PUBLIC NATIVE MCP ingress (`POST /mcp/native`) that requires a per-call
+   * `AgenticInvocationProofV1` (session-key proof-of-possession over the exact call). Fail-closed: the
+   * route 404s unless this is exactly 'true'. Distinct from the OAuth `/mcp` ingress (grant-bundle model,
+   * no per-call signature) and the internal A2A `/tools/*` path (service-MAC). Requires
+   * `UNIVERSAL_SIGNATURE_VALIDATOR` to verify the proof signature.
+   */
+  DEMO_NATIVE_MCP_ENABLED?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -637,6 +646,103 @@ app.post('/tools/get_org_sensitive', async (c) => {
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
+// ─── PUBLIC NATIVE MCP ingress — exact-invocation proof (spec 287) ───────
+//
+// The third transport (alongside internal A2A `/tools/*` service-MAC and the
+// OAuth `/mcp` grant-bundle ingress): a TRULY PUBLIC delegation-token call that
+// binds the EXACT arguments via an `AgenticInvocationProofV1` (the session key
+// signs an EIP-712 digest over chainId/audience/operation/argsHash/tokenHash/
+// requestId/window; verified through the UniversalSignatureValidator + one-shot
+// requestId). This closes the gap where the public hop had only the delegation
+// token (proves "may call tool", not "is making THIS exact call").
+//
+// No service-MAC (not internal) and no OAuth bearer (the proof IS the per-call
+// authenticity). `requireInvocationProof: true` makes withDelegation fail-closed
+// on a missing/invalid/replayed proof. Fail-closed behind DEMO_NATIVE_MCP_ENABLED.
+//
+// NOTE: the proof binds the handler's argument object — for this route that is
+// `{ args: <toolArgs> }` (the call shape below). A client builds the proof with
+// `buildInvocationProof({ ..., args: { args: toolArgs } })`.
+app.post('/mcp/native', async (c) => {
+  if (c.env.DEMO_NATIVE_MCP_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
+  const usv = c.env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!usv) return c.json({ error: 'unsupported', detail: 'UNIVERSAL_SIGNATURE_VALIDATOR unset' }, 501);
+
+  const reqBody = (await c.req.json().catch(() => null)) as
+    | { token?: string; invocationProof?: AgenticInvocationProofV1; tool?: string; args?: { fields?: string[]; purpose?: string } }
+    | null;
+  if (!reqBody?.token) return c.json({ error: 'token required' }, 400);
+  if (!reqBody.invocationProof) return buildInvalidInvocationProofResponse();
+
+  const auditSink = buildAuditSink(c.env);
+  const correlationId = getCorrelationId(c);
+  const environment =
+    typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development';
+
+  // The public native config: baseConfig + the spec-287 gate + the validator.
+  const nativeCfg: McpResourceVerifyConfig = {
+    ...baseConfig(c.env),
+    requireInvocationProof: true,
+    universalSignatureValidator: usv as Address,
+  };
+
+  type Args = { args?: { fields?: string[]; purpose?: string } };
+  const TOOLS: Record<
+    string,
+    { classification: typeof GET_PII_CLASSIFICATION; run: (principal: Address, args: Args['args']) => Promise<unknown> }
+  > = {
+    get_pii: {
+      classification: GET_PII_CLASSIFICATION,
+      run: async (principal, args) => {
+        const r = await readSensitive(
+          c.env,
+          { principal, args, correlationId, audience: c.env.MCP_AUDIENCE },
+          { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive', toolName: 'get_pii', servedBy: 'demo-mcp:get_pii (native)' },
+        );
+        if (!r.ok) return r;
+        return { ok: true, subject: principal, subject_name: r.subject_name, record: r.record, served_by: 'demo-mcp:get_pii (native)' };
+      },
+    },
+    get_org_sensitive: {
+      classification: GET_ORG_SENSITIVE_CLASSIFICATION,
+      run: async (principal, args) => {
+        const r = await readSensitive(
+          c.env,
+          { principal, args, correlationId, audience: c.env.MCP_AUDIENCE },
+          { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive (native)' },
+        );
+        if (!r.ok) return r;
+        return { ok: true, org: principal, org_name: r.subject_name, record: r.record, served_by: 'demo-mcp:get_org_sensitive (native)' };
+      },
+    },
+  };
+  const entry = TOOLS[reqBody.tool ?? ''];
+  if (!entry) return c.json({ error: 'unknown tool', detail: reqBody.tool ?? null }, 400);
+
+  const handler = withDelegation<Args>(
+    nativeCfg,
+    async ({ principal, args }) => entry.run(principal, args),
+    { toolName: reqBody.tool, classification: entry.classification, auditSink, correlationId, environment },
+  );
+  try {
+    const result = await handler({
+      token: reqBody.token,
+      invocationProof: reqBody.invocationProof,
+      args: reqBody.args ?? {},
+    } as Args & { token: string; invocationProof: AgenticInvocationProofV1 });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) {
+      // A native-path auth failure is most often a bad/missing/replayed proof —
+      // surface the distinct OAuth-style code so a client can re-mint a fresh proof.
+      console.error('[demo-mcp native] McpAuthError:', e.code, e.correlationId);
+      if (e.code === 'auth-failed') return buildInvalidInvocationProofResponse();
+      return c.json({ error: 'auth failed', code: e.code, correlationId: e.correlationId }, 401);
+    }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
 });

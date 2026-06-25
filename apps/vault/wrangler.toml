@@ -35,6 +35,9 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 # Fail-closed — 404s unless 'true'. Testnet-only convenience (wields the admin credential +
 # creates a cost-bearing GCP key per owner); production leaves it unset + provisions out of band.
 DEMO_VAULT_PROVISION_ENABLED = "true"
+# spec 287: enable the PUBLIC NATIVE MCP ingress (/mcp/native) requiring a per-call
+# AgenticInvocationProofV1. Fail-closed — 404s unless 'true'. Requires UNIVERSAL_SIGNATURE_VALIDATOR.
+DEMO_NATIVE_MCP_ENABLED = "true"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Production environment — Worker name: "demo-mcp-production"
@@ -59,6 +62,8 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 # Testnet demo: enable on-demand KEK provisioning (the one-click ceremony auto-provisions).
 # A real production deployment OMITS this — provisioning is operator-only, out of band.
 DEMO_VAULT_PROVISION_ENABLED = "true"
+# spec 287: enable the public native MCP ingress (/mcp/native) with exact-invocation proof.
+DEMO_NATIVE_MCP_ENABLED = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"
