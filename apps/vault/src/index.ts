@@ -39,6 +39,8 @@ import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVau
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
+import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
+import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
 
 // Spec 290 §8 — the per-SA hard-budget Durable Object must be exported from the Worker entry so CF can
@@ -419,6 +421,27 @@ export interface Env {
   DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
 }
 
+// spec 289 §5 — the resilient chain-read authority port (W1 revocation + W2 acceptance). Built once per
+// isolate over a single viem provider (the configured RPC); add more providers for multi-RPC divergence
+// later. Returns undefined when it can't be built (no RPC / USV) so the verify config falls back to the
+// inline single-client reads. Memoized: the breaker/freshness state persists across requests in the isolate.
+let _chainReader: ReturnType<typeof createChainAuthorityReader> | undefined;
+let _chainReaderTried = false;
+function chainAuthorityReader(env: Env): ReturnType<typeof createChainAuthorityReader> | undefined {
+  if (_chainReaderTried) return _chainReader;
+  _chainReaderTried = true;
+  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!env.RPC_URL || !usv) return undefined;
+  const provider = createViemChainProvider({
+    source: 'base-sepolia-rpc',
+    delegationManager: env.DELEGATION_MANAGER as Address,
+    universalSignatureValidator: usv as Address,
+    rpcUrl: env.RPC_URL,
+  });
+  _chainReader = createChainAuthorityReader({ chainId: Number(env.CHAIN_ID), providers: [provider] });
+  return _chainReader;
+}
+
 function baseConfig(env: Env): McpResourceVerifyConfig {
   return {
     audience: env.MCP_AUDIENCE,
@@ -449,6 +472,12 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     // operator-key story — accepted testnet hole C-1), so it EXPLICITLY opts out. Client-minted vault
     // calls use `vaultConfig`, which keeps the default (binding enforced). The opt-out is greppable.
     allowUnboundSessionToken: true,
+    // spec 289 §5 (W1+W2) — route the revocation + acceptance reads through the resilient chain-state
+    // port (per-provider circuit-breaker + timeout + the revocation bounded-freshness/monotonic invariant
+    // + divergence evidence) instead of the inline single-client reads. Falls back to inline when the
+    // reader can't be built (no RPC/USV). The signature read stays inline (W3, deferred).
+    chainRevocationReader: chainAuthorityReader(env),
+    chainAcceptanceReader: chainAuthorityReader(env),
   };
 }
 
