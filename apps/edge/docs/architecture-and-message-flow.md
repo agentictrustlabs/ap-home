@@ -111,6 +111,15 @@ Key properties (all in [`apps/demo-edge/src/index.ts`](../src/index.ts)):
 demo-mcp exposes **three ingress paths**, plus demo-a2a's own session/userOp surface. The edge fronts all of
 them. Below, each flow is shown as it will run **through the edge** (target state — see §6 for what's live today).
 
+> **Consumer doctrine — read this before reading the flows ([ADR-0044](../../../docs/architecture/decisions/0044-a2a-is-the-agentic-orchestration-layer.md)).**
+> A first-party UI expresses an **intent** to an **A2A agent**, which discovers + plans + assembles authority
+> and composes MCP tools as primitives. **Flow B is the first-party agentic pattern** (intent → a2a → MCP).
+> **Flows C and D are the *external-MCP-client* primitive** — `/mcp` (OAuth) and `/mcp/native` exist so
+> *other people's* agents (Claude, ChatGPT, a 3rd-party LangChain agent) can reach these capabilities. The
+> Act6 panels that call them directly from the browser are **demonstrations of that ingress primitive, NOT a
+> model for first-party product UX** — a first-party web app driving MCP directly is the anti-pattern (RPC
+> with extra steps). The edge (admission) is orthogonal to all of this.
+
 ### Flow A — Treasury setup / gasless userOp (web → edge → demo-a2a)
 
 The Act ladder (deploy person SA, create org, create treasury, schedule custody, execute calls) goes to
@@ -140,7 +149,7 @@ sequenceDiagram
   E-->>W: passthrough
 ```
 
-### Flow B — Delegation-gated relay read (web → edge → demo-a2a → demo-mcp via service-MAC)
+### Flow B — ✅ the first-party AGENTIC pattern: intent → a2a → MCP (web → edge → demo-a2a → demo-mcp via service-MAC)
 
 The "read PII / Org-sensitive" buttons. The browser holds a signed Variant-A delegation (from Act 5) and
 posts it to demo-a2a, which is the **local authority** for this path: it ERC-1271-verifies the delegation,
@@ -174,7 +183,11 @@ The **service-MAC authenticates the a2a→mcp hop**; the **delegation token auth
 holds no long-lived signing authority over the user's data — it mints a scoped token from a delegation the
 principal SA already signed.
 
-### Flow C — OAuth public MCP (web → edge → demo-mcp `/mcp`)
+### Flow C — ⚠ EXTERNAL-MCP-client primitive (NOT the first-party pattern): OAuth public MCP (web → edge → demo-mcp `/mcp`)
+
+> This flow is the **public MCP ingress** for *external* agents/clients. The Act6 OAuth panel calls it
+> directly from the browser to **demonstrate the primitive**; a first-party product would express an intent
+> to an a2a agent (Flow B), not build MCP calls in the browser ([ADR-0044](../../../docs/architecture/decisions/0044-a2a-is-the-agentic-orchestration-layer.md)).
 
 A "public MCP client" path: the browser mints a delegation token, gets a bearer from demo-mcp's
 `/oauth/token` (authorization-server stand-in), and presents it to `POST /mcp` with a grant bundle. No relay,
@@ -198,7 +211,12 @@ sequenceDiagram
   E-->>W: passthrough
 ```
 
-### Flow D — Native public MCP with invocation proof (web → edge → demo-mcp `/mcp/native`)
+### Flow D — ⚠ EXTERNAL-MCP-client primitive (NOT the first-party pattern): native public MCP with invocation proof (web → edge → demo-mcp `/mcp/native`)
+
+> Like Flow C, this is the **public MCP ingress** for *external* clients — the per-call invocation proof is
+> exactly what makes a public, agent-to-agent MCP endpoint safe. The Act6 Native panel calls it directly to
+> **demonstrate the primitive**; first-party UX uses intents to an a2a agent (Flow B), not browser-built MCP
+> calls ([ADR-0044](../../../docs/architecture/decisions/0044-a2a-is-the-agentic-orchestration-layer.md)).
 
 The headline edge path ([spec 287](../../../specs/287-agentic-invocation-proof.md)). The browser mints an
 ephemeral in-memory **native session key** ([`native-session.ts`](../../demo-web-pro/src/lib/native-session.ts)),

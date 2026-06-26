@@ -1,3 +1,7 @@
+// @legacy-rpc-pattern (ADR-0044): the home reads/writes the profile by calling the MCP `/mcp` ingress
+// directly (RPC-shaped first-party access). The objective is intent-expression to an a2a agent that
+// composes the vault primitive; legacy to migrate, not the first-party pattern to extend.
+//
 // The Impact home's profile store — the member's COMMUNITY CONTACT profile (name/email/phone/org),
 // re-used across community apps. spec 278: this is now persisted in the member's PER-PERSON ENCRYPTED
 // vault at demo-mcp (the `vault:impact-profile` record, sealed under the member's own GCP Cloud KMS
