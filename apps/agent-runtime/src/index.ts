@@ -26,6 +26,11 @@ import {
 import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes } from 'viem';
 import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import {
+  decodeGatewayAssertionToken,
+  verifyGatewayAssertion,
+  createHmacGatewayAssertionVerifier,
+} from '@agenticprimitives/edge-runtime';
+import {
   BadInputError,
   badInputResponse,
   ensureArrayBound,
@@ -172,6 +177,19 @@ export interface Env {
   CHAIN_ID: string;
   ALLOWED_ORIGINS: string;
   MCP_URL: string;
+  /**
+   * spec 288 §4/§6 — GatewayAssertion HMAC secret. Same value on demo-edge (signer) + demo-mcp/demo-a2a
+   * (verifiers). When set, the `/api/a2a` task endpoint verifies the edge admitted THESE exact bytes for
+   * this route (admission proof ONLY — the delegation/signature authority still runs in the A2aTaskDO).
+   * Unset ⇒ no verification.
+   */
+  GATEWAY_ASSERTION_SECRET?: string;
+  /**
+   * spec 288 §6 — when 'true', `/api/a2a` REQUIRES a valid edge GatewayAssertion (route lockdown): a
+   * request without one is rejected, so only edge-admitted traffic reaches the task runtime. Reversible
+   * (a single deploy). The relayer verbs (`/session/*`, `/account/*`) are NOT gated — they stay open.
+   */
+  DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
   /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
    * Used as `iss` (and currently `aud`, until spec 227 splits them)
@@ -657,6 +675,44 @@ app.get('/health', (c) =>
 // `X-Agent-Subdomain` (the label) + `X-Public-Origin`. Pattern ported from
 // agentic-trust atp-agent (`.well-known/agent-card.json` + `/api/a2a`).
 
+// GatewayAssertion admission check (spec 288 §4/§6) — verify the edge admitted THESE exact bytes for the
+// `/api/a2a` task route. Admission proof ONLY (the A2aTaskDO's delegation + signature authority still runs
+// per request). Advisory unless DEMO_REQUIRE_GATEWAY_ASSERTION=true (the route-lockdown lever: only
+// edge-admitted traffic reaches the task runtime). Mirrors demo-mcp's helper. Returns a 401 JSON-RPC error
+// Response to short-circuit, or null to proceed. `rawText` is the exact received body.
+async function checkGatewayAssertion(
+  c: Context<{ Bindings: Env }>,
+  rawText: string,
+  expected: { path: string; operationId: string },
+): Promise<Response | null> {
+  const gaToken = c.req.header('x-agentic-gateway-assertion');
+  const gaSecret = c.env.GATEWAY_ASSERTION_SECRET?.trim();
+  const gaRequired = c.env.DEMO_REQUIRE_GATEWAY_ASSERTION === 'true';
+  if (gaRequired && (!gaToken || !gaSecret)) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'gateway_assertion_required' } }, 401);
+  }
+  if (gaToken && gaSecret) {
+    try {
+      const { assertion, signature } = decodeGatewayAssertionToken(gaToken);
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawText));
+      const digest = 'sha256:' + [...new Uint8Array(hashBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const verdict = await verifyGatewayAssertion({
+        assertion,
+        expected: { aud: 'urn:agentic:edge', method: 'POST', path: expected.path, bodyDigest: digest, operationId: expected.operationId },
+        verify: createHmacGatewayAssertionVerifier(gaSecret, signature),
+      });
+      if (!verdict.ok && gaRequired) {
+        return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'gateway_assertion_invalid', data: verdict.reason } }, 401);
+      }
+    } catch (e) {
+      if (gaRequired) {
+        return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'gateway_assertion_invalid', data: e instanceof Error ? e.message : String(e) } }, 401);
+      }
+    }
+  }
+  return null;
+}
+
 /** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
 async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
   const reqOrigin = new URL(c.req.url).origin;
@@ -699,6 +755,9 @@ app.post('/api/a2a', async (c) => {
   // (ERC-1271 + isRevoked), persists the task, advances it via alarm(), and answers tasks/get|cancel|
   // resubmit. The worker no longer fakes "received" — message/send returns a real {taskId,state}.
   const raw = await c.req.text();
+  // spec 288 §6 — admission gate: only edge-admitted bytes reach the task runtime (when required).
+  const ga = await checkGatewayAssertion(c, raw, { path: '/api/a2a', operationId: 'a2a.task' });
+  if (ga) return ga;
   let body: { jsonrpc?: string; id?: string | number | null; method?: string };
   try { body = JSON.parse(raw); } catch { return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400); }
   if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {

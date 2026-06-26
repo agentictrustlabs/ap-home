@@ -18,6 +18,7 @@
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
+    "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
