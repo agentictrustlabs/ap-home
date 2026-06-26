@@ -6,7 +6,12 @@
 // (ADR-0043) — the downstream Workers still run the full Web3 pipeline (delegation + signature +
 // entitlement + policy). The edge admits + shuttles; it never decides authorization.
 
-import { runAdmission, type AdmissionRequest } from '@agenticprimitives/edge-runtime';
+import {
+  runAdmission,
+  issueGatewayAssertion,
+  createHmacGatewayAssertionSigner,
+  type AdmissionRequest,
+} from '@agenticprimitives/edge-runtime';
 import {
   extractAdmissionRequest,
   createCloudflareRateLimiter,
@@ -36,6 +41,9 @@ interface Env {
   SA_BUDGET: BudgetDoNamespace;
   SA_BUDGET_LIMIT_UNITS?: string;
   DEMO_BUDGET_PROBE_ENABLED?: string;
+  /** Shared HMAC secret for the GatewayAssertion (spec 288 §4). When set, the edge signs an admission
+   *  assertion the origin can verify. Same value on demo-mcp/demo-a2a. Unset ⇒ no assertion issued. */
+  GATEWAY_ASSERTION_SECRET?: string;
   /** Public on-chain config for the discovery doc. */
   CHAIN_ID: string;
   ENTRY_POINT: string;
@@ -91,6 +99,17 @@ function json(body: unknown, status: number, extraHeaders?: Record<string, strin
     headers: { 'content-type': 'application/json', ...extraHeaders },
   });
 }
+
+/** `sha256:<hex>` over the exact body bytes — the GatewayAssertion bodyDigest. The origin recomputes the
+ *  same digest over the bytes it received (exact-byte forwarding makes them identical). */
+async function bodyDigest(rawBody?: ArrayBuffer): Promise<string> {
+  const buf = rawBody ?? new ArrayBuffer(0);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return 'sha256:' + [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** The audience the edge stamps + the origin checks — both sides agree on this constant. */
+const GATEWAY_ASSERTION_AUD = 'urn:agentic:edge';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -159,11 +178,32 @@ export default {
     }
     if (!route) return json({ error: 'admission denied', correlationId: result.correlationId }, 500);
 
+    // GatewayAssertion (spec 288 §4): the edge signs that it admitted THESE exact bytes for this route,
+    // so the origin can prove the request came through admission (admission only — never authority). The
+    // origin recomputes the bodyDigest over the forwarded bytes + verifies the HMAC. Skipped if no secret.
+    const headers = { ...result.headers };
+    if (env.GATEWAY_ASSERTION_SECRET) {
+      const signed = await issueGatewayAssertion(
+        {
+          iss: 'demo-edge',
+          aud: GATEWAY_ASSERTION_AUD,
+          method: admission.method,
+          path: admission.path,
+          bodyDigest: await bodyDigest(rawBody),
+          operationId: route.descriptor.id,
+          correlationId: result.correlationId,
+          ttlMs: 60_000,
+        },
+        createHmacGatewayAssertionSigner(env.GATEWAY_ASSERTION_SECRET),
+      );
+      headers['x-agentic-gateway-assertion'] = signed.token;
+    }
+
     const fetcher = route.binding === 'MCP' ? env.MCP : env.A2A;
     return dispatchToBinding(fetcher, {
       url: request.url,
       method: admission.method,
-      headers: result.headers,
+      headers,
       correlationId: result.correlationId,
       rawBody,
     });

@@ -38,6 +38,7 @@ import {
 import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
+import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
 import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
 
 // Spec 290 §8 — the per-SA hard-budget Durable Object must be exported from the Worker entry so CF can
@@ -377,6 +378,14 @@ export interface Env {
   SA_BUDGET?: BudgetDoNamespace;
   /** Per-Smart-Agent hard-budget unit cap (default 1000). */
   SA_BUDGET_LIMIT_UNITS?: string;
+
+  // ─── Edge admission proof (spec 288 §4) ───────────────────────────────
+  /** Shared HMAC secret for verifying the edge's GatewayAssertion (same value as demo-edge). When set,
+   *  the native path verifies the assertion if present (advisory). Unset ⇒ no verification. */
+  GATEWAY_ASSERTION_SECRET?: string;
+  /** When 'true', the native path REQUIRES a valid GatewayAssertion — only edge-admitted requests pass
+   *  (the route-lockdown precursor). Default unset ⇒ advisory (direct callers still work). */
+  DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -731,11 +740,47 @@ app.post('/mcp/native', async (c) => {
   const usv = c.env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
   if (!usv) return c.json({ error: 'unsupported', detail: 'UNIVERSAL_SIGNATURE_VALIDATOR unset' }, 501);
 
-  const reqBody = (await c.req.json().catch(() => null)) as
-    | { token?: string; invocationProof?: AgenticInvocationProofV1; tool?: string; args?: { fields?: string[]; purpose?: string } }
-    | null;
+  // Read the RAW body text (not c.req.json()) so the GatewayAssertion bodyDigest can be recomputed over
+  // the exact received bytes (matching the edge's sha256 of the forwarded body).
+  const rawText = await c.req.text().catch(() => '');
+  const reqBody = (() => {
+    try {
+      return JSON.parse(rawText) as
+        | { token?: string; invocationProof?: AgenticInvocationProofV1; tool?: string; args?: { fields?: string[]; purpose?: string } }
+        | null;
+    } catch {
+      return null;
+    }
+  })();
   if (!reqBody?.token) return c.json({ error: 'token required' }, 400);
   if (!reqBody.invocationProof) return buildInvalidInvocationProofResponse();
+
+  // GatewayAssertion (spec 288 §4) — verify the edge admitted THESE exact bytes for this route. Admission
+  // proof ONLY (the full Web3 authority still runs below). Advisory by default; REQUIRED under
+  // DEMO_REQUIRE_GATEWAY_ASSERTION (the route-lockdown precursor: only edge-admitted requests pass).
+  {
+    const gaToken = c.req.header('x-agentic-gateway-assertion');
+    const gaSecret = c.env.GATEWAY_ASSERTION_SECRET?.trim();
+    const gaRequired = c.env.DEMO_REQUIRE_GATEWAY_ASSERTION === 'true';
+    if (gaRequired && (!gaToken || !gaSecret)) {
+      return c.json({ error: 'gateway_assertion_required' }, 401);
+    }
+    if (gaToken && gaSecret) {
+      try {
+        const { assertion, signature } = decodeGatewayAssertionToken(gaToken);
+        const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawText));
+        const digest = 'sha256:' + [...new Uint8Array(hashBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+        const verdict = await verifyGatewayAssertion({
+          assertion,
+          expected: { aud: 'urn:agentic:edge', method: 'POST', path: '/mcp/native', bodyDigest: digest, operationId: 'mcp.native' },
+          verify: createHmacGatewayAssertionVerifier(gaSecret, signature),
+        });
+        if (!verdict.ok && gaRequired) return c.json({ error: 'gateway_assertion_invalid', reason: verdict.reason }, 401);
+      } catch (e) {
+        if (gaRequired) return c.json({ error: 'gateway_assertion_invalid', detail: e instanceof Error ? e.message : String(e) }, 401);
+      }
+    }
+  }
 
   const auditSink = buildAuditSink(c.env);
   const correlationId = getCorrelationId(c);

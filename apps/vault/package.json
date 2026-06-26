@@ -16,6 +16,7 @@
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
+    "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/entitlements": "workspace:*",
     "@agenticprimitives/key-authorization": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
