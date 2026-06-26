@@ -25,6 +25,7 @@ import {
 import type { Address } from '@agenticprimitives/types';
 import {
   type Profile,
+  buildSeedProfile,
   createD1JtiStore,
   createD1AuditSink,
 } from './db';
@@ -1210,7 +1211,51 @@ const UPDATE_PROFILE_CLASSIFICATION = {
 } as const;
 declareTool({ name: 'update_profile' }, UPDATE_PROFILE_CLASSIFICATION);
 
-app.post('/tools/update_profile', (c) => c.json({ error: 'not implemented in demo step 3' }, 501));
+// update_profile — delegation-verified WRITE to the person's encrypted vault profile.
+// Mirrors get_profile (read) + set_vault_record (write gate): the principal recovered by
+// withDelegation IS the delegator, and spec 278 requires op:'write' on that person's vault-key
+// authorization. Partial patch over the current (seal-on-read) profile; server stamps
+// owner_address + updated_at. No binding ⇒ fail closed (vault_key_unauthorized).
+app.post('/tools/update_profile', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: { full_name?: string; email?: string; phone?: string | null; notes?: string | null } };
+  const handler = withDelegation<Args>(
+    baseConfig(c.env),
+    async ({ principal, args }) => {
+      const gate = await authorizePersonVaultOp(c.env, principal, RESOURCE_PROFILE, 'write', 'pii.low');
+      if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:update_profile' };
+      const current = (await gate.pv.vault.read<Profile>({ owner: principal, resource: RESOURCE_PROFILE }))?.data ?? buildSeedProfile(principal);
+      const next: Profile = {
+        ...current,
+        owner_address: principal.toLowerCase(),
+        ...(typeof args?.full_name === 'string' ? { full_name: args.full_name } : {}),
+        ...(typeof args?.email === 'string' ? { email: args.email } : {}),
+        ...(args?.phone !== undefined ? { phone: args.phone } : {}),
+        ...(args?.notes !== undefined ? { notes: args.notes } : {}),
+        updated_at: new Date().toISOString(),
+      };
+      await gate.pv.vault.write<Profile>({ owner: principal, resource: RESOURCE_PROFILE, data: next });
+      const owner_name = await resolveAgentName(c.env, principal);
+      return { ok: true, profile: next, owner_name, served_by: 'demo-mcp:update_profile' };
+    },
+    {
+      toolName: 'update_profile',
+      classification: UPDATE_PROFILE_CLASSIFICATION,
+      auditSink,
+      correlationId: getCorrelationId(c),
+      environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development'),
+    },
+  );
+  try {
+    const result = await handler({ token: body.token, args: body.args ?? {} });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
 
 // Dev-only seeder. Audit M3: must not exist in production.
 // Guard wraps the route REGISTRATION (not just the handler body) so:
