@@ -1042,6 +1042,15 @@ app.post('/tools/list_vault_record', async (c) => {
 // but served on the service-MAC `/tools/*` path (NOT the gateway-gated `/mcp` ingress) so it works when the
 // edge is REQUIRED (home → /a2a/mcp/profile/* → demo-a2a → here, all behind the edge). No binding ⇒ fail
 // closed. This is the through-a2a replacement for the home's former browser→/mcp-bind/mcp direct call (ADR-0044).
+//
+// Classifications (N10 — every MCP tool is classified). These tools are owner-own + service-MAC-gated +
+// vault-key-authorized (NOT withDelegation-evaluated), so the classification is audit/lint metadata; risk
+// mirrors get_profile (read=low) / set_vault_record (write=medium).
+const GET_IMPACT_PROFILE_CLASSIFICATION = { '@sa-tool': 'delegation-verified', '@sa-auth': 'session-token', '@sa-risk-tier': 'low' } as const;
+declareTool({ name: 'get_impact_profile' }, GET_IMPACT_PROFILE_CLASSIFICATION);
+const SET_IMPACT_PROFILE_CLASSIFICATION = { '@sa-tool': 'delegation-verified', '@sa-auth': 'session-token', '@sa-risk-tier': 'medium' } as const;
+declareTool({ name: 'set_impact_profile' }, SET_IMPACT_PROFILE_CLASSIFICATION);
+
 app.post('/tools/get_impact_profile', async (c) => {
   const principal = (c.get('parsedBody')?.args as { principal?: string } | undefined)?.principal as Address | undefined;
   if (!principal) return c.json({ ok: false, error: 'principal required' }, 400);
