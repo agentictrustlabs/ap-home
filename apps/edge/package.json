@@ -15,7 +15,8 @@
     "@agenticprimitives/capability-registry": "workspace:*",
     "@agenticprimitives/edge-cloudflare": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
-    "@agenticprimitives/rate-control": "workspace:*"
+    "@agenticprimitives/rate-control": "workspace:*",
+    "@agenticprimitives/rate-control-cloudflare": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260604.1",

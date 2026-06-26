@@ -26,6 +26,20 @@ CHAIN_ID = "84532"
 ENTRY_POINT = "0x9B33De9d9597de82Eb56b5B26C478Dc0a6955388"
 DELEGATION_MANAGER = "0x3a8E2cE74564f699b135db6f266ccDb563979C05"
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xe8F3e531429F44D77dC3A331C18032bfa1550D84"
+# Per-Smart-Agent hard-budget unit cap (spec 290 §8 — demo value).
+SA_BUDGET_LIMIT_UNITS = "10"
+# Gates the /budget/probe endpoint that smoke-tests the SmartAgentBudgetDO reserve/commit/release
+# cycle live. Demo-only — a real deployment leaves it unset (route 404s).
+DEMO_BUDGET_PROBE_ENABLED = "true"
+
+# The authoritative per-SA hard-budget store (spec 290 §8). One DO per Smart Agent shard.
+[[env.production.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
 
 # Stage-1 abuse limiter (local, permissive, eventually-consistent — abuse only, fail-soft).
 [[env.production.ratelimits]]

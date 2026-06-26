@@ -15,11 +15,16 @@ import {
   type FetcherLike,
 } from '@agenticprimitives/edge-cloudflare';
 import { buildAgenticAuthorizationProfile, serveAgenticAuthorization } from '@agenticprimitives/agentic-authorization';
+import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import type {
   CapabilityDescriptor,
   CapabilityProtocol,
   CapabilityRiskTier,
 } from '@agenticprimitives/capability-registry';
+
+// The Stage-3 hard-budget Durable Object must be exported from the Worker entry so CF can bind it
+// (spec 290 §8). One DO instance per Smart Agent shard.
+export { SmartAgentBudgetDO } from '@agenticprimitives/rate-control-cloudflare';
 
 interface Env {
   /** Service Bindings to the private origins (no public hop). */
@@ -27,6 +32,10 @@ interface Env {
   A2A: FetcherLike;
   /** Workers rate-limiter binding — Stage-1 abuse only. */
   EDGE_LIMITER: RateLimiterBinding;
+  /** Per-Smart-Agent hard-budget store (spec 290 §8) — Stage-3, post-authority. */
+  SA_BUDGET: BudgetDoNamespace;
+  SA_BUDGET_LIMIT_UNITS?: string;
+  DEMO_BUDGET_PROBE_ENABLED?: string;
   /** Public on-chain config for the discovery doc. */
   CHAIN_ID: string;
   ENTRY_POINT: string;
@@ -100,6 +109,36 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/health') {
       return json({ ok: true, service: 'demo-edge' }, 200);
+    }
+
+    // Stage-3 hard-budget DO smoke probe (demo-only, flag-gated). Exercises a full reserve →
+    // over-limit deny → commit (charge actuals) → reserve-fits → release → reserve-fits cycle on
+    // a fresh Smart Agent shard, against the real Durable Object. NOT a production route.
+    if (request.method === 'POST' && url.pathname === '/budget/probe') {
+      if (env.DEMO_BUDGET_PROBE_ENABLED !== 'true') return json({ error: 'not_found' }, 404);
+      const body = (await request.json().catch(() => ({}))) as { sponsorAgent?: string };
+      const rnd = new Uint8Array(20);
+      crypto.getRandomValues(rnd);
+      const sponsorAgent = body.sponsorAgent ?? '0x' + [...rnd].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const limitUnits = Number(env.SA_BUDGET_LIMIT_UNITS ?? '10');
+      const budget = createDurableObjectBudgetStore({ namespace: env.SA_BUDGET, chainId: Number(env.CHAIN_ID), limitUnits });
+      const steps: { step: string; allowed?: boolean }[] = [];
+
+      const r1 = await budget.reserve({ sponsorAgent, capabilityId: 'probe', estimatedUnits: 7, idempotencyKey: 'k1' });
+      steps.push({ step: `reserve 7 (k1) [limit ${limitUnits}]`, allowed: r1.allowed });
+      const r2 = await budget.reserve({ sponsorAgent, capabilityId: 'probe', estimatedUnits: 7, idempotencyKey: 'k2' });
+      steps.push({ step: 'reserve 7 (k2) — expect DENY (over limit)', allowed: r2.allowed });
+      if (r1.reservationId) await budget.commit(r1.reservationId, 3);
+      steps.push({ step: 'commit k1 actual=3 (committed=3)' });
+      const r3 = await budget.reserve({ sponsorAgent, capabilityId: 'probe', estimatedUnits: 6, idempotencyKey: 'k3' });
+      steps.push({ step: 'reserve 6 (k3) — expect ALLOW (3+6<=10)', allowed: r3.allowed });
+      if (r3.reservationId) await budget.release(r3.reservationId);
+      steps.push({ step: 'release k3 (frees the 6)' });
+      const r4 = await budget.reserve({ sponsorAgent, capabilityId: 'probe', estimatedUnits: 7, idempotencyKey: 'k4' });
+      steps.push({ step: 'reserve 7 (k4) — expect ALLOW (3+7=10)', allowed: r4.allowed });
+
+      const pass = r1.allowed && !r2.allowed && r3.allowed && r4.allowed;
+      return json({ ok: pass, sponsorAgent, limitUnits, steps }, 200);
     }
 
     // Admission: extract → runAdmission (header hygiene → size/depth/envelope → Stage-1 abuse) →
