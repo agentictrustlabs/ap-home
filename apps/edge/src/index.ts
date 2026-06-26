@@ -87,6 +87,10 @@ function descriptor(
 const CATALOG: { test: (method: string, path: string) => boolean; route: Route }[] = [
   { test: (m, p) => m === 'POST' && p === '/mcp/native', route: { binding: 'MCP', descriptor: descriptor('mcp.native', 'mcp', 'high', 256 * 1024) } },
   { test: (m, p) => m === 'POST' && p === '/mcp', route: { binding: 'MCP', descriptor: descriptor('mcp.oauth', 'mcp', 'high', 256 * 1024) } },
+  // spec 288 §6 — agent-addressed A2A task ingress: `<handle>` rides in the path so it lands in the signed
+  // GatewayAssertion `path` (tamper-evident agent binding). This is how the edge conveys per-agent identity
+  // to demo-a2a; the origin resolves the agent from the same path segment. Matched before the bare route.
+  { test: (m, p) => m === 'POST' && /^\/api\/a2a\/[^/]+$/.test(p), route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 256 * 1024) } },
   { test: (m, p) => m === 'POST' && p === '/api/a2a', route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 256 * 1024) } },
   { test: (m, p) => m === 'GET' && p === '/.well-known/agent-card.json', route: { binding: 'A2A', descriptor: descriptor('a2a.card', 'a2a', 'low', 16 * 1024) } },
 ];

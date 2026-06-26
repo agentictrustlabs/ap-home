@@ -89,14 +89,12 @@ CHAIN_ID = "84532"
 # spec 290 §8 — per-SA hard-budget unit cap for the A2A task path. MUST match demo-mcp's value (same
 # shared DO authority per SA across both paths).
 SA_BUDGET_LIMIT_UNITS = "25"
-# spec 288 §6 — GatewayAssertion is ADVISORY (verify-when-present) on /api/a2a, NOT required yet.
-# The edge mints the assertion and the worker verifies it (the GATEWAY_ASSERTION_SECRET secret, same value
-# on demo-edge signer + demo-mcp verifier, is set via `wrangler secret put`). It is NOT required because
-# the A2A task endpoint resolves its target agent from the per-agent subdomain Host (<handle>.impact-agent.io)
-# — which the single-host edge does not yet convey. Requiring it would 401 legitimate subdomain-direct
-# callers (who carry no edge assertion) without a working edge→agent route to replace them. Flip to "true"
-# once the edge conveys per-agent identity to demo-a2a on dispatch (open spec 288 §6 item). MCP stays fully
-# required (it has no subdomain dependency). Relayer verbs (/session/*, /account/*) are never gated.
+# spec 288 §6 — edge-mode flag. DEFAULT "false" (edge-less: /api/a2a works direct via the subdomain Host).
+# `deploy-cloudflare.ts` OVERRIDES to "true" via --var when EDGE_REQUIRED=true: then BOTH A2A task ingress
+# shapes REQUIRE a valid edge GatewayAssertion — the agent-addressed edge path `POST /api/a2a/<handle>` (the
+# edge conveys the agent in the signed assertion `path`; demo-a2a resolves it via resolveAgentByLabel) works,
+# while the bare subdomain-direct path 401s (intentional — forces traffic through the edge). The agent-card
+# then advertises the edge endpoint (DEMO_EDGE_URL). Relayer verbs (/session/*, /account/*) are never gated.
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
 # These two are placeholders — `pnpm deploy:cloudflare` overrides via `--var`
 # with the freshly-deployed Pages URL + demo-mcp Worker URL. Defaults left

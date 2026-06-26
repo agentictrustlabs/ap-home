@@ -58,7 +58,7 @@ import {
   caip10,
 } from './custody-google';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, buildA2aAgentCard, skillsFromLabels, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -190,6 +190,12 @@ export interface Env {
    * (a single deploy). The relayer verbs (`/session/*`, `/account/*`) are NOT gated — they stay open.
    */
   DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
+  /**
+   * spec 288 §6 — the public Agentic Edge base URL. When set (edge-required deployments), the agent-card
+   * advertises `<DEMO_EDGE_URL>/api/a2a/<handle>` as the message endpoint so discovering agents reach this
+   * agent THROUGH the edge. Unset (edge-less deployments) ⇒ the card advertises the direct subdomain endpoint.
+   */
+  DEMO_EDGE_URL?: string;
   /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
    * Used as `iss` (and currently `aud`, until spec 227 splits them)
@@ -735,39 +741,64 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
       skills = skillsFromLabels(csv);
     } catch { /* best-effort — serve the card without skills */ }
   }
-  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills));
+  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined));
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias
 
-/** A2A JSON-RPC message endpoint, scoped to the host's agent. */
-app.post('/api/a2a', async (c) => {
-  const reqOrigin = new URL(c.req.url).origin;
-  const ctx = await resolveAgentHost(c.req.raw, c.env, reqOrigin);
-  if (!ctx.label) {
-    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'A2A requests must target a personal subdomain (<handle>.impact-agent.io)' } }, 400);
-  }
-  if (!ctx.agent) {
-    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
-  }
-  // Validate the envelope, then hand the body to the agent's live Task runtime (spec 269 W5). The
-  // runtime is an A2aTaskDO sharded per agent (idFromName(agentSA)); it authorizes the delegation
-  // (ERC-1271 + isRevoked), persists the task, advances it via alarm(), and answers tasks/get|cancel|
-  // resubmit. The worker no longer fakes "received" — message/send returns a real {taskId,state}.
-  const raw = await c.req.text();
-  // spec 288 §6 — admission gate: only edge-admitted bytes reach the task runtime (when required).
-  const ga = await checkGatewayAssertion(c, raw, { path: '/api/a2a', operationId: 'a2a.task' });
-  if (ga) return ga;
+// Validate the JSON-RPC envelope, then hand the EXACT body bytes to the agent's live Task runtime (spec
+// 269 W5). The runtime is an A2aTaskDO sharded per agent (idFromName(agentSA)); it authorizes the delegation
+// (ERC-1271 + isRevoked), persists the task, advances it via alarm(), and answers tasks/get|cancel|resubmit.
+// `ctx.agent` MUST be resolved (non-null) by the caller. Shared by both ingress shapes below.
+async function forwardA2aTask(c: Context<{ Bindings: Env }>, agent: Address, raw: string): Promise<Response> {
   let body: { jsonrpc?: string; id?: string | number | null; method?: string };
   try { body = JSON.parse(raw); } catch { return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400); }
   if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
     return c.json({ jsonrpc: '2.0', id: body.id ?? null, error: { code: -32600, message: 'invalid JSON-RPC request' } }, 400);
   }
-  const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(ctx.agent.toLowerCase()));
-  const doResp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${ctx.agent}`, {
+  const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(agent.toLowerCase()));
+  const doResp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${agent}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
   }));
   return new Response(await doResp.text(), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+/**
+ * A2A JSON-RPC task endpoint — TWO ingress shapes, ONE runtime:
+ *  - `/api/a2a` — agent from the per-agent subdomain Host (`<handle>.impact-agent.io`). The direct/legacy
+ *    ingress; works edge-less (advisory). In edge-REQUIRED deployments it has no edge assertion → 401
+ *    (intentional: edge-required forces traffic through the edge path below).
+ *  - `/api/a2a/:handle` — agent from the PATH. The Agentic Edge addresses a specific agent here (spec 288 §6);
+ *    `<handle>` rides in the signed GatewayAssertion `path`, so the target agent is cryptographically bound
+ *    into the admission proof (no spoofable header). This is the path the edge dispatches to.
+ * Both honor DEMO_REQUIRE_GATEWAY_ASSERTION (the deployment toggle): the admission gate runs FIRST, then
+ * agent resolution, then the runtime (whose delegation+signature authority is unchanged).
+ */
+app.post('/api/a2a', async (c) => {
+  const raw = await c.req.text();
+  const ga = await checkGatewayAssertion(c, raw, { path: '/api/a2a', operationId: 'a2a.task' });
+  if (ga) return ga;
+  const ctx = await resolveAgentHost(c.req.raw, c.env, new URL(c.req.url).origin);
+  if (!ctx.label) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'A2A requests must target a personal subdomain (<handle>.impact-agent.io) or POST /api/a2a/<handle> via the edge' } }, 400);
+  }
+  if (!ctx.agent) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
+  }
+  return forwardA2aTask(c, ctx.agent, raw);
+});
+
+app.post('/api/a2a/:handle', async (c) => {
+  const raw = await c.req.text();
+  // Admission FIRST — the assertion's signed `path` (=/api/a2a/<handle>) binds the target agent, so a
+  // verified assertion proves the edge admitted THIS request for THIS agent.
+  const ga = await checkGatewayAssertion(c, raw, { path: c.req.path, operationId: 'a2a.task' });
+  if (ga) return ga;
+  const ctx = await resolveAgentByLabel(c.req.param('handle'), c.env, new URL(c.req.url).origin);
+  if (!ctx.agent) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name ?? c.req.param('handle')}` } }, 404);
+  }
+  return forwardA2aTask(c, ctx.agent, raw);
 });
 
 /**

@@ -77,10 +77,25 @@ export async function resolveAgentHost(
   const injected = req.headers.get('x-agent-subdomain');
   const label = injected && injected.trim() ? injected.trim().toLowerCase() : parseAgentSubdomain(new URL(req.url).hostname, baseDomain);
   const publicOrigin = req.headers.get('x-public-origin')?.trim() || (label ? `https://${label}.${baseDomain}` : requestOrigin);
+  return resolveAgentByLabel(label, env, publicOrigin);
+}
 
-  if (!label) return { label: null, agent: null, name: null, publicOrigin };
+/**
+ * Resolve the A2A agent for an EXPLICIT subdomain label — the path the edge uses
+ * (spec 288 §6): the edge addresses a specific agent via `POST /api/a2a/<handle>`,
+ * the handle rides in the signed GatewayAssertion `path` (tamper-evident), and this
+ * resolves `<handle>` → the canonical Smart Agent address the same way the Host path
+ * does. `null`/dotted labels → the generic (no-agent) context.
+ */
+export async function resolveAgentByLabel(
+  label: string | null,
+  env: HostEnv,
+  publicOrigin: string,
+): Promise<AgentHostContext> {
+  const norm = label && label.trim() ? label.trim().toLowerCase() : null;
+  if (!norm || norm.includes('.')) return { label: null, agent: null, name: null, publicOrigin };
 
-  const name = agentNameForLabel(label);
+  const name = agentNameForLabel(norm);
   let agent: Address | null = null;
   if (env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER) {
     const client = new AgentNamingClient({
@@ -91,7 +106,7 @@ export async function resolveAgentHost(
     });
     agent = await client.resolveName(name);
   }
-  return { label, agent, name, publicOrigin };
+  return { label: norm, agent, name, publicOrigin };
 }
 
 /** One A2A skill-card entry (A2A protocol shape). */
@@ -113,9 +128,21 @@ export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
  * `skills` are the agent's PUBLICLY-ASSERTED skills (spec 282) — the same `atl:skills`
  * the discovery matcher ranks on, surfaced here on the standard A2A card.
  */
-export function buildA2aAgentCard(ctx: AgentHostContext, chainId: number, skills: A2aSkill[] = []): Record<string, unknown> {
+export function buildA2aAgentCard(
+  ctx: AgentHostContext,
+  chainId: number,
+  skills: A2aSkill[] = [],
+  // spec 288 §6 — when the deployment requires edge admission, advertise the EDGE endpoint
+  // (`<edge>/api/a2a/<handle>`) as the agent's message endpoint so discovering agents reach
+  // this agent THROUGH the edge (which mints the GatewayAssertion). Omit ⇒ the direct subdomain
+  // endpoint (edge-less / advisory deployments).
+  edgeBase?: string,
+): Record<string, unknown> {
   const origin = ctx.publicOrigin.replace(/\/$/, '');
-  const messageEndpoint = `${origin}/api/a2a`;
+  const messageEndpoint =
+    edgeBase && ctx.label
+      ? `${edgeBase.replace(/\/$/, '')}/api/a2a/${ctx.label}`
+      : `${origin}/api/a2a`;
   const bound = Boolean(ctx.agent);
   return {
     protocolVersion: '1.0',
