@@ -69,12 +69,14 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
       `agenticprimitives-demo-pro.pages.dev` → 204 + ACAO; `evil.example` → no ACAO. Browser callers can now
       be repointed at the edge.
 
-### Surface 1 — demo-mcp `POST /mcp/native`
-- [x] Origin verifies the assertion (advisory).
-- [ ] Repoint the only caller (demo-web-pro Act6 Native panel) from `config.demoMcpUrl` → the edge URL
-      (`VITE_DEMO_EDGE_URL`). native-mcp-smoke already supports `NATIVE_MCP_BASE=<edge>`.
-- [ ] Flip `DEMO_REQUIRE_GATEWAY_ASSERTION=true` on demo-mcp → direct `/mcp/native` calls 401; via-edge pass.
-      (Proven reversible live 2026-06-25: required ⇒ direct 401, via-edge 200; restored.)
+### Surface 1 — demo-mcp `POST /mcp/native` — ✅ LOCKED (2026-06-26)
+- [x] Origin verifies the assertion.
+- [x] Repointed the only caller (demo-web-pro Act6 Native panel) `config.demoMcpUrl` → `config.demoEdgeUrl`
+      (`VITE_DEMO_EDGE_URL`, propagated in deploy-cloudflare.ts §8); deployed. native-mcp-smoke supports
+      `NATIVE_MCP_BASE=<edge>`.
+- [x] **`DEMO_REQUIRE_GATEWAY_ASSERTION=true`** set in demo-mcp wrangler.toml + deployed. Verified live:
+      direct `/mcp/native` → **401 gateway_assertion_required**; via-edge → **200**. Reversible: remove the
+      toml line + redeploy → advisory.
 
 ### Surface 2 — demo-mcp `POST /mcp` (OAuth ingress)
 - [ ] Add gateway-assertion verification to the `/mcp` handler (same pattern as native; operationId `mcp.oauth`).
@@ -101,9 +103,10 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
 - Surface inventory + the `workers_dev=false`-not-reachable finding.
 - The two-mechanism model + the per-surface gate.
 - **Edge CORS shipped + deployed** (the shared prerequisite) — browser callers can now target the edge.
+- **Surface 1 (`/mcp/native`) LOCKED** — demo-web-pro Native panel repointed at the edge; require-mode
+  enabled + verified live (direct 401, via-edge 200). The first surface is private-behind-the-edge.
 
-## Next concrete step (gated on user go-ahead — it changes a live demo's data path)
-Repoint demo-web-pro Act6's OAuth + Native MCP panels from `config.demoMcpUrl` → a new `VITE_DEMO_EDGE_URL`,
-deploy demo-web-pro, and confirm both panels still work via the edge (now that edge CORS is in place). That
-flips Surface 1's caller-migration row to ✅ and makes `DEMO_REQUIRE_GATEWAY_ASSERTION` on `/mcp/native`
-safe to enable (direct callers gone). Do NOT enable require-mode until that repoint is verified live.
+## Next concrete steps
+- **Surface 2 (`/mcp` OAuth)** — add gateway-assertion verification to the `/mcp` handler (operationId
+  `mcp.oauth`), repoint demo-web-pro Act6's OAuth panel → the edge, then it locks under the same flag.
+- **Surface 3 (`/api/a2a`)** — add verification + resolve the subdomain-vs-edge discovery question.

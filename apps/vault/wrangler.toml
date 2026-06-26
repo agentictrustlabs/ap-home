@@ -66,6 +66,10 @@ DEMO_VAULT_PROVISION_ENABLED = "true"
 DEMO_NATIVE_MCP_ENABLED = "true"
 # spec 290 §8: per-Smart-Agent hard-budget unit cap enforced on the native path (demo value).
 SA_BUDGET_LIMIT_UNITS = "25"
+# spec 288 §6 ROUTE LOCKDOWN: require a valid edge-issued GatewayAssertion on /mcp/native — only
+# edge-admitted requests pass (direct calls 401). The sole live caller (demo-web-pro Act6 Native panel)
+# is repointed at the edge (VITE_DEMO_EDGE_URL). Reversible: remove this line + redeploy → advisory.
+DEMO_REQUIRE_GATEWAY_ASSERTION = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"
