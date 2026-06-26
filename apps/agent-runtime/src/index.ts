@@ -74,6 +74,7 @@ import {
   type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
+import type { BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import {
   composeSinks,
   createConsoleAuditSink,
@@ -154,6 +155,11 @@ export interface Env {
   SESSIONS: DurableObjectNamespace;
   // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
   A2A_TASKS: DurableObjectNamespace;
+  // Spec 290 §8 — the per-SA hard-budget store, bound CROSS-SCRIPT to demo-mcp's SmartAgentBudgetDO so the
+  // A2A + MCP paths share ONE budget authority per SA (§9). Optional: when unbound, the A2A runtime skips
+  // the Stage-3 budget (authority + single-use message-id still apply).
+  SA_BUDGET?: BudgetDoNamespace;
+  SA_BUDGET_LIMIT_UNITS?: string;
   // Bridge anti-replay nonce store (audit M-1) — cross-isolate single-use via KV. Optional: when unbound
   // (e.g. local dev) the bridge falls back to the per-isolate in-memory store.
   BRIDGE_NONCES?: KVNamespace;

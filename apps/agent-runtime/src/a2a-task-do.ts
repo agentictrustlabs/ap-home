@@ -18,11 +18,13 @@ import {
   createA2aAgent,
   dispatchA2aRpc,
   type A2aAgent,
+  type A2aBudgetPort,
   type OnChainChecks,
   type VaultClient,
   type SkillHandler,
 } from '@agenticprimitives/a2a';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
+import { createDurableObjectBudgetStore } from '@agenticprimitives/rate-control-cloudflare';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
@@ -108,11 +110,29 @@ export class A2aTaskDO {
         return (await this.state.storage.get(`vault:${ref.owner.toLowerCase()}:${ref.recordType}`)) ?? null;
       },
     };
+    // Spec 290 §6 Stage-3 — the per-SA hard budget, enforced post-authority in the runtime (keyed by the
+    // verified principal). One SHARED DO per SA: demo-a2a binds CROSS-SCRIPT to demo-mcp's SmartAgentBudgetDO
+    // (script_name=demo-mcp-production), so the A2A + MCP paths debit ONE authority per SA (§9). Adapts the
+    // rich HardBudgetStore to the a2a package's minimal structural port (fixed 1 unit per task).
+    let budget: A2aBudgetPort | undefined;
+    if (this.env.SA_BUDGET) {
+      const hard = createDurableObjectBudgetStore({
+        namespace: this.env.SA_BUDGET,
+        chainId,
+        limitUnits: Number(this.env.SA_BUDGET_LIMIT_UNITS ?? '1000'),
+      });
+      budget = {
+        reserve: (i) => hard.reserve({ ...i, estimatedUnits: 1 }),
+        commit: (id) => hard.commit(id, 1),
+        release: (id) => hard.release(id),
+      };
+    }
+
     this.agent = createA2aAgent({
       agentSA, chainId, delegationManager: dm,
       enforcers: { timestamp: this.env.TIMESTAMP_ENFORCER as Address, allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER as Address, allowedMethods: this.env.ALLOWED_METHODS_ENFORCER as Address },
       taskStore: createDurableObjectTaskStore(this.state.storage),
-      checks, handlers: [echo], vault, mcp: { callTool: async () => null }, hashBody,
+      checks, handlers: [echo], vault, mcp: { callTool: async () => null }, hashBody, budget,
     });
     return this.agent;
   }

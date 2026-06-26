@@ -86,6 +86,9 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
+# spec 290 §8 — per-SA hard-budget unit cap for the A2A task path. MUST match demo-mcp's value (same
+# shared DO authority per SA across both paths).
+SA_BUDGET_LIMIT_UNITS = "25"
 # These two are placeholders — `pnpm deploy:cloudflare` overrides via `--var`
 # with the freshly-deployed Pages URL + demo-mcp Worker URL. Defaults left
 # blank so a misconfigured deploy fails closed (no CORS allowed, no MCP).
@@ -155,6 +158,9 @@ UNIVERSAL_SIGNATURE_VALIDATOR = ""
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
+  # spec 290 §8/§9 — CROSS-SCRIPT binding to demo-mcp's SmartAgentBudgetDO so the A2A + MCP paths share
+  # ONE hard-budget authority per Smart Agent. demo-mcp owns the class + migration; demo-a2a only binds.
+  { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-production" },
 ]
 
 # Bridge anti-replay nonce store (audit M-1): single-use bridge-envelope nonces recorded across isolates
