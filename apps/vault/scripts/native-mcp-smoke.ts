@@ -12,7 +12,10 @@ import {
   type Delegation,
 } from '@agenticprimitives/delegation';
 
-const BASE = 'https://demo-mcp-production.richardpedersen3.workers.dev';
+// Override with NATIVE_MCP_BASE to drive the same flow through the Agentic Edge
+// (demo-edge) instead of hitting demo-mcp directly — proves the edge admits + dispatches
+// the native delegation-token + invocation-proof path end-to-end.
+const BASE = process.env.NATIVE_MCP_BASE ?? 'https://demo-mcp-production.richardpedersen3.workers.dev';
 const CHAIN_ID = 84532;
 const AUDIENCE = 'urn:mcp:server:person';
 const DELEGATION_MANAGER = '0x3a8E2cE74564f699b135db6f266ccDb563979C05';
