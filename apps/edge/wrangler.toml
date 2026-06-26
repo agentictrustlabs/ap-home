@@ -31,6 +31,9 @@ SA_BUDGET_LIMIT_UNITS = "10"
 # Gates the /budget/probe endpoint that smoke-tests the SmartAgentBudgetDO reserve/commit/release
 # cycle live. Demo-only — a real deployment leaves it unset (route 404s).
 DEMO_BUDGET_PROBE_ENABLED = "true"
+# Browser Origins allowed to call the edge (so browser callers can be repointed at it — route-lockdown
+# prerequisite). App config (ADR-0021). `https://*.suffix` wildcards supported.
+EDGE_ALLOWED_ORIGINS = "https://agenticprimitives-demo-pro.pages.dev,https://agenticprimitives-demo.pages.dev,https://agenticprimitives-demo-org.pages.dev,https://agenticprimitives-demo-jp.pages.dev,https://agenticprimitives-demo-gs.pages.dev,https://*.impact-agent.io,https://*.impact-agent.me"
 
 # The authoritative per-SA hard-budget store (spec 290 §8). One DO per Smart Agent shard.
 [[env.production.durable_objects.bindings]]

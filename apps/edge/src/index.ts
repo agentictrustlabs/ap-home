@@ -44,6 +44,9 @@ interface Env {
   /** Shared HMAC secret for the GatewayAssertion (spec 288 §4). When set, the edge signs an admission
    *  assertion the origin can verify. Same value on demo-mcp/demo-a2a. Unset ⇒ no assertion issued. */
   GATEWAY_ASSERTION_SECRET?: string;
+  /** Comma-separated browser Origins allowed to call the edge (so browser callers can be repointed at it
+   *  — route-lockdown prerequisite). Supports `https://*.suffix` wildcards. App config (ADR-0021). */
+  EDGE_ALLOWED_ORIGINS?: string;
   /** Public on-chain config for the discovery doc. */
   CHAIN_ID: string;
   ENTRY_POINT: string;
@@ -111,9 +114,40 @@ async function bodyDigest(rawBody?: ArrayBuffer): Promise<string> {
 /** The audience the edge stamps + the origin checks — both sides agree on this constant. */
 const GATEWAY_ASSERTION_AUD = 'urn:agentic:edge';
 
+/** Is `origin` in the allowlist (exact or `https://*.suffix` wildcard)? */
+function isAllowedOrigin(origin: string | null, allowed?: string): boolean {
+  if (!origin || !allowed) return false;
+  for (const entry of allowed.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (entry === origin) return true;
+    if (entry.startsWith('https://*.')) {
+      const suffix = entry.slice('https://*.'.length);
+      if (origin.startsWith('https://') && (origin.endsWith('.' + suffix) || origin === 'https://' + suffix)) return true;
+    }
+  }
+  return false;
+}
+
+/** CORS headers for an allowed browser Origin (Bearer/JSON, no credentials — no ambient authority). */
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type',
+    'access-control-max-age': '600',
+    vary: 'Origin',
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // CORS so browser callers (demo-web-pro etc.) can be repointed at the edge (route-lockdown
+    // prerequisite). The edge answers the preflight + tags its OWN responses; for DISPATCHED requests
+    // the origin sets ACAO off the forwarded Origin (not a stripped header), so we never double-tag.
+    const origin = request.headers.get('Origin');
+    const cors = isAllowedOrigin(origin, env.EDGE_ALLOWED_ORIGINS) ? corsHeaders(origin!) : {};
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     // Native discovery — served at the edge from public on-chain config only (spec 292).
     if (request.method === 'GET' && url.pathname === '/.well-known/agentic-authorization') {
@@ -123,18 +157,20 @@ export default {
         delegationManager: env.DELEGATION_MANAGER as `0x${string}`,
         universalSignatureValidator: env.UNIVERSAL_SIGNATURE_VALIDATOR as `0x${string}`,
       });
-      return serveAgenticAuthorization(profile);
+      const res = serveAgenticAuthorization(profile);
+      for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+      return res;
     }
 
     if (request.method === 'GET' && url.pathname === '/health') {
-      return json({ ok: true, service: 'demo-edge' }, 200);
+      return json({ ok: true, service: 'demo-edge' }, 200, cors);
     }
 
     // Stage-3 hard-budget DO smoke probe (demo-only, flag-gated). Exercises a full reserve →
     // over-limit deny → commit (charge actuals) → reserve-fits → release → reserve-fits cycle on
     // a fresh Smart Agent shard, against the real Durable Object. NOT a production route.
     if (request.method === 'POST' && url.pathname === '/budget/probe') {
-      if (env.DEMO_BUDGET_PROBE_ENABLED !== 'true') return json({ error: 'not_found' }, 404);
+      if (env.DEMO_BUDGET_PROBE_ENABLED !== 'true') return json({ error: 'not_found' }, 404, cors);
       const body = (await request.json().catch(() => ({}))) as { sponsorAgent?: string };
       const rnd = new Uint8Array(20);
       crypto.getRandomValues(rnd);
@@ -157,7 +193,7 @@ export default {
       steps.push({ step: 'reserve 7 (k4) — expect ALLOW (3+7=10)', allowed: r4.allowed });
 
       const pass = r1.allowed && !r2.allowed && r3.allowed && r4.allowed;
-      return json({ ok: pass, sponsorAgent, limitUnits, steps }, 200);
+      return json({ ok: pass, sponsorAgent, limitUnits, steps }, 200, cors);
     }
 
     // Admission: extract → runAdmission (header hygiene → size/depth/envelope → Stage-1 abuse) →
@@ -173,10 +209,11 @@ export default {
     if (!result.ok) {
       // Single generic error — never echo the internal classifier (info-leak; spec 288 §4).
       return json({ error: 'admission denied', correlationId: result.correlationId }, result.status, {
+        ...cors,
         'x-correlation-id': result.correlationId,
       });
     }
-    if (!route) return json({ error: 'admission denied', correlationId: result.correlationId }, 500);
+    if (!route) return json({ error: 'admission denied', correlationId: result.correlationId }, 500, cors);
 
     // GatewayAssertion (spec 288 §4): the edge signs that it admitted THESE exact bytes for this route,
     // so the origin can prove the request came through admission (admission only — never authority). The
