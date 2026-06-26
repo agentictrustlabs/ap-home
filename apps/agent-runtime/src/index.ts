@@ -560,9 +560,10 @@ app.use('*', async (c, next) => {
   // etc.). No state change to forge → CSRF doesn't apply. We rely on
   // CORS to keep cross-origin browsers off non-allowlisted pages.
   if (c.req.path === '/rpc') return next();
-  // /api/a2a is the machine-to-machine A2A endpoint (spec 231) — no browser
-  // cookie/CSRF; authorization is per the A2A protocol, not double-submit.
-  if (c.req.path === '/api/a2a') return next();
+  // /api/a2a[/<handle>] is the machine-to-machine A2A task endpoint (spec 231 subdomain shape + spec 288 §6
+  // edge agent-addressed shape) — no browser cookie/CSRF; authorization is per the A2A protocol (delegation
+  // + the edge GatewayAssertion), not double-submit.
+  if (c.req.path === '/api/a2a' || c.req.path.startsWith('/api/a2a/')) return next();
   // /custody/google/resolve + /custody/google/sign-site-delegation are server-to-server calls from the
   // Connect broker (no browser cookie). They're authenticated by the bridge HMAC envelope, not CSRF.
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
