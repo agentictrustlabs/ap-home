@@ -78,10 +78,13 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
       direct `/mcp/native` → **401 gateway_assertion_required**; via-edge → **200**. Reversible: remove the
       toml line + redeploy → advisory.
 
-### Surface 2 — demo-mcp `POST /mcp` (OAuth ingress)
-- [ ] Add gateway-assertion verification to the `/mcp` handler (same pattern as native; operationId `mcp.oauth`).
-- [ ] Repoint demo-web-pro Act6 OAuth panel → the edge URL.
-- [ ] Flip require-mode (shares the same `DEMO_REQUIRE_GATEWAY_ASSERTION`, or a per-route flag).
+### Surface 2 — demo-mcp `POST /mcp` (OAuth ingress) — ✅ LOCKED (2026-06-26)
+- [x] Added gateway-assertion verification to the `/mcp` handler (shared `checkGatewayAssertion` helper —
+      native refactored to it too; operationId `mcp.oauth`, raw-body digest, gates before the OAuth logic).
+- [x] Repointed demo-web-pro Act6 OAuth panel: the bearer-gated `/mcp` call → the edge
+      (`config.demoEdgeUrl ?? demoMcpUrl`); the `/oauth/token` MINT stays direct (NOT-LOCKABLE). Deployed.
+- [x] Locked under the same `DEMO_REQUIRE_GATEWAY_ASSERTION` flag. Verified live: direct `/mcp` →
+      **401 gateway_assertion_required**; via-edge → past the gate (`missing_token` from the OAuth logic).
 
 ### Surface 3 — demo-a2a `POST /api/a2a` + agent-card
 - [ ] Add gateway-assertion verification to `/api/a2a` (operationId `a2a.task`).
@@ -105,8 +108,12 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
 - **Edge CORS shipped + deployed** (the shared prerequisite) — browser callers can now target the edge.
 - **Surface 1 (`/mcp/native`) LOCKED** — demo-web-pro Native panel repointed at the edge; require-mode
   enabled + verified live (direct 401, via-edge 200). The first surface is private-behind-the-edge.
+- **Surface 2 (`/mcp` OAuth) LOCKED** — shared `checkGatewayAssertion` helper; demo-web-pro OAuth panel's
+  `/mcp` call repointed at the edge (token mint stays direct); verified live (direct 401, via-edge past gate).
+  Both demo-mcp MCP ingress surfaces are now private behind the edge.
 
 ## Next concrete steps
-- **Surface 2 (`/mcp` OAuth)** — add gateway-assertion verification to the `/mcp` handler (operationId
-  `mcp.oauth`), repoint demo-web-pro Act6's OAuth panel → the edge, then it locks under the same flag.
-- **Surface 3 (`/api/a2a`)** — add verification + resolve the subdomain-vs-edge discovery question.
+- **Surface 3 (`/api/a2a`)** — add gateway-assertion verification to the A2A task endpoint, and resolve the
+  subdomain-vs-edge discovery question (the public A2A endpoint is the `<handle>.impact-agent.io` subdomain
+  served directly by demo-a2a — front it through the edge, or advertise the edge endpoint in the agent-card).
+  This is the last LOCKABLE surface; the relayer/session/custody routes stay public by design.

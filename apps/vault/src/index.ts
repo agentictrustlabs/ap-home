@@ -267,6 +267,37 @@ async function enforceBudget(
   }
 }
 
+// GatewayAssertion admission check (spec 288 §4/§6) — verify the edge admitted THESE exact bytes for this
+// route. Admission proof ONLY (the route's own authority still runs). Advisory unless
+// DEMO_REQUIRE_GATEWAY_ASSERTION (the route-lockdown lever: only edge-admitted requests pass). Returns a
+// 401 Response to short-circuit on failure, or null to proceed. `rawText` is the exact received body.
+async function checkGatewayAssertion(
+  c: { env: Env; req: { header(name: string): string | undefined }; json(o: unknown, s?: number): Response },
+  rawText: string,
+  expected: { path: string; operationId: string },
+): Promise<Response | null> {
+  const gaToken = c.req.header('x-agentic-gateway-assertion');
+  const gaSecret = c.env.GATEWAY_ASSERTION_SECRET?.trim();
+  const gaRequired = c.env.DEMO_REQUIRE_GATEWAY_ASSERTION === 'true';
+  if (gaRequired && (!gaToken || !gaSecret)) return c.json({ error: 'gateway_assertion_required' }, 401);
+  if (gaToken && gaSecret) {
+    try {
+      const { assertion, signature } = decodeGatewayAssertionToken(gaToken);
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawText));
+      const digest = 'sha256:' + [...new Uint8Array(hashBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const verdict = await verifyGatewayAssertion({
+        assertion,
+        expected: { aud: 'urn:agentic:edge', method: 'POST', path: expected.path, bodyDigest: digest, operationId: expected.operationId },
+        verify: createHmacGatewayAssertionVerifier(gaSecret, signature),
+      });
+      if (!verdict.ok && gaRequired) return c.json({ error: 'gateway_assertion_invalid', reason: verdict.reason }, 401);
+    } catch (e) {
+      if (gaRequired) return c.json({ error: 'gateway_assertion_invalid', detail: e instanceof Error ? e.message : String(e) }, 401);
+    }
+  }
+  return null;
+}
+
 // spec 278 — gate a SIMPLE vault op (profile read, generic record read/write — paths that
 // don't mint a one-time DecryptGrant) on the per-person binding + vault-key authorization.
 // No binding ⇒ fail closed (VKB-D1). Returns the per-person Vault on allow.
@@ -755,32 +786,9 @@ app.post('/mcp/native', async (c) => {
   if (!reqBody?.token) return c.json({ error: 'token required' }, 400);
   if (!reqBody.invocationProof) return buildInvalidInvocationProofResponse();
 
-  // GatewayAssertion (spec 288 §4) — verify the edge admitted THESE exact bytes for this route. Admission
-  // proof ONLY (the full Web3 authority still runs below). Advisory by default; REQUIRED under
-  // DEMO_REQUIRE_GATEWAY_ASSERTION (the route-lockdown precursor: only edge-admitted requests pass).
-  {
-    const gaToken = c.req.header('x-agentic-gateway-assertion');
-    const gaSecret = c.env.GATEWAY_ASSERTION_SECRET?.trim();
-    const gaRequired = c.env.DEMO_REQUIRE_GATEWAY_ASSERTION === 'true';
-    if (gaRequired && (!gaToken || !gaSecret)) {
-      return c.json({ error: 'gateway_assertion_required' }, 401);
-    }
-    if (gaToken && gaSecret) {
-      try {
-        const { assertion, signature } = decodeGatewayAssertionToken(gaToken);
-        const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawText));
-        const digest = 'sha256:' + [...new Uint8Array(hashBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-        const verdict = await verifyGatewayAssertion({
-          assertion,
-          expected: { aud: 'urn:agentic:edge', method: 'POST', path: '/mcp/native', bodyDigest: digest, operationId: 'mcp.native' },
-          verify: createHmacGatewayAssertionVerifier(gaSecret, signature),
-        });
-        if (!verdict.ok && gaRequired) return c.json({ error: 'gateway_assertion_invalid', reason: verdict.reason }, 401);
-      } catch (e) {
-        if (gaRequired) return c.json({ error: 'gateway_assertion_invalid', detail: e instanceof Error ? e.message : String(e) }, 401);
-      }
-    }
-  }
+  // GatewayAssertion (spec 288 §4/§6) — admission proof; the full Web3 authority still runs below.
+  const gaNative = await checkGatewayAssertion(c, rawText, { path: '/mcp/native', operationId: 'mcp.native' });
+  if (gaNative) return gaNative;
 
   const auditSink = buildAuditSink(c.env);
   const correlationId = getCorrelationId(c);
@@ -1243,6 +1251,13 @@ app.post('/mcp', async (c) => {
   const metaUrl = new URL('/.well-known/oauth-protected-resource', c.req.url).toString();
   if (!c.env.OAUTH_SIGNING_SECRET) return c.json({ error: 'unsupported', error_description: 'OAuth ingress not configured' }, 501);
 
+  // Read the RAW body once (for the GatewayAssertion digest); the bearer logic below parses from it.
+  const rawText = await c.req.text().catch(() => '');
+  // GatewayAssertion (spec 288 §6) — gate BEFORE the OAuth logic so a direct caller gets a single generic
+  // gateway_assertion_required (no OAuth-surface leak). Advisory unless DEMO_REQUIRE_GATEWAY_ASSERTION.
+  const gaOauth = await checkGatewayAssertion(c, rawText, { path: '/mcp', operationId: 'mcp.oauth' });
+  if (gaOauth) return gaOauth;
+
   const validation = await validateMcpBearerToken(parseBearer(c.req.header('authorization')), {
     verify: createHs256Verify(c.env.OAUTH_SIGNING_SECRET),
     audience: c.env.MCP_AUDIENCE,
@@ -1264,7 +1279,7 @@ app.post('/mcp', async (c) => {
   if (!resolved.ok) return buildUnauthorizedResponse({ resourceMetadataUrl: metaUrl, errorDescription: `grant_${resolved.reason}` });
 
   let body: Record<string, unknown> = {};
-  try { body = (await c.req.json()) as Record<string, unknown>; } catch { body = {}; }
+  try { body = JSON.parse(rawText) as Record<string, unknown>; } catch { body = {}; }
   const tool = typeof body.tool === 'string' ? body.tool : (typeof body.method === 'string' ? body.method : '');
 
   // spec 278 — the home's community contact profile (`ImpactContactProfile`) is a per-person
