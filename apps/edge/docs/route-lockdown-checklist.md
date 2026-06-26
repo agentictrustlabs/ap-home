@@ -1,10 +1,18 @@
 # Route-lockdown caller-migration checklist (spec 288 §6)
 
-**Status: IN PROGRESS — lockdown NOT yet enabled. Advisory mode only.**
+**Status: COMPLETE — all edge-frontable surfaces lock behind a single deployment toggle. Last reviewed 2026-06-26.**
 
-Route lockdown is sequenced LAST and gated (spec 288 §6): pulling a Worker's public exposure before
-*every* caller is repointed is an outage. This checklist is the gate — lockdown proceeds only as rows flip
-to ✅, and every step is reversible. Last reviewed: 2026-06-26.
+**The toggle: `EDGE_REQUIRED` (deploy-cloudflare.ts).** `EDGE_REQUIRED=true pnpm deploy:cloudflare` ⇒ the edge
+is MANDATORY — demo-mcp (`/mcp`, `/mcp/native`) + demo-a2a (`/api/a2a`, `/api/a2a/<handle>`) REQUIRE a valid
+edge GatewayAssertion (`DEMO_REQUIRE_GATEWAY_ASSERTION=true` via `--var`), the web routes MCP through the edge
+(`VITE_DEMO_EDGE_URL` set), the agent-card advertises the edge endpoint (`DEMO_EDGE_URL`), and the edge Worker
+is deployed. Unset (default) ⇒ edge-less: nothing requires the assertion, the web calls origins directly, the
+edge isn't deployed — the demo works fully without the edge. `DEMO_REQUIRE_GATEWAY_ASSERTION` lives in `--var`
+(deploy-controlled), NOT the tomls (which default `"false"`), so the one flag flips the whole flow. Both modes
+verified live on Base Sepolia (2026-06-26).
+
+Route lockdown is gated (spec 288 §6): pulling a Worker's public exposure before *every* caller is repointed is
+an outage. Every step here is reversible (re-deploy without the flag).
 
 ## Two lockdown mechanisms (distinct — don't conflate)
 
@@ -92,18 +100,20 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
       on dispatch and the worker verifies it. Admission proof ONLY — the A2aTaskDO's delegation + signature
       authority still runs. Deployed live (2026-06-26). Agent-card stays **public** (discovery; flows through
       the edge AND directly — verified 200 both ways).
-- [x] **ADVISORY, not required** (`DEMO_REQUIRE_GATEWAY_ASSERTION="false"` on demo-a2a). Deliberate: see the
-      blocker below.
-- [ ] **BLOCKER for require-mode — the edge must convey per-agent identity.** `/api/a2a` resolves its target
-      agent from the per-agent subdomain Host (`<handle>.impact-agent.io`), served **directly** by demo-a2a's
-      Worker route. The single-host edge (`demo-edge-production.workers.dev/api/a2a`) does not convey which
-      agent, so a via-edge task request reaches the worker but `400`s on "must target personal subdomain"
-      *before* the runtime; and requiring the assertion would `401` a legitimate subdomain-direct caller (who
-      carries no edge assertion). Resolve by having the edge convey the target agent on dispatch — e.g. accept
-      `<handle>` in the path/header and inject a trusted `X-Agent-Subdomain` when forwarding to the A2A binding
-      (demo-a2a's `resolveAgentHost` already reads that header; admission header-hygiene currently strips it).
-      This is a spec-288-§6 design decision (the edge asserting agent identity to the origin), not a deploy step.
-- [ ] Flip require-mode on `/api/a2a` once the above lands.
+- [x] **Edge→agent-identity conveyance IMPLEMENTED** (the former blocker). The edge addresses a specific agent
+      via `POST /api/a2a/<handle>`; the `<handle>` rides in the request path, so it lands in the edge-signed
+      GatewayAssertion `path` — the target agent is **cryptographically bound into the admission proof** (no
+      spoofable header, no new assertion field). demo-a2a's new `POST /api/a2a/:handle` handler runs the gate
+      FIRST (expected.path = the actual `/api/a2a/<handle>`), then resolves the agent from the SAME path
+      segment via `resolveAgentByLabel`. The bare `/api/a2a` (subdomain Host) handler stays for edge-less mode.
+      Fixed: CSRF middleware now exempts `/api/a2a/<handle>` (machine-to-machine, like the bare route).
+- [x] **REQUIRE-MODE works (gated on the toggle).** `EDGE_REQUIRED=true` ⇒ `DEMO_REQUIRE_GATEWAY_ASSERTION=true`
+      on demo-a2a ⇒ both task ingress shapes require the assertion. Verified live (2026-06-26): direct
+      `/api/a2a/<h>` (no assertion) → `401 gateway_assertion_required`; direct (forged) → `401
+      gateway_assertion_invalid`; **via-edge `/api/a2a/<h>` → past the gate** (resolves the agent — `404` for an
+      unregistered handle, the task runtime for a real one). The subdomain-direct `/api/a2a` then `401`s in
+      required mode (intentional — forces traffic through the edge). Agent-card advertises the edge endpoint
+      (`<DEMO_EDGE_URL>/api/a2a/<handle>`) when `DEMO_EDGE_URL` is set.
 
 ## Reversibility + rollback
 
@@ -123,13 +133,15 @@ Lockdown of a LOCKABLE surface flips on only when ALL its rows are ✅.
 - **Surface 2 (`/mcp` OAuth) LOCKED** — shared `checkGatewayAssertion` helper; demo-web-pro OAuth panel's
   `/mcp` call repointed at the edge (token mint stays direct); verified live (direct 401, via-edge past gate).
   Both demo-mcp MCP ingress surfaces are now private behind the edge.
-- **Surface 3 (`/api/a2a`) verification WIRED + deployed (advisory)** — the edge mints + demo-a2a verifies the
-  GatewayAssertion; the agent-card stays public discovery. Require-mode is held pending the edge→agent-identity
-  conveyance (below). `GATEWAY_ASSERTION_SECRET` rotated consistently across demo-edge + demo-mcp + demo-a2a
-  (2026-06-26 deploy).
+- **Surface 3 (`/api/a2a`) LOCKED via the agent-addressed edge path** — `POST /api/a2a/<handle>`: the edge binds
+  the agent into the signed assertion `path`; demo-a2a's `:handle` handler verifies + resolves from it. In
+  required mode the subdomain-direct `/api/a2a` 401s (forces edge use). The agent-card advertises the edge
+  endpoint. `GATEWAY_ASSERTION_SECRET` rotated consistently across all three.
 
-## Next concrete steps
-- **Resolve edge→agent identity conveyance** (the require-mode blocker for `/api/a2a`): have the edge accept
-  the target `<handle>` (path or header) and inject a trusted `X-Agent-Subdomain` when dispatching to the A2A
-  binding, so a via-edge task request routes to the right agent AND require-mode can be enabled without
-  breaking the subdomain ingress. Spec-288-§6 design decision. Then flip `/api/a2a` to require-mode.
+## Status: lockdown is a single deploy toggle
+All three edge-frontable surfaces (MCP native + OAuth, A2A task) lock behind `EDGE_REQUIRED=true`, and the
+demo works fully edge-less when it's unset. Both modes verified live (2026-06-26).
+
+Remaining (optional, not blocking): the default Service-Binding-identity GatewayAssertion issuer (288 §4); a
+true private origin would require splitting demo-a2a's relayer/session API into its own non-public Worker
+(out of scope — the relayer is intentionally public, ADR-0043).
