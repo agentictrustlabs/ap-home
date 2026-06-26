@@ -1,6 +1,6 @@
 # demo-edge — architecture & message flow
 
-How the **Agentic Edge** ([`apps/demo-edge`](../src/index.ts), [spec 288](../../../specs/288-agentic-edge-admission-and-capability-registry.md))
+How the **Agentic Edge** ([`apps/demo-edge`](../src/index.ts), [spec 288](../../../specs/288-agentic-edge-admission-and-surface-catalog.md))
 sits in front of the demo stack and what an end-to-end request looks like from a browser client
 ([`apps/demo-web-pro`](../../demo-web-pro/), the Treasury Service Agent demo) through **demo-edge → demo-a2a → demo-mcp**.
 
@@ -271,7 +271,7 @@ server.
 | --- | --- |
 | [`edge-runtime`](../../../packages/edge-runtime/) | vendor-neutral `EdgeAdapter`, `runAdmission` pipeline, `sanitizeTrustedHeaders`, `GatewayAssertion` issue/verify port |
 | [`edge-cloudflare`](../../../packages/edge-cloudflare/) | CF adapter: `extractAdmissionRequest`, Workers rate-limiter binding (Stage-1), `dispatchToBinding` |
-| [`capability-registry`](../../../packages/capability-registry/) | `CapabilityDescriptor` type (route + risk tier + limits + maxBodyBytes) the edge resolves to |
+| [`surface-catalog`](../../../packages/surface-catalog/) | `SurfaceDescriptor` type (route + risk tier + limits + maxBodyBytes) the edge resolves to |
 | [`rate-control`](../../../packages/rate-control/) | vendor-neutral `SoftRateLimiter` / `HardBudgetStore` interfaces + reserve/commit/release semantics |
 | `rate-control-cloudflare` | `createCloudflareRateLimiter` (Stage-1) + `SmartAgentBudgetDO` (Stage-3 hard budget) |
 | [`agentic-authorization`](../../../packages/agentic-authorization/) | the `/.well-known/agentic-authorization` discovery profile |
@@ -321,7 +321,7 @@ signal the origin keys on, not a client-supplied header.
 - [ADR-0043 — the edge owns admission, never authority](../../../docs/architecture/decisions/0043-edge-owns-admission-never-authority.md)
 - [ADR-0041 — Web3 is the authority; the envelope is not](../../../docs/architecture/decisions/0041-web3-authority-not-oauth-on-a2a-to-mcp.md)
 - [spec 287 — Agentic Invocation Proof](../../../specs/287-agentic-invocation-proof.md)
-- [spec 288 — Agentic Edge admission & capability registry](../../../specs/288-agentic-edge-admission-and-capability-registry.md)
+- [spec 288 — Agentic Edge admission & surface catalog](../../../specs/288-agentic-edge-admission-and-surface-catalog.md)
 - [spec 290 — rate-control & usage accounting](../../../specs/290-rate-control-and-usage-accounting.md)
 - [Edge admission & authority hardening plan](../../../docs/architecture/edge-admission-and-authority-hardening-plan.md)
 - Code: [`apps/demo-edge/src/index.ts`](../src/index.ts) · [`apps/demo-a2a/src/index.ts`](../../demo-a2a/src/index.ts) · [`apps/demo-mcp/src/index.ts`](../../demo-mcp/src/index.ts) · [`apps/demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx`](../../demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx)

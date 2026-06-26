@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@agenticprimitives/agentic-authorization": "workspace:*",
-    "@agenticprimitives/capability-registry": "workspace:*",
+    "@agenticprimitives/surface-catalog": "workspace:*",
     "@agenticprimitives/edge-cloudflare": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/rate-control": "workspace:*",

@@ -22,10 +22,10 @@ import {
 import { buildAgenticAuthorizationProfile, serveAgenticAuthorization } from '@agenticprimitives/agentic-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import type {
-  CapabilityDescriptor,
-  CapabilityProtocol,
-  CapabilityRiskTier,
-} from '@agenticprimitives/capability-registry';
+  SurfaceDescriptor,
+  SurfaceProtocol,
+  SurfaceRiskTier,
+} from '@agenticprimitives/surface-catalog';
 
 // The Stage-3 hard-budget Durable Object must be exported from the Worker entry so CF can bind it
 // (spec 290 §8). One DO instance per Smart Agent shard.
@@ -57,15 +57,15 @@ interface Env {
 type BindingName = 'MCP' | 'A2A';
 interface Route {
   binding: BindingName;
-  descriptor: CapabilityDescriptor;
+  descriptor: SurfaceDescriptor;
 }
 
 function descriptor(
   id: string,
-  protocol: CapabilityProtocol,
-  riskTier: CapabilityRiskTier,
+  protocol: SurfaceProtocol,
+  riskTier: SurfaceRiskTier,
   maxBodyBytes: number,
-): CapabilityDescriptor {
+): SurfaceDescriptor {
   return {
     id,
     protocol,
