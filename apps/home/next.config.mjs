@@ -4,6 +4,11 @@ const DEMO_A2A_URL = process.env.DEMO_A2A_URL || 'https://demo-a2a-production.ri
 // /custody/vault-key/bind. Proxy it same-origin (the demo-mcp bind route has no CORS) — same
 // pattern as /a2a. Production MUST set DEMO_MCP_URL; the fallback is solo-dev convenience only.
 const DEMO_MCP_URL = process.env.DEMO_MCP_URL || 'https://demo-mcp-production.richardpedersen3.workers.dev';
+// spec 288 §6 — when EDGE_REQUIRED='true' + DEMO_EDGE_URL set, MCP DATA (`/a2a/mcp/*`) routes through the
+// Agentic Edge (web → edge → a2a → MCP); auth/session/custody (`/a2a/*`) stay direct to demo-a2a. Set both as
+// Vercel env vars to turn the edge on for this app (it deploys via Vercel, not deploy-cloudflare.ts).
+const EDGE_REQUIRED = process.env.EDGE_REQUIRED === 'true';
+const DEMO_EDGE_URL = process.env.DEMO_EDGE_URL || '';
 
 // EXT-001 / EXT-009 — security headers baseline applied to every route. A strict CSP
 // with nonces will land in a follow-up wave (the OIDC SPA mixes inline event handlers
@@ -56,8 +61,13 @@ const nextConfig = {
   // retained only for solo-dev convenience and is not part of the deployment surface.
   async rewrites() {
     return [
+      // spec 288 §6 — MCP DATA through the edge when required (matched BEFORE the general /a2a rule). The edge
+      // matches `/mcp/*` → demo-a2a; the assertion binds the same path demo-a2a verifies.
+      ...(EDGE_REQUIRED && DEMO_EDGE_URL
+        ? [{ source: '/a2a/mcp/:path*', destination: `${DEMO_EDGE_URL}/mcp/:path*` }]
+        : []),
       { source: '/a2a/:path*', destination: `${DEMO_A2A_URL}/:path*` },
-      // spec 278 P5 — vault-key ceremony → demo-mcp (server-side proxy; dodges CORS on /bind).
+      // spec 278 P5 — vault-key ceremony → demo-mcp (server-side proxy; dodges CORS on /bind). NOT a data read.
       { source: '/mcp-bind/:path*', destination: `${DEMO_MCP_URL}/:path*` },
     ];
   },

@@ -87,6 +87,15 @@ function descriptor(
 const CATALOG: { test: (method: string, path: string) => boolean; route: Route }[] = [
   { test: (m, p) => m === 'POST' && p === '/mcp/native', route: { binding: 'MCP', descriptor: descriptor('mcp.native', 'mcp', 'high', 256 * 1024) } },
   { test: (m, p) => m === 'POST' && p === '/mcp', route: { binding: 'MCP', descriptor: descriptor('mcp.oauth', 'mcp', 'high', 256 * 1024) } },
+  // spec 288 §6 — the demo-a2a AGENTIC DATA routes (the first-party `web → edge → a2a → MCP` data path). These
+  // are demo-a2a's delegation-gated proxy routes (it reads/writes MCP on the caller's behalf), distinct from the
+  // exact `/mcp` + `/mcp/native` MCP-origin entries above (matched first → no collision). The edge forwards the
+  // received path unchanged, so the signed assertion `path` equals what demo-a2a verifies. One descriptor id
+  // `a2a.data`; the signed `path` disambiguates which route. `/tools/*` is the legacy session-cookie tool proxy.
+  // Any demo-a2a `/mcp/<sub>` data route (person/pii, org/sensitive, vault/*, youversion/*, profile/*, …) or
+  // `/tools/<name>`. `/mcp` + `/mcp/native` (the demo-mcp origin) are matched EXACTLY above, so they never fall
+  // here. This mirrors demo-a2a's `app.use('/mcp/*')` admission middleware → any new data route is auto-covered.
+  { test: (m, p) => m === 'POST' && /^\/(mcp\/.+|tools\/.+)$/.test(p), route: { binding: 'A2A', descriptor: descriptor('a2a.data', 'a2a', 'high', 256 * 1024) } },
   // spec 288 §6 — agent-addressed A2A task ingress: `<handle>` rides in the path so it lands in the signed
   // GatewayAssertion `path` (tamper-evident agent binding). This is how the edge conveys per-agent identity
   // to demo-a2a; the origin resolves the agent from the same path segment. Matched before the bare route.

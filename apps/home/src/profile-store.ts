@@ -1,16 +1,16 @@
-// @legacy-rpc-pattern (ADR-0044): the home reads/writes the profile by calling the MCP `/mcp` ingress
-// directly (RPC-shaped first-party access). The objective is intent-expression to an a2a agent that
-// composes the vault primitive; legacy to migrate, not the first-party pattern to extend.
-//
 // The Impact home's profile store — the member's COMMUNITY CONTACT profile (name/email/phone/org),
-// re-used across community apps. spec 278: this is now persisted in the member's PER-PERSON ENCRYPTED
-// vault at demo-mcp (the `vault:impact-profile` record, sealed under the member's own GCP Cloud KMS
-// KEK), NOT browser localStorage. The home holds no key material and no copy: it reads/writes over the
-// same-origin `/mcp-bind` proxy by minting an OAuth token for the logged-in member and calling the
-// owner-reads/writes-own `get_impact_profile` / `set_impact_profile` tools. No binding (the member
-// hasn't run the connected-custodian ceremony at /vault-key) ⇒ fail-closed (`vault_key_unauthorized`).
+// re-used across community apps. spec 278: persisted in the member's PER-PERSON ENCRYPTED vault at demo-mcp
+// (the `vault:impact-profile` record, sealed under the member's own GCP Cloud KMS KEK), NOT browser storage.
+//
+// spec 288 §6 / ADR-0044 — the home reaches this THROUGH a2a (never the browser → /mcp direct path): it
+// POSTs the member's address to the same-origin `/a2a/mcp/profile/{get,set}` agentic route (CSRF-protected,
+// edge-admitted when the deployment requires the edge). demo-a2a forwards to demo-mcp over the service-MAC
+// `/tools/{get,set}_impact_profile` (owner-own; demo-a2a asserts the principal — parity with the open demo
+// OAuth mint). The home holds no key material and no copy. No vault-key binding (the member hasn't run the
+// connected-custodian ceremony at /vault-key) ⇒ fail-closed (`vault_key_unauthorized`).
 
 import type { Address } from '@agenticprimitives/types';
+import { ensureCsrfToken, csrfHeaders } from './csrf';
 
 export interface ImpactContactProfile {
   /** Display name — first/last let community apps render a friendly header like
@@ -67,34 +67,21 @@ export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 
   { key: 'organizationCountry', label: 'Organization country',  type: 'text',  placeholder: 'United States',            help: 'Where your organization is based.' },
 ];
 
-// ─── demo-mcp vault access (same-origin /mcp-bind proxy → DEMO_MCP_URL) ──────────────────────
-// The open demo authorization endpoint mints an OAuth token bound to the principal's grant bundle
-// (itself stored under the principal's KEK — so minting already requires a live binding). The token
-// then authorizes owner-reads/writes-own on the /mcp ingress; demo-mcp re-derives the principal from
-// the token and gates every op on the per-person vault-key authorization (read/write).
+// ─── demo-mcp profile access THROUGH a2a (same-origin /a2a/mcp/profile/* → demo-a2a → demo-mcp) ──────
+// Owner-own: demo-a2a asserts the member's principal over service-MAC to demo-mcp, which gates every op on
+// the per-person vault-key authorization (read/write). CSRF-protected like every other /a2a/* mutating call.
 
-const MCP_BIND = '/mcp-bind';
-
-async function mintToken(principal: Address): Promise<string> {
-  const res = await fetch(`${MCP_BIND}/oauth/token`, {
+async function postProfile(path: 'get' | 'set', principal: Address, data?: ImpactStoredProfile): Promise<Record<string, unknown>> {
+  await ensureCsrfToken();
+  const res = await fetch(`/a2a/mcp/profile/${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ principal }),
-  });
-  const body = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
-  if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
-  if (!res.ok || !body.access_token) throw new Error(`mint failed: ${body.error ?? res.status}`);
-  return body.access_token;
-}
-
-async function callMcp(token: string, tool: string, args?: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(`${MCP_BIND}/mcp`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ tool, args: args ?? {} }),
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ principal, ...(data !== undefined ? { data } : {}) }),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (!res.ok) throw new Error(`profile ${path} failed: ${String(body.error ?? res.status)}`);
   return body;
 }
 
@@ -102,8 +89,7 @@ async function callMcp(token: string, tool: string, args?: Record<string, unknow
  *  member has never saved one. Throws `VaultKeyUnauthorizedError` if they haven't activated their
  *  vault key (run the /vault-key ceremony) yet. */
 export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProfile> {
-  const token = await mintToken(addr);
-  const out = await callMcp(token, 'get_impact_profile');
+  const out = await postProfile('get', addr);
   const record = out.record as ImpactStoredProfile | null | undefined;
   if (record && record.v === 1) return record;
   return { v: 1 };
@@ -112,7 +98,6 @@ export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProf
 /** Seal the member's community profile into their vault under their own KEK. Throws
  *  `VaultKeyUnauthorizedError` if they haven't activated their vault key yet. */
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
-  const token = await mintToken(addr);
-  const out = await callMcp(token, 'set_impact_profile', { data: profile });
+  const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
 }

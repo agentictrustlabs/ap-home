@@ -138,6 +138,19 @@ printf '%s' "$OAUTH_SIGNING_SECRET" \
 unset OAUTH_SIGNING_SECRET
 echo "  ✓ OAUTH_SIGNING_SECRET  (demo-mcp)"
 
+# 8. GATEWAY_ASSERTION_SECRET — the spec-288 §6 edge admission HMAC. The SAME value MUST be on demo-edge
+#    (signer) + demo-mcp + demo-a2a (verifiers). The edge is ON by default, so the verifiers REQUIRE a valid
+#    assertion — a mismatch/absence → 401 on every edge-fronted request. Honored from
+#    $GATEWAY_ASSERTION_SECRET if set; else a fresh value is generated and set consistently across all three.
+#    printf '%s' (no trailing newline) — the edge signer does NOT .trim(), so a newline would break the HMAC.
+GATEWAY_ASSERTION_SECRET="${GATEWAY_ASSERTION_SECRET:-$(openssl rand -hex 32)}"
+for ga_app in demo-edge demo-mcp demo-a2a; do
+  printf '%s' "$GATEWAY_ASSERTION_SECRET" \
+    | (cd "apps/$ga_app" && wrangler secret put GATEWAY_ASSERTION_SECRET --env "$ENV") >/dev/null
+  echo "  ✓ GATEWAY_ASSERTION_SECRET  ($ga_app)"
+done
+unset GATEWAY_ASSERTION_SECRET
+
 echo ""
 echo "Fresh A2A master EOA address: $A2A_ADDR"
 echo "  (private key was piped directly to Cloudflare — never stored locally,"

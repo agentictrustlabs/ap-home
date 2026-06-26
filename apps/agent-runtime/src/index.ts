@@ -720,6 +720,23 @@ async function checkGatewayAssertion(
   return null;
 }
 
+// spec 288 §6 — admission gate for the AGENTIC DATA routes (the first-party `web → edge → a2a → MCP` data
+// path): /mcp/person/pii, /mcp/org/sensitive, /mcp/vault/{get,set,list}, /mcp/youversion/*, /tools/*. When the
+// deployment requires the edge (DEMO_REQUIRE_GATEWAY_ASSERTION=true), only edge-admitted requests pass; a
+// direct call (no assertion) → 401. The full delegation/MAC authority below is unchanged. The edge forwards
+// the same path it admitted, so the signed assertion `path` equals `c.req.path` here. Body is read once
+// (Hono caches the buffer; the route handlers' c.req.json()/text() reuse it). Operation id `a2a.data` matches
+// the edge CATALOG descriptor; the signed path disambiguates which data route. Registered before the route
+// handlers; runs after the CSRF + global middlewares.
+const gateAgenticData = async (c: Context<{ Bindings: Env }>, next: () => Promise<void>): Promise<Response | void> => {
+  const raw = await c.req.text();
+  const ga = await checkGatewayAssertion(c, raw, { path: c.req.path, operationId: 'a2a.data' });
+  if (ga) return ga;
+  return next();
+};
+app.use('/mcp/*', gateAgenticData);
+app.use('/tools/*', gateAgenticData);
+
 /** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
 async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
   const reqOrigin = new URL(c.req.url).origin;
@@ -3716,6 +3733,62 @@ app.post('/mcp/org/sensitive', async (c) => {
       500,
     );
   }
+});
+
+// ─── Home community-profile proxy (spec 278 + spec 288 §6) ────────────────
+//
+// The Personal Trust Home (demo-sso-next) reads/writes the member's OWN `vault:impact-profile` record.
+// It has no client-side delegation for the member (owner-own), so this is the through-a2a replacement for
+// the home's former browser → /mcp-bind/mcp direct OAuth call (ADR-0044): the browser POSTs the principal
+// to /a2a/mcp/profile/* (admission-gated like every other /mcp/* data route), and demo-a2a forwards to
+// demo-mcp's service-MAC `/tools/{get,set}_impact_profile` (NOT the gateway-gated /mcp ingress — so it works
+// edge-required). demo-a2a is the trusted service-MAC caller asserting the principal (parity with the open
+// OAuth mint). demo-mcp still fail-closes on the per-person vault-key binding.
+async function forwardMcpServiceMac(
+  env: Env,
+  toolName: 'get_impact_profile' | 'set_impact_profile',
+  toolArgs: Record<string, unknown>,
+  correlationId: string,
+  auditSink: ReturnType<typeof buildAuditSink>,
+): Promise<Response> {
+  const requestBody = JSON.stringify({ args: toolArgs });
+  const macProvider = buildMacProvider(MCP_AUDIENCE, {
+    backend: 'local-aes',
+    config: { sessionSecretHex: env.A2A_MAC_SECRET ?? '' },
+    auditSink,
+  });
+  const macHeaders = await generateServiceMac({
+    ctx: { audience: MCP_AUDIENCE, service: 'a2a-to-mcp', route: toolName, bodyDigest: bodyDigestHex(requestBody) },
+    provider: macProvider,
+  });
+  const reqInit: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-A2A-Mac': macHeaders.mac,
+      'X-A2A-Mac-Nonce': macHeaders.nonce,
+      'X-A2A-Mac-Timestamp': macHeaders.timestamp,
+      'X-A2A-Mac-Key-Id': macHeaders.keyId,
+      'X-Correlation-Id': correlationId,
+    },
+    body: requestBody,
+  };
+  const mcpRes = env.MCP
+    ? await env.MCP.fetch(new Request(`https://internal/tools/${toolName}`, reqInit))
+    : await fetch(`${env.MCP_URL}/tools/${toolName}`, reqInit);
+  return new Response(await mcpRes.text(), { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } });
+}
+
+app.post('/mcp/profile/get', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { principal?: Address } | null;
+  if (!body?.principal) return c.json({ ok: false, error: 'bad_body' }, 400);
+  return forwardMcpServiceMac(c.env, 'get_impact_profile', { principal: body.principal }, crypto.randomUUID(), buildAuditSink(c.env));
+});
+
+app.post('/mcp/profile/set', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { principal?: Address; data?: unknown } | null;
+  if (!body?.principal) return c.json({ ok: false, error: 'bad_body' }, 400);
+  return forwardMcpServiceMac(c.env, 'set_impact_profile', { principal: body.principal, data: body.data ?? null }, crypto.randomUUID(), buildAuditSink(c.env));
 });
 
 // ─── Generic per-agent vault proxy (spec 247) ─────────────────────────────

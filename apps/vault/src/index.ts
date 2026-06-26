@@ -1034,6 +1034,35 @@ app.post('/tools/list_vault_record', async (c) => {
   }
 });
 
+// ─── get_impact_profile / set_impact_profile — service-MAC, owner-own (spec 278 + spec 288 §6) ──────────
+// The Personal Trust Home (demo-sso-next) reads/writes the member's OWN community profile (the encrypted
+// `vault:impact-profile` record). The home holds no client-side delegation for the member, so this is an
+// OWNER-OWN op: the principal is asserted by demo-a2a (service-MAC-trusted — parity with the open OAuth mint)
+// and rides in args. SAME record + SAME per-person vault-key gate as the OAuth `get_impact_profile` dispatch,
+// but served on the service-MAC `/tools/*` path (NOT the gateway-gated `/mcp` ingress) so it works when the
+// edge is REQUIRED (home → /a2a/mcp/profile/* → demo-a2a → here, all behind the edge). No binding ⇒ fail
+// closed. This is the through-a2a replacement for the home's former browser→/mcp-bind/mcp direct call (ADR-0044).
+app.post('/tools/get_impact_profile', async (c) => {
+  const principal = (c.get('parsedBody')?.args as { principal?: string } | undefined)?.principal as Address | undefined;
+  if (!principal) return c.json({ ok: false, error: 'principal required' }, 400);
+  const resource = `${VAULT_RECORD_PREFIX}impact-profile`;
+  const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'pii.low');
+  if (!gate.ok) return c.json({ ok: false, error: gate.error, served_by: 'demo-mcp:get_impact_profile' });
+  const obj = await gate.pv.vault.read({ owner: principal, resource });
+  return c.json({ ok: true, principal, record: obj?.data ?? null, served_by: 'demo-mcp:get_impact_profile' });
+});
+
+app.post('/tools/set_impact_profile', async (c) => {
+  const args = c.get('parsedBody')?.args as { principal?: string; data?: unknown } | undefined;
+  const principal = args?.principal as Address | undefined;
+  if (!principal) return c.json({ ok: false, error: 'principal required' }, 400);
+  const resource = `${VAULT_RECORD_PREFIX}impact-profile`;
+  const gate = await authorizePersonVaultOp(c.env, principal, resource, 'write', 'internal');
+  if (!gate.ok) return c.json({ ok: false, error: gate.error, served_by: 'demo-mcp:set_impact_profile' });
+  await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
+  return c.json({ ok: true, principal, served_by: 'demo-mcp:set_impact_profile' });
+});
+
 // ─── OAuth ingress for public HTTP MCP clients (spec 277 Phase 6) ────────
 //
 // OAuth here is ONLY a compatibility adapter for public HTTP MCP clients — NOT
