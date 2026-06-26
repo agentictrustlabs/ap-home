@@ -37,7 +37,12 @@ import {
 } from './vault';
 import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
+import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
+
+// Spec 290 §8 — the per-SA hard-budget Durable Object must be exported from the Worker entry so CF can
+// bind it. demo-mcp hosts + enforces its own (it is the authority point — it has the verified principal).
+export { SmartAgentBudgetDO } from '@agenticprimitives/rate-control-cloudflare';
 import { demoEntitlementResolver } from './entitlements';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
@@ -219,6 +224,48 @@ async function readSensitive(
   return { ok: true, record: obj?.data ?? null, subject_name };
 }
 
+// spec 290 §6 Stage-3 — the per-Smart-Agent HARD budget, enforced AFTER authority (this runs inside the
+// withDelegation handler, so the proof + delegation + policy + JTI already passed), keyed by the verified
+// `principal` (= sponsorAgent). Reserve a unit before the op, COMMIT on a served result, RELEASE on a
+// data-layer denial or a throw so a budget reservation never burns on a non-served call. Idempotent by
+// the proof's one-shot `requestId`. Additive to the on-chain enforcers — never the authority for value
+// movement (ADR-0041). Skipped (authority + JTI still apply) when SA_BUDGET is unbound.
+async function enforceBudget(
+  env: Env,
+  principal: string,
+  tool: string,
+  requestId: string,
+  run: () => Promise<unknown>,
+): Promise<unknown> {
+  if (!env.SA_BUDGET) return run();
+  const budget = createDurableObjectBudgetStore({
+    namespace: env.SA_BUDGET,
+    chainId: Number(env.CHAIN_ID),
+    limitUnits: Number(env.SA_BUDGET_LIMIT_UNITS ?? '1000'),
+  });
+  const reservation = await budget.reserve({
+    sponsorAgent: principal,
+    capabilityId: `mcp.native.${tool}`,
+    estimatedUnits: 1,
+    idempotencyKey: requestId,
+  });
+  if (!reservation.allowed) {
+    return { ok: false, error: 'budget_exhausted', served_by: `demo-mcp:${tool} (native)` };
+  }
+  try {
+    const out = await run();
+    if (out && typeof out === 'object' && (out as { ok?: boolean }).ok === false) {
+      await budget.release(reservation.reservationId!); // data-layer denial — don't charge
+    } else {
+      await budget.commit(reservation.reservationId!, 1); // served — charge one unit
+    }
+    return out;
+  } catch (e) {
+    await budget.release(reservation.reservationId!);
+    throw e;
+  }
+}
+
 // spec 278 — gate a SIMPLE vault op (profile read, generic record read/write — paths that
 // don't mint a one-time DecryptGrant) on the per-person binding + vault-key authorization.
 // No binding ⇒ fail closed (VKB-D1). Returns the per-person Vault on allow.
@@ -319,6 +366,17 @@ export interface Env {
    * `UNIVERSAL_SIGNATURE_VALIDATOR` to verify the proof signature.
    */
   DEMO_NATIVE_MCP_ENABLED?: string;
+
+  // ─── Stage-3 per-SA hard budget (spec 290 §8) ─────────────────────────
+  /**
+   * The SmartAgentBudgetDO namespace — the authoritative per-Smart-Agent hard-budget store, enforced
+   * on the native path AFTER authority (keyed by the verified principal = sponsorAgent). Additive to
+   * the on-chain enforcers, never a replacement (ADR-0041). Optional: when unbound, the native path
+   * skips the Stage-3 budget (authority + JTI still apply).
+   */
+  SA_BUDGET?: BudgetDoNamespace;
+  /** Per-Smart-Agent hard-budget unit cap (default 1000). */
+  SA_BUDGET_LIMIT_UNITS?: string;
 }
 
 function baseConfig(env: Env): McpResourceVerifyConfig {
@@ -726,7 +784,7 @@ app.post('/mcp/native', async (c) => {
 
   const handler = withDelegation<Args>(
     nativeCfg,
-    async ({ principal, args }) => entry.run(principal, args),
+    async ({ principal, args }) => enforceBudget(c.env, principal, reqBody.tool!, reqBody.invocationProof!.requestId, () => entry.run(principal, args)),
     { toolName: reqBody.tool, classification: entry.classification, auditSink, correlationId, environment },
   );
   try {

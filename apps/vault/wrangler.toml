@@ -64,9 +64,21 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 DEMO_VAULT_PROVISION_ENABLED = "true"
 # spec 287: enable the public native MCP ingress (/mcp/native) with exact-invocation proof.
 DEMO_NATIVE_MCP_ENABLED = "true"
+# spec 290 §8: per-Smart-Agent hard-budget unit cap enforced on the native path (demo value).
+SA_BUDGET_LIMIT_UNITS = "25"
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "demo-mcp"
 database_id = "a7c95b56-8753-47ae-a044-446d5d37cf58"
 migrations_dir = "migrations"
+
+# spec 290 §8 — the authoritative per-SA hard-budget store. demo-mcp hosts + enforces it (it is the
+# authority point with the verified principal). One DO instance per Smart Agent shard.
+[[env.production.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]

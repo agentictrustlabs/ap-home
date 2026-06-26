@@ -21,6 +21,7 @@
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-oauth": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/tool-policy": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
