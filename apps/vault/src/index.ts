@@ -809,7 +809,14 @@ const OAUTH_TOOL_SPECS: Record<string, SensitiveReadSpec> = {
 // ambient-authority surface). Applies ONLY to the OAuth routes; the service-MAC
 // /tools/* worker-to-worker path is unaffected. Short-circuits the OPTIONS
 // preflight; otherwise tags the handler's response with the CORS headers.
-const OAUTH_CORS_PATHS = ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/oauth/token', '/mcp'];
+const OAUTH_CORS_PATHS = [
+  '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/oauth/token', '/mcp',
+  // spec 278 P5 — the connected-custodian vault-key ceremony is driven from the browser
+  // (demo-web-pro), so its endpoints need the same cross-origin treatment as the OAuth ingress.
+  // These carry no ambient authority: provision is fail-closed behind DEMO_VAULT_PROVISION_ENABLED,
+  // and bind is gated by the person-SA signature it carries (verified server-side via ERC-1271).
+  '/custody/vault-key/is-bound', '/custody/vault-key/server-info', '/custody/vault-key/provision', '/custody/vault-key/bind',
+];
 function corsHeaders(origin: string): Record<string, string> {
   return {
     'access-control-allow-origin': origin,
