@@ -472,12 +472,15 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     // operator-key story — accepted testnet hole C-1), so it EXPLICITLY opts out. Client-minted vault
     // calls use `vaultConfig`, which keeps the default (binding enforced). The opt-out is greppable.
     allowUnboundSessionToken: true,
-    // spec 289 §5 (W1+W2) — route the revocation + acceptance reads through the resilient chain-state
-    // port (per-provider circuit-breaker + timeout + the revocation bounded-freshness/monotonic invariant
-    // + divergence evidence) instead of the inline single-client reads. Falls back to inline when the
-    // reader can't be built (no RPC/USV). The signature read stays inline (W3, deferred).
+    // spec 289 §5 (W1+W2+W3) — route the revocation + acceptance + SIGNATURE reads through the resilient
+    // chain-state port (per-provider circuit-breaker + timeout + the revocation bounded-freshness/monotonic
+    // invariant + divergence evidence) instead of the inline single-client reads. Falls back to inline when
+    // the reader can't be built (no RPC/USV). The signature reader validates via the UniversalSignatureValidator
+    // (ECDSA/1271/6492) and surfaces `deployed`; token.ts keeps the requireDeployed policy (true here — the
+    // demo deploys SAs before delegating, so an undeployed delegator is correctly rejected fail-closed).
     chainRevocationReader: chainAuthorityReader(env),
     chainAcceptanceReader: chainAuthorityReader(env),
+    chainSignatureReader: chainAuthorityReader(env),
   };
 }
 
@@ -486,8 +489,10 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
 // client-mint path (per-source binding); the persona/admin path leaves it false, so those tokens
 // (no leaf) keep verifying under the legacy config. The signal rides the service-MAC-authenticated
 // body, so it's unforgeable. When enforcing, we ALSO switch to the UniversalSignatureValidator so the
-// leaf validates under any connection strategy (and counterfactual SAs via ERC-6492 — `requireDeployed`
-// becomes moot on that surface). A `""`/unset USV is treated as undefined (wrangler binds empty strings).
+// leaf validates under any connection strategy. (With the spec-289 §5 W3 signature reader wired in
+// baseConfig, the leaf signature routes through the resilient port — which validates via the same USV and
+// enforces `requireDeployed`; this `universalSignatureValidator` field remains the inline fallback for when
+// the reader can't be built.) A `""`/unset USV is treated as undefined (wrangler binds empty strings).
 function vaultConfig(env: Env, enforceBinding: boolean | undefined): McpResourceVerifyConfig {
   if (!enforceBinding) return baseConfig(env);
   const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
