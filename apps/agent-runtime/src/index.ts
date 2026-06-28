@@ -4348,4 +4348,24 @@ app.post('/intent', async (c) => {
   });
 });
 
+// Spec 278 P5 — the connected-custodian vault-key ceremony, routed THROUGH a2a (web → /a2a/custody/vault-key/*
+// → demo-a2a → demo-mcp), honoring "web never calls MCP directly" (ADR-0044). demo-a2a is a thin server-to-
+// server proxy to demo-mcp's open, CORS-enabled custody endpoints (is-bound/server-info = GET; provision/bind =
+// POST, the latter gated by the person-SA signature it carries). The browser supplies CSRF; the person-SA
+// signature on the bind authorization is the real authority (verified at demo-mcp via ERC-1271). No new auth.
+app.all('/custody/vault-key/:name', async (c) => {
+  const name = c.req.param('name');
+  if (!['is-bound', 'server-info', 'provision', 'bind'].includes(name)) {
+    return c.json({ error: 'not_found' }, 404);
+  }
+  const search = new URL(c.req.url).search;
+  const init: RequestInit = { method: c.req.method, headers: { 'Content-Type': 'application/json' } };
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') init.body = await c.req.text();
+  const path = `/custody/vault-key/${name}${search}`;
+  const resp = c.env.MCP
+    ? await c.env.MCP.fetch(new Request(`https://internal${path}`, init))
+    : await fetch(`${c.env.MCP_URL}${path}`, init);
+  return new Response(await resp.text(), { status: resp.status, headers: { 'Content-Type': 'application/json' } });
+});
+
 export default app;
