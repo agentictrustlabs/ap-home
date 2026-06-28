@@ -3565,7 +3565,7 @@ async function verifyDelegation(
  */
 async function forwardMcpToken(args: {
   env: Env;
-  toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
   token: string;
   toolArgs?: Record<string, unknown>;
   /** spec 270 v4 W3 — per-source binding: set true ONLY on the client-mint path so demo-mcp enforces the
@@ -3631,7 +3631,7 @@ async function forwardMcpToken(args: {
 
 export async function callMcpToolViaDelegation(args: {
   env: Env;
-  toolName: 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
   delegation: IncomingDelegation;
   requester: Address;
   /** Tool args forwarded to demo-mcp (e.g. vault recordType/data). Default {}. */

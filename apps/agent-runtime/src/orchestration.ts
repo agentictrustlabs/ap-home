@@ -16,6 +16,12 @@ import type { Env } from './index.js';
  *  tools (`callMcpToolViaDelegation`). The web posts a GOAL; the planner picks among THESE. */
 export const ORCHESTRATION_TOOLS: ToolSpec[] = [
   {
+    id: 'get_profile',
+    description:
+      "Read the principal's profile (name, email, phone) — the default for \"read/show my profile\". Returns the seeded demo profile. Needs no arguments.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     id: 'get_vault_record',
     description:
       "Read one of the principal's private vault records by recordType (e.g. \"impact-profile\" for their profile). Use this to read the user's own stored data.",
@@ -38,9 +44,19 @@ export const ORCHESTRATION_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** The deterministic default planner (no model, no creds) — the LIVE default. Maps a goal → a single tool. */
+/** The deterministic default planner (no model, no creds) — the LIVE default. Maps a goal → a plan. */
 const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
-  { match: /\bprofile\b/, toolId: 'get_vault_record', args: { recordType: 'impact-profile' } },
+  // MULTI-STEP: "show me everything / all my data" → list the vault, then read the FIRST record the list
+  // returns. Step 2's recordType is threaded from step 1's result via a path $ref (the loop resolves
+  // `list.record_types.0.record_type`). Exercises the loop's multi-step composition + $ref threading live.
+  {
+    match: /\b(everything|all my data|all my records|summar)/,
+    steps: [
+      { toolId: 'list_vault_record', args: {}, ref: 'list' },
+      { toolId: 'get_vault_record', args: { recordType: { $ref: 'list.record_types.0.record_type' } } },
+    ],
+  },
+  { match: /\bprofile\b/, toolId: 'get_profile' },
   { match: /\b(pii|personal|identity|who am i)\b/, toolId: 'get_pii' },
   { match: /\b(list|which records|what records|my records|records)\b/, toolId: 'list_vault_record' },
   // A bare "read my <recordType>" fallback → vault read of that record type.

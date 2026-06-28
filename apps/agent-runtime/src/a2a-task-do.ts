@@ -174,7 +174,7 @@ export class A2aTaskDO {
     // the task's delegation (passed by the handler, symmetric with the vault seam). The delegation is the
     // authority; the planner only chose WHICH tool. Fail-closed: a tool call without a delegation, an
     // unauthorized grant, or a tool-level error throws → the loop observes the failure.
-    const ALLOWED_MCP_TOOLS = new Set(['get_pii', 'get_org_sensitive', 'get_vault_record', 'set_vault_record', 'list_vault_record']);
+    const ALLOWED_MCP_TOOLS = new Set(['get_profile', 'get_pii', 'get_org_sensitive', 'get_vault_record', 'set_vault_record', 'list_vault_record']);
     type DelegatedToolName = Parameters<typeof callMcpToolViaDelegation>[0]['toolName'];
     const mcp: McpClient = {
       callTool: async ({ tool, toolArgs, delegation }) => {
