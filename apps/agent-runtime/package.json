@@ -21,6 +21,8 @@
     "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/orchestration": "workspace:*",
+    "@agenticprimitives/orchestration-anthropic": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/related-agents": "workspace:*",
     "@agenticprimitives/types": "workspace:*",

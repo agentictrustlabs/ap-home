@@ -87,6 +87,7 @@ import {
   type AuditSink,
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
+import { runOrchestration } from './orchestration.js';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -196,6 +197,15 @@ export interface Env {
    * agent THROUGH the edge. Unset (edge-less deployments) ⇒ the card advertises the direct subdomain endpoint.
    */
   DEMO_EDGE_URL?: string;
+  /**
+   * ADR-0044 / spec 293-adjacent — the Ring-0 `orchestrate` skill's planner selection. When
+   * `ORCHESTRATION_LLM === 'anthropic'` AND `ANTHROPIC_API_KEY` is set, the agent plans intents with the
+   * Anthropic LLM planner (`@agenticprimitives/orchestration-anthropic`); otherwise it uses the deterministic
+   * rule-based planner (the live default — no model, no creds). `ORCHESTRATION_MODEL` overrides the model.
+   */
+  ORCHESTRATION_LLM?: string;
+  ANTHROPIC_API_KEY?: string;
+  ORCHESTRATION_MODEL?: string;
   /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
    * Used as `iss` (and currently `aud`, until spec 227 splits them)
@@ -736,6 +746,7 @@ const gateAgenticData = async (c: Context<{ Bindings: Env }>, next: () => Promis
 };
 app.use('/mcp/*', gateAgenticData);
 app.use('/tools/*', gateAgenticData);
+app.use('/intent', gateAgenticData); // ADR-0044 — the first-party INTENT surface is agentic data; edge it too.
 
 /** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
 async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
@@ -4239,6 +4250,71 @@ app.post('/tools/:name', async (c) => {
     : await fetch(`${c.env.MCP_URL}/tools/${toolName}`, reqInit);
   const mcpBody = (await mcpRes.json().catch(() => ({ error: 'mcp returned non-JSON' }))) as Record<string, unknown>;
   return c.json(mcpBody, mcpRes.ok ? 200 : (mcpRes.status as never));
+});
+
+// POST /intent — the first-party INTENT surface (ADR-0044). The browser posts a declarative GOAL (never a
+// tool name); the agent PLANS which MCP tool composes to satisfy it and runs it under the user's session
+// delegation — every composed call rides on-chain authority (ADR-0041). This is the session-bridged sibling
+// of the canonical A2aTaskDO `orchestrate` skill (the agent-to-agent task path via /api/a2a): both run the
+// IDENTICAL Ring-0 orchestration core (`./orchestration`). Edge-gated like the other agentic-data routes.
+app.post('/intent', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { sessionId?: string; goal?: string } | null;
+  if (!body?.sessionId) return c.json({ ok: false, error: 'sessionId required' }, 400);
+  const goal = (body.goal ?? '').trim();
+  if (!goal) return c.json({ ok: false, error: 'goal required (a declarative goal, not a tool name)' }, 400);
+
+  // Session-gated: the user's smart-account address lives in the session cookie.
+  const accountAddress = smartAccountFromCookie(c);
+  if (!accountAddress) return c.json({ ok: false, error: 'auth required (missing or invalid session cookie)' }, 401);
+
+  let resolved;
+  try {
+    resolved = await sessionManagerFor(c.env, accountAddress).resolve(body.sessionId);
+  } catch (e) {
+    return c.json({ ok: false, error: 'session resolve failed', detail: String(e) }, 400);
+  }
+  if (!resolved.delegation) return c.json({ ok: false, error: 'session has no delegation bound' }, 400);
+
+  // The session delegation IS the authority. Wire it for `callMcpToolViaDelegation` (salt bigint → string).
+  const del = resolved.delegation;
+  const wire: IncomingDelegation = {
+    delegator: del.delegator,
+    delegate: del.delegate,
+    authority: del.authority as Hex,
+    caveats: del.caveats.map((cv) => ({ enforcer: cv.enforcer, terms: cv.terms as Hex, args: (cv.args ?? '0x') as Hex })),
+    salt: del.salt.toString(),
+    signature: del.signature as Hex,
+  };
+
+  const { result, plannerKind } = await runOrchestration(c.env, {
+    goal,
+    principal: del.delegator as Address,
+    // The invoker IS the authority boundary — every composed MCP call rides the session delegation.
+    invoke: async (toolId, toolArgs) => {
+      const resp = await callMcpToolViaDelegation({
+        env: c.env,
+        toolName: toolId as Parameters<typeof callMcpToolViaDelegation>[0]['toolName'],
+        delegation: wire,
+        requester: del.delegate as Address,
+        toolArgs,
+      });
+      const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!resp.ok || (j && j.ok === false)) {
+        throw new Error(`mcp ${toolId} failed (HTTP ${resp.status})${j?.error ? `: ${String(j.error)}` : ''}`);
+      }
+      return j;
+    },
+  });
+
+  return c.json({
+    ok: result.outcome === 'completed',
+    outcome: result.outcome,
+    goal,
+    planner: plannerKind,
+    plan: result.plan,
+    result: result.result ?? null,
+    error: result.error ?? null,
+  });
 });
 
 export default app;

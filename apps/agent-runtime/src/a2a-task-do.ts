@@ -21,10 +21,15 @@ import {
   type A2aBudgetPort,
   type OnChainChecks,
   type VaultClient,
+  type McpClient,
   type SkillHandler,
 } from '@agenticprimitives/a2a';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
 import { createDurableObjectBudgetStore } from '@agenticprimitives/rate-control-cloudflare';
+// ADR-0044 — the Ring-0 agentic loop. The `orchestrate` skill runs the SHARED orchestration core (tools +
+// planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
+// behind the Planner port (the chain-state-viem pattern), selected by env at request time.
+import { runOrchestration } from './orchestration.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
@@ -43,6 +48,43 @@ const echo: SkillHandler = {
   skill: 'echo',
   handle: async (ctx) => ({ state: 'completed', artifactIds: [await ctx.emitArtifact({ artifactKind: 'echo', body: ctx.input })] }),
 };
+
+// ── The Ring-0 agentic model (ADR-0044) ──────────────────────────────────────────────────────────────
+/** The `orchestrate` skill — the intent-task entry point. Reads a GOAL, plans which MCP tool composes to
+ *  satisfy it (shared core in ./orchestration), runs it under the TASK's delegation (every call rides
+ *  on-chain authority — the invoker wraps `ctx.mcp.callTool`), and emits the result as an artifact. */
+function makeOrchestrateSkill(env: Env): SkillHandler {
+  return {
+    skill: 'orchestrate',
+    handle: async (ctx) => {
+      const raw = ctx.input as { goal?: unknown } | string | null;
+      const goal = typeof raw === 'string' ? raw : typeof raw?.goal === 'string' ? raw.goal : '';
+      if (!goal.trim()) return { state: 'failed', error: 'orchestrate requires input.goal (a declarative goal)' };
+
+      const { result, plannerKind } = await runOrchestration(env, {
+        goal,
+        principal: ctx.principal,
+        // The invoker IS the authority boundary: every composed MCP call rides the TASK's delegation.
+        invoke: async (toolId, toolArgs) => ctx.mcp.callTool({ tool: toolId, toolArgs, delegation: ctx.delegation }),
+      });
+
+      const artifactId = await ctx.emitArtifact({
+        artifactKind: 'orchestration.result',
+        body: {
+          goal,
+          planner: plannerKind,
+          outcome: result.outcome,
+          plan: result.plan,
+          result: result.result ?? null,
+          error: result.error ?? null,
+        },
+      });
+      return result.outcome === 'completed'
+        ? { state: 'completed', artifactIds: [artifactId] }
+        : { state: 'failed', artifactIds: [artifactId], error: result.error };
+    },
+  };
+}
 
 const AGENT_SA_KEY = '__a2a_agent_sa';
 const ALARM_DELAY_MS = 1500;
@@ -128,11 +170,36 @@ export class A2aTaskDO {
       };
     }
 
+    // MCP seam (ADR-0044 / ADR-0041) — the `orchestrate` skill composes MCP tools through this, ALWAYS under
+    // the task's delegation (passed by the handler, symmetric with the vault seam). The delegation is the
+    // authority; the planner only chose WHICH tool. Fail-closed: a tool call without a delegation, an
+    // unauthorized grant, or a tool-level error throws → the loop observes the failure.
+    const ALLOWED_MCP_TOOLS = new Set(['get_pii', 'get_org_sensitive', 'get_vault_record', 'set_vault_record', 'list_vault_record']);
+    type DelegatedToolName = Parameters<typeof callMcpToolViaDelegation>[0]['toolName'];
+    const mcp: McpClient = {
+      callTool: async ({ tool, toolArgs, delegation }) => {
+        if (!ALLOWED_MCP_TOOLS.has(tool)) throw new Error(`mcp tool not exposed by this agent: ${tool}`);
+        if (!delegation) throw new Error(`orchestrated MCP call requires a task delegation (tool ${tool})`);
+        const resp = await callMcpToolViaDelegation({
+          env,
+          toolName: tool as DelegatedToolName,
+          delegation: toWire(delegation),
+          requester: delegation.delegate as Address,
+          toolArgs,
+        });
+        const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
+        if (!resp.ok || (j && j.ok === false)) {
+          throw new Error(`mcp ${tool} failed (HTTP ${resp.status})${j?.error ? `: ${String(j.error)}` : ''}`);
+        }
+        return j;
+      },
+    };
+
     this.agent = createA2aAgent({
       agentSA, chainId, delegationManager: dm,
       enforcers: { timestamp: this.env.TIMESTAMP_ENFORCER as Address, allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER as Address, allowedMethods: this.env.ALLOWED_METHODS_ENFORCER as Address },
       taskStore: createDurableObjectTaskStore(this.state.storage),
-      checks, handlers: [echo], vault, mcp: { callTool: async () => null }, hashBody, budget,
+      checks, handlers: [echo, makeOrchestrateSkill(this.env)], vault, mcp, hashBody, budget,
     });
     return this.agent;
   }
