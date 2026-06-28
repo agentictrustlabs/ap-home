@@ -86,6 +86,8 @@ function descriptor(
 // path; the others front the existing demo origins.
 const CATALOG: { test: (method: string, path: string) => boolean; route: Route }[] = [
   { test: (m, p) => m === 'POST' && p === '/mcp/native', route: { binding: 'MCP', descriptor: descriptor('mcp.native', 'mcp', 'high', 256 * 1024) } },
+  // spec 293 — the conformant stateless MCP endpoint (JSON-RPC: server/discover, tools/list, tools/call).
+  { test: (m, p) => m === 'POST' && p === '/mcp/v2', route: { binding: 'MCP', descriptor: descriptor('mcp.v2', 'mcp', 'high', 256 * 1024) } },
   { test: (m, p) => m === 'POST' && p === '/mcp', route: { binding: 'MCP', descriptor: descriptor('mcp.oauth', 'mcp', 'high', 256 * 1024) } },
   // spec 288 §6 — the demo-a2a AGENTIC DATA routes (the first-party `web → edge → a2a → MCP` data path). These
   // are demo-a2a's delegation-gated proxy routes (it reads/writes MCP on the caller's behalf), distinct from the
