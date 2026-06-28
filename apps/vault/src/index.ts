@@ -39,6 +39,21 @@ import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVau
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
+// spec 293 — the conformant stateless MCP protocol primitive + surface-catalog capability generation.
+import {
+  parseJsonRpc,
+  parseRequestMeta,
+  negotiateProtocolVersion,
+  checkRequestIntegrity,
+  MethodRegistry,
+  RpcError,
+  buildServerDiscover,
+  withCacheable,
+  structuredResult,
+  authorityExtensionEntry,
+  RPC_ERROR,
+} from '@agenticprimitives/mcp-protocol';
+import { defineSurface, buildMcpToolsList, buildMcpServerCapabilities, mcpListCacheHint, type SurfaceDescriptor } from '@agenticprimitives/surface-catalog';
 import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
@@ -891,6 +906,117 @@ app.post('/mcp/native', async (c) => {
     }
     return c.json({ error: 'internal error', detail: String(e) }, 500);
   }
+});
+
+// ─── Conformant stateless MCP endpoint (spec 293) ────────────────────────
+// A standards-conformant MCP 2026-07-28 endpoint built on @agenticprimitives/mcp-protocol, capabilities
+// GENERATED from a surface-catalog (no hand-written lists). ADDITIVE — /mcp + /mcp/native are unchanged.
+// server/discover + tools/list are public protocol methods; tools/call runs the SAME Web3 pipeline as
+// /mcp/native (token + invocation proof + withDelegation + budget). The Web3 authority is the ONE declared
+// exception, advertised as the io.agentictrustlabs.authority extension (never an OAuth server).
+const DEMO_MCP_CATALOG = defineSurface([
+  {
+    id: 'get_pii',
+    protocol: 'mcp',
+    description: "Read a person's sensitive PII for an authorized purpose.",
+    inputSchema: { type: 'object', properties: { fields: { type: 'array', items: { type: 'string' } }, purpose: { type: 'string' } } },
+    outputSchema: { type: 'object' },
+    authorization: { mode: 'agentic-delegation', riskTier: 'high' },
+    operations: { rateLimitProfile: 'pii', maxBodyBytes: 262144, timeoutMs: 10000, idempotency: 'safe', cache: 'no-store' },
+    mcp: { kind: 'tool', annotations: { title: 'Read PII', readOnlyHint: true } },
+  },
+  {
+    id: 'get_org_sensitive',
+    protocol: 'mcp',
+    description: "Read an organization's sensitive/regulated data for an authorized purpose.",
+    inputSchema: { type: 'object', properties: { fields: { type: 'array', items: { type: 'string' } }, purpose: { type: 'string' } } },
+    outputSchema: { type: 'object' },
+    authorization: { mode: 'agentic-delegation', riskTier: 'critical', onchainAcceptanceRequired: true },
+    operations: { rateLimitProfile: 'pii', maxBodyBytes: 262144, timeoutMs: 10000, idempotency: 'safe', cache: 'no-store' },
+    mcp: { kind: 'tool', annotations: { title: 'Read org-sensitive', readOnlyHint: true } },
+  },
+] satisfies SurfaceDescriptor[]);
+
+const DEMO_AUTHORITY_EXTENSION = authorityExtensionEntry({
+  version: '1',
+  authorizationModes: ['agentic-delegation', 'invocation-proof'],
+  signatureSchemes: ['erc-1271', 'erc-6492', 'ecdsa'],
+  delegationTokenVersion: 'v4',
+  invocationProofVersion: 'v1',
+});
+
+app.post('/mcp/v2', async (c) => {
+  if (c.env.DEMO_NATIVE_MCP_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
+  const usv = c.env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  const rawText = await c.req.text().catch(() => '');
+  // Admission (spec 288 §6) — same edge gate as the other MCP ingresses.
+  const ga = await checkGatewayAssertion(c, rawText, { path: '/mcp/v2', operationId: 'mcp.v2' });
+  if (ga) return ga;
+
+  const parsed = parseJsonRpc(rawText);
+  if (!parsed.ok) return c.json(parsed.res as unknown as Record<string, unknown>);
+  const req = parsed.req;
+  const meta = parseRequestMeta(req.params?._meta as Record<string, unknown> | undefined, c.req.header('mcp-protocol-version'));
+  const version = negotiateProtocolVersion(meta.protocolVersion);
+  if (!version) {
+    return c.json({ jsonrpc: '2.0', id: req.id ?? null, error: { code: RPC_ERROR.INVALID_REQUEST, message: 'unsupported protocol version' } });
+  }
+  const integrity = checkRequestIntegrity({ method: c.req.header('mcp-method'), name: c.req.header('mcp-name') }, req, { requireMethodHeader: false });
+  if (!integrity.ok) {
+    return c.json({ jsonrpc: '2.0', id: req.id ?? null, error: { code: RPC_ERROR.INVALID_REQUEST, message: 'request integrity check failed' } });
+  }
+
+  const auditSink = buildAuditSink(c.env);
+  const correlationId = getCorrelationId(c);
+  const environment = typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development';
+
+  type ToolArgs = { args?: { fields?: string[]; purpose?: string } };
+  const registry = new MethodRegistry({ onError: (info) => console.error('[demo-mcp /mcp/v2]', info.method, info.correlationId) })
+    .register('server/discover', () =>
+      buildServerDiscover({
+        serverInfo: { name: 'demo-mcp', version: '2' },
+        capabilities: buildMcpServerCapabilities(DEMO_MCP_CATALOG),
+        extensions: DEMO_AUTHORITY_EXTENSION,
+      }) as unknown as Record<string, unknown>,
+    )
+    .register('tools/list', () => withCacheable(buildMcpToolsList(DEMO_MCP_CATALOG), mcpListCacheHint(DEMO_MCP_CATALOG, 'tool')))
+    .register('tools/call', async (params) => {
+      if (!usv) throw new RpcError(RPC_ERROR.INTERNAL_ERROR, 'unsupported');
+      const name = typeof params?.name === 'string' ? params.name : '';
+      if (!DEMO_MCP_CATALOG.get(name)) throw new RpcError(RPC_ERROR.METHOD_NOT_FOUND, 'unknown tool');
+      const a = (params?.arguments ?? {}) as { token?: string; invocationProof?: AgenticInvocationProofV1; fields?: string[]; purpose?: string };
+      if (!a.token) throw new RpcError(RPC_ERROR.INVALID_PARAMS, 'token required');
+      if (!a.invocationProof) throw new RpcError(RPC_ERROR.INVALID_PARAMS, 'invocation proof required');
+      const spec =
+        name === 'get_org_sensitive'
+          ? { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high' as const, toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive (mcp/v2)' }
+          : { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive' as const, toolName: 'get_pii', servedBy: 'demo-mcp:get_pii (mcp/v2)' };
+      const classification = name === 'get_org_sensitive' ? GET_ORG_SENSITIVE_CLASSIFICATION : GET_PII_CLASSIFICATION;
+      const nativeCfg: McpResourceVerifyConfig = { ...baseConfig(c.env), requireInvocationProof: true, universalSignatureValidator: usv as Address };
+      const handler = withDelegation<ToolArgs>(
+        nativeCfg,
+        async ({ principal, args }) =>
+          enforceBudget(c.env, principal, name, a.invocationProof!.requestId, () =>
+            readSensitive(c.env, { principal, args, correlationId, audience: c.env.MCP_AUDIENCE }, spec),
+          ),
+        { toolName: name, classification, auditSink, correlationId, environment },
+      );
+      let out: { ok?: boolean; record?: unknown; subject_name?: string; error?: string };
+      try {
+        out = (await handler({ token: a.token, invocationProof: a.invocationProof, args: { fields: a.fields, purpose: a.purpose } } as ToolArgs & {
+          token: string;
+          invocationProof: AgenticInvocationProofV1;
+        })) as typeof out;
+      } catch (e) {
+        if (e instanceof McpAuthError) throw new RpcError(RPC_ERROR.INVALID_PARAMS, 'authorization failed');
+        throw new RpcError(RPC_ERROR.INTERNAL_ERROR, 'internal error');
+      }
+      if (out.ok === false) throw new RpcError(RPC_ERROR.INVALID_PARAMS, out.error ?? 'denied');
+      return structuredResult({ tool: name, subject_name: out.subject_name ?? null, record: out.record ?? null }) as unknown as Record<string, unknown>;
+    });
+
+  const res = await registry.dispatch(req, { meta, protocolVersion: version, raw: rawText, correlationId });
+  return res === null ? c.body(null, 204) : c.json(res as unknown as Record<string, unknown>);
 });
 
 // ─── Generic per-agent vault (spec 247) ─────────────────────────────────
