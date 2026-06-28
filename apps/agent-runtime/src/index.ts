@@ -23,7 +23,7 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/connect-auth';
-import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, recoverAddress } from 'viem';
 import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import {
   decodeGatewayAssertionToken,
@@ -4118,11 +4118,23 @@ app.post('/session/package', async (c) => {
     Number(c.env.CHAIN_ID),
     c.env.DELEGATION_MANAGER as Address,
   );
-  const isValid = await accountClient(c.env).isValidSignature(
-    delegation.delegator,
-    eip712Hash,
-    delegation.signature,
-  );
+  // Fresh-deploy tolerance: a just-deployed SA may not yet be visible on the RPC node this read hits
+  // (eventual consistency across replicas), so a naive single verify can spuriously fail right after
+  // /session/deploy. Bounded-retry the SAME ERC-1271 read until the SA has code + verifies (ADR-0013: a
+  // bounded retry of one mechanism, NOT a fallback to a weaker one). Accept on the first valid result.
+  const pubForPkg = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let isValid = false;
+  let lastCodeLen = 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = await pubForPkg.getCode({ address: delegation.delegator }).catch(() => undefined);
+    lastCodeLen = code && code !== '0x' ? (code.length - 2) / 2 : 0;
+    if (lastCodeLen > 0) {
+      isValid = await accountClient(c.env).isValidSignature(delegation.delegator, eip712Hash, delegation.signature);
+      if (isValid) break;
+    }
+    if (attempt < 5) await sleep(700);
+  }
 
   // Fail-CLOSED on invalid delegation signature (audit P1-2). The
   // previous behavior persisted regardless of `isValid` and just
@@ -4130,13 +4142,21 @@ app.post('/session/package', async (c) => {
   // tool calls would mint tokens against a delegation the contract
   // would have rejected on chain. Reject before persistence.
   if (!isValid) {
+    // Server-side diagnostics only (no info-leak to the browser, mcp-runtime invariant). Logs who the
+    // signature recovers to + custodian membership + RPC visibility for forensic correlation.
+    try {
+      const recoveredRaw = await recoverAddress({ hash: eip712Hash, signature: delegation.signature });
+      const isCust = lastCodeLen > 0
+        ? await pubForPkg.readContract({ address: delegation.delegator, abi: [{ type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ name: 'b', type: 'bool' }] }] as const, functionName: 'isCustodian', args: [recoveredRaw] }).catch(() => 'err')
+        : 'no-code';
+      console.error('[session/package] ERC-1271 failed', JSON.stringify({ delegator: delegation.delegator, recoveredRaw, isCustodian: isCust, codeLen: lastCodeLen }));
+    } catch { /* diagnostics are best-effort */ }
     return c.json(
       {
         ok: false,
         error: 'delegation_invalid',
-        // Detail intentionally generic (info-leak invariant from
-        // mcp-runtime CLAUDE.md). The contract-level reason is logged
-        // server-side via the audit sink, not returned to the browser.
+        // Detail intentionally generic (info-leak invariant from mcp-runtime CLAUDE.md). The contract-level
+        // reason is logged server-side, not returned to the browser.
         detail: 'ERC-1271 verification failed against the delegator smart account',
       },
       403,

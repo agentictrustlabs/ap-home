@@ -56,8 +56,11 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
       { toolId: 'get_vault_record', args: { recordType: { $ref: 'list.record_types.0.record_type' } } },
     ],
   },
-  { match: /\bprofile\b/, toolId: 'get_profile' },
-  { match: /\b(pii|personal|identity|who am i)\b/, toolId: 'get_pii' },
+  // "read my profile / personal info" → get_pii. get_pii uses readSensitive (entitlement→KAS→audit→decrypt)
+  // and works for any person SA; get_profile needs a per-person vault-key binding (spec 278) the simple flow
+  // never creates (it returns vault_key_unauthorized), so it is NOT the default — it stays an exposed tool a
+  // binding-holding caller (e.g. via demo-sso) or the LLM planner may still select.
+  { match: /\b(profile|pii|personal|identity|who am i)\b/, toolId: 'get_pii' },
   { match: /\b(list|which records|what records|my records|records)\b/, toolId: 'list_vault_record' },
   // A bare "read my <recordType>" fallback → vault read of that record type.
   {
