@@ -4348,6 +4348,24 @@ app.post('/intent', async (c) => {
   });
 });
 
+// Spec 294 — PROVIDER-NEUTRAL social/OIDC custody surface. The connection custodian for a social sign-in is a
+// generic OIDC custodian (Google / YouVersion / any future provider are instances, never in the feature name).
+// `/custody/oidc/<name>` is the canonical path; it re-dispatches to the (legacy provider-named) `/custody/google/
+// <name>` handlers, which are already provider-neutral internally (they custody by the session's (iss,sub), not
+// by "Google"). New clients (demo-web's social rail) use `/custody/oidc/*`; `/custody/google/*` stays as the
+// deprecated alias until the handlers are physically renamed (tracked follow-up).
+app.post('/custody/oidc/:name', async (c) => {
+  const name = c.req.param('name');
+  const allowed = new Set(['bootstrap', 'bootstrap-and-claim', 'name-agent', 'sign', 'custodian']);
+  if (!allowed.has(name)) return c.json({ error: 'not_found' }, 404);
+  // Internal re-dispatch to the existing handler (headers — incl. X-CSRF-Token — + body forwarded).
+  return app.request(
+    `/custody/google/${name}`,
+    { method: 'POST', headers: c.req.raw.headers, body: await c.req.text() },
+    c.env,
+  );
+});
+
 // Spec 278 P5 — the connected-custodian vault-key ceremony, routed THROUGH a2a (web → /a2a/custody/vault-key/*
 // → demo-a2a → demo-mcp), honoring "web never calls MCP directly" (ADR-0044). demo-a2a is a thin server-to-
 // server proxy to demo-mcp's open, CORS-enabled custody endpoints (is-bound/server-info = GET; provision/bind =
