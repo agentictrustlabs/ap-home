@@ -4258,44 +4258,55 @@ app.post('/tools/:name', async (c) => {
 // of the canonical A2aTaskDO `orchestrate` skill (the agent-to-agent task path via /api/a2a): both run the
 // IDENTICAL Ring-0 orchestration core (`./orchestration`). Edge-gated like the other agentic-data routes.
 app.post('/intent', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { sessionId?: string; goal?: string } | null;
-  if (!body?.sessionId) return c.json({ ok: false, error: 'sessionId required' }, 400);
-  const goal = (body.goal ?? '').trim();
+  const body = (await c.req.json().catch(() => null)) as
+    | { goal?: string; sessionId?: string; delegation?: IncomingDelegation; requester?: Address }
+    | null;
+  const goal = (body?.goal ?? '').trim();
   if (!goal) return c.json({ ok: false, error: 'goal required (a declarative goal, not a tool name)' }, 400);
 
-  // Session-gated: the user's smart-account address lives in the session cookie.
-  const accountAddress = smartAccountFromCookie(c);
-  if (!accountAddress) return c.json({ ok: false, error: 'auth required (missing or invalid session cookie)' }, 401);
-
-  let resolved;
-  try {
-    resolved = await sessionManagerFor(c.env, accountAddress).resolve(body.sessionId);
-  } catch (e) {
-    return c.json({ ok: false, error: 'session resolve failed', detail: String(e) }, 400);
+  // TWO authority sources, ONE orchestration core:
+  //  (a) EXPLICIT grant — the caller already holds a signed delegation (demo-org/gs/jp pass {delegation,
+  //      requester}, the same pair their /mcp/* reads use). Verified per-call by callMcpToolViaDelegation.
+  //  (b) SESSION grant — the simple demo-web holds a server-side session; we resolve its bound delegation.
+  let wire: IncomingDelegation;
+  let requester: Address;
+  if (body?.delegation && body?.requester) {
+    wire = body.delegation;
+    requester = body.requester;
+  } else if (body?.sessionId) {
+    const accountAddress = smartAccountFromCookie(c);
+    if (!accountAddress) return c.json({ ok: false, error: 'auth required (missing or invalid session cookie)' }, 401);
+    let resolved;
+    try {
+      resolved = await sessionManagerFor(c.env, accountAddress).resolve(body.sessionId);
+    } catch (e) {
+      return c.json({ ok: false, error: 'session resolve failed', detail: String(e) }, 400);
+    }
+    if (!resolved.delegation) return c.json({ ok: false, error: 'session has no delegation bound' }, 400);
+    const del = resolved.delegation;
+    wire = {
+      delegator: del.delegator,
+      delegate: del.delegate,
+      authority: del.authority as Hex,
+      caveats: del.caveats.map((cv) => ({ enforcer: cv.enforcer, terms: cv.terms as Hex, args: (cv.args ?? '0x') as Hex })),
+      salt: del.salt.toString(),
+      signature: del.signature as Hex,
+    };
+    requester = del.delegate as Address;
+  } else {
+    return c.json({ ok: false, error: 'provide either {sessionId} or {delegation, requester}' }, 400);
   }
-  if (!resolved.delegation) return c.json({ ok: false, error: 'session has no delegation bound' }, 400);
-
-  // The session delegation IS the authority. Wire it for `callMcpToolViaDelegation` (salt bigint → string).
-  const del = resolved.delegation;
-  const wire: IncomingDelegation = {
-    delegator: del.delegator,
-    delegate: del.delegate,
-    authority: del.authority as Hex,
-    caveats: del.caveats.map((cv) => ({ enforcer: cv.enforcer, terms: cv.terms as Hex, args: (cv.args ?? '0x') as Hex })),
-    salt: del.salt.toString(),
-    signature: del.signature as Hex,
-  };
 
   const { result, plannerKind } = await runOrchestration(c.env, {
     goal,
-    principal: del.delegator as Address,
-    // The invoker IS the authority boundary — every composed MCP call rides the session delegation.
+    principal: wire.delegator as Address,
+    // The invoker IS the authority boundary — every composed MCP call rides the supplied delegation.
     invoke: async (toolId, toolArgs) => {
       const resp = await callMcpToolViaDelegation({
         env: c.env,
         toolName: toolId as Parameters<typeof callMcpToolViaDelegation>[0]['toolName'],
         delegation: wire,
-        requester: del.delegate as Address,
+        requester,
         toolArgs,
       });
       const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
