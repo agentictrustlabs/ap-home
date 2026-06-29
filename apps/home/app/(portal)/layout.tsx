@@ -3,8 +3,9 @@
 // the onboarding/sign-in EntryExperience when not authed (or mid relying-app enrollment),
 // the PortalShell when authed. Mirrors the old App.tsx `if (enrollReq){…}` early-return:
 // an enrollment takes precedence over any stale session.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SessionProvider, useSession } from '../../src/context/session';
+import { activateVaultIfNeeded } from '../../src/home/onboarding';
 import { PortalShell } from '../../src/components/portal/PortalShell';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
 import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
@@ -58,6 +59,22 @@ function Gate({ children }: { children: ReactNode }) {
   // KMS-custodied OIDC homes (Google + YouVersion) share the server-side secure-home / enroll-resume /
   // welcome-back beats — the demo-a2a bridge derives the custodian from the session (iss, sub) for both.
   const isOidcHome = session?.via === 'Google' || session?.via === 'YouVersion';
+
+  // spec 278 self-heal — a deployed-but-UNBOUND OIDC member would otherwise be stuck at
+  // `vault_key_unauthorized` in relying apps (e.g. onboarded before the enroll-time bind, or after a
+  // swallowed best-effort failure). The enroll/secure-home flows only bind during enroll / pre-deploy;
+  // a member who is already deployed lands straight in the portal with no bind attempt. Fire the
+  // IDEMPOTENT ceremony once per authed portal load (skips if already bound; zero device prompt for KMS;
+  // fire-and-forget so a vault hiccup never blocks the portal). This recovers any stuck OIDC member the
+  // next time they open their home, and is a no-op for already-bound members.
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (healedRef.current) return;
+    if (phase !== 'authed' || !isOidcHome || !agentDeployed || !agentAddress || !session?.token) return;
+    healedRef.current = true;
+    const via = session.via === 'YouVersion' ? 'youversion' : 'google';
+    void activateVaultIfNeeded(agentAddress, via, { token: session.token }).catch(() => { /* non-fatal */ });
+  }, [phase, isOidcHome, agentDeployed, agentAddress, session?.token, session?.via]);
 
   // A fresh OIDC return that already has a home (no secure-home step, no enroll) → show the welcome-back
   // beat once. (Passkey/wallet/name surface their own beat in EntryExperience.)
