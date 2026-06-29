@@ -142,13 +142,28 @@ async function deployAccount(buildBody: Record<string, unknown>, signDigest: (h:
   throw new Error(`deploy failed after retries: ${lastErr.slice(0, 240)}`);
 }
 
+/** Derive an SA address (counterfactual) for a deploy body — needed as the `newOwner` of a name claim. */
+async function deriveAddress(body: Record<string, unknown>): Promise<Address> {
+  const d = await relayer('/account/derive-address', { ...body, salt: '0' });
+  return (d.smartAccountAddress ?? d.address) as Address;
+}
+
+/** executeBatch calldata that claims `<label>.impact` for `newOwner` (register + setPrimaryName), bundled
+ *  into the deploy userOp so an SA deploys + claims its handle in one signature. */
+function nameClaimCallData(label: string, newOwner: Address): Hex {
+  const register = buildSubregistryRegisterCall({ subregistry: PERMISSIONLESS_SUBREGISTRY, label, newOwner });
+  const setPrimary = buildSetPrimaryNameCall({ registry: D.agentNameRegistry, node: namehash(`${label}.${NAME_PARENT}`) });
+  return buildExecuteBatchCallData([register, setPrimary]) as Hex;
+}
+
 // ─── the custody-agnostic seam ────────────────────────────────────────
 interface CustodyRail {
   kind: 'siwe' | 'passkey' | 'social';
   /** Is this rail runnable in this environment? (social needs an interactive OAuth session.) */
   available(): Promise<boolean>;
-  /** Onboard the principal SA via this rail (deploy on-chain). Returns the SA address. */
-  onboard(): Promise<Address>;
+  /** Onboard the SA via this rail (deploy on-chain). Pass `claimLabel` to ALSO claim `<label>.impact` in the
+   *  same userOp — the owner/receiver in the cross-principal flow needs a resolvable handle. Returns the SA. */
+  onboard(claimLabel?: string): Promise<Address>;
   /** Sign a 32-byte digest in the on-chain wire format THIS rail's SA validates (ERC-1271 via USV). */
   signDigest(digest: Hex): Promise<Hex>;
   readonly sa?: Address;
@@ -162,8 +177,10 @@ function siweRail(): CustodyRail {
     kind: 'siwe',
     get sa() { return sa; },
     async available() { return true; },
-    async onboard() {
-      sa = await deployAccount({ initMethod: 'eoa', owner: account.address }, (h) => account.sign({ hash: h }));
+    async onboard(claimLabel?: string) {
+      const body = { initMethod: 'eoa', owner: account.address };
+      const callData = claimLabel ? nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
+      sa = await deployAccount(body, (h) => account.sign({ hash: h }), callData);
       return sa;
     },
     signDigest: (digest) => account.sign({ hash: digest }),
@@ -205,11 +222,10 @@ function passkeyRail(): CustodyRail {
     kind: 'passkey',
     get sa() { return sa; },
     async available() { return true; },
-    async onboard() {
-      sa = await deployAccount(
-        { initMethod: 'passkey', credentialIdDigest, pubKeyX: pubKeyX.toString(), pubKeyY: pubKeyY.toString(), rpIdHash },
-        async (h) => assertOver(h),
-      );
+    async onboard(claimLabel?: string) {
+      const body = { initMethod: 'passkey', credentialIdDigest, pubKeyX: pubKeyX.toString(), pubKeyY: pubKeyY.toString(), rpIdHash };
+      const callData = claimLabel ? nameClaimCallData(claimLabel, await deriveAddress(body)) : undefined;
+      sa = await deployAccount(body, async (h) => assertOver(h), callData);
       return sa;
     },
     signDigest: async (digest) => assertOver(digest),
@@ -227,9 +243,11 @@ function socialRail(): CustodyRail {
     kind: 'social',
     get sa() { return sa; },
     async available() { return Boolean(session && presetSa); },
-    async onboard() {
+    async onboard(_claimLabel?: string) {
+      // Naming for a social SA is the home's (demo-sso-next) job; the harness assumes onboarding + any name
+      // claim already happened there and a SOCIAL_CUSTODY_SA was provided. claimLabel is ignored here.
       if (!sa) throw new Error('social rail needs SOCIAL_CUSTODY_SA (the home-onboarded SA)');
-      return sa; // the home (demo-sso-next) owns social onboarding; harness assumes it already happened
+      return sa;
     },
     async signDigest(digest) {
       const j = await relayer('/custody/google/sign', { session, hash: digest, sender: sa });
@@ -243,15 +261,8 @@ const RAIL_FACTORIES: Record<string, () => CustodyRail> = { siwe: siweRail, pass
 
 // ─── onboard a NAMED receiver (B) — always SIWE (B's custody is irrelevant to A's authority test) ───
 async function onboardNamedReceiver(): Promise<{ sa: Address; label: string }> {
-  const account = privateKeyToAccount(generatePrivateKey());
   const label = `e2e-${toHex(randomBytes(4)).slice(2)}`;
-  const der = await relayer('/account/derive-address', { initMethod: 'eoa', owner: account.address, salt: '0' });
-  const predicted = (der.smartAccountAddress ?? der.address) as Address;
-  // deploy + claim name atomically (one signed userOp): register <label>.impact + setPrimaryName.
-  const register = buildSubregistryRegisterCall({ subregistry: PERMISSIONLESS_SUBREGISTRY, label, newOwner: predicted });
-  const setPrimary = buildSetPrimaryNameCall({ registry: D.agentNameRegistry, node: namehash(`${label}.${NAME_PARENT}`) });
-  const callData = buildExecuteBatchCallData([register, setPrimary]);
-  const sa = await deployAccount({ initMethod: 'eoa', owner: account.address }, (h) => account.sign({ hash: h }), callData);
+  const sa = await siweRail().onboard(label);
   return { sa, label };
 }
 
@@ -387,6 +398,90 @@ async function runRail(name: string): Promise<{ name: string; ok: boolean; detai
   };
 }
 
+/**
+ * GENUINE cross-principal flow (the corrected topology): Alice is the OWNER (delegator); Bob is the
+ * DELEGATE/caller. Authority + data residency follow the owner — Alice's PII lives behind Alice's MCP and
+ * is composed by ALICE's A2A agent, so `allowedTargets` = ALICE's agent and the message is posted to
+ * Alice's handle. TWO independent ERC-1271 proofs at Alice's agent: Alice signed the grant (delegator),
+ * Bob signed the live message (delegate==requester). `principal = delegator = Alice` → the read terminates
+ * at Alice's infra. A stolen grant is useless without Bob's fresh message signature; Bob acting alone is
+ * useless without Alice's grant.
+ */
+async function runCrossPrincipal(name: string): Promise<{ name: string; ok: boolean; detail: string }> {
+  const label = `${name}/cross`;
+  const aliceRail = RAIL_FACTORIES[name]?.();
+  const bobRail = RAIL_FACTORIES[name]?.();
+  if (!aliceRail || !bobRail) return { name: label, ok: false, detail: 'unknown rail' };
+  if (!(await aliceRail.available()) || !(await bobRail.available())) {
+    return { name: label, ok: false, detail: 'SKIPPED — rail wired but not runnable here (social needs SOCIAL_CUSTODY_SESSION + SOCIAL_CUSTODY_SA from an interactive OAuth sign-in)' };
+  }
+  console.log(`\n=== rail: ${name} — CROSS-PRINCIPAL (Alice owns, Bob is the delegate/caller) ===`);
+
+  const aliceLabel = `e2e-alice-${toHex(randomBytes(4)).slice(2)}`;
+  const alice = await aliceRail.onboard(aliceLabel); // OWNER + receiver: named (allowedTargets) + her vault
+  console.log(`  [Alice] owner + receiving agent = ${aliceLabel}.${NAME_PARENT} → ${alice}`);
+  const bob = await bobRail.onboard();               // DELEGATE/caller: deployed (signs the message); no name
+  console.log(`  [Bob]   delegate / caller SA   = ${bob}`);
+
+  const vaultBound = await bindVaultKey(aliceRail);  // Alice's PII lives behind Alice's MCP (her binding)
+  console.log(`  [Alice] vault-key binding (${name}) = ${vaultBound ? 'LIVE — get_pii returns Alice\'s PII' : 'absent — get_pii fail-closes (spine still proven)'}`);
+
+  // Grant: delegator=Alice, delegate=Bob, allowedTargets=[Alice's agent], allowedMethods=[orchestrate].
+  // Signed by ALICE (the owner authorizes Bob). This is issued to Bob out-of-band / via a consent flow.
+  const caveats: Caveat[] = buildA2aGrantCaveats({ recipientAgentSA: alice, skill: 'orchestrate', enforcers: ENFORCERS, window: { validAfter: 0, validUntil: now() + 3600 } });
+  const d: Delegation = { delegator: alice, delegate: bob, authority: ROOT_AUTHORITY, caveats, salt: BigInt(rand32()), signature: '0x' };
+  d.signature = await aliceRail.signDigest(hashDelegation(d, D.chainId, D.delegationManager)); // ALICE signs the grant
+  const delegation = delegationWire(d);
+
+  // Live message: sender=Bob, signed by BOB (proves "this is really Bob, now"). requester=Bob=delegate.
+  const input = { goal: GOAL };
+  const message = {
+    messageId: rand32(), sender: bob, skill: 'orchestrate',
+    bodyRef: { owner: alice, recordType: 'pending' }, bodyHash: hashBody(input), signature: '0x' as Hex, createdAt: now(),
+  };
+  message.signature = await bobRail.signDigest(hashA2aMessage({ messageId: message.messageId, sender: bob, skill: 'orchestrate', bodyHash: message.bodyHash, createdAt: message.createdAt })); // BOB signs
+
+  console.log(`  → POST message/send to EDGE /api/a2a/${aliceLabel}  (Alice signed the grant · Bob signs the message)`);
+  let send: any;
+  for (let i = 0; i < 10; i++) {
+    send = await edgeRpc(aliceLabel, 'message/send', { delegation, requester: bob, message, input });
+    if (!(send.error?.code === -32004)) break;
+    process.stdout.write(`  … awaiting Alice name propagation (attempt ${i + 1})\r`);
+    await sleep(3000);
+  }
+  console.log('');
+  if (send.error || !send.result?.taskId) return { name: label, ok: false, detail: `message/send rejected: ${JSON.stringify(send).slice(0, 500)}` };
+  const taskId = send.result.taskId as Hex;
+  console.log(`  ✓ authorized — taskId=${taskId}`);
+  console.log(`    gate: delegate(Bob)==requester · allowedTargets=Alice's agent · 1271(Alice signed grant) · 1271(Bob signed msg) · principal=Alice`);
+
+  const TERMINAL = new Set(['completed', 'failed', 'canceled', 'rejected', 'input-required', 'auth-required']);
+  let task: any = null;
+  for (let i = 0; i < 30; i++) {
+    await sleep(2000);
+    // tasks/get caller-proof signed by BOB (the caller), over the request bound to Alice's agent.
+    const sig = await bobRail.signDigest(hashA2aTaskRequest({ method: 'tasks/get', taskId, agentSA: alice, chainId: D.chainId }));
+    const got = await edgeRpc(aliceLabel, 'tasks/get', { taskId, caller: bob, signature: sig });
+    if (got.error) { console.log(`  … tasks/get error: ${JSON.stringify(got.error).slice(0, 200)}`); continue; }
+    task = got.result;
+    process.stdout.write(`  … state=${task?.state}\r`);
+    if (task && TERMINAL.has(task.state)) break;
+  }
+  console.log('');
+  if (!task) return { name: label, ok: false, detail: 'tasks/get never returned a task' };
+  const artifacts = task.artifactRefs ?? [];
+  const taskErr = task.error ?? task.status?.message ?? task.statusMessage ?? null;
+  console.log(`  task state=${task.state} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
+  const spineProven = TERMINAL.has(task.state);
+  const gold = task.state === 'completed';
+  return {
+    name: label, ok: spineProven,
+    detail: gold
+      ? `taskId issued + COMPLETED — Bob (delegate) read Alice's PII via Alice's grant; principal=Alice, terminated at Alice's agent/MCP`
+      : `taskId issued + state=${task.state}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
+  };
+}
+
 async function main() {
   console.log(`canonical-A2A two-agent e2e — EDGE=${EDGE_BASE} A2A=${A2A_BASE}`);
   const dep = await (await fetch(`${A2A_BASE}/deployments`)).json();
@@ -394,10 +489,19 @@ async function main() {
   ENFORCERS = { timestamp: D.timestampEnforcer, allowedTargets: D.allowedTargetsEnforcer, allowedMethods: D.allowedMethodsEnforcer };
   console.log(`  chainId=${D.chainId} dm=${D.delegationManager} skill=orchestrate(sel=${skillSelector('orchestrate')})`);
 
+  // MODE=cross (default, the GENUINE cross-principal Alice→Bob flow) | self (degenerate self-grant) | both.
+  const MODE = (process.env.MODE ?? 'cross').toLowerCase();
+  console.log(`  mode=${MODE} (cross = Alice owns / Bob is the delegate-caller; self = A grants a separate receiver)`);
   const results: Array<{ name: string; ok: boolean; detail: string }> = [];
   for (const r of RAILS) {
-    try { results.push(await runRail(r)); }
-    catch (e) { results.push({ name: r, ok: false, detail: `THREW: ${e instanceof Error ? e.message : String(e)}` }); }
+    if (MODE === 'self' || MODE === 'both') {
+      try { results.push(await runRail(r)); }
+      catch (e) { results.push({ name: `${r}/self`, ok: false, detail: `THREW: ${e instanceof Error ? e.message : String(e)}` }); }
+    }
+    if (MODE === 'cross' || MODE === 'both') {
+      try { results.push(await runCrossPrincipal(r)); }
+      catch (e) { results.push({ name: `${r}/cross`, ok: false, detail: `THREW: ${e instanceof Error ? e.message : String(e)}` }); }
+    }
   }
 
   console.log('\n──────── SUMMARY ────────');
