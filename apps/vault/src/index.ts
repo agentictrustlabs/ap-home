@@ -55,6 +55,7 @@ import {
 } from '@agenticprimitives/mcp-protocol';
 import { defineSurface, buildMcpToolsList, buildMcpServerCapabilities, mcpListCacheHint, type SurfaceDescriptor } from '@agenticprimitives/surface-catalog';
 import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
+import { createMemorySoftRateLimiter, type SoftRateLimiter } from '@agenticprimitives/rate-control';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import type { Delegation, AgenticInvocationProofV1, DataScopeGrant } from '@agenticprimitives/delegation';
 
@@ -456,6 +457,18 @@ export interface Env {
 // isolate over a single viem provider (the configured RPC); add more providers for multi-RPC divergence
 // later. Returns undefined when it can't be built (no RPC / USV) so the verify config falls back to the
 // inline single-client reads. Memoized: the breaker/freshness state persists across requests in the isolate.
+// Spec 290 §6 Stage-2 — module-scoped (per-isolate) SOFT rate limiter, keyed on the verified
+// principal+capability. Memoized so buckets persist across requests in an isolate (a per-call limiter
+// would never throttle). In-memory is per-isolate (not cross-isolate-durable) — fine for a soft traffic
+// limit; the cross-isolate HARD budget is the Stage-3 SmartAgentBudgetDO. 120 verified calls / 60s.
+let _stage2Limiter: SoftRateLimiter | undefined;
+function stage2RateLimiter(): SoftRateLimiter {
+  if (!_stage2Limiter) {
+    _stage2Limiter = createMemorySoftRateLimiter({ limits: { verified: { windowMs: 60_000, limit: 120 } } });
+  }
+  return _stage2Limiter;
+}
+
 let _chainReader: ReturnType<typeof createChainAuthorityReader> | undefined;
 let _chainReaderTried = false;
 function chainAuthorityReader(env: Env): ReturnType<typeof createChainAuthorityReader> | undefined {
@@ -512,6 +525,10 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     chainRevocationReader: chainAuthorityReader(env),
     chainAcceptanceReader: chainAuthorityReader(env),
     chainSignatureReader: chainAuthorityReader(env),
+    // spec 290 §6 Stage-2 — post-verify soft rate limit, keyed on the verified principal/sponsor.
+    stage2RateLimiter: stage2RateLimiter(),
+    rateLimitProfileId: 'verified',
+    rateLimitSecret: 'demo-mcp-stage2', // only obscures the opaque bucket key in logs (§9); not a secret-grade gate
   };
 }
 

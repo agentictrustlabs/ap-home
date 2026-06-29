@@ -25,6 +25,7 @@
     "@agenticprimitives/mcp-oauth": "workspace:*",
     "@agenticprimitives/mcp-protocol": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/rate-control": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/surface-catalog": "workspace:*",
     "@agenticprimitives/tool-policy": "workspace:*",
