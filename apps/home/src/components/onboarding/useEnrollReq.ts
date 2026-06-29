@@ -166,6 +166,13 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
   const url = new URL(enroll.redirectUri);
   url.searchParams.set('code', code);
   url.searchParams.set('state', enroll.state);
+  // Carry the MINTING origin (this Home — possibly a `<label>` subdomain we hopped to from a nameless apex
+  // enroll) so the relying app exchanges the code + verifies the id_token `iss` HERE, not at the apex it
+  // opened. Without this, a hopped popup/redirect breaks the exchange (iss mismatch — wallet/passkey only;
+  // social FedCMs server-side and never hops). Read by the relying app's `relayCodeIfPopupReturn` / `?code`
+  // return handler (spec 295); harmless to apps that ignore it. (The postMessage path above needs no marker
+  // — the opener reads the message's `e.origin`, which IS this minting origin.)
+  if (typeof window !== 'undefined') url.searchParams.set('ac_iss', window.location.origin);
   // spec 257: if we ARE a popup but lost our opener (the OAuth IdP — e.g. Google COOP — severs
   // window.opener on the cross-origin round-trip), we can't postMessage the code back. Redirect
   // THIS popup to the relying app with a relay marker so it hands {code,state} to its same-origin
