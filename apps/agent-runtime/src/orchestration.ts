@@ -42,6 +42,12 @@ export const ORCHESTRATION_TOOLS: ToolSpec[] = [
       "Read the principal's personal identifying information (PII — high sensitivity). Use this only when the user explicitly asks for their personal/identity details.",
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    id: 'get_org_sensitive',
+    description:
+      "Read the ORGANIZATION's gated/sensitive data (when the principal is an org Smart Agent). Use this for \"read my org/organization details\".",
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 /** The deterministic default planner (no model, no creds) — the LIVE default. Maps a goal → a plan. */
@@ -60,6 +66,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
   // and works for any person SA; get_profile needs a per-person vault-key binding (spec 278) the simple flow
   // never creates (it returns vault_key_unauthorized), so it is NOT the default — it stays an exposed tool a
   // binding-holding caller (e.g. via demo-sso) or the LLM planner may still select.
+  { match: /\b(org|organization|organisation)\b/, toolId: 'get_org_sensitive' },
   { match: /\b(profile|pii|personal|identity|who am i)\b/, toolId: 'get_pii' },
   { match: /\b(list|which records|what records|my records|records)\b/, toolId: 'list_vault_record' },
   // A bare "read my <recordType>" fallback → vault read of that record type.
