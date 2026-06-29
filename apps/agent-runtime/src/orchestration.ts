@@ -68,8 +68,18 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
   // binding-holding caller (e.g. via demo-sso) or the LLM planner may still select.
   { match: /\b(org|organization|organisation)\b/, toolId: 'get_org_sensitive' },
   { match: /\b(profile|pii|personal|identity|who am i)\b/, toolId: 'get_pii' },
+  // App-driven vault ops (demo-gs/jp operational reads): EXPLICIT, collision-free goals that carry the exact
+  // recordType verbatim (no fuzzy keyword matching — recordTypes can be anything: hyphens, colons, prefixes).
+  // These are intent-shaped + ride the custody-agnostic delegation, but the recordType is app-known, so the
+  // goal names it precisely rather than relying on the NL planner to guess.
+  {
+    match: /^read vault record /i,
+    toolId: 'get_vault_record',
+    args: (goal) => ({ recordType: goal.replace(/^read vault record /i, '').trim() }),
+  },
+  { match: /^list vault records$/i, toolId: 'list_vault_record' },
   { match: /\b(list|which records|what records|my records|records)\b/, toolId: 'list_vault_record' },
-  // A bare "read my <recordType>" fallback → vault read of that record type.
+  // A bare "read my <recordType>" fallback → vault read of that record type (NL convenience).
   {
     match: /\bread my (\w[\w-]*)/,
     toolId: 'get_vault_record',
