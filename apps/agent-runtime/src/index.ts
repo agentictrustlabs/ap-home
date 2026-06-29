@@ -994,6 +994,7 @@ app.post('/account/derive-address', async (c) => {
     credentialIdDigest?: Hex;
     pubKeyX?: string;
     pubKeyY?: string;
+    rpIdHash?: string;
     salt?: string;
   } | null;
   if (!body) return c.json({ error: 'body required' }, 400);
@@ -1035,8 +1036,18 @@ app.post('/account/derive-address', async (c) => {
       if (x === 0n || y === 0n) {
         return c.json({ error: 'pubKeyX and pubKeyY must be non-zero' }, 400);
       }
+      // Orphan-registry guard (CA-F1): the factory mixes rpIdHash into the passkey-SA CREATE2 salt, so the
+      // PREDICTED address here MUST be computed with the SAME rpIdHash the deploy + the WebAuthn assertion
+      // use (sha256 of the rp.id = page hostname). Omitting it defaulted to ZERO → predict diverged from
+      // deploy → orphan SA + ERC-1271 failures. Fail-closed: require it (matches the /session/deploy guard).
+      if (typeof body.rpIdHash !== 'string' || !BYTES32_REGEX.test(body.rpIdHash)) {
+        return c.json(
+          { error: 'rpIdHash (0x-prefixed 32-byte hex) is required for passkey derivation — MUST equal sha256(rp.id) used at deploy + assertion (CA-F1 orphan-registry guard)' },
+          400,
+        );
+      }
       smartAccountAddress = await accountClient(c.env).getAddressForAgentAccount({
-        passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x, y },
+        passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x, y, rpIdHash: body.rpIdHash as Hex },
         salt,
       });
     } else {
