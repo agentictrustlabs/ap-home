@@ -26,6 +26,8 @@ import {
 } from '@agenticprimitives/a2a';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
 import { createDurableObjectBudgetStore } from '@agenticprimitives/rate-control-cloudflare';
+import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
+import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // ADR-0044 — the Ring-0 agentic loop. The `orchestrate` skill runs the SHARED orchestration core (tools +
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
@@ -104,6 +106,30 @@ function normalizeDelegation(d: Record<string, unknown>): Delegation {
 /** Methods whose `params.delegation.salt` arrives as a JSON string and must become a bigint. */
 const DELEGATION_METHODS = new Set(['message/send', 'tasks/resubmit']);
 
+// spec 289 §5 — the resilient chain-read authority port for the A2A verify gate (revocation + the
+// delegation/message/caller ERC-1271 signature reads), symmetric with demo-mcp's baseConfig. The viem
+// provider validates signatures via the UniversalSignatureValidator (ECDSA/1271/6492) + reports `deployed`;
+// circuit-breaker + bounded-freshness/divergence evidence wrap it. Memoized per isolate; falls back to the
+// inline single-client reads when no RPC/USV. SINGLE provider (demo) — add more for divergence detection.
+let _a2aChainReader: ReturnType<typeof createChainAuthorityReader> | undefined;
+let _a2aChainReaderTried = false;
+function a2aChainReader(env: Env): ReturnType<typeof createChainAuthorityReader> | undefined {
+  if (_a2aChainReaderTried) return _a2aChainReader;
+  _a2aChainReaderTried = true;
+  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!env.RPC_URL || !usv) return undefined;
+  _a2aChainReader = createChainAuthorityReader({
+    chainId: Number(env.CHAIN_ID ?? 84532),
+    providers: [createViemChainProvider({
+      source: 'base-sepolia-rpc',
+      delegationManager: env.DELEGATION_MANAGER as Address,
+      universalSignatureValidator: usv as Address,
+      rpcUrl: env.RPC_URL,
+    })],
+  });
+  return _a2aChainReader;
+}
+
 export class A2aTaskDO {
   private agent: A2aAgent | null = null;
   constructor(private state: DurableObjectState, private env: Env) {}
@@ -113,17 +139,31 @@ export class A2aTaskDO {
     const pub = createPublicClient({ chain: baseSepolia, transport: http(this.env.RPC_URL) });
     const chainId = Number(this.env.CHAIN_ID ?? 84532);
     const dm = this.env.DELEGATION_MANAGER as Address;
-    const erc1271 = async (account: Address, digest: Hex, signature: Hex): Promise<boolean> => {
+    // Inline ERC-1271 (direct SA isValidSignature) — the fallback when the resilient reader can't be built.
+    const erc1271Inline = async (account: Address, digest: Hex, signature: Hex): Promise<boolean> => {
       const magic = (await pub.readContract({ address: account, abi: ERC1271_ABI, functionName: 'isValidSignature', args: [digest, signature] })) as Hex;
       return magic.toLowerCase() === ERC1271_MAGIC;
     };
+    // spec 289 §5 — route revocation + the three signature reads through the resilient chain-state port when
+    // available (USV-based, circuit-breaker, evidence). The signature reads require BOTH valid AND deployed:
+    // the inline path reverts on an undeployed signer (fail-closed) — `valid && deployed` preserves that
+    // (an A2A party is always a deployed SA), while the port also handles 6492 robustly. Fall back to inline.
+    const reader = a2aChainReader(this.env);
+    const verifySig = reader
+      ? async (signer: Address, digest: Hex, signature: Hex): Promise<boolean> => {
+          const r = await reader.verifySmartAgentSignature({ signer, digest, signature });
+          return r.valid && r.deployed;
+        }
+      : erc1271Inline;
     const checks: OnChainChecks = {
       // Fail-closed: any throw propagates and the package denies (ADR-0013).
-      isRevoked: async (d) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
-      verifyDelegationSignature: async (d) => erc1271(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex),
-      verifyMessageSignature: async (msg, digest) => erc1271(msg.sender as Address, digest, msg.signature as Hex),
+      isRevoked: reader
+        ? async (d) => (await reader.isDelegationRevoked(hashDelegation(d, chainId, dm))).revoked
+        : async (d) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
+      verifyDelegationSignature: async (d) => verifySig(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex),
+      verifyMessageSignature: async (msg, digest) => verifySig(msg.sender as Address, digest, msg.signature as Hex),
       // AUDIT NEW-A2A-2 — the read/control caller proves control of `caller` via ERC-1271 over the request digest.
-      verifyCallerSignature: async (caller, digest, signature) => erc1271(caller as Address, digest, signature as Hex),
+      verifyCallerSignature: async (caller, digest, signature) => verifySig(caller as Address, digest, signature as Hex),
     };
     // Vault seam (A2A-INV-04 — only refs/hashes in task state):
     //  • with a delegation (FR-3.4) → write/read the DELEGATOR's demo-mcp vault via the captured grant
