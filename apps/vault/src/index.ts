@@ -56,7 +56,7 @@ import {
 import { defineSurface, buildMcpToolsList, buildMcpServerCapabilities, mcpListCacheHint, type SurfaceDescriptor } from '@agenticprimitives/surface-catalog';
 import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
-import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/delegation';
+import type { Delegation, AgenticInvocationProofV1, DataScopeGrant } from '@agenticprimitives/delegation';
 
 // Spec 290 §8 — the per-SA hard-budget Durable Object must be exported from the Worker entry so CF can
 // bind it. demo-mcp hosts + enforces its own (it is the authority point — it has the verified principal).
@@ -182,9 +182,20 @@ type SensitiveReadResult =
   | { ok: false; error: string; reason?: string; served_by: string }
   | { ok: true; record: unknown; subject_name: string | null };
 
+/** Field-scoping (spec 291-A): when the delegation carried DATA_SCOPE grants, RESTRICT the released fields
+ *  to what the issuer granted for THIS resource. No grants ⇒ unchanged (owner-self / full-authority reads).
+ *  Grants present but none for this resource ⇒ [] (fail-closed: scoped access doesn't reach this resource). */
+function applyDataScope(grants: DataScopeGrant[] | undefined, resource: string, requested?: string[]): string[] | undefined {
+  if (!grants || grants.length === 0) return requested;
+  const allowed = new Set<string>();
+  for (const g of grants) if (g.resources.includes(resource)) for (const f of g.fields) allowed.add(f);
+  if (!requested || requested.length === 0) return [...allowed];
+  return requested.filter((f) => allowed.has(f));
+}
+
 async function readSensitive(
   env: Env,
-  ctx: { principal: string; args?: { fields?: string[]; purpose?: string }; correlationId: string | undefined; audience: string },
+  ctx: { principal: string; args?: { fields?: string[]; purpose?: string }; grants?: DataScopeGrant[]; correlationId: string | undefined; audience: string },
   spec: SensitiveReadSpec,
 ): Promise<SensitiveReadResult> {
   const { principal, args } = ctx;
@@ -210,6 +221,10 @@ async function readSensitive(
   });
   if (decision.decision === 'deny') return { ok: false, error: 'entitlement_denied', reason: decision.reason, served_by: spec.servedBy };
 
+  // spec 291-A field-scoping: intersect the entitlement's allowedFields with the delegation's DATA_SCOPE
+  // grant for this resource. Owner-self / full-authority delegations carry no grant → unchanged.
+  const scopedFields = applyDataScope(ctx.grants, spec.resource, decision.allowedFields);
+
   // Phase 4 + spec 278: one-time DecryptGrant gated by the KAS, which ALSO requires the
   // per-person vault-key authorization (the person SA authorized THIS host to wield the KEK).
   const release = await authorizeDecrypt({
@@ -220,7 +235,7 @@ async function readSensitive(
     args: args ?? {},
     resource: spec.resource,
     classification: spec.classification,
-    allowedFields: decision.allowedFields,
+    allowedFields: scopedFields,
     purpose,
     entitlementIds: decision.matchedCredentials,
     vaultKeyAuthorization: { verifier: buildVaultKeyVerifier(env), authorization: pv.authorization, binding: pv.binding },
@@ -715,10 +730,10 @@ app.post('/tools/get_pii', async (c) => {
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     baseConfig(c.env),
-    async ({ principal, args }) => {
+    async ({ principal, args, grants }) => {
       const r = await readSensitive(
         c.env,
-        { principal, args, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
+        { principal, args, grants, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
         { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive', toolName: 'get_pii', servedBy: 'demo-mcp:get_pii' },
       );
       if (!r.ok) return r;
@@ -769,10 +784,10 @@ app.post('/tools/get_org_sensitive', async (c) => {
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
     baseConfig(c.env),
-    async ({ principal, args }) => {
+    async ({ principal, args, grants }) => {
       const r = await readSensitive(
         c.env,
-        { principal, args, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
+        { principal, args, grants, correlationId: getCorrelationId(c), audience: c.env.MCP_AUDIENCE },
         { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive' },
       );
       if (!r.ok) return r;
@@ -855,14 +870,14 @@ app.post('/mcp/native', async (c) => {
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const TOOLS: Record<
     string,
-    { classification: typeof GET_PII_CLASSIFICATION; run: (principal: Address, args: Args['args']) => Promise<unknown> }
+    { classification: typeof GET_PII_CLASSIFICATION; run: (principal: Address, args: Args['args'], grants?: DataScopeGrant[]) => Promise<unknown> }
   > = {
     get_pii: {
       classification: GET_PII_CLASSIFICATION,
-      run: async (principal, args) => {
+      run: async (principal, args, grants) => {
         const r = await readSensitive(
           c.env,
-          { principal, args, correlationId, audience: c.env.MCP_AUDIENCE },
+          { principal, args, grants, correlationId, audience: c.env.MCP_AUDIENCE },
           { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive', toolName: 'get_pii', servedBy: 'demo-mcp:get_pii (native)' },
         );
         if (!r.ok) return r;
@@ -871,10 +886,10 @@ app.post('/mcp/native', async (c) => {
     },
     get_org_sensitive: {
       classification: GET_ORG_SENSITIVE_CLASSIFICATION,
-      run: async (principal, args) => {
+      run: async (principal, args, grants) => {
         const r = await readSensitive(
           c.env,
-          { principal, args, correlationId, audience: c.env.MCP_AUDIENCE },
+          { principal, args, grants, correlationId, audience: c.env.MCP_AUDIENCE },
           { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high', toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive (native)' },
         );
         if (!r.ok) return r;
@@ -887,7 +902,7 @@ app.post('/mcp/native', async (c) => {
 
   const handler = withDelegation<Args>(
     nativeCfg,
-    async ({ principal, args }) => enforceBudget(c.env, principal, reqBody.tool!, reqBody.invocationProof!.requestId, () => entry.run(principal, args)),
+    async ({ principal, args, grants }) => enforceBudget(c.env, principal, reqBody.tool!, reqBody.invocationProof!.requestId, () => entry.run(principal, args, grants)),
     { toolName: reqBody.tool, classification: entry.classification, auditSink, correlationId, environment },
   );
   try {
@@ -996,9 +1011,9 @@ app.post('/mcp/v2', async (c) => {
       const nativeCfg: McpResourceVerifyConfig = { ...baseConfig(c.env), requireInvocationProof: true, universalSignatureValidator: usv as Address };
       const handler = withDelegation<ToolArgs>(
         nativeCfg,
-        async ({ principal, args }) =>
+        async ({ principal, args, grants }) =>
           enforceBudget(c.env, principal, name, a.invocationProof!.requestId, () =>
-            readSensitive(c.env, { principal, args, correlationId, audience: c.env.MCP_AUDIENCE }, spec),
+            readSensitive(c.env, { principal, args, grants, correlationId, audience: c.env.MCP_AUDIENCE }, spec),
           ),
         { toolName: name, classification, auditSink, correlationId, environment },
       );

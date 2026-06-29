@@ -40,6 +40,7 @@ import {
   ROOT_AUTHORITY,
   hashDelegation,
   buildVaultKeyUseCaveat,
+  buildDataScopeCaveat,
   type Delegation,
   type Caveat,
 } from '@agenticprimitives/delegation';
@@ -398,6 +399,37 @@ async function runRail(name: string): Promise<{ name: string; ok: boolean; detai
   };
 }
 
+/** spec 291-A LIVE proof: read Alice's PII through the edge with an UNSCOPED vs a DATA_SCOPE'd Alice→Bob
+ *  delegation. /mcp/person/pii returns the get_pii record; the scoped grant must RESTRICT the returned
+ *  fields to what Alice granted. Both go through the edge (gateway assertion) + carry CSRF. */
+async function verifyFieldScoping(aliceRail: CustodyRail, alice: Address, bob: Address): Promise<string> {
+  const aliceToBob = async (caveats: Caveat[]): Promise<Record<string, unknown>> => {
+    const d: Delegation = { delegator: alice, delegate: bob, authority: ROOT_AUTHORITY, caveats, salt: BigInt(rand32()), signature: '0x' };
+    d.signature = await aliceRail.signDigest(hashDelegation(d, D.chainId, D.delegationManager));
+    return delegationWire(d);
+  };
+  const readPiiKeys = async (delegation: Record<string, unknown>): Promise<string[]> => {
+    const token = await csrfToken();
+    const r = await fetch(`${EDGE_BASE}/mcp/person/pii`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, 'X-CSRF-Token': token },
+      body: JSON.stringify({ delegation, requester: bob }),
+    });
+    const j: any = await r.json().catch(() => ({}));
+    return j?.record && typeof j.record === 'object' ? Object.keys(j.record) : [];
+  };
+  const SCOPE = ['full_name', 'email'];
+  const fullKeys = await readPiiKeys(await aliceToBob([]));
+  const scopedKeys = await readPiiKeys(await aliceToBob([buildDataScopeCaveat([{ server: 'demo-mcp', resources: ['person-pii'], fields: SCOPE }])]));
+  console.log(`    field-scoping: unscoped→[${fullKeys.join(',')}]`);
+  console.log(`                   scoped  →[${scopedKeys.join(',')}]  (grant: person-pii ⊇ ${SCOPE.join('+')})`);
+  const scopedOk = scopedKeys.length > 0 && scopedKeys.every((k) => SCOPE.includes(k));
+  const restricted = scopedKeys.length < fullKeys.length && fullKeys.length > 0;
+  return scopedOk && restricted
+    ? `field-scoping ENFORCED (${fullKeys.length} fields → ${scopedKeys.length}: ${scopedKeys.join('+')})`
+    : `field-scoping NOT enforced (unscoped=${fullKeys.length}, scoped=${scopedKeys.length}) — demo-mcp likely pre-deploy`;
+}
+
 /**
  * GENUINE cross-principal flow (the corrected topology): Alice is the OWNER (delegator); Bob is the
  * DELEGATE/caller. Authority + data residency follow the owner — Alice's PII lives behind Alice's MCP and
@@ -474,10 +506,19 @@ async function runCrossPrincipal(name: string): Promise<{ name: string; ok: bool
   console.log(`  task state=${task.state} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
   const spineProven = TERMINAL.has(task.state);
   const gold = task.state === 'completed';
+
+  // spec 291-A — having proven the cross-principal spine, demonstrate FIELD-SCOPING: a DATA_SCOPE'd grant
+  // restricts what Bob reads. (Only meaningful once demo-mcp with the scoping change is deployed.)
+  let scopeNote = '';
+  if (gold && vaultBound) {
+    try { scopeNote = ` · ${await verifyFieldScoping(aliceRail, alice, bob)}`; }
+    catch (e) { scopeNote = ` · field-scoping check errored: ${e instanceof Error ? e.message : String(e)}`; }
+  }
+
   return {
     name: label, ok: spineProven,
     detail: gold
-      ? `taskId issued + COMPLETED — Bob (delegate) read Alice's PII via Alice's grant; principal=Alice, terminated at Alice's agent/MCP`
+      ? `taskId issued + COMPLETED — Bob (delegate) read Alice's PII via Alice's grant; principal=Alice, terminated at Alice's agent/MCP${scopeNote}`
       : `taskId issued + state=${task.state}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
   };
 }
