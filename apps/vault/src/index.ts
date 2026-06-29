@@ -62,6 +62,7 @@ import type { Delegation, AgenticInvocationProofV1 } from '@agenticprimitives/de
 // bind it. demo-mcp hosts + enforces its own (it is the authority point — it has the verified principal).
 export { SmartAgentBudgetDO } from '@agenticprimitives/rate-control-cloudflare';
 import { demoEntitlementResolver } from './entitlements';
+import { buildCredentialVerifier } from './credential-verifier';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
 import { resolveAgentName } from './naming';
@@ -196,7 +197,7 @@ async function readSensitive(
   if (!pv) return { ok: false, error: 'vault_key_unauthorized', served_by: spec.servedBy };
 
   // Phase 3: resolve the entitlement BEFORE decrypting; allowedFields scopes the projection.
-  const decision = await demoEntitlementResolver().resolve({
+  const decision = await demoEntitlementResolver(buildCredentialVerifier(env)).resolve({
     actor: principal,
     principal,
     audience: ctx.audience,
