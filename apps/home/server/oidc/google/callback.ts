@@ -14,6 +14,7 @@ import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/t
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
+import { isSocialCustodyAud } from '../../../src/lib/oidc-clients';
 import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /**
@@ -150,9 +151,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const oidcIss = result.principal.iss;
   const oidcSub = result.principal.sub;
   const custodyAud = env.DEMO_SSO_AUD ?? 'demo-sso';
-  // Google × KMS custody is offered ONLY for the Personal-Home aud (spec 235).
-  // Relying-app auds stay login-grade — their members onboard via the Personal Home.
-  const custodyEligible = stash.aud === custodyAud;
+  // Google × KMS custody is offered for the Personal-Home aud AND for clients explicitly flagged
+  // `socialCustody` in the registry (spec 294 — self-contained demos like demo-web that bootstrap their own
+  // SA). Other relying-app auds stay login-grade — their members onboard via the Personal Home (spec 235).
+  const custodyEligible = isSocialCustodyAud(stash.aud, custodyAud);
   // Per-subject rotation (spec 235 §5b): which KMS home this Google account opens now. demo-a2a
   // derives `SA(iss,sub,rotation)` deterministically — derive-only here, no on-chain effect.
   const rotation = await readRotation(env.AUTH_CODES, oidcIss, oidcSub);
@@ -197,7 +199,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       sub: agent,
       principal: sessionPrincipal,
       assurance: custodyGrade ? 'onchain-confirmed' : 'asserted',
-      aud: stash.aud,
+      // A custody-grade session is HOME-level custody authority (the KMS custodian = the person's home
+      // identity), so it carries the home/custody aud — which demo-a2a's `/custody/*` gate verifies
+      // (expectedAud = DEMO_SSO_AUD). For the Personal Home aud this is a no-op; for a `socialCustody`
+      // client (spec 294, e.g. demo-web) it lets the SAME custody gate accept the session. Login-grade
+      // sessions stay bound to the requesting relying-app aud.
+      aud: custodyGrade ? custodyAud : stash.aud,
       iss,
       ttlSeconds: 3600,
       // Carry the rotation so demo-a2a's gate derives the matching per-subject key (spec 235 §5b).
@@ -206,7 +213,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     signer,
   );
 
-  // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token.
+  // §4a / CN-9: stash under a single-use code; deliver the CODE, not the token. The code-exchange aud is
+  // the REQUESTING client (stash.aud) — distinct from the session's internal (home) aud for custody clients.
   const authCode = newAuthCode();
   await env.AUTH_CODES.put(`code:${authCode}`, JSON.stringify({ token, aud: stash.aud }), { expirationTtl: 120 });
 

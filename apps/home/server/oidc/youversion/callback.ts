@@ -13,6 +13,7 @@ import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/t
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
+import { isSocialCustodyAud } from '../../../src/lib/oidc-clients';
 import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /** App-layer return-URL policy (mirrors the Google handler): trust this site's own apex + per-handle
@@ -151,8 +152,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const oidcIss = result.principal.iss;
   const oidcSub = result.principal.sub;
   const custodyAud = env.DEMO_SSO_AUD ?? 'demo-sso';
-  // KMS custody is offered ONLY for the Personal-Home aud (spec 235); relying-app auds stay login-grade.
-  const custodyEligible = stash.aud === custodyAud;
+  // KMS custody for the Personal-Home aud AND registry clients flagged `socialCustody` (spec 294 — e.g.
+  // demo-web); other relying-app auds stay login-grade (onboard via the Personal Home, spec 235).
+  const custodyEligible = isSocialCustodyAud(stash.aud, custodyAud);
   const rotation = await readRotation(env.AUTH_CODES, oidcIss, oidcSub);
   const derived = custodyEligible
     ? await resolveKmsAgent(env, oidcIss, oidcSub, rotation)
@@ -211,7 +213,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       sub: agent,
       principal: sessionPrincipal,
       assurance: custodyGrade ? 'onchain-confirmed' : 'asserted',
-      aud: stash.aud,
+      // Custody-grade = home-level custody authority → home/custody aud (demo-a2a's /custody gate verifies
+      // it). No-op for the Personal-Home aud; admits `socialCustody` clients (spec 294). See google/callback.
+      aud: custodyGrade ? custodyAud : stash.aud,
       iss,
       ttlSeconds: 3600,
       ...(custodyGrade ? { rotation } : {}),

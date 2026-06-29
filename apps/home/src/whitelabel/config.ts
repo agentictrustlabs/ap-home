@@ -27,6 +27,20 @@ const faithImpact: WhiteLabelConfig = {
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
   relyingApps: [
+    // spec 294 — the SIMPLE demo (apps/demo-web). Unlike the relying apps below, demo-web is a
+    // self-contained demo that bootstraps its OWN Smart Agent across SIWE / passkey / social. So its
+    // social (OIDC) sign-in is custody-grade (`socialCustody: true`) — the OIDC custodian deploys + signs
+    // for the SA directly, giving tri-custody parity with the SIWE/passkey paths. NOT a pattern for true
+    // relying apps (which stay login-grade + onboard via the Personal Home).
+    {
+      client_id: 'demo-web',
+      name: 'agenticprimitives demo',
+      redirect_uris: ['https://agenticprimitives-demo.pages.dev/', 'http://localhost:5173/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      socialCustody: true,
+    },
     {
       client_id: 'demo-org',
       name: 'Impact',

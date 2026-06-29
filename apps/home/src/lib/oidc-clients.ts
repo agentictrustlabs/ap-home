@@ -19,6 +19,14 @@ export function getClient(clientId: string): OidcClient | null {
   return CLIENTS[clientId] ?? null;
 }
 
+/** spec 294 — is a social (OIDC) sign-in under `aud` (client_id) custody-grade? True for the Personal-Home
+ *  aud AND for any registered client flagged `socialCustody` (self-contained demos like demo-web). Relying
+ *  apps without the flag stay login-grade (onboard via the home). */
+export function isSocialCustodyAud(aud: string, homeAud: string): boolean {
+  if (aud === homeAud) return true;
+  return getClient(aud)?.socialCustody === true;
+}
+
 /** Exact-match redirect allowlist (CN-1). Never substring/prefix. */
 export function clientAllowsRedirect(client: OidcClient, redirectUri: string): boolean {
   return client.redirect_uris.includes(redirectUri);

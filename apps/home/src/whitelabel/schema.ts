@@ -25,6 +25,12 @@ export interface RelyingApp {
    *  treated as untrusted hint and MUST match this. Address format: 0x-prefixed 20-byte hex.
    *  (SEC-001 closure — the broker no longer accepts attacker-chosen delegates.) */
   delegate: `0x${string}`;
+  /** spec 294 — when true, a social (OIDC) sign-in under THIS client_id yields a KMS-CUSTODIED
+   *  Smart Agent directly (custody-grade), instead of the default login-grade relying-app path
+   *  where members onboard via the Personal Home. A deliberate, registered exception for
+   *  SELF-CONTAINED demos (e.g. demo-web) that bootstrap their own SA across SIWE/passkey/social —
+   *  NOT for true relying apps (demo-org/jp/gs stay login-grade). Default false/undefined. */
+  socialCustody?: boolean;
   /** x402 payment params for the `x402-pay` template (spec 272/243). Present only on clients that
    *  sell paid content. The home mints a `person-treasury → payee` PaymentEnforcer delegation with
    *  these caps; amounts are atomic-unit strings (plain data / JSON-serializable). `mode`: 'push'
