@@ -350,11 +350,26 @@ export async function collectSubscriptions(opts: {
   return { ok: true, attempted: due.length, collected: settled.length, results };
 }
 
-/** Claim a forced-unique `<base>[N].demo.agent` for the agent + set it as primary.
+/** Read-only ABIs for the one-name-per-caller guard below. */
+const SUBREG_CLAIMED_ABI = [
+  { type: 'function', name: 'claimedBy', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ type: 'bytes32' }] },
+] as const;
+const RESOLVER_NAMEOF_ABI = [
+  { type: 'function', name: 'nameOf', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'string' }] },
+] as const;
+
+/** Claim a forced-unique `<base>[N].impact` for the agent + set it as primary.
  *  register + setPrimaryName are BATCHED into one execute UserOp (one nonce, one signature):
  *  they must land together, and the batch avoids an inter-userOp race where the second op
  *  sees a stale view of the first's state. `minNonce` rides out the post-deploy nonce lag
- *  (pass the nonce the SA must be at after its deploy, e.g. 1n right after a fresh deploy). */
+ *  (pass the nonce the SA must be at after its deploy, e.g. 1n right after a fresh deploy).
+ *
+ *  ONE-NAME-PER-CALLER GUARD: PermissionlessSubregistry.register reverts `AlreadyClaimed` if THIS SA
+ *  already claimed a name (spec 257). A reconnected/existing home already HAS its name, so re-claiming a
+ *  DIFFERENT one (e.g. founding a second, differently-named home with a wallet that already has one) would
+ *  revert the whole userOp → a 500 the founding flow can't recover from. We detect the existing claim and
+ *  return it as a NO-OP success instead — the home keeps its established name (one mechanism, ADR-0013: a
+ *  positive `claimedBy` read IS the answer; we don't attempt-then-handle-the-revert). */
 export async function claimName(
   agent: Address,
   signHash: SignHash,
@@ -362,6 +377,24 @@ export async function claimName(
   onStep?: (s: string) => void,
   minNonce?: bigint,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  // Already-claimed? Surface the existing name; never submit a reverting register.
+  try {
+    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const prior = (await pc.readContract({
+      address: CONTRACTS.permissionlessSubregistry, abi: SUBREG_CLAIMED_ABI, functionName: 'claimedBy', args: [agent],
+    })) as Hex;
+    if (prior && BigInt(prior) !== 0n) {
+      let existing = '';
+      try {
+        existing = (await pc.readContract({
+          address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_NAMEOF_ABI, functionName: 'nameOf', args: [prior],
+        })) as string;
+      } catch { /* resolver read failed — still a no-op claim, just without the resolved label */ }
+      onStep?.(existing ? `This home already has a name: ${existing}` : 'This home already has a name.');
+      return { ok: true, name: existing || base };
+    }
+  } catch { /* read failed → fall through and attempt the claim (the on-chain AlreadyClaimed guard still protects) */ }
+
   onStep?.('Finding a free name…');
   const nameRes = await fetch(`/connect/name?base=${encodeURIComponent(base)}`);
   const picked = (await nameRes.json()) as { label?: string; name?: string; node?: Hex; error?: string };
