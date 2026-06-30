@@ -343,14 +343,20 @@ async function authorizePersonVaultOp(
   classification: string,
 ): Promise<{ ok: true; pv: PersonVault } | { ok: false; error: 'vault_key_unauthorized' }> {
   const pv = await resolvePersonVault(env, owner);
-  if (!pv) return { ok: false, error: 'vault_key_unauthorized' };
+  if (!pv) {
+    console.warn(`[vault-key] unauthorized: NO BINDING owner=${owner} resource=${resource} op=${op}`);
+    return { ok: false, error: 'vault_key_unauthorized' };
+  }
   const verdict = await verifyVaultKeyAuthorization({
     verifier: buildVaultKeyVerifier(env),
     authorization: pv.authorization,
     binding: pv.binding,
     request: { vaultId: pv.binding.vaultId, ownerPersonSA: owner, serverId: VAULT_SERVER_ID, resource, op, classification },
   });
-  if (!verdict.ok) return { ok: false, error: 'vault_key_unauthorized' };
+  if (!verdict.ok) {
+    console.warn(`[vault-key] unauthorized: owner=${owner} resource=${resource} op=${op} reason=${verdict.reason} allowed=${JSON.stringify(pv.binding.allowedResources)}`);
+    return { ok: false, error: 'vault_key_unauthorized' };
+  }
   return { ok: true, pv };
 }
 
