@@ -1,17 +1,17 @@
-// THE GATE — Google × KMS custody (spec 235 §5).
+// THE GATE — OIDC-subject custody (spec 235 §5; #2 per-subject signer, provider-neutral — Google OR YouVersion).
 //
 // demo-a2a is the SOLE holder of the master, so it is the ONLY party that can
 // derive a member's per-subject custodian C_sub and compute their Smart Agent
-// address. These helpers are the security boundary for the three custody
-// endpoints in index.ts:
+// address. These helpers are the security boundary for the custody endpoints in
+// index.ts (canonical `/custody/oidc/*`; `/custody/google/*` is the deprecated alias):
 //
-//   /custody/google/resolve            (broker → a2a, bridge-secret) — derive only
-//   /custody/google/bootstrap-and-claim (client → a2a, custody session) — deploy + claim
-//   /custody/google/sign                (client → a2a, custody session) — sign a digest
+//   /custody/oidc/resolve            (broker → a2a, bridge-secret) — derive only
+//   /custody/oidc/bootstrap-and-claim (client → a2a, custody session) — deploy + claim
+//   /custody/oidc/sign                (client → a2a, custody session) — sign a digest
 //
 // Invariants enforced here (spec 235 §9):
 //   - A client-facing call NEVER derives/signs without a JWKS-verified,
-//     custody-grade, iss/aud-pinned Google session for that exact (iss,sub).
+//     custody-grade, iss/aud-pinned OIDC session for that exact (iss,sub).
 //   - The OIDC (iss,sub) is read from the VERIFIED session, never the body.
 //   - The SA we act for is DERIVED from (iss,sub) — never client-supplied; the
 //     caller can only ask us to act for the agent their session already proves.

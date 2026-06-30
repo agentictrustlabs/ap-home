@@ -56,7 +56,7 @@ import {
   deriveSubjectCustodian,
   timingSafeEqual,
   caip10,
-} from './custody-google';
+} from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
 import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
 import {
@@ -578,10 +578,11 @@ app.use('*', async (c, next) => {
   // /custody/google/resolve + /custody/google/sign-site-delegation are server-to-server calls from the
   // Connect broker (no browser cookie). They're authenticated by the bridge HMAC envelope, not CSRF.
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
-  if (c.req.path === '/custody/google/resolve') return next();
-  if (c.req.path === '/custody/google/sign-site-delegation') return next();
-  // Server-to-server FedCM vault-key binding from the Connect broker (bridge-HMAC authenticated, no browser cookie).
-  if (c.req.path === '/custody/google/activate-vault') return next();
+  // Server-to-server custody bridge calls (bridge-HMAC authenticated, no browser cookie). Canonical `oidc`
+  // path + the deprecated `google` alias (CSRF runs before the alias re-dispatch, so both must be exempt).
+  if (c.req.path === '/custody/oidc/resolve' || c.req.path === '/custody/google/resolve') return next();
+  if (c.req.path === '/custody/oidc/sign-site-delegation' || c.req.path === '/custody/google/sign-site-delegation') return next();
+  if (c.req.path === '/custody/oidc/activate-vault' || c.req.path === '/custody/google/activate-vault') return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -2068,7 +2069,7 @@ app.post('/session/direct-deploy', async (c) => {
 // surface entirely; the registry path that all live code uses (SA-signed
 // `executeBatch` inside a deploy userOp) is the single mechanism per ADR-0013.
 
-// ─── Google × KMS custody (spec 235) — THE GATE lives in ./custody-google.ts ─
+// ─── OIDC-subject custody (spec 235; #2 per-subject signer, provider-neutral) — THE GATE lives in ./custody-oidc.ts ─
 //
 // Three endpoints let a member whose ONLY credential is Google get + use a
 // real Smart Agent. demo-a2a holds the master, so it is the only party that
@@ -2092,7 +2093,7 @@ function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: string; ex
 }
 
 /**
- * POST /custody/google/resolve  (broker → a2a, bridge-secret authenticated)
+ * POST /custody/oidc/resolve  (broker → a2a, bridge-secret authenticated)
  * Body: { iss, sub }  → { ok, agent, agentId (CAIP-10), custodian }
  *
  * Derive-only: the OIDC callback can't hold the master, so it asks demo-a2a
@@ -2100,7 +2101,7 @@ function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: string; ex
  * effect — fast. Authenticated by the shared bridge secret (the user's Google
  * authn already happened at the broker).
  */
-app.post('/custody/google/resolve', async (c) => {
+app.post('/custody/oidc/resolve', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
 
@@ -2130,14 +2131,14 @@ app.post('/custody/google/resolve', async (c) => {
 });
 
 /**
- * POST /custody/google/bootstrap-and-claim  (client → a2a, custody session)
+ * POST /custody/oidc/bootstrap-and-claim  (client → a2a, custody session)
  * Body: { session, label, node }  → { ok, agent, agentId, name, transactionHash }
  *
  * Deploy SA_expected (custodians:[C_sub], salt 0) + claim `<label>` +
  * setPrimary(node) in ONE C_sub-signed, paymaster-sponsored userOp. The
  * member's only gesture was signing in with Google.
  */
-app.post('/custody/google/bootstrap-and-claim', async (c) => {
+app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
   if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
     return c.json({ ok: false, error: 'naming_not_configured' }, 503);
@@ -2230,7 +2231,7 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
 });
 
 /**
- * POST /custody/google/bootstrap  (client → a2a, custody session)
+ * POST /custody/oidc/bootstrap  (client → a2a, custody session)
  * Body: { session }  → { ok, agent, agentId, transactionHash }
  *
  * spec 257 Phase 1.5 — TRUE name-deferral. Deploy SA_expected (custodians:[C_sub],
@@ -2241,7 +2242,7 @@ app.post('/custody/google/bootstrap-and-claim', async (c) => {
  * The named atomic path is still available at /custody/google/bootstrap-and-claim for
  * the power-user "choose a name now" affordance.
  */
-app.post('/custody/google/bootstrap', async (c) => {
+app.post('/custody/oidc/bootstrap', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
@@ -2454,7 +2455,7 @@ app.post('/custody/recover-probe', async (c) => {
 });
 
 /**
- * POST /custody/google/bootstrap-org  (client → a2a, custody session)
+ * POST /custody/oidc/bootstrap-org  (client → a2a, custody session)
  * Body: { session, label, node, delegate, grantOrg? }
  *   → { ok, org, orgId, name, person, delegation, brokerDelegation?, stewardshipDelegation?, transactionHash }
  *
@@ -2462,7 +2463,7 @@ app.post('/custody/recover-probe', async (c) => {
  * per-(iss,sub) KMS custodian C_sub (durable-org-custody), deployed + named + its spec-253 sentinel
  * grants approveHash'd in ONE C_sub-signed, paymaster-sponsored userOp. Mirrors bootstrap-and-claim.
  */
-app.post('/custody/google/bootstrap-org', async (c) => {
+app.post('/custody/oidc/bootstrap-org', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
   if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
     return c.json({ ok: false, error: 'naming_not_configured' }, 503);
@@ -2587,7 +2588,7 @@ app.post('/custody/google/bootstrap-org', async (c) => {
 });
 
 /**
- * POST /custody/google/bootstrap-agent  (client → a2a, custody session — Google OR YouVersion)
+ * POST /custody/oidc/bootstrap-agent  (client → a2a, custody session — Google OR YouVersion)
  * Body: { session, kind, parent, label?, node? }
  *   → { ok, agent, name, person, stewardshipDelegation, custodyDescriptor, transactionHash }
  *
@@ -2597,7 +2598,7 @@ app.post('/custody/google/bootstrap-org', async (c) => {
  * (the org SA for an org-treasury; the person for the rest) rather than always child→person. No relying-app
  * `delegate` site grant — these are the member's own home-managed agents.
  */
-app.post('/custody/google/bootstrap-agent', async (c) => {
+app.post('/custody/oidc/bootstrap-agent', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
   if (!c.env.APPROVED_HASH_REGISTRY) return c.json({ ok: false, error: 'grants_not_configured' }, 503);
   const gateCfg = custodyGateConfig(c.env);
@@ -2703,7 +2704,7 @@ app.post('/custody/google/bootstrap-agent', async (c) => {
 });
 
 /**
- * POST /custody/google/name-agent  (client → a2a, custody session — Google OR YouVersion)
+ * POST /custody/oidc/name-agent  (client → a2a, custody session — Google OR YouVersion)
  * Body: { session, agent, label, node }  → { ok, name, transactionHash }
  *
  * spec 275 name-later: claim an EXACT name for an already-deployed NAMELESS social-custodied agent.
@@ -2711,7 +2712,7 @@ app.post('/custody/google/bootstrap-agent', async (c) => {
  * — only an agent THIS session's C_sub actually custodies can be named (defence-in-depth; on-chain
  * validateUserOp would reject a non-custodian signature anyway).
  */
-app.post('/custody/google/name-agent', async (c) => {
+app.post('/custody/oidc/name-agent', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
   if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
     return c.json({ ok: false, error: 'naming_not_configured' }, 503);
@@ -2770,14 +2771,14 @@ app.post('/custody/google/name-agent', async (c) => {
 });
 
 /**
- * POST /custody/google/sign  (client → a2a, custody session)
+ * POST /custody/oidc/sign  (client → a2a, custody session)
  * Body: { session, hash, sender }  → { ok, signature, custodian }
  *
  * Sign a 32-byte userOp / delegation digest with C_sub — for post-onboarding
  * actions (e.g. givePermission's EIP-712 delegation, future userOps), with no
  * device gesture. Only ever signs for the SA the session proves.
  */
-app.post('/custody/google/sign', async (c) => {
+app.post('/custody/oidc/sign', async (c) => {
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
@@ -2818,7 +2819,7 @@ app.post('/custody/google/sign', async (c) => {
 });
 
 /**
- * POST /custody/google/custodian  (browser, custody-session authenticated, CSRF)
+ * POST /custody/oidc/custodian  (browser, custody-session authenticated, CSRF)
  * Body: { session }  → { ok, custodian }
  *
  * Read-only sibling of /sign: verify the custody session and DERIVE the member's KMS custodian C_sub
@@ -2826,7 +2827,7 @@ app.post('/custody/google/sign', async (c) => {
  * discovery custody check can ask "which agents does my C_sub custody?" (C_sub is a public on-chain
  * address; deriving it releases nothing the chain doesn't, and it does NOT sign).
  */
-app.post('/custody/google/custodian', async (c) => {
+app.post('/custody/oidc/custodian', async (c) => {
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
@@ -2845,7 +2846,7 @@ app.post('/custody/google/custodian', async (c) => {
 });
 
 /**
- * POST /custody/google/sign-site-delegation  (Connect broker → a2a, BRIDGE-authenticated)
+ * POST /custody/oidc/sign-site-delegation  (Connect broker → a2a, BRIDGE-authenticated)
  * Body: { custodyToken, delegate, sender }  → { ok, delegation, custodian }
  *
  * The server-side custody leg of the FedCM delegation flow (ADR-0032). After a FedCM assertion, the
@@ -2859,7 +2860,7 @@ app.post('/custody/google/custodian', async (c) => {
  * {relationship, naming, subregistry}) and C_sub signs THAT — never a caller-supplied hash. So a broker
  * compromise can at worst mint a scoped, value-0, revocable site delegation, NEVER a fund-moving userOp.
  */
-app.post('/custody/google/sign-site-delegation', async (c) => {
+app.post('/custody/oidc/sign-site-delegation', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
   const gateCfg = custodyGateConfig(c.env);
@@ -2919,7 +2920,7 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
 });
 
 /**
- * POST /custody/google/activate-vault  (Connect broker → a2a, BRIDGE-authenticated)
+ * POST /custody/oidc/activate-vault  (Connect broker → a2a, BRIDGE-authenticated)
  * Body: { custodyToken, owner }  → { ok, owner?, kmsKeyRef?, skipped? }
  *
  * The server-side spec-278 vault-key binding for the FedCM fast path. The popup/journey/portal paths run
@@ -2932,7 +2933,7 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
  * bound). The vault-key endpoints carry no ambient authority (signature-gated), reached over the MCP service
  * binding (not the gateway-gated `/mcp` ingress).
  */
-app.post('/custody/google/activate-vault', async (c) => {
+app.post('/custody/oidc/activate-vault', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
   const gateCfg = custodyGateConfig(c.env);
@@ -4480,17 +4481,22 @@ app.post('/intent', async (c) => {
 
 // Spec 294 — PROVIDER-NEUTRAL social/OIDC custody surface. The connection custodian for a social sign-in is a
 // generic OIDC custodian (Google / YouVersion / any future provider are instances, never in the feature name).
-// `/custody/oidc/<name>` is the canonical path; it re-dispatches to the (legacy provider-named) `/custody/google/
-// <name>` handlers, which are already provider-neutral internally (they custody by the session's (iss,sub), not
-// by "Google"). New clients (demo-web's social rail) use `/custody/oidc/*`; `/custody/google/*` stays as the
-// deprecated alias until the handlers are physically renamed (tracked follow-up).
-app.post('/custody/oidc/:name', async (c) => {
+// `/custody/oidc/<name>` is now the CANONICAL path (the handlers above) — the custody signer is keyed on the
+// session's `(iss,sub)`, provider-neutral (Google OR YouVersion), so "oidc" names it correctly (spec 294,
+// naming-cleanup Phase 2). `/custody/google/<name>` remains a DEPRECATED alias for one deploy (old clients /
+// in-flight bridge calls) and re-dispatches to the canonical route; remove it once all callers are migrated.
+// Note: the bridge HMAC binds `audience + body`, not the URL path, so the audience strings (`custody.google.*`)
+// are unaffected by this rename — those are renamed separately in Phase 3 (they need lockstep deploy).
+app.post('/custody/google/:name', async (c) => {
   const name = c.req.param('name');
-  const allowed = new Set(['bootstrap', 'bootstrap-and-claim', 'name-agent', 'sign', 'custodian']);
+  const allowed = new Set([
+    'resolve', 'bootstrap', 'bootstrap-and-claim', 'bootstrap-org', 'bootstrap-agent',
+    'name-agent', 'sign', 'custodian', 'sign-site-delegation', 'activate-vault',
+  ]);
   if (!allowed.has(name)) return c.json({ error: 'not_found' }, 404);
-  // Internal re-dispatch to the existing handler (headers — incl. X-CSRF-Token — + body forwarded).
+  // Internal re-dispatch to the canonical handler (headers — incl. X-CSRF-Token / bridge envelope — + body forwarded).
   return app.request(
-    `/custody/google/${name}`,
+    `/custody/oidc/${name}`,
     { method: 'POST', headers: c.req.raw.headers, body: await c.req.text() },
     c.env,
   );

@@ -251,7 +251,7 @@ function socialRail(): CustodyRail {
       return sa;
     },
     async signDigest(digest) {
-      const j = await relayer('/custody/google/sign', { session, hash: digest, sender: sa });
+      const j = await relayer('/custody/oidc/sign', { session, hash: digest, sender: sa });
       if (!j.signature) throw new Error(`social signDigest failed: ${JSON.stringify(j).slice(0, 200)}`);
       return j.signature as Hex;
     },
