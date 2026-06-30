@@ -74,6 +74,7 @@ import {
   encodeTimestampTerms,
   encodeValueTerms,
   encodeAllowedTargetsTerms,
+  buildVaultKeyUseCaveat,
   ROOT_AUTHORITY,
   type Delegation,
   type Caveat,
@@ -579,6 +580,8 @@ app.use('*', async (c, next) => {
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
   if (c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/google/sign-site-delegation') return next();
+  // Server-to-server FedCM vault-key binding from the Connect broker (bridge-HMAC authenticated, no browser cookie).
+  if (c.req.path === '/custody/google/activate-vault') return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -2912,6 +2915,122 @@ app.post('/custody/google/sign-site-delegation', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] custody/google/sign-site-delegation failed:', e);
     return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /custody/google/activate-vault  (Connect broker → a2a, BRIDGE-authenticated)
+ * Body: { custodyToken, owner }  → { ok, owner?, kmsKeyRef?, skipped? }
+ *
+ * The server-side spec-278 vault-key binding for the FedCM fast path. The popup/journey/portal paths run
+ * `activateVaultIfNeeded` client-side, but a FedCM connect (the silent path) never does — so a social member
+ * gets a delegation but no vault key and every PII read fails closed with `vault_key_unauthorized`. The
+ * Connect broker's `/fedcm/grant` calls THIS after minting the delegation. Two gates, identical to
+ * sign-site-delegation: the BRIDGE HMAC proves the broker; the `custodyToken` proves the MEMBER. CONSTRAINED:
+ * the worker BUILDS the `VaultKeyAuthorization` (person → demo-mcp serverKey, one non-subdelegable
+ * VAULT_KEY_USE caveat) and C_sub signs THAT — never a caller-supplied hash. Idempotent (no-op if already
+ * bound). The vault-key endpoints carry no ambient authority (signature-gated), reached over the MCP service
+ * binding (not the gateway-gated `/mcp` ingress).
+ */
+app.post('/custody/google/activate-vault', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const gateCfg = custodyGateConfig(c.env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+  if (!c.env.DELEGATION_MANAGER) return c.json({ ok: false, error: 'delegation_env_not_configured' }, 503);
+
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({
+    request: c.req.raw,
+    rawBody,
+    secret,
+    expectedAudience: 'custody.google.activate-vault',
+    nonces: bridgeNonceStore(c.env),
+  });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as
+    { custodyToken?: string; owner?: Address } | null;
+  if (!body?.custodyToken || !body?.owner) return c.json({ ok: false, error: 'custodyToken + owner required' }, 400);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.owner)) return c.json({ ok: false, error: 'bad_owner' }, 400);
+
+  const gate = await verifyCustodySession(body.custodyToken, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+
+  try {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+      auditSink: buildAuditSink(c.env),
+      rotation: gate.rotation,
+    });
+    const person = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    // INVARIANT (spec 235 §5.4): only ever sign for the SA the session proves.
+    if (body.owner.toLowerCase() !== person.toLowerCase()) {
+      return c.json({ ok: false, error: 'owner_mismatch', detail: 'requested owner ≠ session SA' }, 403);
+    }
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), person).toLowerCase()) {
+      return c.json({ ok: false, error: 'sa_mismatch' }, 403);
+    }
+
+    // demo-mcp's vault-key endpoints — prefer the MCP service binding (sibling worker; avoids same-account
+    // loopback), fall back to MCP_URL for local dev. No edge assertion needed: vault-key routes aren't behind
+    // the gateway gate (only `/mcp*` is). Host placeholder for the binding; only the path matters.
+    const mfetch = (path: string, init?: RequestInit): Promise<Response> =>
+      c.env.MCP
+        ? c.env.MCP.fetch(new Request(`https://internal${path}`, init))
+        : fetch(`${c.env.MCP_URL.replace(/\/$/, '')}${path}`, init);
+
+    // Idempotent: already bound → done (mirrors activateVaultIfNeeded).
+    const boundRes = await mfetch(`/custody/vault-key/is-bound?owner=${person}`);
+    const boundJson = (await boundRes.json().catch(() => ({}))) as { bound?: boolean };
+    if (boundJson.bound === true) return c.json({ ok: true, skipped: true, owner: person });
+
+    // Discover this server's binding params, then provision the per-person KEK (idempotent).
+    const info = (await (await mfetch('/custody/vault-key/server-info')).json().catch(() => ({}))) as
+      { serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
+    const serverKey = ((info.serverKey ?? '').trim() || '0x0000000000000000000000000000000000000001') as Address;
+    const allowedResources = info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'];
+    const classificationCeiling = info.classificationCeiling ?? 'regulated.high';
+    const ops: ('read' | 'write')[] = info.ops ?? ['read', 'write'];
+    const vaultId = 'demo-mcp';
+
+    const provRes = await mfetch('/custody/vault-key/provision', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: person }),
+    });
+    const prov = (await provRes.json().catch(() => ({}))) as
+      { ok?: boolean; kmsKeyRef?: string; error?: string; error_description?: string; detail?: string };
+    if (!provRes.ok || !prov.ok || !prov.kmsKeyRef) {
+      return c.json({ ok: false, error: 'provision_failed', detail: prov.error_description ?? prov.detail ?? prov.error ?? `HTTP ${provRes.status}` }, 502);
+    }
+
+    // Build the VaultKeyAuthorization (person → serverKey, one non-subdelegable VAULT_KEY_USE caveat) and
+    // C_sub signs the canonical digest — same struct + hash as the client `buildVaultKeyAuthorization`.
+    const validUntil = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90;
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    let salt = 0n;
+    for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
+    const caveat = buildVaultKeyUseCaveat({
+      vaultId, kmsKeyRef: prov.kmsKeyRef, resources: allowedResources, classificationCeiling, ops, noSubdelegation: true,
+    });
+    const d: Delegation = { delegator: person, delegate: serverKey, authority: ROOT_AUTHORITY, caveats: [caveat], salt, signature: '0x' };
+    const digest = hashDelegation(d, Number(c.env.CHAIN_ID), c.env.DELEGATION_MANAGER as Address);
+    d.signature = await sign(digest); // C_sub EIP-712 sig; the person SA's ERC-1271 validates it
+    const expiresAt = new Date(validUntil * 1000).toISOString();
+
+    const bindRes = await mfetch('/custody/vault-key/bind', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        owner: person, vaultId, kmsKeyRef: prov.kmsKeyRef, allowedResources, classificationCeiling, ops, expiresAt,
+        authorization: { ...d, salt: d.salt.toString() }, // WIRE form (salt as string)
+      }),
+    });
+    const bind = (await bindRes.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string };
+    if (!bindRes.ok || bind.ok !== true) {
+      return c.json({ ok: false, error: 'bind_failed', detail: bind.reason ?? bind.error ?? `HTTP ${bindRes.status}` }, 502);
+    }
+    return c.json({ ok: true, owner: person, kmsKeyRef: prov.kmsKeyRef });
+  } catch (e) {
+    console.error('[demo-a2a] custody/google/activate-vault failed:', e);
+    return c.json({ ok: false, error: 'activate_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

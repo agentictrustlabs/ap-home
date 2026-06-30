@@ -433,6 +433,33 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
       return json({ error: out.error ?? `sign HTTP ${res.status}` }, 502, cors);
     }
     audit('granted', { sub: hs.sub, delegate: client.delegate });
+
+    // spec 278 — bind the member's per-person vault key server-side. The FedCM fast path has NO popup/portal
+    // step (where `activateVaultIfNeeded` runs), so without this a social member who connects to a relying
+    // app via FedCM gets the delegation but no vault-key binding → every PII read fails closed with
+    // `vault_key_unauthorized`. demo-a2a builds + C_sub-signs the VaultKeyAuthorization and binds it at
+    // demo-mcp (same struct as the client `bindVaultKey`). Idempotent (no-op if already bound) + best-effort:
+    // the delegation is already minted, so a vault hiccup never blocks connecting (the member can self-heal
+    // on the Home portal). Awaited so the binding is in place before the relying app reads.
+    try {
+      const vkEnvelope = await signBridgeCall({
+        secret: env.A2A_CUSTODY_BRIDGE_SECRET,
+        audience: 'custody.google.activate-vault',
+        payload: { custodyToken: hs.custodyToken, owner: addr },
+      });
+      const vkRes = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/activate-vault`, {
+        method: 'POST',
+        headers: vkEnvelope.headers,
+        body: vkEnvelope.body,
+      });
+      const vk = (await vkRes.json().catch(() => ({}))) as { ok?: boolean; skipped?: boolean; error?: string; detail?: string };
+      audit(vk.ok ? (vk.skipped ? 'vault_already_bound' : 'vault_bound') : 'vault_bind_failed', {
+        sub: hs.sub, ...(vk.ok ? {} : { vaultError: vk.detail ?? vk.error }),
+      });
+    } catch (e) {
+      audit('vault_bind_threw', { sub: hs.sub, vaultError: e instanceof Error ? e.message : String(e) });
+    }
+
     const sl = loginStatusHeader('logged-in');
     return json({ delegation: out.delegation }, 200, { ...cors, [sl.name]: sl.value });
   } catch (e) {
