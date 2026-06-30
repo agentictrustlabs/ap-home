@@ -259,10 +259,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!granted.ok) return fail(granted.error);
         code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       }
-      // spec 278 — keep the member's encrypted vault on. SILENT for social (KMS) custodians only +
-      // skipped if already bound, so this one-tap recognized path never sprouts a passkey/wallet
-      // gesture (those members activate during the full journey or from /vault-key). Best-effort.
-      if (isKmsVia(viaLower)) { try { await activateVaultIfNeeded(home.address, viaLower, { token }); } catch { /* non-fatal */ } }
+      // spec 278 — bind the member's per-person vault key during connect, for EVERY custody type. A
+      // relying-app-first member (connects here, never runs the full journey / the /vault-key portal) would
+      // otherwise have NO binding, so their first vault read/write at the relying app fails closed with
+      // vault_key_unauthorized. KMS (social) signs server-side (no gesture); wallet/passkey sign their own
+      // VaultKeyAuthorization on-device — ONE extra signature at connect (the deliberate "custodian backs all
+      // authority" tradeoff). Idempotent (skipped if already bound) + best-effort (a vault hiccup never blocks
+      // the connect — the delegation is already minted, and /vault-key + the journey remain as a re-bind path).
+      try { await activateVaultIfNeeded(home.address, viaLower, isKmsVia(viaLower) ? { token } : undefined); }
+      catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
       setFedcmLoginStatus('logged-in');
