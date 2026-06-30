@@ -4,11 +4,13 @@ const DEMO_A2A_URL = process.env.DEMO_A2A_URL || 'https://demo-a2a-production.ri
 // /custody/vault-key/bind. Proxy it same-origin (the demo-mcp bind route has no CORS) — same
 // pattern as /a2a. Production MUST set DEMO_MCP_URL; the fallback is solo-dev convenience only.
 const DEMO_MCP_URL = process.env.DEMO_MCP_URL || 'https://demo-mcp-production.richardpedersen3.workers.dev';
-// spec 288 §6 — when EDGE_REQUIRED='true' + DEMO_EDGE_URL set, MCP DATA (`/a2a/mcp/*`) routes through the
-// Agentic Edge (web → edge → a2a → MCP); auth/session/custody (`/a2a/*`) stay direct to demo-a2a. Set both as
-// Vercel env vars to turn the edge on for this app (it deploys via Vercel, not deploy-cloudflare.ts).
-const EDGE_REQUIRED = process.env.EDGE_REQUIRED === 'true';
-const DEMO_EDGE_URL = process.env.DEMO_EDGE_URL || '';
+// spec 288 §6 — MCP DATA (`/a2a/mcp/*`) routes through the Agentic Edge (web → edge → a2a → MCP) so the edge
+// signs the GatewayAssertion demo-a2a requires (DEMO_REQUIRE_GATEWAY_ASSERTION=true); auth/session/custody
+// (`/a2a/*`) stay direct to demo-a2a. demo-a2a is edge-required in prod, so the Home MUST route through the
+// edge or `/a2a/mcp/*` writes (e.g. the profile save) 401 `gateway_assertion_required`. Defaults to the prod
+// edge (matching DEMO_A2A_URL/DEMO_MCP_URL) so this works on Vercel WITHOUT a per-deploy env var; `??` lets a
+// local dev DISABLE it with an explicit `DEMO_EDGE_URL=''` (then `/a2a/mcp/*` goes direct to a local demo-a2a).
+const DEMO_EDGE_URL = process.env.DEMO_EDGE_URL ?? 'https://demo-edge-production.richardpedersen3.workers.dev';
 
 // EXT-001 / EXT-009 — security headers baseline applied to every route. A strict CSP
 // with nonces will land in a follow-up wave (the OIDC SPA mixes inline event handlers
@@ -63,7 +65,7 @@ const nextConfig = {
     return [
       // spec 288 §6 — MCP DATA through the edge when required (matched BEFORE the general /a2a rule). The edge
       // matches `/mcp/*` → demo-a2a; the assertion binds the same path demo-a2a verifies.
-      ...(EDGE_REQUIRED && DEMO_EDGE_URL
+      ...(DEMO_EDGE_URL
         ? [{ source: '/a2a/mcp/:path*', destination: `${DEMO_EDGE_URL}/mcp/:path*` }]
         : []),
       { source: '/a2a/:path*', destination: `${DEMO_A2A_URL}/:path*` },
