@@ -194,7 +194,7 @@ export async function createOrganization(
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts)
         : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
-    : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts);
+    : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts, via);
   if (!r.ok) return r;
   const x = r.result;
   // ADR-0025: the `org` payload carries the private credential + the person SA so the

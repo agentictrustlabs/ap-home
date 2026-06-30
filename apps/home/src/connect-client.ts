@@ -919,16 +919,43 @@ export async function createChildAgentForSite(
   onStep?: (s: string) => void,
   relationshipType: RelationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType,
   cOpts: CreateChildOpts = {},
+  via: string = 'passkey',
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
-  const pk = loadPasskey();
-  if (!pk) return { ok: false, error: 'Your central-auth passkey isn’t on this device — sign in to Agentic Connect first.' };
   // Name-independent salt (ADR-0010): credential scope + entropy, never the name.
   const saltBytes = crypto.getRandomValues(new Uint8Array(8));
   let salt = 0n;
   for (const b of saltBytes) salt = (salt << 8n) | BigInt(b);
 
-  // Derive the SA up front so we can deploy + claim its name in ONE userOp (one prompt).
-  const childAgent = await derivePasskeySa(pk, salt);
+  // Resolve the credential rail (the SAME credential that custodies the person SA, MAM-D2): derive the
+  // child SA, choose the signer, build the matching deploy body. WALLET signs via the EOA (personalSign,
+  // initMethod 'eoa'); passkey signs on-device. Google/KMS members go through createOrganizationWithGoogle
+  // (createOrganization routes KMS there), never here. Derive the SA up front so deploy + claim its name land
+  // in ONE userOp (one prompt). Mirrors createManagedAgent's all-custody branch.
+  let childAgent: Address;
+  let signHash: SignHash;
+  let deployBody: Record<string, unknown>;
+  if (via === 'wallet') {
+    const owner = await connectWallet();
+    childAgent = await deriveEoaSa(owner, salt);
+    signHash = (h) => personalSign(owner, h);
+    deployBody = { initMethod: 'eoa', owner, salt: salt.toString() };
+  } else {
+    const pk = loadPasskey();
+    if (!pk) return { ok: false, error: 'Your central-auth passkey isn’t on this device — sign in to Agentic Connect first.' };
+    childAgent = await derivePasskeySa(pk, salt);
+    signHash = passkeySignHash;
+    // rpIdHash MUST match derivePasskeySa (sha256(hostname)) — passed explicitly so the server doesn't fall
+    // back to Origin derivation (orphan-registry root cause, live-debug 2026-06-01).
+    const rpIdHash = await derivePasskeyRpIdHash();
+    deployBody = {
+      initMethod: 'passkey',
+      credentialIdDigest: pk.credentialIdDigest,
+      pubKeyX: pk.pubKeyX.toString(),
+      pubKeyY: pk.pubKeyY.toString(),
+      rpIdHash,
+      salt: salt.toString(),
+    };
+  }
   if (childAgent.toLowerCase() === personAgent.toLowerCase()) {
     return { ok: false, error: 'agent collided with your person agent (salt)' };
   }
@@ -961,22 +988,9 @@ export async function createChildAgentForSite(
   const deployCallData = buildExecuteBatchCallData([...claim.calls, ...approveCalls]);
 
   onStep?.('Deploying your organization — name + all access grants…');
-  // rpIdHash must match `derivePasskeySa`'s value (sha256(hostname)) — passed
-  // explicitly so the server doesn't fall back to Origin derivation. Closes the
-  // orphan-registry root cause (live-debug 2026-06-01).
-  const rpIdHash = await derivePasskeyRpIdHash();
-  const dep = await deployAgent(
-    {
-      initMethod: 'passkey',
-      credentialIdDigest: pk.credentialIdDigest,
-      pubKeyX: pk.pubKeyX.toString(),
-      pubKeyY: pk.pubKeyY.toString(),
-      rpIdHash,
-      salt: salt.toString(),
-      callData: deployCallData, // deploy + claim + approve all grants — ONE signature
-    },
-    passkeySignHash,
-  );
+  // deploy + claim + approve all grants — ONE signature, on the member's resolved credential rail (the
+  // deployBody + signHash chosen above by `via`: eoa for wallet, passkey otherwise).
+  const dep = await deployAgent({ ...deployBody, callData: deployCallData }, signHash);
   if (!dep.ok) return { ok: false, error: `agent deploy failed: ${dep.error}` };
 
   // spec 253 — the org's site / broker / stewardship grants are validated via the on-chain
