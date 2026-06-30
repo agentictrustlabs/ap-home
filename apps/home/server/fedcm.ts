@@ -422,7 +422,7 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
       audience: 'custody.google.sign-delegation',
       payload: { custodyToken: hs.custodyToken, delegate: client.delegate, sender: addr },
     });
-    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/sign-site-delegation`, {
+    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/sign-site-delegation`, {
       method: 'POST',
       headers: envelope.headers,
       body: envelope.body,
@@ -447,7 +447,7 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
         audience: 'custody.google.activate-vault',
         payload: { custodyToken: hs.custodyToken, owner: addr },
       });
-      const vkRes = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/activate-vault`, {
+      const vkRes = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/activate-vault`, {
         method: 'POST',
         headers: vkEnvelope.headers,
         body: vkEnvelope.body,

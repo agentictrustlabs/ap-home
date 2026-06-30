@@ -446,7 +446,7 @@ export const passkeySignHash: SignHash = (hash) =>
 export function googleSignHash(sender: Address, sessionToken: string): SignHash {
   return async (hash: Hex): Promise<Hex> => {
     await ensureCsrfToken();
-    const res = await fetch('/a2a/custody/google/sign', {
+    const res = await fetch('/a2a/custody/oidc/sign', {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -477,7 +477,7 @@ export async function secureHomeWithGoogle(
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
   onStep?.('Securing your home on the network…');
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/bootstrap-and-claim', {
+  const res = await fetch('/a2a/custody/oidc/bootstrap-and-claim', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -501,7 +501,7 @@ export async function secureHomeGoogleNoName(
 ): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
   onStep?.('Securing your home on the network…');
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/bootstrap', {
+  const res = await fetch('/a2a/custody/oidc/bootstrap', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -611,7 +611,7 @@ export function connectedCredential(via: string | undefined, name: string | null
  *  derived, not signed). Custody-session authenticated, CSRF — mirrors googleSignHash. */
 export async function resolveGoogleCustodian(sessionToken: string): Promise<Address | null> {
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/custodian', {
+  const res = await fetch('/a2a/custody/oidc/custodian', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -1281,7 +1281,7 @@ async function createManagedAgentSocial(
 
   onStep?.(wantName ? 'Deploying your agent — name + access grant…' : 'Deploying your agent (unnamed)…');
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/bootstrap-agent', {
+  const res = await fetch('/a2a/custody/oidc/bootstrap-agent', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -1330,7 +1330,7 @@ async function nameManagedAgentSocial(
 
   onStep?.('Naming your agent on the network…');
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/name-agent', {
+  const res = await fetch('/a2a/custody/oidc/name-agent', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
@@ -1427,7 +1427,7 @@ export async function createOrganizationWithGoogle(
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
 
   await ensureCsrfToken();
-  const res = await fetch('/a2a/custody/google/bootstrap-org', {
+  const res = await fetch('/a2a/custody/oidc/bootstrap-org', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },

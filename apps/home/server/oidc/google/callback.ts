@@ -64,7 +64,7 @@ async function resolveKmsAgent(
       audience: 'custody.google.resolve',
       payload: { iss: oidcIss, sub: oidcSub, rotation },
     });
-    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/google/resolve`, {
+    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/resolve`, {
       method: 'POST',
       headers: envelope.headers,
       body: envelope.body,
