@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, type Via, type Auth } from '../../home/onboarding';
 import { passkeyLogin, fetchProfile, siweLogin } from '../../connect-client';
+import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
@@ -762,8 +763,19 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   // A passkey member has no reusable token; they fall through to `via='passkey'` and the ambient passkey,
   // which is correct.
   const cred = session ?? readSsoCookie();
-  const credVia = (cred?.via ?? 'passkey').toLowerCase();
-  const via: Via = credVia === 'google' ? 'google' : credVia === 'wallet' ? 'wallet' : 'passkey';
+  const credVia = (cred?.via ?? '').toLowerCase();
+  // Resolve the org-create signing credential. The cookie `via` is authoritative when it names a real
+  // credential; otherwise (cookie absent / `via:'sso'` placeholder) DON'T blindly default to passkey — a
+  // WALLET member has no passkey on this device, so a passkey ceremony errors "your central-auth passkey
+  // isn't on this device" (the #349 class). Fall back to WALLET when there's no passkey on this device AND a
+  // wallet is injected (createChildAgentForSite then deploys an eoa-custodied org via personalSign); else
+  // passkey. Google/YouVersion are KMS — signed server-side with the session token.
+  const via: Via =
+    credVia === 'google' ? 'google'
+    : credVia === 'youversion' ? 'youversion'
+    : credVia === 'wallet' ? 'wallet'
+    : (!loadPasskey() && hasWallet()) ? 'wallet'
+    : 'passkey';
   const auth: Auth | undefined = cred?.token ? { token: cred.token } : undefined;
 
   async function authorize() {
