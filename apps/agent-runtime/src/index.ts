@@ -2989,7 +2989,7 @@ app.post('/custody/oidc/activate-vault', async (c) => {
     const info = (await (await mfetch('/custody/vault-key/server-info')).json().catch(() => ({}))) as
       { serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
     const serverKey = ((info.serverKey ?? '').trim() || '0x0000000000000000000000000000000000000001') as Address;
-    const allowedResources = info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'];
+    const allowedResources = info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'];
     const classificationCeiling = info.classificationCeiling ?? 'regulated.high';
     const ops: ('read' | 'write')[] = info.ops ?? ['read', 'write'];
     const vaultId = 'demo-mcp';

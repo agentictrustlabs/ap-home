@@ -491,7 +491,7 @@ export async function activateVault(
         vaultId: 'demo-mcp',
         kmsKeyRef: prov.kmsKeyRef,
         serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
-        allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'],
+        allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
         classificationCeiling: info.classificationCeiling ?? 'regulated.high',
         ops: info.ops ?? ['read', 'write'],
       },
@@ -523,6 +523,17 @@ export async function activateVaultIfNeeded(
   via: Via = 'passkey',
   auth?: Auth,
 ): Promise<Result<{ kmsKeyRef?: string; skipped?: boolean }>> {
-  if (await isVaultBound(owner)) return { ok: true, skipped: true };
+  // Skip ONLY when the owner has a live binding that covers the `vault:*` namespace. A STALE binding (one
+  // created before the namespace default — its allowedResources lacks `vault:*`) would let the member's app
+  // records 401 forever; we re-bind to upgrade it (one extra signature, one time). Fail-open to activate on
+  // any read error so a transient hiccup never wrongly skips.
+  let status: { bound?: boolean; allowedResources?: string[] } = {};
+  try {
+    status = (await fetch(`/mcp-bind/custody/vault-key/is-bound?owner=${owner}`).then((r) => r.json())) as typeof status;
+  } catch {
+    /* fall through to activate */
+  }
+  const coversNamespace = Array.isArray(status.allowedResources) && status.allowedResources.includes('vault:*');
+  if (status.bound === true && coversNamespace) return { ok: true, skipped: true };
   return activateVault(owner, via, auth);
 }

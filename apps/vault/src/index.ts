@@ -35,7 +35,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
@@ -1373,7 +1373,11 @@ app.get('/custody/vault-key/is-bound', async (c) => {
   // Per-owner + state-changing-over-time (a ceremony flips it) ⇒ never cache (a stale 404/false at
   // the edge would make onboarding re-prompt or wrongly skip).
   c.header('Cache-Control', 'no-store');
-  return c.json({ ok: true, owner, bound: await isVaultKeyBound(c.env, owner) });
+  const bound = await isVaultKeyBound(c.env, owner);
+  // Surface the binding's authorized scope so onboarding can detect + re-bind a STALE binding (one that
+  // predates the `vault:*` namespace) instead of skipping activation and leaving app records 401.
+  const allowedResources = bound ? await getVaultKeyAllowedResources(c.env, owner) : [];
+  return c.json({ ok: true, owner, bound, allowedResources });
 });
 
 app.get('/custody/vault-key/server-info', (c) =>
@@ -1381,7 +1385,12 @@ app.get('/custody/vault-key/server-info', (c) =>
     serverId: VAULT_SERVER_ID,
     vaultId: VAULT_SERVER_ID,
     serverKey: (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim() || '0x0000000000000000000000000000000000000001',
-    defaultResources: [RESOURCE_PERSON_PII, RESOURCE_ORG_SENSITIVE, RESOURCE_PROFILE, `${VAULT_RECORD_PREFIX}impact-profile`],
+    // `vault:*` authorizes the person's WHOLE own vault-record namespace (impact-profile, jp:adopter,
+    // jp:facilitator, gs:offering, …) — relying apps store member-owned records under `vault:<app>:<type>`,
+    // and the narrow per-record default broke them (resource_not_authorized → vault_key_unauthorized). The
+    // SENSITIVE families (person-pii/org-sensitive/profile) stay listed explicitly; per-field/cross-principal
+    // narrowing is the separate entitlement + DATA_SCOPE layer, not this owner-self binding scope.
+    defaultResources: [RESOURCE_PERSON_PII, RESOURCE_ORG_SENSITIVE, RESOURCE_PROFILE, `${VAULT_RECORD_PREFIX}*`],
     classificationCeiling: 'regulated.high',
     ops: ['read', 'write'],
   }),

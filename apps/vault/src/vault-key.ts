@@ -134,6 +134,16 @@ export async function isVaultKeyBound(env: Pick<VaultKeyEnv, 'DB'>, owner: strin
   return true;
 }
 
+/** The authorized resource scope of an owner's LIVE binding ([] if none/expired). Lets onboarding detect a
+ *  STALE binding (one created before the `vault:*` namespace default) and re-bind to upgrade it — otherwise
+ *  the member's app records (`vault:<app>:<type>`) stay `resource_not_authorized` forever. */
+export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB'>, owner: string): Promise<string[]> {
+  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+  if (!row) return [];
+  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return [];
+  try { return JSON.parse(row.allowed_resources) as string[]; } catch { return []; }
+}
+
 /**
  * The real vault-key authorization verifier (spec 278 §5). The scope engine
  * (key-authorization) handles owner/server/vault/resource/op/ceiling/expiry; this
