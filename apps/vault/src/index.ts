@@ -79,6 +79,7 @@ import {
   MCP_OAUTH_SCOPES,
 } from '@agenticprimitives/mcp-oauth';
 import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from './oauth';
+import { verifyPrincipalControlProof } from './principal-proof';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
 //   - console (surfaces in `wrangler tail` for live ops debugging)
@@ -1471,6 +1472,24 @@ app.post('/oauth/token', async (c) => {
   const scopes = Array.isArray(scopeRaw)
     ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
     : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
+  const fields = Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined;
+  const ttlSeconds = typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined;
+
+  // KC-1b (seam audit): the open mint used to issue a bearer for ANY requested principal with no proof
+  // the caller controls it → one-request cross-principal PII read on a public deployment. Require the
+  // caller to PROVE control of the principal: an ERC-1271 signature (via the USV) over a freshness-bound
+  // challenge binding every mint parameter. Fail-closed — no/invalid/stale proof ⇒ no mint.
+  const proofInput = { principal, audience: c.env.MCP_AUDIENCE, issuedAt: typeof body.issued_at === 'number' ? body.issued_at : NaN, scopes, fields, ttlSeconds };
+  const proof = await verifyPrincipalControlProof(
+    c.env,
+    proofInput,
+    typeof body.principal_proof === 'string' ? body.principal_proof : undefined,
+    Math.floor(Date.now() / 1000),
+  );
+  if (!proof.ok) {
+    return c.json({ error: 'unauthorized', error_description: `principal control proof failed: ${proof.reason}` }, 401);
+  }
+
   try {
     const result = await mintDemoMcpToken(c.env, {
       principal,
@@ -1478,9 +1497,9 @@ app.post('/oauth/token', async (c) => {
       issuer: new URL(c.req.url).origin,
       clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
       scopes,
-      fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
+      fields,
       purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
-      ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
+      ttlSeconds,
     });
     return c.json(result);
   } catch (e) {
