@@ -193,6 +193,14 @@ export interface Env {
    */
   DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
   /**
+   * KC-1 (2026-07-05): permits the SERVER-MINT delegation path (callMcpToolViaDelegation), which fabricates
+   * the DEL-001 session binding for an unauthenticated `requester` body param. Fail-closed by default: unset
+   * ⇒ the sensitive/vault routes require a client-minted, delegate-signed token (body.token). The named,
+   * greppable, testnet-only flag keeps the persona/operator-key demo (accepted hole C-1) working; a real
+   * deployment leaves it UNSET so KC-1 is closed. Allowlisted in check-fail-open-knobs.ts.
+   */
+  DEMO_ALLOW_SERVER_MINT?: string;
+  /**
    * spec 288 §6 — the public Agentic Edge base URL. When set (edge-required deployments), the agent-card
    * advertises `<DEMO_EDGE_URL>/api/a2a/<handle>` as the message endpoint so discovering agents reach this
    * agent THROUGH the edge. Unset (edge-less deployments) ⇒ the card advertises the direct subdomain endpoint.
@@ -3768,6 +3776,24 @@ export async function callMcpToolViaDelegation(args: {
   /** Tool args forwarded to demo-mcp (e.g. vault recordType/data). Default {}. */
   toolArgs?: Record<string, unknown>;
 }): Promise<Response> {
+  // KC-1 (2026-07-05): SERVER-MINT is the fabrication path. It signs the delegation token with a
+  // SERVER-held session key (`sessionManagerFor(env, requester)`) for an UNAUTHENTICATED `requester` body
+  // param, so demo-a2a manufactures a valid DEL-001 binding for whoever presents a leaked
+  // {delegation, requester} blob — the enforceBinding flip downstream is theater because the server made the
+  // binding. Fail-closed by default (ADR-0045): a real deployment leaves DEMO_ALLOW_SERVER_MINT unset and
+  // callers MUST client-mint a delegate-signed, DEL-001-bound token (body.token → forwardMcpToken with
+  // enforceBinding), which proves possession of the delegate key. The named, greppable, testnet-only flag
+  // keeps the persona/operator-key demo (accepted hole C-1) working.
+  if (args.env.DEMO_ALLOW_SERVER_MINT !== 'true') {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: 'server_mint_disabled',
+        detail: 'this route requires a client-minted, delegate-signed token (body.token); server-mint is disabled (KC-1)',
+      }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
   // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side
   //    rejection; same proof either way).
   const verify = await verifyDelegation(args.env, args.delegation, args.requester);
@@ -3834,12 +3860,27 @@ export async function callMcpToolViaDelegation(args: {
 app.post('/mcp/person/pii', async (c) => {
   try {
     const body = (await c.req.json().catch(() => null)) as {
-      delegation: IncomingDelegation;
-      requester: Address;
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
     } | null;
+    // KC-1: SECURE client-mint path (default) — the relying app already minted + signed the token with the
+    // DELEGATE's own DEL-001-bound session key (proof of possession); demo-mcp enforces the binding. Mirrors
+    // /mcp/vault/*. This is the required path for a real deployment.
+    if (typeof body?.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'get_pii',
+        token: body.token,
+        enforceBinding: true,
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
+    }
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
+    // Server-mint fallback — fails closed unless DEMO_ALLOW_SERVER_MINT (persona demo, C-1). See KC-1.
     return await callMcpToolViaDelegation({
       env: c.env,
       toolName: 'get_pii',
@@ -3857,12 +3898,25 @@ app.post('/mcp/person/pii', async (c) => {
 app.post('/mcp/org/sensitive', async (c) => {
   try {
     const body = (await c.req.json().catch(() => null)) as {
-      delegation: IncomingDelegation;
-      requester: Address;
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
     } | null;
+    // KC-1: SECURE client-mint path (default) — delegate-signed, DEL-001-bound token; demo-mcp enforces it.
+    if (typeof body?.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'get_org_sensitive',
+        token: body.token,
+        enforceBinding: true,
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
+    }
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
+    // Server-mint fallback — fails closed unless DEMO_ALLOW_SERVER_MINT (persona demo, C-1). See KC-1.
     return await callMcpToolViaDelegation({
       env: c.env,
       toolName: 'get_org_sensitive',
