@@ -33,6 +33,13 @@ export function buildSeedProfile(owner: string): Profile {
 // increment-and-read per spec 205 §5.
 export function createD1JtiStore(db: D1Database, table: string = 'token_usage'): JtiStore {
   return {
+    // NEW-DELEGATION-JTI-AMP-1 — read-only replay peek (no increment). verify calls this before the on-chain
+    // reads so a replayed token is rejected without RPC amplification. Returns true iff already at/over limit.
+    async peekConsumed(jti: string, limit: number) {
+      const row = await db.prepare(`SELECT usage, inflight FROM ${table} WHERE jti = ?`).bind(jti).first<{ usage: number; inflight: number }>();
+      if (!row) return false;
+      return (row.usage + (row.inflight ?? 0)) >= limit;
+    },
     async trackUsage(jti: string, limit: number) {
       const row = await db
         .prepare(
