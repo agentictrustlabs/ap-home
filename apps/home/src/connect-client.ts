@@ -1508,6 +1508,9 @@ const ADD_PASSKEY_ABI = [
       { name: 'credentialIdDigest', type: 'bytes32' },
       { name: 'x', type: 'uint256' },
       { name: 'y', type: 'uint256' },
+      // F-2 (spec 300 / H7-C.1): the contract's addPasskey is 4-arg — the rpIdHash
+      // pins the credential's RP. Omitting it made add-passkey/enroll/device-link revert.
+      { name: 'rpIdHash', type: 'bytes32' },
     ],
     outputs: [],
   },
@@ -1666,10 +1669,11 @@ export async function addPasskeyCredential(
   onStep?.('Creating the passkey to add…');
   const pk = await registerPasskey(`${personAgent.slice(0, 8)}… passkey`); // fresh passkey, stored on this device
 
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
-    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY],
+    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY, rpIdHash],
   });
   const callData = buildExecuteCallData({ to: personAgent, value: 0n, data: inner });
   onStep?.('Adding the passkey — confirm with your wallet…');
@@ -1694,10 +1698,11 @@ export async function enrollSitePasskey(
   const r = await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`);
   const info = (await r.json()) as { exists?: boolean; name?: string; agent?: Address };
   if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
-    args: [enroll.credentialIdDigest, enroll.x, enroll.y],
+    args: [enroll.credentialIdDigest, enroll.x, enroll.y, rpIdHash],
   });
   const callData = buildExecuteCallData({ to: info.agent, value: 0n, data: inner });
   onStep?.('Approve with your passkey…');
@@ -1802,10 +1807,11 @@ export async function addThisDevicePasskey(
   if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
   onStep?.('Creating a passkey on this device…');
   const pk = await registerPasskey(`${name} (this device)`);
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
-    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY],
+    args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY, rpIdHash],
   });
   const callData = buildExecuteCallData({ to: info.agent, value: 0n, data: inner });
   onStep?.('Approve with your existing passkey — choose “another device” if asked, and scan with the device that has it.');

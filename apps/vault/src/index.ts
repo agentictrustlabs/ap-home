@@ -79,6 +79,7 @@ import {
   MCP_OAUTH_SCOPES,
 } from '@agenticprimitives/mcp-oauth';
 import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from './oauth';
+import { verifyPrincipalControlProof, verifyProvisionControlProof } from './principal-proof';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
 //   - console (surfaces in `wrangler tail` for live ops debugging)
@@ -87,27 +88,35 @@ import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from
 // composeSinks isolates per-sink failures so a D1 outage never breaks
 // the request flow. Built per-request because the D1 sink needs
 // c.env.DB.
+// ARCH-H5 (seam audit): forensic-CRITICAL events (a KEK release, a sensitive data read, an authority
+// accept) MUST land durably — otherwise tamper-evidence over an incomplete log proves nothing (spec-214
+// OP-2). Route those FAIL-HARD (a durable-sink failure throws → the request refuses to commit); telemetry
+// stays fail-soft so a D1 blip never breaks a non-critical flow. Matches the audit package's H7-B.7
+// "security-critical events use composeFailHardSinks" invariant.
+const CRITICAL_AUDIT_ACTION =
+  /^(key_release\.|read$|.*\.with-delegation\.accept$|.*\.service-mac\.accept$|delegation\.(mint|revoke)|custody\.|account-custody\.credential|key-custody\.)/;
+
 function buildAuditSink(env: Env): AuditSink {
-  // Pass 5g (AUD-1): wrap the durable D1 sink with the PII guardrail so
-  // accidental secret leaks in emitted events get redacted at the sink
-  // boundary BEFORE they hit the append-only forensics table. Per the
-  // package CLAUDE.md invariant this is defense-in-depth — emitters
-  // still MUST hash/omit raw secrets — but D1 rows are forever, so a
-  // single sloppy emitter would otherwise poison the trail permanently.
-  // Console intentionally bypasses the guardrail: ops debugging in
-  // `wrangler tail` benefits from raw values, and worker logs roll off.
-  return composeSinks(
-    createConsoleAuditSink({ prefix: '[AUDIT mcp]' }),
-    createPiiGuardrailSink(createD1AuditSink(env.DB), {
-      mode: 'redact',
-      onDetect: ({ event, findings }) => {
-        console.warn(
-          `[AUDIT mcp] PII guardrail flagged event ${event.id} (action=${event.action}):`,
-          findings.map((f) => `${f.path}=${f.reason}/${f.preview}`).join(', '),
-        );
-      },
-    }),
-  );
+  // Pass 5g (AUD-1): wrap the durable D1 sink with the PII guardrail so accidental secret leaks in emitted
+  // events get redacted at the sink boundary BEFORE they hit the append-only forensics table. Console
+  // intentionally bypasses the guardrail: ops debugging in `wrangler tail` benefits from raw values.
+  const durable = createPiiGuardrailSink(createD1AuditSink(env.DB), {
+    mode: 'redact',
+    onDetect: ({ event, findings }) => {
+      console.warn(
+        `[AUDIT mcp] PII guardrail flagged event ${event.id} (action=${event.action}):`,
+        findings.map((f) => `${f.path}=${f.reason}/${f.preview}`).join(', '),
+      );
+    },
+  });
+  const consoleSink = createConsoleAuditSink({ prefix: '[AUDIT mcp]' });
+  const failSoft = composeSinks(consoleSink, durable);        // telemetry — a D1 blip never breaks the request
+  const failHard = composeFailHardSinks(durable, consoleSink); // ARCH-H5 — durable-write failure THROWS
+  return {
+    async write(event) {
+      return (CRITICAL_AUDIT_ACTION.test(event.action) ? failHard : failSoft).write(event);
+    },
+  };
 }
 
 /**
@@ -411,6 +420,11 @@ export interface Env {
    *  Fail-closed: the route 404s unless this is 'true'. The demo sets it; production leaves it unset
    *  and provisions out of band. */
   DEMO_VAULT_PROVISION_ENABLED?: string;
+  /** mcp-provision-unauth-prod: testnet-only skip of the owner-control proof on the provision route.
+   *  Fail-closed by default: unset ⇒ the caller must sign an ERC-1271 proof of control over `owner`
+   *  (freshness-bound) before any KEK is created. The live demo sets it while its client callers are
+   *  updated to sign the challenge; a real deployment leaves it unset. Allowlisted in check-fail-open-knobs.ts. */
+  DEMO_VAULT_PROVISION_SKIP_PROOF?: string;
   /** This server's authorized delegate, advertised by GET /custody/vault-key/server-info so the
    *  ceremony auto-fills it. Default is a placeholder (the read verifier doesn't pin it yet). */
   VAULT_KEY_SERVER_DELEGATE?: string;
@@ -1424,6 +1438,25 @@ app.post('/custody/vault-key/provision', async (c) => {
   if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
     return c.json({ error: 'invalid_request', error_description: 'owner (0x address) required' }, 400);
   }
+  // mcp-provision-unauth-prod (2026-07-04 self-audit): this endpoint wields an ADMIN GCP-KMS credential
+  // and creates a real, cost-bearing KEK per distinct owner. It must NOT provision for an arbitrary
+  // body-supplied address — require the caller to prove control of `owner` (ERC-1271 over a
+  // freshness-bound challenge), same gate as /oauth/token. FAIL-CLOSED by default (ADR-0045): a real
+  // deployment leaves DEMO_VAULT_PROVISION_SKIP_PROOF unset ⇒ proof enforced (missing/stale/invalid → 401).
+  // The named, greppable, testnet-only opt-out lets the live demo ceremony auto-provision while its 4
+  // client callers (demo-sso-next / demo-a2a / demo-web-pro) are updated to sign the provision challenge.
+  if (c.env.DEMO_VAULT_PROVISION_SKIP_PROOF !== 'true') {
+    const issuedAt = typeof body.issuedAt === 'number' ? body.issuedAt : Number(body.issuedAt);
+    const proofSig = typeof body.proof === 'string' ? body.proof : undefined;
+    const proof = await verifyProvisionControlProof(
+      { RPC_URL: c.env.RPC_URL, UNIVERSAL_SIGNATURE_VALIDATOR: c.env.UNIVERSAL_SIGNATURE_VALIDATOR },
+      owner,
+      issuedAt,
+      proofSig,
+      Math.floor(Date.now() / 1000),
+    );
+    if (!proof.ok) return c.json({ error: 'unauthorized', error_description: proof.reason }, 401);
+  }
   let sa: { project_id?: string; client_email?: string };
   try {
     const raw = c.env.GCP_SERVICE_ACCOUNT_JSON.trim();
@@ -1471,6 +1504,24 @@ app.post('/oauth/token', async (c) => {
   const scopes = Array.isArray(scopeRaw)
     ? (scopeRaw.filter((s): s is string => typeof s === 'string'))
     : (typeof scopeRaw === 'string' ? scopeRaw.split(/\s+/).filter(Boolean) : undefined);
+  const fields = Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined;
+  const ttlSeconds = typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined;
+
+  // KC-1b (seam audit): the open mint used to issue a bearer for ANY requested principal with no proof
+  // the caller controls it → one-request cross-principal PII read on a public deployment. Require the
+  // caller to PROVE control of the principal: an ERC-1271 signature (via the USV) over a freshness-bound
+  // challenge binding every mint parameter. Fail-closed — no/invalid/stale proof ⇒ no mint.
+  const proofInput = { principal, audience: c.env.MCP_AUDIENCE, issuedAt: typeof body.issued_at === 'number' ? body.issued_at : NaN, scopes, fields, ttlSeconds };
+  const proof = await verifyPrincipalControlProof(
+    c.env,
+    proofInput,
+    typeof body.principal_proof === 'string' ? body.principal_proof : undefined,
+    Math.floor(Date.now() / 1000),
+  );
+  if (!proof.ok) {
+    return c.json({ error: 'unauthorized', error_description: `principal control proof failed: ${proof.reason}` }, 401);
+  }
+
   try {
     const result = await mintDemoMcpToken(c.env, {
       principal,
@@ -1478,9 +1529,9 @@ app.post('/oauth/token', async (c) => {
       issuer: new URL(c.req.url).origin,
       clientId: typeof body.client_id === 'string' ? body.client_id : undefined,
       scopes,
-      fields: Array.isArray(body.fields) ? (body.fields.filter((f): f is string => typeof f === 'string')) : undefined,
+      fields,
       purpose: typeof body.purpose === 'string' ? body.purpose : undefined,
-      ttlSeconds: typeof body.ttl_seconds === 'number' ? body.ttl_seconds : undefined,
+      ttlSeconds,
     });
     return c.json(result);
   } catch (e) {
