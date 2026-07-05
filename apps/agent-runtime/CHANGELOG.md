@@ -1,5 +1,23 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.12
+
+### Patch Changes
+
+- Updated dependencies [5ee7d28]
+  - @agenticprimitives/audit@1.0.0-alpha.14
+  - @agenticprimitives/a2a@0.0.0-alpha.10
+  - @agenticprimitives/chain-state-viem@0.0.0-alpha.2
+  - @agenticprimitives/delegation@1.0.0-alpha.14
+  - @agenticprimitives/key-custody@1.0.0-alpha.14
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.14
+  - @agenticprimitives/related-agents@0.0.0-alpha.10
+  - @agenticprimitives/connect@1.0.0-alpha.14
+  - @agenticprimitives/types@1.0.0-alpha.14
+  - @agenticprimitives/connect-auth@1.0.0-alpha.14
+  - @agenticprimitives/agent-account@1.0.0-alpha.14
+  - @agenticprimitives/agent-naming@1.0.0-alpha.14
+
 ## 0.0.2-alpha.11
 
 ### Patch Changes
