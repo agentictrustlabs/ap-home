@@ -14,7 +14,7 @@ import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/t
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
-import { isSocialCustodyAud } from '../../../src/lib/oidc-clients';
+import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /**
@@ -25,6 +25,15 @@ import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../
  * only, a SINGLE DNS label (no dots), root path, no query/fragment — the suffix is our own
  * registrable domain, so this is not an open redirect.
  */
+// SSO-OIDC-REDIRECT-FAILOPEN-1 / SSO-OIDC-BOOTSTRAP-EMAIL-LEAK-2 (2026-07-05 completeness audit): fail-CLOSED
+// redirect validation. Accept a return URL ONLY if it matches the env allowlist, the relying-client
+// registry, OR our own portal. An EMPTY REDIRECT_URI_ALLOWLIST must NOT bypass the check — doing so
+// 302'd the auth code (issued path) or the victim's verified email (bootstrap path) to any attacker URL.
+function redirectAllowed(allowlist: string | undefined, rpRedirect: string): boolean {
+  const allow = (allowlist ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return validateRedirectUri(allow, rpRedirect) || isAllowedRelyingOrigin(rpRedirect) || isOwnPortalReturn(rpRedirect);
+}
+
 function isOwnPortalReturn(rpRedirect: string): boolean {
   try {
     const u = new URL(rpRedirect);
@@ -178,7 +187,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // notice if there's no linked agent yet.
     agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
     if (!agent) {
-      if (stash.rpRedirect) {
+      // Only 302 the email-carrying bootstrap notice to a VALIDATED redirect (fail-closed); otherwise
+      // return the bootstrap status inline without leaking the email to an unvalidated URL.
+      if (stash.rpRedirect && redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
         const dest = new URL(stash.rpRedirect);
         dest.searchParams.set('connect_status', 'bootstrap');
         dest.searchParams.set('via', 'google');
@@ -219,8 +230,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   await env.AUTH_CODES.put(`code:${authCode}`, JSON.stringify({ token, aud: stash.aud }), { expirationTtl: 120 });
 
   if (stash.rpRedirect) {
-    const allow = (env.REDIRECT_URI_ALLOWLIST ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (allow.length && !validateRedirectUri(allow, stash.rpRedirect) && !isOwnPortalReturn(stash.rpRedirect)) {
+    // SSO-OIDC-REDIRECT-FAILOPEN-1: fail-closed — an empty allowlist no longer bypasses the check.
+    if (!redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
       return json({ error: 'redirect_uri not allowed (CN-1)' }, 400);
     }
     const dest = new URL(stash.rpRedirect);

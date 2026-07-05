@@ -13,11 +13,19 @@ import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/t
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
 import { signBridgeCall } from '../../_lib/bridge-hmac';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
-import { isSocialCustodyAud } from '../../../src/lib/oidc-clients';
+import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
 
 /** App-layer return-URL policy (mirrors the Google handler): trust this site's own apex + per-handle
  *  `https://<label>.<CONNECT_DOMAIN>/` portal homes (spec 232) in addition to REDIRECT_URI_ALLOWLIST. */
+// SSO-OIDC-REDIRECT-FAILOPEN-1 / SSO-OIDC-BOOTSTRAP-EMAIL-LEAK-2 (2026-07-05 completeness audit): fail-CLOSED
+// redirect validation — accept a return URL only if it matches the env allowlist, the relying-client
+// registry, or our own portal. An empty allowlist must NOT bypass the check.
+function redirectAllowed(allowlist: string | undefined, rpRedirect: string): boolean {
+  const allow = (allowlist ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return validateRedirectUri(allow, rpRedirect) || isAllowedRelyingOrigin(rpRedirect) || isOwnPortalReturn(rpRedirect);
+}
+
 function isOwnPortalReturn(rpRedirect: string): boolean {
   try {
     const u = new URL(rpRedirect);
@@ -133,7 +141,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // ── LINK this YouVersion subject to an EXISTING agent (P0-C) ──
   if (stash.linkToken) {
     const back = (status: string, extra: Record<string, string> = {}): Response => {
-      if (!stash.rpRedirect) return json({ status, ...extra }, status === 'linked' ? 200 : 400);
+      if (!stash.rpRedirect || !redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
+        return json({ status, ...extra }, status === 'linked' ? 200 : 400);
+      }
       const dest = new URL(stash.rpRedirect);
       dest.searchParams.set('connect_status', status);
       for (const [k, val] of Object.entries(extra)) dest.searchParams.set(k, val);
@@ -194,7 +204,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   } else {
     agent = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
     if (!agent) {
-      if (stash.rpRedirect) {
+      if (stash.rpRedirect && redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
         const dest = new URL(stash.rpRedirect);
         dest.searchParams.set('connect_status', 'bootstrap');
         dest.searchParams.set('via', 'youversion');
@@ -229,8 +239,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   await env.AUTH_CODES.put(`code:${authCode}`, JSON.stringify({ token, aud: stash.aud }), { expirationTtl: 120 });
 
   if (stash.rpRedirect) {
-    const allow = (env.REDIRECT_URI_ALLOWLIST ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (allow.length && !validateRedirectUri(allow, stash.rpRedirect) && !isOwnPortalReturn(stash.rpRedirect)) {
+    if (!redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
       return json({ error: 'redirect_uri not allowed (CN-1)' }, 400);
     }
     const dest = new URL(stash.rpRedirect);

@@ -3975,16 +3975,41 @@ async function forwardMcpServiceMac(
   return new Response(await mcpRes.text(), { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } });
 }
 
+// APP-PROFILE-1: resolve the owner-own profile principal from the authenticated session (proof of control),
+// falling back to an unauthenticated body param ONLY under the named testnet flag (the KC-1 server-mint class).
+function resolveProfilePrincipal(
+  c: { req: { raw: Request }; env: Env },
+  bodyPrincipal: Address | undefined,
+): { ok: true; value: Address } | { ok: false; error: string; status: 401 | 403 } {
+  const authed = smartAccountFromCookie(c);
+  if (authed) {
+    if (bodyPrincipal && bodyPrincipal.toLowerCase() !== authed.toLowerCase()) {
+      return { ok: false, error: 'forbidden: principal must be the session SA (APP-PROFILE-1)', status: 403 };
+    }
+    return { ok: true, value: authed };
+  }
+  if (c.env.DEMO_ALLOW_SERVER_MINT === 'true' && bodyPrincipal) return { ok: true, value: bodyPrincipal };
+  return { ok: false, error: 'unauthorized: session required (APP-PROFILE-1)', status: 401 };
+}
+
 app.post('/mcp/profile/get', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { principal?: Address } | null;
-  if (!body?.principal) return c.json({ ok: false, error: 'bad_body' }, 400);
-  return forwardMcpServiceMac(c.env, 'get_impact_profile', { principal: body.principal }, crypto.randomUUID(), buildAuditSink(c.env));
+  // APP-PROFILE-1 (2026-07-05 completeness audit): owner-own — the principal MUST be the authenticated
+  // session SA (proof of control), never an unauthenticated body param. demo-mcp's authorizePersonVaultOp
+  // only proves a person->server KEK grant EXISTS (signed once at binding), NOT that the caller controls
+  // the owner, so trusting body.principal was a cross-principal PII read. Fail-closed: require the session;
+  // the body-principal path is allowed ONLY under the named testnet flag (same class as KC-1's server-mint).
+  const principal = resolveProfilePrincipal(c, body?.principal);
+  if (!principal.ok) return c.json({ ok: false, error: principal.error }, principal.status);
+  return forwardMcpServiceMac(c.env, 'get_impact_profile', { principal: principal.value }, crypto.randomUUID(), buildAuditSink(c.env));
 });
 
 app.post('/mcp/profile/set', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { principal?: Address; data?: unknown } | null;
-  if (!body?.principal) return c.json({ ok: false, error: 'bad_body' }, 400);
-  return forwardMcpServiceMac(c.env, 'set_impact_profile', { principal: body.principal, data: body.data ?? null }, crypto.randomUUID(), buildAuditSink(c.env));
+  // APP-PROFILE-1: owner-own — principal is the authenticated session SA (see /mcp/profile/get).
+  const principal = resolveProfilePrincipal(c, body?.principal);
+  if (!principal.ok) return c.json({ ok: false, error: principal.error }, principal.status);
+  return forwardMcpServiceMac(c.env, 'set_impact_profile', { principal: principal.value, data: body?.data ?? null }, crypto.randomUUID(), buildAuditSink(c.env));
 });
 
 // ─── Generic per-agent vault proxy (spec 247) ─────────────────────────────
