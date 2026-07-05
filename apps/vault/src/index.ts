@@ -88,27 +88,35 @@ import { verifyPrincipalControlProof } from './principal-proof';
 // composeSinks isolates per-sink failures so a D1 outage never breaks
 // the request flow. Built per-request because the D1 sink needs
 // c.env.DB.
+// ARCH-H5 (seam audit): forensic-CRITICAL events (a KEK release, a sensitive data read, an authority
+// accept) MUST land durably — otherwise tamper-evidence over an incomplete log proves nothing (spec-214
+// OP-2). Route those FAIL-HARD (a durable-sink failure throws → the request refuses to commit); telemetry
+// stays fail-soft so a D1 blip never breaks a non-critical flow. Matches the audit package's H7-B.7
+// "security-critical events use composeFailHardSinks" invariant.
+const CRITICAL_AUDIT_ACTION =
+  /^(key_release\.|read$|.*\.with-delegation\.accept$|.*\.service-mac\.accept$|delegation\.(mint|revoke)|custody\.|account-custody\.credential|key-custody\.)/;
+
 function buildAuditSink(env: Env): AuditSink {
-  // Pass 5g (AUD-1): wrap the durable D1 sink with the PII guardrail so
-  // accidental secret leaks in emitted events get redacted at the sink
-  // boundary BEFORE they hit the append-only forensics table. Per the
-  // package CLAUDE.md invariant this is defense-in-depth — emitters
-  // still MUST hash/omit raw secrets — but D1 rows are forever, so a
-  // single sloppy emitter would otherwise poison the trail permanently.
-  // Console intentionally bypasses the guardrail: ops debugging in
-  // `wrangler tail` benefits from raw values, and worker logs roll off.
-  return composeSinks(
-    createConsoleAuditSink({ prefix: '[AUDIT mcp]' }),
-    createPiiGuardrailSink(createD1AuditSink(env.DB), {
-      mode: 'redact',
-      onDetect: ({ event, findings }) => {
-        console.warn(
-          `[AUDIT mcp] PII guardrail flagged event ${event.id} (action=${event.action}):`,
-          findings.map((f) => `${f.path}=${f.reason}/${f.preview}`).join(', '),
-        );
-      },
-    }),
-  );
+  // Pass 5g (AUD-1): wrap the durable D1 sink with the PII guardrail so accidental secret leaks in emitted
+  // events get redacted at the sink boundary BEFORE they hit the append-only forensics table. Console
+  // intentionally bypasses the guardrail: ops debugging in `wrangler tail` benefits from raw values.
+  const durable = createPiiGuardrailSink(createD1AuditSink(env.DB), {
+    mode: 'redact',
+    onDetect: ({ event, findings }) => {
+      console.warn(
+        `[AUDIT mcp] PII guardrail flagged event ${event.id} (action=${event.action}):`,
+        findings.map((f) => `${f.path}=${f.reason}/${f.preview}`).join(', '),
+      );
+    },
+  });
+  const consoleSink = createConsoleAuditSink({ prefix: '[AUDIT mcp]' });
+  const failSoft = composeSinks(consoleSink, durable);        // telemetry — a D1 blip never breaks the request
+  const failHard = composeFailHardSinks(durable, consoleSink); // ARCH-H5 — durable-write failure THROWS
+  return {
+    async write(event) {
+      return (CRITICAL_AUDIT_ACTION.test(event.action) ? failHard : failSoft).write(event);
+    },
+  };
 }
 
 /**
