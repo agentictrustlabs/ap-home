@@ -109,6 +109,14 @@ export async function authorizeDecrypt(input: AuthorizeDecryptInput): Promise<Ke
       // documented, greppable opt-out — a cross-trust consumer of a client-supplied grant must instead
       // pass verifySignature.
       allowUnsignedGrant: true,
+      // N-4 false-closed (2026-07-04 self-audit): the same in-process grant carries no
+      // expect.delegationHash (this KAS caller has no verified delegation hash to bind against —
+      // the grant is minted for THIS request, never replayed across delegations). With the N-4
+      // fail-closed default, verifyDecryptGrant would return `delegation_binding_required` and every
+      // PII/vault read would deny (false-closed). Same trust-boundary reasoning as allowUnsignedGrant:
+      // self-authored, single-use, real authority is the vaultKeyAuthorization. A cross-trust consumer
+      // of a client-supplied grant MUST instead pass expect.delegationHash (never this opt-out).
+      allowUnboundGrant: true,
       vaultKeyAuthorization: input.vaultKeyAuthorization,
     },
   );

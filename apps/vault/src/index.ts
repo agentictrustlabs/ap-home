@@ -79,7 +79,7 @@ import {
   MCP_OAUTH_SCOPES,
 } from '@agenticprimitives/mcp-oauth';
 import { createHs256Verify, createVaultGrantBundleStore, mintDemoMcpToken } from './oauth';
-import { verifyPrincipalControlProof } from './principal-proof';
+import { verifyPrincipalControlProof, verifyProvisionControlProof } from './principal-proof';
 
 // Per-request audit sink (audit C3 pass 3b). composeSinks fans out to:
 //   - console (surfaces in `wrangler tail` for live ops debugging)
@@ -420,6 +420,11 @@ export interface Env {
    *  Fail-closed: the route 404s unless this is 'true'. The demo sets it; production leaves it unset
    *  and provisions out of band. */
   DEMO_VAULT_PROVISION_ENABLED?: string;
+  /** mcp-provision-unauth-prod: testnet-only skip of the owner-control proof on the provision route.
+   *  Fail-closed by default: unset ⇒ the caller must sign an ERC-1271 proof of control over `owner`
+   *  (freshness-bound) before any KEK is created. The live demo sets it while its client callers are
+   *  updated to sign the challenge; a real deployment leaves it unset. Allowlisted in check-fail-open-knobs.ts. */
+  DEMO_VAULT_PROVISION_SKIP_PROOF?: string;
   /** This server's authorized delegate, advertised by GET /custody/vault-key/server-info so the
    *  ceremony auto-fills it. Default is a placeholder (the read verifier doesn't pin it yet). */
   VAULT_KEY_SERVER_DELEGATE?: string;
@@ -1432,6 +1437,25 @@ app.post('/custody/vault-key/provision', async (c) => {
   const owner = typeof body.owner === 'string' ? body.owner : undefined;
   if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
     return c.json({ error: 'invalid_request', error_description: 'owner (0x address) required' }, 400);
+  }
+  // mcp-provision-unauth-prod (2026-07-04 self-audit): this endpoint wields an ADMIN GCP-KMS credential
+  // and creates a real, cost-bearing KEK per distinct owner. It must NOT provision for an arbitrary
+  // body-supplied address — require the caller to prove control of `owner` (ERC-1271 over a
+  // freshness-bound challenge), same gate as /oauth/token. FAIL-CLOSED by default (ADR-0045): a real
+  // deployment leaves DEMO_VAULT_PROVISION_SKIP_PROOF unset ⇒ proof enforced (missing/stale/invalid → 401).
+  // The named, greppable, testnet-only opt-out lets the live demo ceremony auto-provision while its 4
+  // client callers (demo-sso-next / demo-a2a / demo-web-pro) are updated to sign the provision challenge.
+  if (c.env.DEMO_VAULT_PROVISION_SKIP_PROOF !== 'true') {
+    const issuedAt = typeof body.issuedAt === 'number' ? body.issuedAt : Number(body.issuedAt);
+    const proofSig = typeof body.proof === 'string' ? body.proof : undefined;
+    const proof = await verifyProvisionControlProof(
+      { RPC_URL: c.env.RPC_URL, UNIVERSAL_SIGNATURE_VALIDATOR: c.env.UNIVERSAL_SIGNATURE_VALIDATOR },
+      owner,
+      issuedAt,
+      proofSig,
+      Math.floor(Date.now() / 1000),
+    );
+    if (!proof.ok) return c.json({ error: 'unauthorized', error_description: proof.reason }, 401);
   }
   let sa: { project_id?: string; client_email?: string };
   try {

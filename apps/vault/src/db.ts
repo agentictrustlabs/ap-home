@@ -45,6 +45,41 @@ export function createD1JtiStore(db: D1Database, table: string = 'token_usage'):
       const current = row?.usage ?? 1;
       return { usage: current, allowed: current <= limit };
     },
+    // spec 290 §3 / MRT-1 — two-phase reserve. withDelegation defaults to
+    // usageMode:'reserve' when a Stage-2 soft limiter is present (a throttled 429
+    // must RELEASE the reserved use, never burn it). Without this the D1 store had
+    // only trackUsage and verifyDelegationToken failed closed for every gated call
+    // (token.ts:972). D1 is SQLite dialect → identical two-phase SQL to
+    // createSqliteJtiStore (mcp-runtime/src/jti-stores.ts:173). Requires the
+    // `inflight` column (migration 0009). Atomic: reserve iff usage+inflight<limit;
+    // commit moves a slot in-flight→committed; release frees it (usage NEVER drops).
+    async reserveUsage(jti: string, limit: number) {
+      const row = await db
+        .prepare(
+          `INSERT INTO ${table} (jti, usage, inflight) VALUES (?, 0, 1)
+           ON CONFLICT(jti) DO UPDATE SET inflight = inflight + 1 WHERE usage + inflight < ?
+           RETURNING usage`,
+        )
+        .bind(jti, limit)
+        .first<{ usage: number }>();
+      if (!row) return { allowed: false };
+      let settled = false;
+      return {
+        allowed: true,
+        reservation: {
+          async commit() {
+            if (settled) return;
+            settled = true;
+            await db.prepare(`UPDATE ${table} SET usage = usage + 1, inflight = inflight - 1 WHERE jti = ?`).bind(jti).run();
+          },
+          async release() {
+            if (settled) return;
+            settled = true;
+            await db.prepare(`UPDATE ${table} SET inflight = inflight - 1 WHERE jti = ?`).bind(jti).run();
+          },
+        },
+      };
+    },
   };
 }
 

@@ -35,6 +35,11 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 # Fail-closed — 404s unless 'true'. Testnet-only convenience (wields the admin credential +
 # creates a cost-bearing GCP key per owner); production leaves it unset + provisions out of band.
 DEMO_VAULT_PROVISION_ENABLED = "true"
+# mcp-provision-unauth-prod (2026-07-04 self-audit): the provision route now requires an owner-control
+# proof (ERC-1271 over a freshness challenge) by DEFAULT. This testnet-only flag skips that proof so the
+# live ceremony can auto-provision until its client callers sign the challenge. A real deployment leaves
+# this UNSET ⇒ proof enforced. Allowlisted in check-fail-open-knobs.ts.
+DEMO_VAULT_PROVISION_SKIP_PROOF = "true"
 # spec 287: enable the PUBLIC NATIVE MCP ingress (/mcp/native) requiring a per-call
 # AgenticInvocationProofV1. Fail-closed — 404s unless 'true'. Requires UNIVERSAL_SIGNATURE_VALIDATOR.
 DEMO_NATIVE_MCP_ENABLED = "true"
@@ -62,6 +67,9 @@ DEMO_OAUTH_MINT_ENABLED = "true"
 # Testnet demo: enable on-demand KEK provisioning (the one-click ceremony auto-provisions).
 # A real production deployment OMITS this — provisioning is operator-only, out of band.
 DEMO_VAULT_PROVISION_ENABLED = "true"
+# mcp-provision-unauth-prod: testnet-only skip of the owner-control proof so the live one-click ceremony
+# auto-provisions. A real production deployment OMITS this ⇒ proof enforced (ERC-1271 over the challenge).
+DEMO_VAULT_PROVISION_SKIP_PROOF = "true"
 # spec 287: enable the public native MCP ingress (/mcp/native) with exact-invocation proof.
 DEMO_NATIVE_MCP_ENABLED = "true"
 # spec 290 §8: per-Smart-Agent hard-budget unit cap enforced on the native path (demo value).

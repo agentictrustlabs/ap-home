@@ -66,6 +66,36 @@ export function mintChallengeHash(i: MintProofInput): `0x${string}` {
 }
 
 /**
+ * Core ERC-1271 control-proof check: `signer` must have signed `hash`, verified via the deployed
+ * UniversalSignatureValidator. Fail-closed: no validator, no/malformed proof, or a verification error/false
+ * result all reject. The freshness bound is the caller's responsibility (both callers below check it before
+ * building `hash`, so a stale challenge can never reach here).
+ */
+async function verifyControlProofHash(
+  env: PrincipalProofEnv,
+  signer: string,
+  hash: `0x${string}`,
+  proof: string | undefined,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!usv) return { ok: false, reason: 'signature_validator_unconfigured' };
+  if (!proof || !/^0x[0-9a-fA-F]+$/.test(proof)) return { ok: false, reason: 'principal_proof_required' };
+  const client = createPublicClient({ transport: http(env.RPC_URL) });
+  let valid = false;
+  try {
+    valid = (await client.readContract({
+      address: usv as Address,
+      abi: USV_ISVALIDSIG_ABI,
+      functionName: 'isValidSig',
+      args: [signer as Address, hash, proof as `0x${string}`],
+    })) as boolean;
+  } catch {
+    return { ok: false, reason: 'proof_verification_error' };
+  }
+  return valid ? { ok: true } : { ok: false, reason: 'proof_invalid' };
+}
+
+/**
  * Verify the caller controls `principal` by checking the ERC-1271 signature over the mint challenge.
  * Fail-closed: any missing input, stale timestamp, verification error, or false result → not ok.
  */
@@ -75,23 +105,33 @@ export async function verifyPrincipalControlProof(
   proof: string | undefined,
   nowSeconds: number,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
-  if (!usv) return { ok: false, reason: 'signature_validator_unconfigured' };
-  if (!proof || !/^0x[0-9a-fA-F]+$/.test(proof)) return { ok: false, reason: 'principal_proof_required' };
   if (!Number.isFinite(input.issuedAt)) return { ok: false, reason: 'issued_at_required' };
   if (Math.abs(nowSeconds - input.issuedAt) > MINT_PROOF_MAX_SKEW_SECONDS) return { ok: false, reason: 'proof_stale' };
-  const hash = mintChallengeHash(input);
-  const client = createPublicClient({ transport: http(env.RPC_URL) });
-  let valid = false;
-  try {
-    valid = (await client.readContract({
-      address: usv as Address,
-      abi: USV_ISVALIDSIG_ABI,
-      functionName: 'isValidSig',
-      args: [input.principal as Address, hash, proof as `0x${string}`],
-    })) as boolean;
-  } catch {
-    return { ok: false, reason: 'proof_verification_error' };
-  }
-  return valid ? { ok: true } : { ok: false, reason: 'proof_invalid' };
+  return verifyControlProofHash(env, input.principal, mintChallengeHash(input), proof);
+}
+
+/**
+ * Canonical provision challenge (`mcp-provision-unauth-prod`, 2026-07-04 self-audit). The vault-key
+ * provision endpoint wields an ADMIN GCP-KMS credential and creates a real, cost-bearing per-owner KEK. It
+ * must NOT provision for an arbitrary body-supplied `owner`: the caller signs this challenge with the owner
+ * SA to prove control before any key is created. Binds `owner` + `issuedAt` (freshness).
+ */
+export function provisionChallengeHash(owner: string, issuedAt: number): `0x${string}` {
+  return keccak256(toBytes(['demo-mcp:vault-key-provision:v1', owner.toLowerCase(), String(issuedAt)].join('\n')));
+}
+
+/**
+ * Verify the caller controls `owner` before provisioning that owner's vault KEK. Same ERC-1271 gate as the
+ * mint proof; fail-closed on missing/stale/invalid proof.
+ */
+export async function verifyProvisionControlProof(
+  env: PrincipalProofEnv,
+  owner: string,
+  issuedAt: number,
+  proof: string | undefined,
+  nowSeconds: number,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!Number.isFinite(issuedAt)) return { ok: false, reason: 'issued_at_required' };
+  if (Math.abs(nowSeconds - issuedAt) > MINT_PROOF_MAX_SKEW_SECONDS) return { ok: false, reason: 'proof_stale' };
+  return verifyControlProofHash(env, owner, provisionChallengeHash(owner, issuedAt), proof);
 }
