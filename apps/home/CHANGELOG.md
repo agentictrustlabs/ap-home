@@ -1,5 +1,27 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.14
+
+### Patch Changes
+
+- Updated dependencies [71c68e3]
+  - @agenticprimitives/contracts@1.0.0-alpha.16
+  - @agenticprimitives/agent-profile@1.0.0-alpha.16
+  - @agenticprimitives/registry-kit@0.0.0-alpha.4
+  - @agenticprimitives/identity-directory-adapters@1.0.0-alpha.16
+  - @agenticprimitives/delegation@1.0.0-alpha.16
+  - @agenticprimitives/treasury-service-agent@0.0.0-alpha.3
+  - @agenticprimitives/identity-directory@1.0.0-alpha.16
+  - @agenticprimitives/payments@0.0.0-alpha.12
+  - @agenticprimitives/related-agents@0.0.0-alpha.12
+  - @agenticprimitives/connect@1.0.0-alpha.16
+  - @agenticprimitives/types@1.0.0-alpha.16
+  - @agenticprimitives/connect-auth@1.0.0-alpha.16
+  - @agenticprimitives/agent-account@1.0.0-alpha.16
+  - @agenticprimitives/agent-naming@1.0.0-alpha.16
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.16
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.13
+
 ## 0.0.2-alpha.13
 
 ### Patch Changes
