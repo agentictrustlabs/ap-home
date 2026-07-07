@@ -63,6 +63,7 @@ import type { Delegation, AgenticInvocationProofV1, DataScopeGrant } from '@agen
 // bind it. demo-mcp hosts + enforces its own (it is the authority point — it has the verified principal).
 export { SmartAgentBudgetDO } from '@agenticprimitives/rate-control-cloudflare';
 import { demoEntitlementResolver } from './entitlements';
+import { buildReceiptsConfig } from './receipts';
 import { buildCredentialVerifier } from './credential-verifier';
 import type { EntitlementClassification } from '@agenticprimitives/entitlements';
 import { authorizeDecrypt } from './kas';
@@ -402,6 +403,12 @@ export interface Env {
    * its presence.
    */
   A2A_MAC_SECRET?: string;
+  /**
+   * spec 303 W2 — signs verification receipts ('demo-hmac' over the canonical
+   * receiptHash). Demo-grade symmetric signer; unset ⇒ unsigned
+   * (integrity-only) receipts. Production target: service-SA KMS EIP-712.
+   */
+  VERIFICATION_RECEIPT_SECRET?: string;
 
   // ─── Per-person vault key custody (spec 278 P4) ───────────────────────
   /**
@@ -1045,7 +1052,11 @@ app.post('/mcp/v2', async (c) => {
           ? { resource: RESOURCE_ORG_SENSITIVE, classification: 'regulated.high' as const, toolName: 'get_org_sensitive', servedBy: 'demo-mcp:get_org_sensitive (mcp/v2)' }
           : { resource: RESOURCE_PERSON_PII, classification: 'pii.sensitive' as const, toolName: 'get_pii', servedBy: 'demo-mcp:get_pii (mcp/v2)' };
       const classification = name === 'get_org_sensitive' ? GET_ORG_SENSITIVE_CLASSIFICATION : GET_PII_CLASSIFICATION;
-      const nativeCfg: McpResourceVerifyConfig = { ...baseConfig(c.env), requireInvocationProof: true, universalSignatureValidator: usv as Address };
+      // spec 303 W2 — mint a verification receipt at the wrapper's terminal
+      // decision (allow AND deny); the holder carries the public receipt back
+      // into the response `_meta.ap_receipt`.
+      const { receipts, holder } = buildReceiptsConfig(c.env, { correlationId });
+      const nativeCfg: McpResourceVerifyConfig = { ...baseConfig(c.env), requireInvocationProof: true, universalSignatureValidator: usv as Address, receipts };
       const handler = withDelegation<ToolArgs>(
         nativeCfg,
         async ({ principal, args, grants }) =>
@@ -1065,7 +1076,11 @@ app.post('/mcp/v2', async (c) => {
         throw new RpcError(RPC_ERROR.INTERNAL_ERROR, 'internal error');
       }
       if (out.ok === false) throw new RpcError(RPC_ERROR.INVALID_PARAMS, out.error ?? 'denied');
-      return structuredResult({ tool: name, subject_name: out.subject_name ?? null, record: out.record ?? null }) as unknown as Record<string, unknown>;
+      const result = structuredResult({ tool: name, subject_name: out.subject_name ?? null, record: out.record ?? null }) as unknown as Record<string, unknown>;
+      // spec 303 W2 — the caller retains the public receipt independently of
+      // this host (the article's point). Commitment-only: safe to return.
+      if (holder.receipt) result._meta = { ...(result._meta as Record<string, unknown> | undefined), ap_receipt: holder.receipt };
+      return result;
     });
 
   const res = await registry.dispatch(req, { meta, protocolVersion: version, raw: rawText, correlationId });

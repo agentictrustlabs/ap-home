@@ -32,6 +32,7 @@
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verifiable-credentials": "workspace:*",
+    "@agenticprimitives/verification-receipts": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "hono": "^4.12.23"
   },
