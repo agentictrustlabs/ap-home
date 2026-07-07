@@ -37,6 +37,17 @@ interface SessionCtx {
   refreshProfile(): Promise<void>;
 }
 
+// Spec 309 — the authority deployment epoch. Mirrors @agenticprimitives/connect-client's
+// checkDeploymentEpoch, inlined here because the HOME is not a relying app and must not pull the
+// relying-client package into its Vercel build. A stored session's id_token `sub` carries the
+// person's OLD-factory SA after a full-reset redeploy; dropping it forces a re-onboard onto the
+// correct new-factory identity. `undefined` current epoch does NOT gate (only invalidate when knowable).
+import { DEPLOYMENT_EPOCH } from '../lib/chain';
+function epochStale(stored: string | undefined): boolean {
+  if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
+  return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
+}
+
 export const SESSION_KEY = 'agenticprimitives:demo-sso:session';
 const Ctx = createContext<SessionCtx | null>(null);
 
@@ -90,7 +101,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const openSession = useCallback(async (token: string, via: string, fresh: boolean): Promise<BasicProfile | null> => {
     setSession({ token, via, fresh });
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // survive refresh (this origin)
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via, deploymentEpoch: DEPLOYMENT_EPOCH })); // survive refresh (this origin)
     } catch {
       /* storage blocked (private mode) — session just won't persist */
     }
@@ -212,7 +223,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // Prefer the per-origin localStorage session; else fall back to the parent-domain SSO
         // cookie (signed in once on another *.impact-agent.me origin).
         const raw = localStorage.getItem(SESSION_KEY);
-        const stored = raw ? (JSON.parse(raw) as { token?: string; via?: string }) : null;
+        const stored = raw ? (JSON.parse(raw) as { token?: string; via?: string; deploymentEpoch?: string }) : null;
         let token = stored?.token;
         let via = stored?.via;
         let fromCookie = false;
@@ -225,6 +236,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           }
         }
         if (!token || !via) {
+          localStorage.removeItem(SESSION_KEY);
+          setPhase('anon');
+          return;
+        }
+        // Spec 309 — a full-reset redeploy since this session was minted means its id_token references
+        // an old-factory SA. Drop the localStorage session (keep the parent cookie for its own home) so
+        // the user re-onboards onto the live identity. Only gate the localStorage path (has an epoch).
+        if (!fromCookie && epochStale(stored?.deploymentEpoch)) {
           localStorage.removeItem(SESSION_KEY);
           setPhase('anon');
           return;

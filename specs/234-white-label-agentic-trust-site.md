@@ -7,6 +7,14 @@ access for domain-specific relying apps. Composes the existing SSO/identity wave
 (specs 224/229/230/231/232) — introduces **no new package capability**, only
 **app-level composition + a white-label config model**.
 
+> **Update (spec 310):** the reusable *product* shape stays here and `demo-sso-next` remains the reference
+> **Home** *app*. As of [spec 310](310-agentic-trust-home-control-plane-and-inbox.md) the stable,
+> cross-product *contracts* of a Home — manifests, surface descriptors, projections, action cards, inbox
+> binding — are extracted into the portable Ring-0 package `@agenticprimitives/home` (schema/projection
+> only, no routes/UI/branding). Home is a **facet** of the canonical Smart Agent address (ADR-0010), not
+> the identity. The agentic **inbox** the Home renders is specified in
+> [spec 309](309-messaging-and-interactions.md).
+
 ## 1. Purpose
 
 One reusable **control plane** — the Central Agentic Trust Site — that any
