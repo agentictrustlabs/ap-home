@@ -32,6 +32,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
+import { buildA2aReceiptsConfig } from './receipts.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
@@ -240,6 +241,10 @@ export class A2aTaskDO {
       enforcers: { timestamp: this.env.TIMESTAMP_ENFORCER as Address, allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER as Address, allowedMethods: this.env.ALLOWED_METHODS_ENFORCER as Address },
       taskStore: createDurableObjectTaskStore(this.state.storage),
       checks, handlers: [echo, makeOrchestrateSkill(this.env)], vault, mcp, hashBody, budget,
+      // spec 303 W3 — mint verification receipts at the message/send +
+      // resubmit terminals; the accept receipt rides the send result so the
+      // SENDER retains it, and rows persist to D1 (migration 0002).
+      receipts: buildA2aReceiptsConfig(this.env, agentSA),
     });
     return this.agent;
   }

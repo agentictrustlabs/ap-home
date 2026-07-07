@@ -334,6 +334,10 @@ export interface Env {
    * shared GCP KMS HMAC key via `buildMacProvider({backend:'gcp-kms', ...})`.
    */
   A2A_MAC_SECRET?: string;
+  /** spec 303 W3 — signs verification receipts ('demo-hmac' over the canonical
+   *  receiptHash). Unset ⇒ unsigned (integrity-only) receipts. Production
+   *  target: agent-SA KMS EIP-712. */
+  VERIFICATION_RECEIPT_SECRET?: string;
   /** Full resource name of the symmetric Cloud KMS key for envelope
    *  encryption. Required when A2A_KMS_BACKEND=gcp-kms. */
   GCP_KMS_ENCRYPT_KEY_NAME?: string;
