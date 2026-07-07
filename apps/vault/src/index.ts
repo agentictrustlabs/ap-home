@@ -409,6 +409,10 @@ export interface Env {
    * (integrity-only) receipts. Production target: service-SA KMS EIP-712.
    */
   VERIFICATION_RECEIPT_SECRET?: string;
+  /** spec 303 — Cloud KMS secp256k1 cryptoKeyVersion for the ASYMMETRIC
+   *  receipt signer (EIP-191 over receiptHash, ecrecover-verifiable offline).
+   *  Takes precedence over the demo-hmac secret; needs GCP_SERVICE_ACCOUNT_JSON. */
+  VERIFICATION_RECEIPT_KMS_KEY?: string;
 
   // ─── Per-person vault key custody (spec 278 P4) ───────────────────────
   /**

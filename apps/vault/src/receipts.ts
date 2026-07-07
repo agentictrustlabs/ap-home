@@ -19,12 +19,27 @@ import type {
   Sha256,
   VerificationReceiptV1,
 } from '@agenticprimitives/verification-receipts';
+import { hashMessage, hexToBytes } from 'viem';
+import {
+  addressFromSpkiPem,
+  createGcpKmsTransport,
+  gcpSignDigest,
+  parseServiceAccountJson,
+  type GcpKmsTransport,
+  type ServiceAccount,
+} from '@agenticprimitives/key-custody/kms-core';
+import { resolvePersonVault, type VaultKeyEnv } from './vault-key';
 
-interface ReceiptsEnv {
+interface ReceiptsEnv extends VaultKeyEnv {
   DB: D1Database;
   RPC_URL: string;
   MCP_AUDIENCE: string;
   VERIFICATION_RECEIPT_SECRET?: string;
+  /** spec 303 — Cloud KMS secp256k1 cryptoKeyVersion for the ASYMMETRIC receipt
+   *  signer (EIP-191 over the canonical receiptHash; offline-verifiable via
+   *  ecrecover). Takes precedence over the demo-hmac secret — one mechanism,
+   *  selected by configuration (ADR-0013). Requires GCP_SERVICE_ACCOUNT_JSON. */
+  VERIFICATION_RECEIPT_KMS_KEY?: string;
 }
 
 const enc = new TextEncoder();
@@ -43,6 +58,33 @@ function demoHmacSigner(secret: string): (receiptHash: Sha256) => Promise<Receip
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
     return { type: 'demo-hmac', signature: `hmac-sha256:${hex}` };
+  };
+}
+
+// spec 303 — the ASYMMETRIC signer: Cloud KMS secp256k1, EIP-191 over the
+// canonical receiptHash string. Any counterparty verifies OFFLINE with
+// standard tooling: recoverMessageAddress({ message: receiptHash, signature })
+// === proof.signer. Transport + signer address memoized per isolate.
+let _kms: { transport: GcpKmsTransport; signer: `0x${string}` } | undefined;
+function kmsEip191Signer(
+  serviceAccountJson: string,
+  keyName: string,
+): (receiptHash: Sha256) => Promise<ReceiptProof> {
+  const sa: ServiceAccount = parseServiceAccountJson(serviceAccountJson);
+  return async (receiptHash) => {
+    if (!_kms) {
+      const transport = createGcpKmsTransport(sa);
+      const pem = await transport.getPublicKeyPem(keyName);
+      _kms = { transport, signer: addressFromSpkiPem(pem) as `0x${string}` };
+    }
+    const digest = hexToBytes(hashMessage(receiptHash));
+    const signature = await gcpSignDigest({
+      serviceAccount: sa,
+      cryptoKeyVersionName: keyName,
+      digest,
+      transport: _kms.transport,
+    });
+    return { type: 'eip191-kms-secp256k1', signature, signer: _kms.signer };
   };
 }
 
@@ -70,14 +112,37 @@ async function latestBlockEvidence(
 }
 
 async function storeReceipt(
-  db: D1Database,
+  env: ReceiptsEnv,
   minted: MintedReceipt,
   ctx: { outcome: 'allow' | 'deny'; correlationId: string; toolName: string },
 ): Promise<void> {
-  // detail_json residency is INTERIM (vault-destined; see migration 0010's
-  // header) — it leaks nothing beyond existing audit_events rows, but the
-  // spec-303 target is the principal's vault.
-  await db
+  // spec 303 — detail residency. When the principal has a live per-person
+  // vault-key binding (spec 278), the PRIVATE detail (raw values + the
+  // receiptKey opening the commitments) is sealed into THEIR vault under
+  // their own KEK, classification `receipt.private`; the D1 row keeps only a
+  // pointer. Principals without a binding (and pre-verify denies, where the
+  // principal is 'unknown') keep the documented D1 interim — no worse than
+  // the audit rows, and the erasure path (delete the row) still holds.
+  let detailColumn = JSON.stringify(minted.detail);
+  const principal = minted.detail.principal;
+  if (ctx.outcome === 'allow' && principal && principal !== 'unknown') {
+    try {
+      const pv = await resolvePersonVault(env, principal);
+      if (pv) {
+        const resource = `verification-receipt:${minted.receipt.receiptId}`;
+        await pv.vault.write({
+          owner: principal,
+          resource,
+          classification: 'receipt.private',
+          data: minted.detail,
+        });
+        detailColumn = JSON.stringify({ vaultResource: resource, owner: principal });
+      }
+    } catch (e) {
+      console.error('[demo-mcp] receipt detail vault write failed (D1 interim kept):', e);
+    }
+  }
+  await env.DB
     .prepare(
       `INSERT INTO verification_receipts
          (receipt_id, correlation_id, outcome, tool, created_at, receipt_json, detail_json)
@@ -90,7 +155,7 @@ async function storeReceipt(
       ctx.toolName,
       new Date().toISOString(),
       JSON.stringify(minted.receipt),
-      JSON.stringify(minted.detail),
+      detailColumn,
     )
     .run();
 }
@@ -107,18 +172,30 @@ export function buildReceiptsConfig(
 ): { receipts: ReceiptsConfig; holder: { receipt?: VerificationReceiptV1 } } {
   const holder: { receipt?: VerificationReceiptV1 } = {};
   const secret = env.VERIFICATION_RECEIPT_SECRET?.trim();
+  const kmsKey = env.VERIFICATION_RECEIPT_KMS_KEY?.trim();
+  // ONE signer, selected by configuration (ADR-0013): the asymmetric KMS
+  // EIP-191 signer when a key is configured (counterparty-verifiable offline
+  // via ecrecover); else demo-hmac (host-verifiable only, demo-grade); else
+  // unsigned (integrity-only). Never a runtime fallback between them.
+  const sign =
+    kmsKey && env.GCP_SERVICE_ACCOUNT_JSON
+      ? kmsEip191Signer(env.GCP_SERVICE_ACCOUNT_JSON, kmsKey)
+      : secret
+        ? demoHmacSigner(secret)
+        : undefined;
   const receipts: ReceiptsConfig = {
     // The verifying service identity. The demo host has no service SA wired
-    // on this ingress yet, so the audience URN names the verifier; the
-    // service-SA identity + KMS signature land together (spec 303 follow-up).
+    // on this ingress yet, so the audience URN names the verifier; with the
+    // KMS signer configured, proof.signer carries the recoverable KMS key
+    // address (the service-SA facet binding is G-5's territory).
     verifier: env.MCP_AUDIENCE,
     policyVersion: 'demo-mcp/mcp-v2/1',
-    ...(secret ? { sign: demoHmacSigner(secret) } : {}),
+    ...(sign ? { sign } : {}),
     statusEvidence: () => latestBlockEvidence(env.RPC_URL),
     onReceipt: async (minted, mctx) => {
       holder.receipt = minted.receipt;
       try {
-        await storeReceipt(env.DB, minted, mctx);
+        await storeReceipt(env, minted, mctx);
       } catch (e) {
         console.error('[demo-mcp] receipt store failed (fail-soft):', e, ctx.correlationId);
       }
