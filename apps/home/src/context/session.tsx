@@ -226,12 +226,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const stored = raw ? (JSON.parse(raw) as { token?: string; via?: string; deploymentEpoch?: string }) : null;
         let token = stored?.token;
         let via = stored?.via;
+        let restoredEpoch = stored?.deploymentEpoch;
         let fromCookie = false;
         if (!token) {
           const c = readSsoCookie();
           if (c) {
             token = c.token;
             via = c.via;
+            restoredEpoch = c.deploymentEpoch;
             fromCookie = true;
           }
         }
@@ -240,11 +242,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           setPhase('anon');
           return;
         }
-        // Spec 311 — a full-reset redeploy since this session was minted means its id_token references
-        // an old-factory SA. Drop the localStorage session (keep the parent cookie for its own home) so
-        // the user re-onboards onto the live identity. Only gate the localStorage path (has an epoch).
-        if (!fromCookie && epochStale(stored?.deploymentEpoch)) {
+        // Spec 311 — a full-reset redeploy since this session/cookie was minted means its id_token
+        // references an old-factory SA (and any grant signed for it fails on the new DelegationManager).
+        // Drop BOTH the localStorage session AND the cross-subdomain SSO cookie (an unstamped, pre-guard
+        // cookie is treated as stale) so the user re-onboards onto the live identity.
+        if (epochStale(restoredEpoch)) {
           localStorage.removeItem(SESSION_KEY);
+          clearSsoCookie();
           setPhase('anon');
           return;
         }

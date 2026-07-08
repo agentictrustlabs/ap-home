@@ -10,6 +10,7 @@
 // this JS-managed one (today it's the same exposure as the localStorage token). Tracked as a
 // follow-up; the token itself (short-lived, aud/iss-pinned AgentSession) is unchanged.
 import { CONNECT_DOMAIN } from './domain';
+import { DEPLOYMENT_EPOCH } from './chain';
 
 const NAME = 'ap_sso';
 const PARENT = `.${CONNECT_DOMAIN}`;
@@ -35,7 +36,7 @@ const SSO_MAX_AGE_SEC = 60 * 60 * 24 * 30;
 export function setSsoCookie(token: string, via: string, maxAgeSec = SSO_MAX_AGE_SEC): void {
   if (!onImpactHost()) return;
   try {
-    const value = encodeURIComponent(JSON.stringify({ t: token, v: via }));
+    const value = encodeURIComponent(JSON.stringify({ t: token, v: via, e: DEPLOYMENT_EPOCH }));
     // SameSite=None (with Secure) so the cookie rides on FedCM's credentialed cross-site fetches
     // (`/fedcm/accounts` + `/fedcm/assertion`), which are initiated for the relying app and therefore
     // cross-site — a Lax cookie would NOT be sent → the IdP couldn't see the session (401). The token is
@@ -46,12 +47,12 @@ export function setSsoCookie(token: string, via: string, maxAgeSec = SSO_MAX_AGE
   }
 }
 
-export function readSsoCookie(): { token: string; via: string } | null {
+export function readSsoCookie(): { token: string; via: string; deploymentEpoch?: string } | null {
   try {
     const m = document.cookie.match(new RegExp(`(?:^|; )${NAME}=([^;]*)`));
     if (!m || !m[1]) return null;
-    const o = JSON.parse(decodeURIComponent(m[1])) as { t?: string; v?: string };
-    return o?.t ? { token: o.t, via: o.v ?? 'sso' } : null;
+    const o = JSON.parse(decodeURIComponent(m[1])) as { t?: string; v?: string; e?: string };
+    return o?.t ? { token: o.t, via: o.v ?? 'sso', deploymentEpoch: o.e } : null;
   } catch {
     return null;
   }

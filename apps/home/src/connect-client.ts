@@ -2103,7 +2103,8 @@ export async function registerAgent(
   const cardHash = hashAgentCard(card);
   const registryId = DISCOVERY_REGISTRY_ID as RegistryId;
   const entryId = `urn:ap:registry-entry:${name}` as RegistryEntryId;
-  const bindingProofHash = await hashBindingProofBody({ registryId, entryId, subjectAgent: sa, cardHash, claimHashes: [], issuedAt });
+  // NEW-RK-1: chainId + registryAddress domain-scope the binding proof (BindingProofBody requires them).
+  const bindingProofHash = await hashBindingProofBody({ registryId, entryId, subjectAgent: sa, cardHash, claimHashes: [], issuedAt, chainId: CHAIN_ID, registryAddress: CONTRACTS.agentRegistryBase });
   const call = buildRegisterEntryCall({
     registry: CONTRACTS.agentRegistryBase, registryId, entryId, subjectAgent: sa,
     cardHash, bindingProofHash, claimHashes: [], expiresAt: 0,
