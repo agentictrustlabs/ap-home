@@ -48,8 +48,22 @@ export function useInboxView(session: { token: string } | null) {
     if (res.ok) setView((await res.json()) as InboxView);
   }, [session]);
 
+  // Initial load + light polling (5s, paused while the tab is hidden) so new
+  // deliveries appear without a manual refresh.
   useEffect(() => {
     void refresh();
+    const tick = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') void refresh();
+    };
+    const id = setInterval(tick, 5000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refresh]);
 
   const post = useCallback(

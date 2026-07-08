@@ -75,8 +75,11 @@ export default function ChatsPage() {
                   textAlign: 'left',
                   padding: '0.75rem 0.9rem',
                   border: 'none',
+                  borderRadius: 0,
                   borderBottom: '1px solid #f1f5f9',
-                  background: c.conversationId === activeId ? '#eef2ff' : 'transparent',
+                  background: c.conversationId === activeId ? '#eef2ff' : '#fff',
+                  color: '#111827',
+                  fontWeight: 400,
                   cursor: 'pointer',
                 }}
               >

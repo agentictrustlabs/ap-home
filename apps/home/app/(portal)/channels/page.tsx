@@ -135,8 +135,9 @@ export default function ChannelsPage() {
                 onClick={() => setActiveId(c.descriptor.id)}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left', padding: '0.4rem 0.5rem',
-                  border: 'none', borderRadius: 6, cursor: 'pointer',
-                  background: c.descriptor.id === activeId ? '#eef2ff' : 'transparent',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', minHeight: 0,
+                  background: c.descriptor.id === activeId ? '#eef2ff' : '#fff',
+                  color: '#111827',
                   fontWeight: c.descriptor.id === activeId ? 600 : 400,
                 }}
               >
