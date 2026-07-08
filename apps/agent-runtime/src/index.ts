@@ -2628,6 +2628,12 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     if (!/^[a-z0-9-]{1,63}$/.test(body.label!.toLowerCase())) return c.json({ ok: false, error: 'bad_label' }, 400);
     if (!/^0x[0-9a-fA-F]{64}$/.test(body.node!)) return c.json({ ok: false, error: 'bad_node' }, 400);
   }
+  // Orgs MUST be named (name-deferral is for person/treasury agents only): an
+  // organization is a counterparty-facing identity — other agents delegate to
+  // it, receive grants from it, and resolve it by name.
+  if (body.kind === 'org' && !wantName) {
+    return c.json({ ok: false, error: 'org_requires_name' }, 400);
+  }
 
   const gate = await verifyCustodySession(body.session, gateCfg);
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);

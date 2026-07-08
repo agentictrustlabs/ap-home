@@ -136,9 +136,15 @@ export function CreateAgentForm({
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
 
+  // Orgs MUST be named (counterparty-facing identity); treasuries may defer.
+  const nameRequired = kind === 'org';
+
   async function create(named: boolean) {
     const clean = label.trim().toLowerCase();
-    if (named && clean.length < 3) { setErr('Pick a name with at least 3 characters, or create it unnamed.'); return; }
+    if (named && clean.length < 3) {
+      setErr(nameRequired ? 'Organizations require a name — at least 3 characters.' : 'Pick a name with at least 3 characters, or create it unnamed.');
+      return;
+    }
     setBusy(true); setErr(''); setStep('');
     const res = await createManagedAgent(
       { kind, label: named ? clean : undefined, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
@@ -162,7 +168,7 @@ export function CreateAgentForm({
   return (
     <div style={{ marginTop: '.55rem', display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name (optional)" disabled={busy}
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={nameRequired ? 'name (required)' : 'name (optional)'} disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
       </div>
@@ -170,16 +176,18 @@ export function CreateAgentForm({
         <button type="button" className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(true)}>
           {busy ? (step || 'Working…') : 'Create + name'}
         </button>
-        <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false)}>
-          Create without a name
-        </button>
+        {!nameRequired && (
+          <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false)}>
+            Create without a name
+          </button>
+        )}
         <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => { setOpen(false); setErr(''); }}>
           Cancel
         </button>
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
         Deploys an on-chain Smart Agent custodied by you — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
-        {' '}A name is optional; you can name it later.
+        {' '}{nameRequired ? 'Organizations are counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
