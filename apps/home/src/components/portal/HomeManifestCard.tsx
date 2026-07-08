@@ -80,7 +80,22 @@ export function HomeManifestCard() {
     }
   }, [session, agentAddress, label, refresh]);
 
-  if (!session || !agentAddress || !label) return null;
+  if (!session || !agentAddress) return null;
+
+  // The manifest publishes under the name's subdomain — without a claimed
+  // name there is nowhere to serve it. Say so instead of hiding (fail-visible).
+  if (!label) {
+    return (
+      <div className="dash-section" style={{ marginTop: '1.5rem' }}>
+        <h2>Your Home manifest</h2>
+        <p style={{ opacity: 0.8 }}>
+          Publishing needs a claimed agent name — the manifest is served at{' '}
+          <code>{'<name>.…/.well-known/agentic-home'}</code> and the server verifies the name
+          resolves to your agent on-chain. Claim your name first, then publish from here.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="dash-section" style={{ marginTop: '1.5rem' }}>

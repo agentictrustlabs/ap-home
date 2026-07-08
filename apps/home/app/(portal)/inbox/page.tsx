@@ -83,7 +83,13 @@ export default function InboxPage() {
   // Demo helper: deliver a signed-shape access request to YOURSELF through the
   // full public delivery pipeline (on-chain label check + audited admission).
   const sendDemoRequest = useCallback(async () => {
-    if (!session || !agentAddress || !agentName) return;
+    if (!session || !agentAddress) return;
+    if (!agentName) {
+      // The public delivery pipeline verifies label → agent on-chain; without
+      // a claimed name there is no label to deliver under. Fail visible.
+      setError('Your agent needs a claimed name first — delivery verifies your name resolves to your agent on-chain. Claim a name, then retry.');
+      return;
+    }
     setBusy('demo');
     setError(null);
     try {
