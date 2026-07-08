@@ -31,17 +31,22 @@ grant it issued), so the caption is "custodian"/"connected app" rather than a de
 
 ```
 WorkspaceScope = { kind: 'person' }
-              | { kind: 'org';  org: Address }     // /org/<address>/<page>
-              | { kind: 'app';  clientId: string } // /app/<clientId>
+              | { kind: 'org';      org: Address }   // /org/<address>/<page>
+              | { kind: 'treasury'; agent: Address } // /treasury/<address>
 ```
+
+**A workspace is a CUSTODIAL smart agent** — an SA the connected person controls (person, org,
+treasury, later data-source/service agents). Connected apps are the opposite: external apps the
+person granted access TO, with no custodial rights over them — they are a person-scoped review
+surface (`/apps` in the person nav), never a workspace in the switcher.
 
 - **Person** — the connected custodian's own home: all of today's nav, including creating
   organizations, treasuries, data sources (spec 275 flows stay person-scoped).
 - **Org** — one of the org SAs the custodian stewards (`listManagedAgents`, kind `org`).
   Nav: Overview (identity + name-it + treasury), Data (vault reads over the stewardship
   delegation), Treasury.
-- **App** — a connected app the custodian granted (`listConnectedApps`). Nav: Overview
-  (grant surface: can-do / cannot-do, scopes).
+- **Treasury** — a money agent the custodian manages (`person-treasury` / `org-treasury`).
+  Nav: Overview (balance, funding, naming, host connections).
 
 ## Enforcement note (mirrors ACTOR-NAV-MODEL §5.6)
 
@@ -52,6 +57,7 @@ steward renders an empty/denied state, never data.
 ## Waves
 
 - **W1 (SHIPPED):** `workspace.ts` (URL-derived scope) + `AgentSwitcher` in the topbar +
-  scoped `buildNav` + org workspace pages (overview / data / treasury) + app workspace page.
+  scoped `buildNav` + org workspace pages (overview / data / treasury) + treasury workspace page.
+  (First cut listed connected apps in the switcher; corrected same-day — apps are non-custodial.)
 - **W2 (later):** roles beyond custodian (member/viewer) once membership assertions land in
   Home; org-scoped Messages; default-workspace pin.

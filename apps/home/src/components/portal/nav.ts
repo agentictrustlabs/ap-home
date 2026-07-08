@@ -3,7 +3,7 @@
 // is always scoped to what the header switcher selected — person / org / connected app.
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import type { WorkspaceScope } from '../../lib/workspace';
-import { orgHref, appHref } from '../../lib/workspace';
+import { orgHref, treasuryHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
   ChatIcon, HashIcon, GlobeIcon,
@@ -49,13 +49,13 @@ export function buildNav(
       },
     ];
   }
-  // APP workspace: the grant surface for one connected app.
-  if (active.kind === 'app') {
+  // TREASURY workspace: one custodial money agent's actions.
+  if (active.kind === 'treasury') {
     return [
       {
-        heading: 'Connected app',
+        heading: 'Treasury',
         items: [
-          { id: 'app-overview', label: 'Overview', href: appHref(active.clientId), Icon: LinkIcon, status: 'live' },
+          { id: 'treasury-overview', label: 'Overview', href: treasuryHref(active.agent), Icon: LandmarkIcon, status: 'live' },
         ],
       },
     ];

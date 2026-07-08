@@ -1,20 +1,21 @@
 'use client';
 // The WORKSPACE switcher (spec 315) — sits right of the site name in the topbar, ported from the
-// impact home's ContextSwitcher. Picks what the left nav is scoped to: You (the connected person),
-// an organization you steward, or a connected app you granted. Switching = navigating; the shell
-// derives the active workspace from the URL. Identity (who am I) stays in the top-right chip —
-// this menu answers "where am I acting".
-import { useEffect, useMemo, useState } from 'react';
+// impact home's ContextSwitcher. Lists ONLY the custodial smart agents the connected person is
+// responsible for: you (the person SA), the organizations you steward, and the treasuries you
+// manage. Selecting one scopes the left nav to that agent's actions; switching = navigating (the
+// shell derives the active workspace from the URL). Connected apps are external grants — no
+// custody — and live in the person nav (/apps), never here. Identity (who am I) stays in the
+// top-right chip; this menu answers "where am I acting".
+import { useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
-import { listConnectedApps } from '../../lib/connected-apps';
-import type { Permission } from '../../home/types';
-import { parseWorkspacePath, orgHref, appHref } from '../../lib/workspace';
-import { UserIcon, BuildingIcon, LinkIcon, CheckIcon } from '../shared/Icons';
+import { parseWorkspacePath, orgHref, treasuryHref } from '../../lib/workspace';
+import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const lc = (s: string) => s.toLowerCase();
 
 export function AgentSwitcher() {
   const { session, profile, agentAddress, agentName } = useSession();
@@ -22,25 +23,22 @@ export function AgentSwitcher() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const { agents } = useManagedAgents(session?.token ?? null);
-  const [apps, setApps] = useState<Permission[]>([]);
-  useEffect(() => {
-    if (agentAddress) setApps(listConnectedApps(agentAddress));
-  }, [agentAddress]);
 
   const active = useMemo(() => parseWorkspacePath(pathname ?? '/'), [pathname]);
   const orgs = agents.filter((a) => a.kind === 'org');
+  const treasuries = agents.filter((a) => a.kind === 'person-treasury' || a.kind === 'org-treasury');
+  const orgNameFor = (parent: string) => orgs.find((o) => lc(o.agent) === lc(parent))?.name;
 
   if (!session || !profile) return null;
 
   const personLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
-  const activeOrg = active.kind === 'org' ? orgs.find((o) => o.agent.toLowerCase() === active.org.toLowerCase()) : undefined;
-  const activeApp = active.kind === 'app' ? apps.find((a) => a.clientId === active.clientId) : undefined;
+  const activeOrg = active.kind === 'org' ? orgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
+  const activeTreasury = active.kind === 'treasury' ? treasuries.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
   const triggerName =
-    active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : activeOrg ? short(activeOrg.agent) : short(active.org))
-    : active.kind === 'app' ? (activeApp?.appName ?? active.clientId)
+    active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
+    : active.kind === 'treasury' ? (activeTreasury?.name ? nameLabel(activeTreasury.name) : short(active.agent))
     : personLabel;
-  const caption =
-    active.kind === 'org' ? 'acting as custodian' : active.kind === 'app' ? 'connected app' : 'acting as you';
+  const caption = active.kind === 'person' ? 'acting as you' : 'acting as custodian';
 
   const go = (href: string) => { router.push(href); setOpen(false); };
 
@@ -82,7 +80,7 @@ export function AgentSwitcher() {
           cursor: 'pointer', fontWeight: 400, maxWidth: 260,
         }}
       >
-        {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'app' ? <LinkIcon size={16} /> : <UserIcon size={16} />}
+        {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'treasury' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
           <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
             {triggerName}
@@ -102,7 +100,7 @@ export function AgentSwitcher() {
               padding: '.4rem', maxHeight: '70vh', overflowY: 'auto',
             }}
           >
-            {heading('Switch workspace')}
+            {heading('Your smart agents')}
             <Row
               icon={<UserIcon size={17} />}
               title={personLabel}
@@ -118,22 +116,25 @@ export function AgentSwitcher() {
                 icon={<BuildingIcon size={17} />}
                 title={o.name ? nameLabel(o.name) : short(o.agent)}
                 sub={o.name ? 'organization · custodied by you' : 'unnamed organization'}
-                activeRow={active.kind === 'org' && active.org.toLowerCase() === o.agent.toLowerCase()}
+                activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
                 onClick={() => go(orgHref(o.agent, 'overview'))}
               />
             ))}
 
-            {apps.length > 0 && heading('Connected apps')}
-            {apps.map((a) => (
-              <Row
-                key={a.clientId}
-                icon={<LinkIcon size={17} />}
-                title={a.appName}
-                sub={a.appDomain}
-                activeRow={active.kind === 'app' && active.clientId === a.clientId}
-                onClick={() => go(appHref(a.clientId))}
-              />
-            ))}
+            {treasuries.length > 0 && heading('Treasuries you manage')}
+            {treasuries.map((t) => {
+              const parentOrg = t.kind === 'org-treasury' ? orgNameFor(t.parent) : undefined;
+              return (
+                <Row
+                  key={t.agent}
+                  icon={<LandmarkIcon size={17} />}
+                  title={t.name ? nameLabel(t.name) : short(t.agent)}
+                  sub={t.kind === 'person-treasury' ? 'personal treasury' : `treasury of ${parentOrg ? nameLabel(parentOrg) : 'an organization'}`}
+                  activeRow={active.kind === 'treasury' && lc(active.agent) === lc(t.agent)}
+                  onClick={() => go(treasuryHref(t.agent))}
+                />
+              );
+            })}
 
             <div style={{ borderTop: '1px solid #f1f5f9', margin: '.4rem 0' }} />
             <button
@@ -143,7 +144,7 @@ export function AgentSwitcher() {
                 background: 'transparent', border: 'none', color: '#4338ca', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
               }}
             >
-              ＋ Create or manage organizations
+              ＋ Create an organization or treasury
             </button>
           </div>
         </>
