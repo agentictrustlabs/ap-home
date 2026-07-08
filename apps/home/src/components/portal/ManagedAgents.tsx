@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { emitControlEvent } from '../../home/control-plane';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
@@ -145,6 +146,8 @@ export function CreateAgentForm({
     );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
+    // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
+    void emitControlEvent(token, 'agent-added', []);
     setOpen(false); setLabel('');
     onDone();
   }

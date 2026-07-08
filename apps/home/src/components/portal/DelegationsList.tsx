@@ -19,6 +19,7 @@ import {
   type SignHash,
 } from '../../connect-client';
 import type { DelegationWire } from '../../lib/delegation';
+import { emitControlEvent, toConnectedAppGrant } from '../../home/control-plane';
 import { connectWallet, personalSign } from '../../lib/wallet';
 import { useSession } from '../../context/session';
 import { AddressChip } from '../shared/AddressChip';
@@ -111,8 +112,12 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
     try {
       const signHash = await signerFor(session?.via ?? 'passkey', it.delegation.delegator, token);
       const r = await revokeGrantedDelegation(it.delegation, signHash);
-      if (r.ok) setRevoked((s) => new Set(s).add(it.key));
-      else setError(r.error);
+      if (r.ok) {
+        setRevoked((s) => new Set(s).add(it.key));
+        // Control-plane timeline (spec 310 W4) — the on-chain revoke is canonical;
+        // this records the projection row with the delegation's AuthorityRef.
+        void emitControlEvent(token, 'grant-revoked', [toConnectedAppGrant(it.kind, it.delegation, true).grantRef]);
+      } else setError(r.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'revoke failed');
     } finally {
@@ -141,6 +146,9 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
             <div className="manage-grid">
               {items.map((it) => {
                 const c = grantCopy(it);
+                // Portable projection (spec 310 W4): status + expiry come from the
+                // delegation's own timestamp caveat, keyed by its canonical hash.
+                const grant = toConnectedAppGrant(it.kind, it.delegation);
                 return (
                   <div className="manage-card" key={it.key}>
                     <div className="manage-card-head">
@@ -149,6 +157,11 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
                     </div>
                     <div style={{ margin: '.45rem 0' }}><AddressChip address={it.org.orgAgent} size="sm" /></div>
                     <p className="manage-card-blurb">{c.blurb}</p>
+                    <p className="manage-card-blurb" style={{ fontSize: '.78rem', opacity: 0.75 }}>
+                      {grant.status === 'active' ? 'Active' : grant.status}
+                      {grant.expiresAt ? ` · until ${new Date(grant.expiresAt).toLocaleDateString()}` : ''}
+                      {' · '}<code>{grant.grantRef.hash.slice(0, 10)}…</code>
+                    </p>
                     <button
                       type="button"
                       className="btn-danger-outline"

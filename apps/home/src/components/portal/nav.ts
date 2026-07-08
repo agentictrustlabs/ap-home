@@ -3,7 +3,7 @@
 // agent kinds appear and whether they're live. Imported only by the shell (PortalShell).
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import {
-  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
+  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon, InboxIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -27,7 +27,7 @@ const AGENT_META: Record<string, { href: string; Icon: IconComponent }> = {
   'data-source': { href: '/data-sources', Icon: DatabaseIcon },
 };
 
-export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): NavGroup[] {
+export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number; inbox?: number } = {}): NavGroup[] {
   const agents = wl.manageableAgents;
   const person = agents.find((a) => a.id === 'person');
   const others = agents.filter((a) => a.id !== 'person');
@@ -46,6 +46,8 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): 
   }));
 
   const portal: NavItem[] = [];
+  // Agentic inbox (spec 310 W3): messages + pending approvals for everything acting in your name.
+  portal.push({ id: 'inbox', label: 'Inbox', href: '/inbox', Icon: InboxIcon, status: 'live', badge: badges.inbox });
   if (wl.services.connectedApps) {
     portal.push({ id: 'apps', label: 'Connected Apps', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
   }
@@ -58,7 +60,8 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number } = {}): 
   portal.push({ id: 'naming', label: 'Naming Service', href: '/naming', Icon: TagIcon, status: 'live' });
   // Skills (spec 282): manage skills privately + assert a public subset for discovery.
   portal.push({ id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' });
-  portal.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'soon' });
+  // Control-plane timeline (spec 310 W4) — audit-backed grant/agent/inbox/manifest events.
+  portal.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'live' });
 
   return [
     { items: top },

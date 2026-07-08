@@ -130,8 +130,9 @@ export interface ConnectedAppGrantV1 {
 export interface HomeActionCardV1 {
   type: 'ap.home.action-card.v1';
   cardId: string; interactionId: string; messageId?: string;
-  cardKind: 'access_request' | 'entitlement_request' | 'credential_review' | 'tool_approval'
-          | 'delegation_review' | 'policy_exception' | 'revocation_notice' | 'needs_information';
+  cardKind: 'access-request' | 'entitlement-request' | 'credential-review' | 'tool-approval'
+          | 'delegation-review' | 'policy-exception' | 'revocation-notice' | 'needs-information';
+  // (same vocabulary as `interactions`' ActionCardKind — transport + render halves map 1:1)
   title: string; summary?: string;
   dataRefs: DataRef[]; risk?: ActionRiskMetadataRef;
   allowedActions: HomeActionDescriptorV1[];
@@ -236,17 +237,43 @@ consent; the Home is the *issuance UX*, the authority is the existing delegation
 
 ## 8. Implementation waves
 
-- **W1 — `home` contracts.** Schemas + validators for manifest/context/surface/inbox-binding/action-card/
-  managed-agent/connected-app-grant/control-event + deterministic `HomeInboxSummary` projection. Unit tests:
-  manifest signature validation, projection determinism, action-card allowed-actions enforcement.
-- **W2 — Home publishes its manifest.** `demo-sso-next` serves `HomeManifestV1` (profile data / well-known
-  route / A2A AgentCard metadata — app chooses; the primitive defines only the schema).
-- **W3 — Inbox surface in Home.** Wire spec 309's messaging/interactions into a Home inbox page + pending
-  approvals; render `HomeActionCardV1` with native components.
-- **W4 — Connected apps + managed agents.** Projections over `delegation` grants (connected apps) and spec
-  275's agent tree (managed agents), with revoke actions emitting `HomeControlEventV1`.
-- **W5 — Mandates + control-plane timeline.** Issue `InteractionMandateV1` from the approval surface;
-  render the audit/receipt/relationship-record timeline.
+- **W1 — `home` contracts.** SHIPPED (`packages/home` @ `w1-contracts`). Schemas + fail-closed validators
+  for manifest/context/surface/inbox-binding/action-card/managed-agent/connected-app-grant/control-event
+  (`validateHomeManifest` + `isManifestCurrent` currency gate, crypto verification behind
+  `ManifestVerificationPort`; `resolveCardAction` allowed-actions enforcement) + deterministic
+  `projectHomeInboxSummary`. Unit tests cover manifest signer/window validation, projection determinism
+  and order-independence, and unknown-action rejection.
+- **W2 — Home publishes its manifest.** SHIPPED. `demo-sso-next` serves the owner-signed `HomeManifestV1`
+  at `/.well-known/agentic-home` on the personal subdomain (unpublished ⇒ 404, never an unsigned draft —
+  ADR-0013). Publish flow: the You page's Home-manifest card builds the draft (`src/home/manifest.ts`,
+  endpoints from `domain.ts`), the ROOT credential signs the canonical digest (same raw-or-EIP-191 path as
+  delegations), and `/connect/home-manifest` POST gates fail-closed — schema (`validateHomeManifest`),
+  session⇔owner, label⇔owner via on-chain `reverseResolve`, ERC-1271 over the re-derived digest — then
+  stores to KV.
+- **W3 — Inbox surface in Home.** SHIPPED. `src/home/inbox-data.ts` adapts the packages' stores to KV
+  (event-sourced doc per person, rehydrated per request; replay divergence is a hard error); audited
+  admission + audited case transitions preserved end-to-end (audit-write failure blocks the operation).
+  Routes: `POST /connect/inbox/deliver` (public transport half; label⇔addressee bound on-chain) +
+  `GET/POST /connect/inbox` (session-gated view + read/archive/transition). UI: `/inbox` portal page —
+  folders/unread/summary badges, pending-approvals queue, sender-proposed action cards rendered with
+  native components (buttons = lifecycle transitions; they grant nothing). Demo guides:
+  `apps/demo-sso-next/docs/home-inbox/guide.md` + `docs/messaging-interactions/guide.md`; both
+  capabilities promoted to the active cross-cutting index.
+- **W4 — Connected apps + managed agents.** SHIPPED. `src/home/control-plane.ts` projects issued
+  delegations onto `ConnectedAppGrantV1` (status/expiry from the delegation's own timestamp caveat,
+  `grantRef` = canonical delegation hash — shown on each grant card) and the spec 275 tree onto
+  `ManagedAgentEntryV1`. `HomeControlEventV1` rows are emitted audit-first (`/connect/control-events`;
+  no audit row ⇒ no timeline row) on delegation revoke, agent creation, inbox decisions, and manifest
+  publication.
+- **W5 — Mandates + control-plane timeline.** SHIPPED. The Activity page renders the control-plane
+  timeline (event + audit ref + authority refs) and the portable managed-agents projection. Approving an
+  access-request from the inbox ISSUES: the person signs a scoped delegation (timestamp + value-0 caveats
+  — the authority, revocable like every grant) and the `InteractionMandateV1` that references it by hash,
+  both under the ROOT credential (`src/home/mandate.ts`). The server re-derives the mandate digest,
+  ERC-1271-verifies it against the person SA, runs the audited approve transition carrying the delegation
+  hash as the case's `AuthorityRef`, stores the mandate with the case, and emits `credential-issued` on
+  the timeline — any gate failing means no transition and no stored mandate. Issued mandates render
+  inline in the inbox with scope/purpose/expiry/delegation hash.
 
 ## 9. Acceptance criteria
 

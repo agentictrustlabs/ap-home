@@ -9,6 +9,7 @@ import {
 } from '../../../src/profile-store';
 import { PersonalTreasurySection } from '../../../src/components/portal/ManagedAgents';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
+import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
@@ -47,6 +48,8 @@ export default function YouPage() {
       <PersonalTreasurySection token={session?.token ?? null} person={agentAddress ?? null} via={session?.via ?? ''} />
 
       <DelegationsList token={session?.token ?? null} />
+
+      <HomeManifestCard />
 
       <GoogleHomeSection />
 

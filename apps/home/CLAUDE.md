@@ -29,6 +29,10 @@ claiming, and the delegations it signs on the member's behalf.
 | Connect a service SA (treasury/discovery) to its A2A+MCP hosts | `src/lib/connect-treasury.ts` (spec 283/284 ceremony: bind endpoint records → mint scoped host delegation → publish skills; pure+injectable, UI page TBD) |
 | Name label / TLD handling | `src/home/types.ts` (`homeLabel`) + `src/lib/domain.ts` (`AGENT_NAME_PARENT = 'impact'`) |
 | White-label config | `src/whitelabel/config.ts` (spec 234) |
+| Home manifest publish/serve (spec 310 W2) | `src/home/manifest.ts` (compose + digest) + `server/connect/home-manifest.ts` (fail-closed publish gates) + `app/.well-known/agentic-home/route.ts` (serve; 404 when unpublished) |
+| Agentic inbox (spec 310 W3 / 309 W6) | `src/home/inbox-data.ts` (KV adapter over messaging/interactions stores, audited fail-closed) + `server/connect/inbox{,-deliver}.ts` + `app/(portal)/inbox/page.tsx` + `docs/{home-inbox,messaging-interactions}/guide.md` |
+| Control-plane projections + timeline (spec 310 W4) | `src/home/control-plane.ts` (delegation→`ConnectedAppGrantV1`, tree→`ManagedAgentEntryV1`) + `server/connect/control-events.ts` (audit-first `HomeControlEventV1`) + `app/(portal)/activity/page.tsx` |
+| Mandate issuance on approve (spec 310 W5) | `src/home/mandate.ts` (scoped delegation + signed `InteractionMandateV1`) + `applyApproveWithMandate` in `src/home/inbox-data.ts` (ERC-1271 over re-derived digest, fail-closed) |
 
 ## Hard rules (this app)
 - **Name labels: the label is the FIRST dot-segment** (`homeLabel`), parent-agnostic. Do NOT strip a
