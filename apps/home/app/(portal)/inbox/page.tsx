@@ -7,16 +7,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Address } from '@agenticprimitives/types';
-import type { ContextRefV1, MessageEnvelopeV1 } from '@agenticprimitives/messaging';
-import { generateMessageId, generateConversationId, sha256Hex32 } from '@agenticprimitives/messaging';
-import type { ActionCardV1, InteractionCaseV1 } from '@agenticprimitives/interactions';
-import { generateInteractionId } from '@agenticprimitives/interactions';
+import type { InteractionCaseV1 } from '@agenticprimitives/interactions';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { connectWallet, personalSign } from '../../../src/lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/connect-client';
-import { nameLabel } from '../../../src/lib/domain';
-import { homeCaip10 } from '../../../src/home/manifest';
 import { issueMandateForCase } from '../../../src/home/mandate';
 import { useInboxView, shortId, agentLabel } from '../../../src/home/use-inbox';
 
@@ -53,90 +48,12 @@ function ContextChip({ r, active, onClick }: { r: { kind: string; id: string; la
 }
 
 export default function InboxPage() {
-  const { session, agentAddress, agentName } = useSession();
-  const { view, refresh, post, busy, error, setError, inboxConversations } = useInboxView(session);
+  const { session, agentAddress } = useSession();
+  const { view, post, busy, error, setError, inboxConversations } = useInboxView(session);
   const [folder, setFolder] = useState<string>('all');
   const [context, setContext] = useState<{ kind: string; id: string; label?: string } | null>(null);
   const [openConv, setOpenConv] = useState<string | null>(null);
   const [localBusy, setLocalBusy] = useState(false);
-
-  // Demo helper: deliver a signed-shape access request to YOURSELF through the
-  // full public delivery pipeline (on-chain label check + audited admission).
-  const sendDemoRequest = useCallback(async () => {
-    if (!session || !agentAddress) return;
-    if (!agentName) {
-      setError('Your agent needs a claimed name first — delivery verifies your name resolves to your agent on-chain. Claim a name, then retry.');
-      return;
-    }
-    setLocalBusy(true);
-    setError(null);
-    try {
-      const me = homeCaip10(agentAddress as Address);
-      const label = nameLabel(agentName);
-      const bodyText = 'Demo: an agent asks to read your contact email for delivery updates (purpose: notifications).';
-      const now = new Date().toISOString();
-      const interactionId = generateInteractionId();
-      const contextRefs: ContextRefV1[] = [{ kind: 'resource', id: 'contact-email', label: 'Contact email' }];
-      const envelope: MessageEnvelopeV1 = {
-        version: 'ap.message.v1',
-        id: generateMessageId(),
-        conversationId: generateConversationId(),
-        kind: 'request',
-        from: me,
-        to: [me],
-        subject: 'Access request: contact email',
-        createdAt: now,
-        classification: 'internal',
-        body: { resource: 'inline:demo', classification: 'internal', updatedAt: now },
-        bodyHash: await sha256Hex32(new TextEncoder().encode(bodyText)),
-        bodyContentType: 'text/plain',
-        interactionId,
-        contextRefs,
-        priority: 'high',
-      };
-      const interactionCase: InteractionCaseV1 = {
-        version: 'ap.interaction.v1',
-        id: interactionId,
-        kind: 'access-request',
-        subject: 'Read contact email (purpose: notifications)',
-        contextRefs,
-        requester: me,
-        responder: me,
-        state: 'draft',
-        createdAt: now,
-        updatedAt: now,
-        rootMessageId: envelope.id,
-        latestMessageId: envelope.id,
-        evidenceRefs: [],
-        authorityRefs: [],
-      };
-      const card: ActionCardV1 = {
-        version: 'ap.interaction.action-card.v1',
-        cardId: `card_${interactionId.slice(4)}`,
-        interactionId,
-        cardKind: 'access-request',
-        title: 'Share your contact email?',
-        summary: 'Requested for delivery notifications. You can ask for more information first.',
-        allowedActions: [
-          { actionId: 'approve', label: 'Approve', transition: 'approve', style: 'primary' },
-          { actionId: 'deny', label: 'Deny', transition: 'deny', style: 'destructive' },
-          { actionId: 'ask', label: 'Ask for info', transition: 'ask-info' },
-        ],
-      };
-      const res = await fetch('/connect/inbox/deliver', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ label, envelope, bodyText, interactionCase, card }),
-      });
-      const out = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !out.ok) throw new Error(out.error ?? `delivery failed (${res.status})`);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLocalBusy(false);
-    }
-  }, [session, agentAddress, agentName, refresh, setError]);
 
   // W5: approving an access-request ISSUES — scoped delegation + mandate,
   // both signed under the ROOT credential, ERC-1271-verified server-side.
@@ -183,17 +100,14 @@ export default function InboxPage() {
 
   if (!session) {
     return (
-      <SectionShell title="Inbox" description="Sign in to see your agentic inbox.">
+      <SectionShell title="Inbox">
         <p>Not signed in.</p>
       </SectionShell>
     );
   }
 
   return (
-    <SectionShell
-      title="Inbox"
-      description="Requests, approvals, and receipts for everything acting in your name. Approving records a decision — authority is issued separately, on your terms. Person-to-person conversations live in Chats."
-    >
+    <SectionShell title="Inbox">
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
 
       {/* ── Needs attention (Gmail/Outlook focused-triage band) ── */}
@@ -251,12 +165,7 @@ export default function InboxPage() {
       )}
 
       <div className="dash-section" style={{ marginTop: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h2>Mail{view?.summary ? ` · ${view.summary.unreadTotal} unread` : ''}</h2>
-          <button className="btn" onClick={() => void sendDemoRequest()} disabled={anyBusy}>
-            {localBusy ? 'Delivering…' : 'Send yourself a demo request'}
-          </button>
-        </div>
+        <h2>Mail{view?.summary ? ` · ${view.summary.unreadTotal} unread` : ''}</h2>
 
         <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0', flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn" style={folder === 'all' ? { fontWeight: 700 } : undefined} onClick={() => setFolder('all')}>

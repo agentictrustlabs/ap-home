@@ -92,7 +92,7 @@ export default function FindPage() {
 
   if (!session) {
     return (
-      <SectionShell title="Find" description="Sign in to find people and organizations.">
+      <SectionShell title="Find">
         <p>Not signed in.</p>
       </SectionShell>
     );
@@ -116,10 +116,7 @@ export default function FindPage() {
   );
 
   return (
-    <SectionShell
-      title="Find"
-      description="Find people and organizations by name (public naming service) or through communities they chose to be listed in. Nobody appears here without publishing themselves — discovery is consent, not surveillance."
-    >
+    <SectionShell title="Find">
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
       {note && <p style={{ color: '#15803d' }}>{note}</p>}
 

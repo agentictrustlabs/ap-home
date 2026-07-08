@@ -124,7 +124,7 @@ export default function NetworksPage() {
 
   if (!session) {
     return (
-      <SectionShell title="Networks" description="Sign in to publish and discover organizations.">
+      <SectionShell title="Networks">
         <p>Not signed in.</p>
       </SectionShell>
     );
@@ -133,10 +133,7 @@ export default function NetworksPage() {
   const myOrgAddrs = new Set(orgs.map((o) => o.agent.toLowerCase()));
 
   return (
-    <SectionShell
-      title="Networks"
-      description="Organizations that chose to be found. Publish yours so others can discover it and reach its inbox; every listing is signed by the org's own agent and revocable by its steward."
-    >
+    <SectionShell title="Networks">
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
       {note && <p style={{ color: '#15803d' }}>{note}</p>}
 

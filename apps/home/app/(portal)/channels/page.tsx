@@ -93,17 +93,14 @@ export default function ChannelsPage() {
 
   if (!session) {
     return (
-      <SectionShell title="Channels" description="Sign in to join community channels.">
+      <SectionShell title="Channels">
         <p>Not signed in.</p>
       </SectionShell>
     );
   }
 
   return (
-    <SectionShell
-      title="Channels"
-      description="Community boards, membership by consent: publishing your directory listing in a community is what lets you read and post here. Posts are signed-shape envelopes, audited before they land."
-    >
+    <SectionShell title="Channels">
       {error && (
         <p style={{ color: '#b91c1c' }}>
           {error}

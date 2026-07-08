@@ -48,17 +48,14 @@ export default function ChatsPage() {
 
   if (!session) {
     return (
-      <SectionShell title="Chats" description="Sign in to see your conversations.">
+      <SectionShell title="Chats">
         <p>Not signed in.</p>
       </SectionShell>
     );
   }
 
   return (
-    <SectionShell
-      title="Chats"
-      description="Focused conversations with people you know. Every message is envelope-signed, vault-resident, and admitted through your Home's audited pipeline."
-    >
+    <SectionShell title="Chats">
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
 
       {chatConversations.length === 0 ? (
