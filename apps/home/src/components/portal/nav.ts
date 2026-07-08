@@ -3,8 +3,8 @@
 // agent kinds appear and whether they're live. Imported only by the shell (PortalShell).
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import {
-  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon, InboxIcon,
-  ChatIcon, HashIcon, SearchIcon, GlobeIcon,
+  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
+  ChatIcon, HashIcon, GlobeIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -46,13 +46,12 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number; inbox?: 
     status: a.status,
   }));
 
-  // Interactions (spec 313): tempo-separated surfaces — Gmail-like triage,
-  // Signal-like chats, Slack-like channels, LinkedIn-like find/networks.
+  // Interactions (spec 313 v2): ONE Messages surface (requests + chats +
+  // search/compose — Telegram model); Channels = communities, Networks = org
+  // presence. The old /inbox /chats /find routes redirect to /messages.
   const interactions: NavItem[] = [
-    { id: 'inbox', label: 'Inbox', href: '/inbox', Icon: InboxIcon, status: 'live', badge: badges.inbox },
-    { id: 'chats', label: 'Chats', href: '/chats', Icon: ChatIcon, status: 'live' },
+    { id: 'messages', label: 'Messages', href: '/messages', Icon: ChatIcon, status: 'live', badge: badges.inbox },
     { id: 'channels', label: 'Channels', href: '/channels', Icon: HashIcon, status: 'live' },
-    { id: 'find', label: 'Find', href: '/find', Icon: SearchIcon, status: 'live' },
     { id: 'networks', label: 'Networks', href: '/networks', Icon: GlobeIcon, status: 'live' },
   ];
 

@@ -71,5 +71,13 @@ internal-classification community boards. The descriptor/envelope shapes keep th
 - **W1:** Nav group + Chats page (thread view, reply) + Inbox slimmed to triage. SHIPPED with this spec.
 - **W2:** Channels (create/post/read, listing-gated). SHIPPED.
 - **W3:** Find + Networks + discoverability prompts. SHIPPED.
-- **W4 (later):** unread badges per surface, channel mentions, org-to-org collaboration cases
+- **W4 — v2 consolidation (SHIPPED):** user feedback showed Inbox/Chats/Find all end in "send a
+  message" — three tabs, three composers. Merged into ONE `/messages` surface (Telegram/Slack model):
+  pending requests pinned on top, every conversation in one rail (chat vs request is now
+  presentation — a case badge and in-thread decision card — not navigation), reply box for two-party
+  threads, KB search + compose in the header, open-thread = read. `/inbox`, `/chats`, `/find`
+  redirect to `/messages`. §2's mechanical partition rule still governs WHAT renders where; only the
+  navigation collapsed. Channels (communities) and Networks (org presence) remain separate
+  destinations.
+- **W5 (later):** unread badges per surface, channel mentions, org-to-org collaboration cases
   (relationship-proposal), MLS-profile channels.
