@@ -10,6 +10,7 @@ import {
 import { PersonalTreasurySection } from '../../../src/components/portal/ManagedAgents';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
+import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
 import { rotateGoogleHome } from '../../../src/server-client';
 import { continueWithGoogle } from '../../../src/home/onboarding';
 import { whitelabel } from '../../../src/whitelabel/config';
@@ -50,6 +51,8 @@ export default function YouPage() {
       <DelegationsList token={session?.token ?? null} />
 
       <HomeManifestCard />
+
+      <DirectoryListingCard />
 
       <GoogleHomeSection />
 

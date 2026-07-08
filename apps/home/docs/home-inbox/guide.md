@@ -52,6 +52,27 @@ the portable Home contracts from `@agenticprimitives/home`, published and render
   no stored mandate.
 - A `credential-issued` control event lands on the timeline; issued mandates render inline in the inbox.
 
+## Synthesis inbox + community messaging (spec 312)
+
+- **Conversation-first UI** (`app/(portal)/inbox/page.tsx`, per
+  `docs/architecture/inbox-ux-synthesis.md`): a "Needs attention" triage band (pending approvals +
+  urgent — Outlook's focused inbox), conversation rows from `summarizeConversations` (Slack), context
+  chips from `ContextRefV1` that filter the whole inbox, and a signature chip per message —
+  verified signer quiet-green, missing signature loud-amber (Signal).
+- **Send** (`sendFromInbox` in `src/home/inbox-data.ts`, `POST /connect/inbox {action:'send'}`):
+  recipient by claimed name → one on-chain `resolveName` → the recipient's copy goes through the SAME
+  audited delivery pipeline as external mail; the sender records a `sent` copy + their own
+  `ConversationDescriptorV1`.
+- **Related messages**: `GET /connect/inbox?contextKind=…&contextId=…` → `listByContext` — the same
+  projection the inbox renders, filtered; never a second index (ADR-0013).
+- **Community directory** (`/connect/directory`, `DirectoryListingCard` on the You page): OPT-IN
+  self-signed `DirectoryListingV1` per community; server gates = structural validation → subject =
+  session SA → ERC-1271 over the re-derived digest → claimed-name requirement. Revocable anytime;
+  no listing ⇒ not discoverable (ADR-0025 — membership is never inferred). The composer's
+  "Browse directory" picker reads only current listings.
+- **Other apps deliver context-linked mail** to `/connect/inbox/deliver` with `contextRefs`
+  (e.g. demo-jp people-group/agreement notes, demo-gs need/offering discussions).
+
 ## Doctrine checklist for other Home implementations
 
 1. A Home is a **facet** — the SA address and its delegations survive Home rotation (ADR-0010/0011).

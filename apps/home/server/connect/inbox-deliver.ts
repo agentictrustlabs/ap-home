@@ -6,7 +6,7 @@
 // Admission is the packages' audited fail-closed pipeline (validate → body-hash
 // → audit-accept → commit; case submit/admit transitions audited the same way).
 // A message is never authority — nothing here grants anything (spec 309 §4).
-import type { MessageEnvelopeV1 } from '@agenticprimitives/messaging';
+import type { ConversationDescriptorV1, MessageEnvelopeV1 } from '@agenticprimitives/messaging';
 import type { ActionCardV1, InteractionCaseV1 } from '@agenticprimitives/interactions';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
@@ -28,6 +28,7 @@ interface DeliverBody {
   bodyText?: string;
   interactionCase?: InteractionCaseV1;
   card?: ActionCardV1;
+  conversation?: ConversationDescriptorV1;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -59,6 +60,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       bodyText: body.bodyText,
       interactionCase: body.interactionCase,
       card: body.card,
+      conversation: body.conversation,
     });
     return json({ ok: true, messageId: body.envelope.id }, 200);
   } catch (e) {

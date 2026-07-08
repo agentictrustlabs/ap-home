@@ -20,9 +20,12 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { readInboxView, applyMessageAction, applyCaseTransition, applyApproveWithMandate } from '../../src/home/inbox-data';
+import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox } from '../../src/home/inbox-data';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { agentNameForLabel } from '../../src/lib/domain';
+import type { ContextRefV1 } from '@agenticprimitives/messaging';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -50,6 +53,17 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
+  // the same projection the inbox renders, filtered; never a second index.
+  const url = new URL(request.url);
+  const contextKind = url.searchParams.get('contextKind');
+  if (contextKind) {
+    const items = await readMessagesByContext(env.AUTH_CODES, person, {
+      kind: contextKind,
+      id: url.searchParams.get('contextId') ?? undefined,
+    });
+    return jsonCors({ items }, request);
+  }
   return jsonCors(await readInboxView(env.AUTH_CODES, person), request);
 };
 
@@ -60,10 +74,46 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
 
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; messageId?: string; interactionId?: string; transition?: string; reason?: string; mandate?: InteractionMandateV1 }
+    | {
+        action?: string;
+        messageId?: string;
+        interactionId?: string;
+        transition?: string;
+        reason?: string;
+        mandate?: InteractionMandateV1;
+        toLabel?: string;
+        subject?: string;
+        bodyText?: string;
+        contextRefs?: ContextRefV1[];
+        conversationId?: string;
+      }
     | null;
 
   try {
+    if (body?.action === 'send') {
+      // Composer send (spec 312): recipient by claimed name — one on-chain
+      // resolution mechanism; no listing/roster lookup here (ADR-0025).
+      const label = (body.toLabel ?? '').trim().toLowerCase();
+      if (!/^[a-z0-9-]{1,63}$/.test(label) || !body.bodyText?.trim()) {
+        return jsonCors({ error: 'toLabel + bodyText required' }, request, 400);
+      }
+      const naming = new AgentNamingClient({
+        rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+        chainId: CHAIN_ID,
+        registry: CONTRACTS.agentNameRegistry,
+        universalResolver: CONTRACTS.agentNameUniversalResolver,
+      });
+      const recipient = await naming.resolveName(agentNameForLabel(label));
+      if (!recipient) return jsonCors({ error: `no agent claimed the name "${label}"` }, request, 404);
+      const out = await sendFromInbox(env.AUTH_CODES, person as Address, {
+        recipient,
+        subject: body.subject,
+        bodyText: body.bodyText,
+        contextRefs: body.contextRefs,
+        conversationId: body.conversationId,
+      });
+      return jsonCors({ ok: true, ...out }, request);
+    }
     if (body?.action === 'read' || body?.action === 'archive') {
       if (!body.messageId) return jsonCors({ error: 'messageId required' }, request, 400);
       await applyMessageAction(env.AUTH_CODES, person as Address, body.messageId, body.action === 'read' ? 'read' : 'archived');

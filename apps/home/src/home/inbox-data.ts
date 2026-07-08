@@ -10,7 +10,12 @@
 import {
   createAuditedInboxDelivery,
   createInMemoryInboxProjector,
+  summarizeConversations,
   summarizeFolders,
+  validateConversationDescriptor,
+  type ContextRefV1,
+  type ConversationDescriptorV1,
+  type ConversationSummaryV1,
   type FolderSummaryV1,
   type InboxItemV1,
   type InboxProjector,
@@ -56,6 +61,8 @@ export interface InboxDataV1 {
   cards: Record<string, ActionCardV1>;
   /** interactionId → the signed mandate the owner issued on approve (W5). */
   mandates?: Record<string, InteractionMandateV1>;
+  /** Owner-side conversation descriptors (spec 312) — this side's copies. */
+  conversations?: ConversationDescriptorV1[];
 }
 
 const EMPTY: InboxDataV1 = {
@@ -119,6 +126,15 @@ export interface InboxView {
   cards: Record<string, ActionCardV1>;
   bodies: Record<string, string>;
   mandates: Record<string, InteractionMandateV1>;
+  /** Conversation-first rows (spec 312 §7.1) — newest activity first. */
+  conversations: ConversationSummaryV1[];
+  /** Owner's conversation descriptors, keyed by conversation id. */
+  descriptors: Record<string, ConversationDescriptorV1>;
+  /** Envelope metadata the UI needs (sender, subject, refs), keyed by messageId. */
+  envelopeMeta: Record<
+    string,
+    { from: string; subject?: string; contextRefs?: ContextRefV1[]; signatureSigner?: string; createdAt: string }
+  >;
 }
 
 export async function readInboxView(kv: KV, person: string): Promise<InboxView> {
@@ -126,6 +142,18 @@ export async function readInboxView(kv: KV, person: string): Promise<InboxView> 
   const { projector, interactions } = hydrate(person, doc);
   const items = projector.listInbox();
   const cases = interactions.listCases();
+  const envelopeMeta: InboxView['envelopeMeta'] = {};
+  for (const e of doc.envelopes) {
+    envelopeMeta[e.id] = {
+      from: e.from,
+      subject: e.subject,
+      contextRefs: e.contextRefs,
+      signatureSigner: e.signature?.signer,
+      createdAt: e.createdAt,
+    };
+  }
+  const descriptors: InboxView['descriptors'] = {};
+  for (const d of doc.conversations ?? []) descriptors[d.id] = d;
   return {
     items,
     folders: summarizeFolders(items),
@@ -134,7 +162,22 @@ export async function readInboxView(kv: KV, person: string): Promise<InboxView> 
     cards: doc.cards,
     bodies: doc.bodies,
     mandates: doc.mandates ?? {},
+    conversations: summarizeConversations(items),
+    descriptors,
+    envelopeMeta,
   };
+}
+
+/** Related-messages read path for entity views (spec 312 §8.2): the SAME
+ *  projection the inbox renders, filtered by context — never a second index. */
+export async function readMessagesByContext(
+  kv: KV,
+  person: string,
+  ref: { kind: string; id?: string },
+): Promise<InboxItemV1[]> {
+  const doc = await loadInboxData(kv, person);
+  const { projector } = hydrate(person, doc);
+  return projector.listByContext(ref);
 }
 
 export interface DeliverPayload {
@@ -145,6 +188,10 @@ export interface DeliverPayload {
   interactionCase?: InteractionCaseV1;
   /** Optional sender-proposed approval card (transport half, spec 309 §6.4). */
   card?: ActionCardV1;
+  /** Optional sender-proposed conversation descriptor (spec 312 §4.2). The
+   *  recipient stores their OWN copy (owner rewritten) — descriptors are
+   *  projection metadata and never authorize anything. */
+  conversation?: ConversationDescriptorV1;
 }
 
 /**
@@ -210,10 +257,106 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
     }
   }
 
+  if (payload.conversation) {
+    if (payload.conversation.id !== envelope.conversationId) {
+      throw new Error('conversation descriptor does not match envelope conversation');
+    }
+    const mine: ConversationDescriptorV1 = { ...payload.conversation, owner: recipient };
+    const errors = validateConversationDescriptor(mine);
+    if (errors.length > 0) throw new Error(`invalid conversation descriptor: ${errors.join(', ')}`);
+    const existing = doc.conversations ?? [];
+    // First descriptor wins for this owner; later proposals never overwrite.
+    if (!existing.some((d) => d.id === mine.id)) doc.conversations = [...existing, mine];
+  }
+
   doc.envelopes.push(envelope);
   doc.events.push(event);
   doc.bodies[envelope.id] = bodyText;
   await saveInboxData(kv, person, doc);
+}
+
+/**
+ * Owner send (spec 312 W2/W3 composer). Both sides live on this Home (demo
+ * topology): the recipient's copy goes through the SAME audited delivery
+ * pipeline as external mail; the sender's copy is recorded as a 'sent' event
+ * in their own store. One descriptor per conversation on each side.
+ */
+export async function sendFromInbox(
+  kv: KV,
+  person: Address,
+  opts: {
+    recipient: Address;
+    subject?: string;
+    bodyText: string;
+    contextRefs?: ContextRefV1[];
+    conversationId?: string;
+    title?: string;
+  },
+): Promise<{ messageId: string; conversationId: string }> {
+  const me = homeCaip10(person);
+  const them = homeCaip10(opts.recipient);
+  const now = new Date().toISOString();
+  const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/messaging');
+  const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
+  const envelope: MessageEnvelopeV1 = {
+    version: 'ap.message.v1',
+    id: generateMessageId(),
+    conversationId,
+    kind: 'plain',
+    from: me,
+    to: [them],
+    subject: opts.subject,
+    createdAt: now,
+    classification: 'internal',
+    body: { resource: `inline:home-send`, classification: 'internal', updatedAt: now },
+    bodyHash: await sha256Hex32(new TextEncoder().encode(opts.bodyText)),
+    bodyContentType: 'text/plain',
+    contextRefs: opts.contextRefs,
+  };
+  const descriptor: ConversationDescriptorV1 = {
+    version: 'ap.conversation.v1',
+    id: conversationId,
+    owner: them,
+    title: opts.title ?? opts.subject,
+    participants: [me, them],
+    contextRefs: opts.contextRefs,
+    participantPolicy: 'fixed',
+    createdAt: now,
+  };
+
+  // Recipient side first — audited, fail-closed; nothing recorded on failure.
+  await deliverToInbox(kv, opts.recipient, {
+    envelope,
+    bodyText: opts.bodyText,
+    conversation: descriptor,
+  });
+
+  // Self-send: the delivered copy IS the record; no second copy.
+  if (opts.recipient.toLowerCase() === person.toLowerCase()) {
+    return { messageId: envelope.id, conversationId };
+  }
+
+  // Sender's own copy: same envelope, 'sent' perspective.
+  const doc = await loadInboxData(kv, person);
+  const { projector } = hydrate(person, doc);
+  projector.putMessage(envelope);
+  const sent: MessageEventV1 = {
+    version: 'ap.message.event.v1',
+    messageId: envelope.id,
+    actor: me,
+    eventType: 'sent',
+    at: now,
+  };
+  projector.appendEvent(sent);
+  doc.envelopes.push(envelope);
+  doc.events.push(sent);
+  doc.bodies[envelope.id] = opts.bodyText;
+  const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
+  if (!(doc.conversations ?? []).some((d) => d.id === conversationId)) {
+    doc.conversations = [...(doc.conversations ?? []), mine];
+  }
+  await saveInboxData(kv, person, doc);
+  return { messageId: envelope.id, conversationId };
 }
 
 /** Owner-side message action (mark read / archive). */
