@@ -48,7 +48,7 @@ export default function NamingPage() {
   const [err, setErr] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<NameRow | null>(null);
   // The connected home is deployed but NAMELESS (spec 257 name-deferral, e.g. Google onboarding) → offer
-  // the nameless→named transition right here, then chain into "publish connection".
+  // the nameless→named transition right here. Publishing a connection is a SEPARATE opt-in choice.
   const isNameless = !!agentAddress && agentDeployed && !agentName;
 
   const load = useCallback(async () => {
@@ -80,11 +80,13 @@ export default function NamingPage() {
           agent={agentAddress}
           via={memberVia}
           token={session?.token ?? null}
-          onNamed={(claimedName) => {
+          onNamed={() => {
+            // Spec 280: publishing a connection record (the public name→credential reverse mapping) is
+            // an OPT-IN, owner-authorized, NEVER-automatic action. Claiming a name does NOT prompt it —
+            // the freshly-named agent simply appears below with an OPTIONAL "Publish connection" button
+            // the member can use later by choice.
             void refreshProfile();
             void load();
-            // Chain straight into "publish connection" for the freshly-named agent.
-            setEditFor({ name: claimedName, subjectAgent: agentAddress, registered: false, shaclConforms: true, mine: true, connectionKind: null, connectionAddress: null });
           }}
         />
       )}
@@ -207,7 +209,7 @@ function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
 }
 
 /** Nameless → named (spec 257). Claim a public name for the deployed-but-unnamed home, signed by the
- *  member's current credential, gasless — then `onNamed` chains into the publish-connection step. Reuses
+ *  member's current credential, gasless. Publishing a connection record is a SEPARATE opt-in step. Reuses
  *  the existing `claimName` primitive (which also fires the discovery re-index). */
 function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Via; token: string | null; onNamed: (name: string) => void }) {
   const [value, setValue] = useState('');
