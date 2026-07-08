@@ -1,16 +1,19 @@
 'use client';
 // The WORKSPACE switcher (spec 315) — sits right of the site name in the topbar, ported from the
 // impact home's ContextSwitcher. Lists ONLY the custodial smart agents the connected person is
-// responsible for: you (the person SA), the organizations you steward, and the treasuries you
-// manage. Selecting one scopes the left nav to that agent's actions; switching = navigating (the
-// shell derives the active workspace from the URL). Connected apps are external grants — no
-// custody — and live in the person nav (/apps), never here. Identity (who am I) stays in the
-// top-right chip; this menu answers "where am I acting".
+// responsible for, grouped by the ADR-0046 classification (PROV-O trichotomy): YOU (person), the
+// ORGANIZATIONS you steward, and the SERVICES you manage (treasury is a service ROLE — any future
+// service-class agent lands in the same group). Under each service's name we render its authority
+// lineage — the custody chain it was spawned under (you → treasury vs you → org → treasury) — so
+// a person's service and an org's service read differently at a glance. Selecting a workspace
+// scopes the left nav; switching = navigating (the shell derives the scope from the URL).
+// Connected apps are external grants with no custody — they stay in the person nav (/apps).
 import { useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
-import { parseWorkspacePath, orgHref, treasuryHref } from '../../lib/workspace';
+import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
+import { agentClassOf, serviceRoleOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
 
@@ -25,18 +28,20 @@ export function AgentSwitcher() {
   const { agents } = useManagedAgents(session?.token ?? null);
 
   const active = useMemo(() => parseWorkspacePath(pathname ?? '/'), [pathname]);
-  const orgs = agents.filter((a) => a.kind === 'org');
-  const treasuries = agents.filter((a) => a.kind === 'person-treasury' || a.kind === 'org-treasury');
-  const orgNameFor = (parent: string) => orgs.find((o) => lc(o.agent) === lc(parent))?.name;
+  const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
+  const services = agents.filter((a) => agentClassOf(a.kind) === 'service');
 
   if (!session || !profile) return null;
 
   const personLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
+  const lineageFor = (a: (typeof agents)[number]) =>
+    [...authorityLineage(a, agents, 'you').map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n))), serviceRoleOf(a.kind)].join(' → ');
+
   const activeOrg = active.kind === 'org' ? orgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
-  const activeTreasury = active.kind === 'treasury' ? treasuries.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
+  const activeService = active.kind === 'service' ? services.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
   const triggerName =
     active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
-    : active.kind === 'treasury' ? (activeTreasury?.name ? nameLabel(activeTreasury.name) : short(active.agent))
+    : active.kind === 'service' ? (activeService?.name ? nameLabel(activeService.name) : short(active.agent))
     : personLabel;
   const caption = active.kind === 'person' ? 'acting as you' : 'acting as custodian';
 
@@ -56,7 +61,7 @@ export function AgentSwitcher() {
       {icon}
       <span style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         <span style={{ fontWeight: 600, fontSize: '.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
-        <span style={{ fontSize: '.7rem', opacity: 0.6 }}>{sub}</span>
+        <span style={{ fontSize: '.7rem', opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</span>
       </span>
       {activeRow && <CheckIcon size={15} />}
     </button>
@@ -80,7 +85,7 @@ export function AgentSwitcher() {
           cursor: 'pointer', fontWeight: 400, maxWidth: 260,
         }}
       >
-        {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'treasury' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
+        {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
           <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
             {triggerName}
@@ -95,7 +100,7 @@ export function AgentSwitcher() {
           <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
           <div
             style={{
-              position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 41, width: 290,
+              position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 41, width: 300,
               background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,.12)',
               padding: '.4rem', maxHeight: '70vh', overflowY: 'auto',
             }}
@@ -104,7 +109,7 @@ export function AgentSwitcher() {
             <Row
               icon={<UserIcon size={17} />}
               title={personLabel}
-              sub="your personal home"
+              sub="person · your home"
               activeRow={active.kind === 'person'}
               onClick={() => go('/you')}
             />
@@ -115,26 +120,23 @@ export function AgentSwitcher() {
                 key={o.agent}
                 icon={<BuildingIcon size={17} />}
                 title={o.name ? nameLabel(o.name) : short(o.agent)}
-                sub={o.name ? 'organization · custodied by you' : 'unnamed organization'}
+                sub={`organization · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
                 activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
                 onClick={() => go(orgHref(o.agent, 'overview'))}
               />
             ))}
 
-            {treasuries.length > 0 && heading('Treasuries you manage')}
-            {treasuries.map((t) => {
-              const parentOrg = t.kind === 'org-treasury' ? orgNameFor(t.parent) : undefined;
-              return (
-                <Row
-                  key={t.agent}
-                  icon={<LandmarkIcon size={17} />}
-                  title={t.name ? nameLabel(t.name) : short(t.agent)}
-                  sub={t.kind === 'person-treasury' ? 'personal treasury' : `treasury of ${parentOrg ? nameLabel(parentOrg) : 'an organization'}`}
-                  activeRow={active.kind === 'treasury' && lc(active.agent) === lc(t.agent)}
-                  onClick={() => go(treasuryHref(t.agent))}
-                />
-              );
-            })}
+            {services.length > 0 && heading('Services you manage')}
+            {services.map((t) => (
+              <Row
+                key={t.agent}
+                icon={<LandmarkIcon size={17} />}
+                title={t.name ? nameLabel(t.name) : short(t.agent)}
+                sub={lineageFor(t)}
+                activeRow={active.kind === 'service' && lc(active.agent) === lc(t.agent)}
+                onClick={() => go(serviceHref(t.agent))}
+              />
+            ))}
 
             <div style={{ borderTop: '1px solid #f1f5f9', margin: '.4rem 0' }} />
             <button
@@ -144,7 +146,7 @@ export function AgentSwitcher() {
                 background: 'transparent', border: 'none', color: '#4338ca', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
               }}
             >
-              ＋ Create an organization or treasury
+              ＋ Create an organization or service
             </button>
           </div>
         </>

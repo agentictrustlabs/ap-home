@@ -31,22 +31,31 @@ grant it issued), so the caption is "custodian"/"connected app" rather than a de
 
 ```
 WorkspaceScope = { kind: 'person' }
-              | { kind: 'org';      org: Address }   // /org/<address>/<page>
-              | { kind: 'treasury'; agent: Address } // /treasury/<address>
+              | { kind: 'org';     org: Address }   // /org/<address>/<page>
+              | { kind: 'service'; agent: Address } // /service/<address>
 ```
 
-**A workspace is a CUSTODIAL smart agent** — an SA the connected person controls (person, org,
-treasury, later data-source/service agents). Connected apps are the opposite: external apps the
-person granted access TO, with no custodial rights over them — they are a person-scoped review
-surface (`/apps` in the person nav), never a workspace in the switcher.
+**A workspace is a CUSTODIAL smart agent, grouped by the ADR-0046 classification** (PROV-O's
+trichotomy): Person / Organization / Service. Treasury is a service ROLE, not a class — every
+service-class agent (treasury today; indexer, relay, data-source, … later) shares the Services
+group and the `/service/<sa>` workspace, dispatching on role for its panel. Connected apps are
+the opposite: external apps the person granted access TO, with no custodial rights over them —
+they are a person-scoped review surface (`/apps` in the person nav), never a workspace.
 
 - **Person** — the connected custodian's own home: all of today's nav, including creating
   organizations, treasuries, data sources (spec 275 flows stay person-scoped).
 - **Org** — one of the org SAs the custodian stewards (`listManagedAgents`, kind `org`).
   Nav: Overview (identity + name-it + treasury), Data (vault reads over the stewardship
   delegation), Treasury.
-- **Treasury** — a money agent the custodian manages (`person-treasury` / `org-treasury`).
-  Nav: Overview (balance, funding, naming, host connections).
+- **Service** — a service-class agent the custodian manages (class derived by
+  `agentClassOf(kind)` — app kinds map DOWN to a class, never up). Nav: Overview
+  (role panel — treasury: balance, funding, naming, host connections).
+
+**Authority lineage under each service's name.** The switcher renders the custody chain the
+agent was spawned under — walked through managed-agent `parent` links back to the person —
+so a person's treasury and an org's treasury read differently at a glance:
+`you → treasury` vs `you → acme → treasury`. Most service agents will hang off an
+organization; the lineage is what makes that visible.
 
 ## Enforcement note (mirrors ACTOR-NAV-MODEL §5.6)
 

@@ -3,7 +3,7 @@
 // is always scoped to what the header switcher selected — person / org / connected app.
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import type { WorkspaceScope } from '../../lib/workspace';
-import { orgHref, treasuryHref } from '../../lib/workspace';
+import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
   ChatIcon, HashIcon, GlobeIcon,
@@ -49,13 +49,14 @@ export function buildNav(
       },
     ];
   }
-  // TREASURY workspace: one custodial money agent's actions.
-  if (active.kind === 'treasury') {
+  // SERVICE workspace (ADR-0046): one custodial service-class agent's actions. Role-agnostic —
+  // treasuries today; any future service role joins here with zero IA change.
+  if (active.kind === 'service') {
     return [
       {
-        heading: 'Treasury',
+        heading: 'Service',
         items: [
-          { id: 'treasury-overview', label: 'Overview', href: treasuryHref(active.agent), Icon: LandmarkIcon, status: 'live' },
+          { id: 'service-overview', label: 'Overview', href: serviceHref(active.agent), Icon: LandmarkIcon, status: 'live' },
         ],
       },
     ];
