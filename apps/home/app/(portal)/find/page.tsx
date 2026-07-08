@@ -21,7 +21,9 @@ export default function FindPage() {
   const [nameHits, setNameHits] = useState<AgentSearchHit[] | null>(null);
   const [community, setCommunity] = useState('');
   const [listings, setListings] = useState<Listing[] | null>(null);
-  const [messageTo, setMessageTo] = useState<{ label: string; display: string } | null>(null);
+  // `name` = FULL agent name (KB hits — may live under any parent, e.g. demo.agent);
+  // `label` = bare label under the app's default parent (directory listings).
+  const [messageTo, setMessageTo] = useState<{ name?: string; label?: string; display: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -70,7 +72,11 @@ export default function FindPage() {
       const res = await fetch('/connect/inbox', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
-        body: JSON.stringify({ action: 'send', toLabel: messageTo.label, bodyText: draft }),
+        body: JSON.stringify({
+          action: 'send',
+          ...(messageTo.name ? { toName: messageTo.name } : { toLabel: messageTo.label }),
+          bodyText: draft,
+        }),
       });
       const out = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !out.ok) throw new Error(out.error ?? `send failed (${res.status})`);
@@ -166,7 +172,7 @@ export default function FindPage() {
                     )}
                     <div style={{ fontSize: '0.72rem', opacity: 0.5 }}><code>{h.smartAgent}</code></div>
                   </div>
-                  <button className="btn" onClick={() => setMessageTo({ label: h.label, display: h.displayName ?? h.name })}>
+                  <button className="btn" onClick={() => setMessageTo({ name: h.name, display: h.displayName ?? h.name })}>
                     Message
                   </button>
                 </div>

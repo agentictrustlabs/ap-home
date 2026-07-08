@@ -82,6 +82,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         reason?: string;
         mandate?: InteractionMandateV1;
         toLabel?: string;
+        toName?: string;
         subject?: string;
         bodyText?: string;
         contextRefs?: ContextRefV1[];
@@ -93,9 +94,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (body?.action === 'send') {
       // Composer send (spec 312): recipient by claimed name — one on-chain
       // resolution mechanism; no listing/roster lookup here (ADR-0025).
+      // `toName` is a FULL name (any parent, e.g. alice.demo.agent — what the
+      // KB search returns); `toLabel` is a bare label under the app's default
+      // parent (what directory listings store).
+      const fullName = (body.toName ?? '').trim().toLowerCase();
       const label = (body.toLabel ?? '').trim().toLowerCase();
-      if (!/^[a-z0-9-]{1,63}$/.test(label) || !body.bodyText?.trim()) {
-        return jsonCors({ error: 'toLabel + bodyText required' }, request, 400);
+      const name = /^[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(fullName)
+        ? fullName
+        : /^[a-z0-9-]{1,63}$/.test(label)
+          ? agentNameForLabel(label)
+          : null;
+      if (!name || !body.bodyText?.trim()) {
+        return jsonCors({ error: 'toName (full) or toLabel + bodyText required' }, request, 400);
       }
       const naming = new AgentNamingClient({
         rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
@@ -103,8 +113,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         registry: CONTRACTS.agentNameRegistry,
         universalResolver: CONTRACTS.agentNameUniversalResolver,
       });
-      const recipient = await naming.resolveName(agentNameForLabel(label));
-      if (!recipient) return jsonCors({ error: `no agent claimed the name "${label}"` }, request, 404);
+      const recipient = await naming.resolveName(name);
+      if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
       const out = await sendFromInbox(env.AUTH_CODES, person as Address, {
         recipient,
         subject: body.subject,
