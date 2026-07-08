@@ -1,7 +1,9 @@
 // Portal navigation, derived from the white-label config (manageableAgents drives the
-// "Your agents" group + live/soon status). Generic structure; the vertical decides which
-// agent kinds appear and whether they're live. Imported only by the shell (PortalShell).
+// "Your agents" group + live/soon status) AND the active workspace (spec 315): the left nav
+// is always scoped to what the header switcher selected — person / org / connected app.
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
+import type { WorkspaceScope } from '../../lib/workspace';
+import { orgHref, appHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
   ChatIcon, HashIcon, GlobeIcon,
@@ -28,7 +30,37 @@ const AGENT_META: Record<string, { href: string; Icon: IconComponent }> = {
   'data-source': { href: '/data-sources', Icon: DatabaseIcon },
 };
 
-export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number; inbox?: number } = {}): NavGroup[] {
+export function buildNav(
+  wl: WhiteLabelConfig,
+  badges: { apps?: number; inbox?: number } = {},
+  active: WorkspaceScope = { kind: 'person' },
+): NavGroup[] {
+  // ORG workspace (spec 315): the left nav is that org's actions, URL-scoped under /org/<sa>/….
+  if (active.kind === 'org') {
+    const a = active.org;
+    return [
+      {
+        heading: 'Organization',
+        items: [
+          { id: 'org-overview', label: 'Overview', href: orgHref(a, 'overview'), Icon: BuildingIcon, status: 'live' },
+          { id: 'org-data', label: 'Data', href: orgHref(a, 'data'), Icon: DatabaseIcon, status: 'live' },
+          { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
+        ],
+      },
+    ];
+  }
+  // APP workspace: the grant surface for one connected app.
+  if (active.kind === 'app') {
+    return [
+      {
+        heading: 'Connected app',
+        items: [
+          { id: 'app-overview', label: 'Overview', href: appHref(active.clientId), Icon: LinkIcon, status: 'live' },
+        ],
+      },
+    ];
+  }
+
   const agents = wl.manageableAgents;
   const person = agents.find((a) => a.id === 'person');
   const others = agents.filter((a) => a.id !== 'person');

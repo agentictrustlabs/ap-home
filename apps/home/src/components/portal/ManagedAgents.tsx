@@ -63,7 +63,7 @@ function useUsdcBalance(address?: string, refreshKey?: number): string | null {
   return bal;
 }
 
-function BalanceLine({ address, refreshKey }: { address: string; refreshKey?: number }) {
+export function BalanceLine({ address, refreshKey }: { address: string; refreshKey?: number }) {
   const bal = useUsdcBalance(address, refreshKey);
   return (
     <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>
@@ -250,7 +250,7 @@ export function NameAgentForm({
 /** A treasury card — name (or "unnamed" + name-it slot), address, live balance, explorer, fund action, and
  *  (for NAMED treasuries) a "Connect to hosts" popup that runs the bind → authorize → publish ceremony with
  *  the treasury already selected (spec 283/284). */
-function TreasuryCard({
+export function TreasuryCard({
   name, address, sublabel, nameSlot, person, via, token, refreshKey, onFunded,
 }: {
   name: string; address: string; sublabel?: string; nameSlot?: React.ReactNode;
