@@ -15,7 +15,7 @@ export const DEFAULT_RPC_URL = 'https://sepolia.base.org';
 /** Deployed Base Sepolia contracts. Single source of truth:
  *  `packages/contracts/deployments-base-sepolia.json`, surfaced here via
  *  the `@agenticprimitives/contracts/deployments/base-sepolia` subpath. */
-/** Spec 309 — authority deployment epoch of the contracts this build targets. */
+/** Spec 311 — authority deployment epoch of the contracts this build targets. */
 export const DEPLOYMENT_EPOCH: string | undefined = (DEPLOYED as { deploymentEpoch?: string }).deploymentEpoch;
 
 export const CONTRACTS = {

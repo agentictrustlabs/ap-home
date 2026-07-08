@@ -37,7 +37,7 @@ interface SessionCtx {
   refreshProfile(): Promise<void>;
 }
 
-// Spec 309 — the authority deployment epoch. Mirrors @agenticprimitives/connect-client's
+// Spec 311 — the authority deployment epoch. Mirrors @agenticprimitives/connect-client's
 // checkDeploymentEpoch, inlined here because the HOME is not a relying app and must not pull the
 // relying-client package into its Vercel build. A stored session's id_token `sub` carries the
 // person's OLD-factory SA after a full-reset redeploy; dropping it forces a re-onboard onto the
@@ -240,7 +240,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           setPhase('anon');
           return;
         }
-        // Spec 309 — a full-reset redeploy since this session was minted means its id_token references
+        // Spec 311 — a full-reset redeploy since this session was minted means its id_token references
         // an old-factory SA. Drop the localStorage session (keep the parent cookie for its own home) so
         // the user re-onboards onto the live identity. Only gate the localStorage path (has an epoch).
         if (!fromCookie && epochStale(stored?.deploymentEpoch)) {
