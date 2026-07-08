@@ -134,6 +134,63 @@ export async function isVaultKeyBound(env: Pick<VaultKeyEnv, 'DB'>, owner: strin
   return true;
 }
 
+/**
+ * Spec 311 (server complement to the client deployment-epoch guard) — is the owner's binding
+ * not just PRESENT but CURRENT? A binding's stored authorization binds the DelegationManager as its
+ * EIP-712 `verifyingContract`. After a full-reset redeploy (new DM) that authorization exists in D1
+ * but no longer ERC-1271-verifies against the current DM, so `isVaultKeyBound` (existence-only) returns
+ * true, the client's idempotent activation SKIPS re-binding, and every vault read then fails
+ * `vault_key_unauthorized` forever. This re-runs the SAME signature verify the read path uses, over an
+ * in-scope probe request, so a stale binding surfaces as `bound: false` (+ `stale: true`) and onboarding
+ * re-binds against the live contracts.
+ *
+ * Fail-open ONLY on infra uncertainty: a DEFINITIVE `false` verdict (e.g. digest mismatch vs the new DM)
+ * ⇒ stale ⇒ re-bind; an RPC/verifier ERROR can't determine currency and is treated as bound (the per-read
+ * `authorizePersonVaultOp` fail-closes on the same check if truly stale) — no re-bind storm on a blip.
+ */
+export async function isVaultKeyBindingCurrent(
+  env: VaultKeyEnv,
+  owner: string,
+): Promise<{ bound: boolean; stale: boolean; allowedResources: string[] }> {
+  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+  if (!row) return { bound: false, stale: false, allowedResources: [] };
+  if (row.expires_at && Date.parse(row.expires_at) < Date.now()) {
+    return { bound: false, stale: false, allowedResources: [] };
+  }
+  const binding = bindingFromRow(row);
+  const authorization = delegationFromWire(row.authorization_json);
+  const allowedResources = binding.allowedResources ?? [];
+  try {
+    const verdict = await buildVaultKeyVerifier(env).verify({
+      authorization,
+      binding,
+      request: {
+        vaultId: binding.vaultId,
+        ownerPersonSA: owner,
+        serverId: VAULT_SERVER_ID,
+        resource: allowedResources[0] ?? 'vault:*',
+        op: binding.ops?.[0] ?? 'read',
+        classification: binding.classificationCeiling,
+      },
+      now: new Date(),
+    });
+    if (!verdict.ok) {
+      console.warn(
+        `[vault-key] is-bound: STALE binding owner=${owner} reason=${verdict.reason} — authorization no longer ` +
+          `verifies against the current DelegationManager (likely a full-reset redeploy); re-bind required.`,
+      );
+      return { bound: false, stale: true, allowedResources };
+    }
+    return { bound: true, stale: false, allowedResources };
+  } catch (e) {
+    // Infra/RPC/verifier error — cannot determine currency. Treat as bound: the per-read authorize path
+    // (authorizePersonVaultOp) runs the same verify and fail-closes if the binding is truly stale, so we
+    // don't force a spurious re-bind (which re-provisions a KEK) on a transient RPC blip.
+    console.warn('[vault-key] is-bound currency check errored (treating as bound):', e instanceof Error ? e.message : String(e));
+    return { bound: true, stale: false, allowedResources };
+  }
+}
+
 /** The authorized resource scope of an owner's LIVE binding ([] if none/expired). Lets onboarding detect a
  *  STALE binding (one created before the `vault:*` namespace default) and re-bind to upgrade it — otherwise
  *  the member's app records (`vault:<app>:<type>`) stay `resource_not_authorized` forever. */

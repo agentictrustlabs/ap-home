@@ -35,7 +35,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
@@ -1412,11 +1412,14 @@ app.get('/custody/vault-key/is-bound', async (c) => {
   // Per-owner + state-changing-over-time (a ceremony flips it) ⇒ never cache (a stale 404/false at
   // the edge would make onboarding re-prompt or wrongly skip).
   c.header('Cache-Control', 'no-store');
-  const bound = await isVaultKeyBound(c.env, owner);
-  // Surface the binding's authorized scope so onboarding can detect + re-bind a STALE binding (one that
-  // predates the `vault:*` namespace) instead of skipping activation and leaving app records 401.
-  const allowedResources = bound ? await getVaultKeyAllowedResources(c.env, owner) : [];
-  return c.json({ ok: true, owner, bound, allowedResources });
+  // Spec 311 (server complement) — CURRENCY check, not existence: a binding whose stored authorization
+  // was signed against a previous DelegationManager (a full-reset redeploy) exists but no longer verifies,
+  // so returning bound:true would let the client skip re-binding and every read would 401. This re-runs
+  // the read-path signature verify; a stale binding surfaces as bound:false (+stale:true) → onboarding
+  // re-binds against the live contracts. `stale` is advisory for observability; existing clients that gate
+  // on `bound` re-bind automatically.
+  const { bound, stale, allowedResources } = await isVaultKeyBindingCurrent(c.env, owner);
+  return c.json({ ok: true, owner, bound, stale, allowedResources });
 });
 
 app.get('/custody/vault-key/server-info', (c) =>
