@@ -6,7 +6,6 @@ import { whitelabel } from '../../src/whitelabel/config';
 import { stewardedThings } from '../../src/home/stewardship';
 import { AddressChip } from '../../src/components/shared/AddressChip';
 import { LockIcon } from '../../src/components/shared/Icons';
-import { ClaimPublicNameCard } from '../../src/components/portal/ClaimPublicNameCard';
 
 // Which dedicated page each stewarded area links to (live areas only; spec 275).
 const STEWARD_HREF: Record<string, string | undefined> = {
@@ -38,11 +37,8 @@ export default function HomeDashboard() {
         </div>
       </section>
 
-      {/* spec 257 (greenfield 08) — the deferred, optional, dismissible "Claim your public name"
-          card. With true name-deferral a fresh Google home arrives NAMELESS, so this surfaces the
-          public handle LATER as a desirable choice, not an onboarding gate. Self-hides if dismissed. */}
-      <ClaimPublicNameCard />
-
+      {/* spec 257 — the "Claim your public name" card lives on the Naming Service tab (/naming),
+          not the home page (its ClaimNameCard surfaces the nameless→named choice there). */}
       <section className="dash-section">
         <h2>{whitelabel.copy.portalManageHeading}</h2>
         <div className="manage-grid">

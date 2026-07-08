@@ -10,7 +10,7 @@ import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName } from '../../../src/connect-client';
-import { signHashFor, type Via } from '../../../src/home/onboarding';
+import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding';
 import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
@@ -38,16 +38,12 @@ interface NameRow extends AgentRegistryRow {
   connectionAddress: string | null;
 }
 
-const toViaForSign = (via: string | undefined): Via => {
-  const v = (via ?? '').toLowerCase();
-  if (v === 'wallet') return 'wallet';
-  if (v === 'google') return 'google';
-  if (v === 'youversion') return 'youversion';
-  return 'passkey';
-};
-
 export default function NamingPage() {
-  const { session, agentName, agentAddress, agentDeployed, refreshProfile } = useSession();
+  const { session, profile, agentName, agentAddress, agentDeployed, refreshProfile } = useSession();
+  // Resolve the SIGNING credential from the profile's credential kind (not the cookie's defaulted via):
+  // a Google/YouVersion session's credential is `oidc` → KMS signing, NOT a (nonexistent) passkey.
+  // Without this, a social member's name claim mis-routes to a passkey prompt that times out.
+  const memberVia = resolveVia(profile?.credential as string | undefined, session?.via);
   const [rows, setRows] = useState<NameRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<NameRow | null>(null);
@@ -82,7 +78,7 @@ export default function NamingPage() {
       {isNameless && agentAddress && (
         <ClaimNameCard
           agent={agentAddress}
-          via={toViaForSign(session?.via)}
+          via={memberVia}
           token={session?.token ?? null}
           onNamed={(claimedName) => {
             void refreshProfile();
@@ -127,7 +123,7 @@ export default function NamingPage() {
       {editFor && (
         <PublishPanel
           row={editFor}
-          via={session?.via ?? 'passkey'}
+          via={memberVia}
           name={agentName}
           token={session?.token ?? null}
           onClose={() => setEditFor(null)}
