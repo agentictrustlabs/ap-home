@@ -133,7 +133,15 @@ export interface InboxView {
   /** Envelope metadata the UI needs (sender, subject, refs), keyed by messageId. */
   envelopeMeta: Record<
     string,
-    { from: string; subject?: string; contextRefs?: ContextRefV1[]; signatureSigner?: string; createdAt: string }
+    {
+      from: string;
+      subject?: string;
+      kind: string;
+      interactionId?: string;
+      contextRefs?: ContextRefV1[];
+      signatureSigner?: string;
+      createdAt: string;
+    }
   >;
 }
 
@@ -147,6 +155,8 @@ export async function readInboxView(kv: KV, person: string): Promise<InboxView> 
     envelopeMeta[e.id] = {
       from: e.from,
       subject: e.subject,
+      kind: e.kind,
+      interactionId: e.interactionId,
       contextRefs: e.contextRefs,
       signatureSigner: e.signature?.signer,
       createdAt: e.createdAt,
@@ -357,6 +367,35 @@ export async function sendFromInbox(
   }
   await saveInboxData(kv, person, doc);
   return { messageId: envelope.id, conversationId };
+}
+
+/**
+ * Reply inside an existing conversation (spec 313 Chats). The recipient comes
+ * from the OWNER'S OWN descriptor (never the wire): the other fixed
+ * participant. One mechanism — no label round-trip needed.
+ */
+export async function replyInConversation(
+  kv: KV,
+  person: Address,
+  conversationId: string,
+  bodyText: string,
+): Promise<{ messageId: string; conversationId: string }> {
+  const doc = await loadInboxData(kv, person);
+  const descriptor = (doc.conversations ?? []).find((d) => d.id === conversationId);
+  if (!descriptor) throw new Error('unknown conversation');
+  const me = homeCaip10(person).toLowerCase();
+  const others = descriptor.participants.filter((p) => p.toLowerCase() !== me);
+  if (others.length !== 1) throw new Error('reply requires a two-party conversation');
+  const otherAddr = others[0]!.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
+  if (!otherAddr) throw new Error('counterparty is not an EVM agent');
+  return sendFromInbox(kv, person, {
+    recipient: otherAddr,
+    subject: descriptor.title,
+    bodyText,
+    contextRefs: descriptor.contextRefs as ContextRefV1[] | undefined,
+    conversationId,
+    title: descriptor.title,
+  });
 }
 
 /** Owner-side message action (mark read / archive). */

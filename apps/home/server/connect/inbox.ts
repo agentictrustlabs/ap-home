@@ -20,7 +20,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox } from '../../src/home/inbox-data';
+import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -112,6 +112,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         contextRefs: body.contextRefs,
         conversationId: body.conversationId,
       });
+      return jsonCors({ ok: true, ...out }, request);
+    }
+    if (body?.action === 'reply') {
+      // In-thread chat reply (spec 313): recipient comes from the owner's own
+      // conversation descriptor — never the wire.
+      if (!body.conversationId || !body.bodyText?.trim()) {
+        return jsonCors({ error: 'conversationId + bodyText required' }, request, 400);
+      }
+      const out = await replyInConversation(env.AUTH_CODES, person as Address, body.conversationId, body.bodyText);
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {

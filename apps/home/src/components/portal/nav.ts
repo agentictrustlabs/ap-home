@@ -4,6 +4,7 @@
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon, InboxIcon,
+  ChatIcon, HashIcon, SearchIcon, GlobeIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -45,9 +46,17 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number; inbox?: 
     status: a.status,
   }));
 
+  // Interactions (spec 313): tempo-separated surfaces — Gmail-like triage,
+  // Signal-like chats, Slack-like channels, LinkedIn-like find/networks.
+  const interactions: NavItem[] = [
+    { id: 'inbox', label: 'Inbox', href: '/inbox', Icon: InboxIcon, status: 'live', badge: badges.inbox },
+    { id: 'chats', label: 'Chats', href: '/chats', Icon: ChatIcon, status: 'live' },
+    { id: 'channels', label: 'Channels', href: '/channels', Icon: HashIcon, status: 'live' },
+    { id: 'find', label: 'Find', href: '/find', Icon: SearchIcon, status: 'live' },
+    { id: 'networks', label: 'Networks', href: '/networks', Icon: GlobeIcon, status: 'live' },
+  ];
+
   const portal: NavItem[] = [];
-  // Agentic inbox (spec 310 W3): messages + pending approvals for everything acting in your name.
-  portal.push({ id: 'inbox', label: 'Inbox', href: '/inbox', Icon: InboxIcon, status: 'live', badge: badges.inbox });
   if (wl.services.connectedApps) {
     portal.push({ id: 'apps', label: 'Connected Apps', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
   }
@@ -65,6 +74,7 @@ export function buildNav(wl: WhiteLabelConfig, badges: { apps?: number; inbox?: 
 
   return [
     { items: top },
+    { heading: 'Interactions', items: interactions },
     { heading: 'What you steward', items: yourAgents },
     { heading: 'Your home', items: portal },
   ].filter((g) => g.items.length > 0);

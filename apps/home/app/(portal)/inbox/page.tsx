@@ -1,24 +1,16 @@
 'use client';
-// The agentic inbox — synthesis surface (spec 312 §7, docs/architecture/
-// inbox-ux-synthesis.md): Outlook's triage band + deterministic folders,
-// Slack's conversation-first list + context chips, Signal's signature cues,
-// Diode's vault-residency posture. Approve/Deny buttons feed the interactions
-// state machine through the audited store; they grant nothing — issuance
-// routes through the authority packages.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Inbox (spec 313) — the Gmail-tempo triage surface: pending approvals, typed
+// requests, receipts, and system mail. Pure person↔person chats live in
+// /chats (deterministic partition, spec 313 §2); discovery lives in /find.
+// Approve/Deny feed the interactions state machine through the audited store;
+// they grant nothing — issuance routes through the authority packages.
+import { useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { Address } from '@agenticprimitives/types';
-import type {
-  ContextRefV1,
-  ConversationDescriptorV1,
-  ConversationSummaryV1,
-  FolderSummaryV1,
-  InboxItemV1,
-  MessageEnvelopeV1,
-} from '@agenticprimitives/messaging';
+import type { ContextRefV1, MessageEnvelopeV1 } from '@agenticprimitives/messaging';
 import { generateMessageId, generateConversationId, sha256Hex32 } from '@agenticprimitives/messaging';
-import type { ActionCardV1, InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/interactions';
+import type { ActionCardV1, InteractionCaseV1 } from '@agenticprimitives/interactions';
 import { generateInteractionId } from '@agenticprimitives/interactions';
-import type { HomeInboxSummaryV1 } from '@agenticprimitives/home';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { connectWallet, personalSign } from '../../../src/lib/wallet';
@@ -26,6 +18,7 @@ import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/con
 import { nameLabel } from '../../../src/lib/domain';
 import { homeCaip10 } from '../../../src/home/manifest';
 import { issueMandateForCase } from '../../../src/home/mandate';
+import { useInboxView, shortId } from '../../../src/home/use-inbox';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -37,33 +30,7 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
   return passkeySignHash;
 }
 
-interface EnvelopeMeta {
-  from: string;
-  subject?: string;
-  contextRefs?: ContextRefV1[];
-  signatureSigner?: string;
-  createdAt: string;
-}
-
-interface InboxView {
-  items: InboxItemV1[];
-  folders: FolderSummaryV1[];
-  summary: HomeInboxSummaryV1;
-  cases: InteractionCaseV1[];
-  cards: Record<string, ActionCardV1>;
-  bodies: Record<string, string>;
-  mandates: Record<string, InteractionMandateV1>;
-  conversations: ConversationSummaryV1[];
-  descriptors: Record<string, ConversationDescriptorV1>;
-  envelopeMeta: Record<string, EnvelopeMeta>;
-}
-
 const PENDING_STATES = ['delivered', 'seen', 'triaged'];
-
-const short = (caip: string): string => {
-  const addr = caip.match(/0x[0-9a-fA-F]{40}$/)?.[0];
-  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : caip.slice(0, 18);
-};
 
 function ContextChip({ r, active, onClick }: { r: { kind: string; id: string; label?: string }; active?: boolean; onClick?: () => void }) {
   return (
@@ -80,69 +47,18 @@ function ContextChip({ r, active, onClick }: { r: { kind: string; id: string; la
       }}
       title={`${r.kind}: ${r.id}`}
     >
-      {r.label ?? `${r.kind}:${short(r.id)}`}
+      {r.label ?? `${r.kind}:${shortId(r.id)}`}
     </button>
-  );
-}
-
-function SignatureChip({ meta }: { meta?: EnvelopeMeta }) {
-  if (!meta) return null;
-  return meta.signatureSigner ? (
-    <span style={{ fontSize: '0.72rem', color: '#15803d' }} title={meta.signatureSigner}>
-      ✓ signed by {short(meta.signatureSigner)}
-    </span>
-  ) : (
-    <span style={{ fontSize: '0.72rem', color: '#92400e' }}>⚠ no signature</span>
   );
 }
 
 export default function InboxPage() {
   const { session, agentAddress, agentName } = useSession();
-  const [view, setView] = useState<InboxView | null>(null);
+  const { view, refresh, post, busy, error, setError, inboxConversations } = useInboxView(session);
   const [folder, setFolder] = useState<string>('all');
   const [context, setContext] = useState<{ kind: string; id: string; label?: string } | null>(null);
   const [openConv, setOpenConv] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [composeOpen, setComposeOpen] = useState(false);
-  const [compose, setCompose] = useState({ toLabel: '', subject: '', bodyText: '' });
-  const [dirCommunity, setDirCommunity] = useState('');
-  const [dirListings, setDirListings] = useState<{ label: string; displayName: string }[] | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!session) return;
-    const res = await fetch('/connect/inbox', { headers: { authorization: `Bearer ${session.token}` } });
-    if (res.ok) setView((await res.json()) as InboxView);
-  }, [session]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const post = useCallback(
-    async (body: Record<string, unknown>, key: string) => {
-      if (!session) return false;
-      setBusy(key);
-      setError(null);
-      try {
-        const res = await fetch('/connect/inbox', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
-          body: JSON.stringify(body),
-        });
-        const out = (await res.json()) as { ok?: boolean; error?: string };
-        if (!res.ok || !out.ok) throw new Error(out.error ?? `failed (${res.status})`);
-        await refresh();
-        return true;
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        return false;
-      } finally {
-        setBusy(null);
-      }
-    },
-    [session, refresh],
-  );
+  const [localBusy, setLocalBusy] = useState(false);
 
   // Demo helper: deliver a signed-shape access request to YOURSELF through the
   // full public delivery pipeline (on-chain label check + audited admission).
@@ -152,7 +68,7 @@ export default function InboxPage() {
       setError('Your agent needs a claimed name first — delivery verifies your name resolves to your agent on-chain. Claim a name, then retry.');
       return;
     }
-    setBusy('demo');
+    setLocalBusy(true);
     setError(null);
     try {
       const me = homeCaip10(agentAddress as Address);
@@ -218,77 +134,37 @@ export default function InboxPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(null);
+      setLocalBusy(false);
     }
-  }, [session, agentAddress, agentName, refresh]);
+  }, [session, agentAddress, agentName, refresh, setError]);
 
-  // W5: approving an access-request ISSUES — the person signs a scoped
-  // delegation (the authority) + the mandate that references it, both under
-  // their ROOT credential; the server ERC-1271-verifies before committing.
+  // W5: approving an access-request ISSUES — scoped delegation + mandate,
+  // both signed under the ROOT credential, ERC-1271-verified server-side.
   const approveWithMandate = useCallback(
     async (c: InteractionCaseV1) => {
       if (!session || !agentAddress) return;
-      setBusy(c.id);
+      setLocalBusy(true);
       setError(null);
       try {
         const sign = await signerFor(session.via, agentAddress as Address, session.token);
         const { mandate } = await issueMandateForCase(c, agentAddress as Address, sign);
-        const res = await fetch('/connect/inbox', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
-          body: JSON.stringify({ action: 'transition', transition: 'approve', interactionId: c.id, mandate }),
-        });
-        const out = (await res.json()) as { ok?: boolean; error?: string };
-        if (!res.ok || !out.ok) throw new Error(out.error ?? `failed (${res.status})`);
-        await refresh();
+        await post({ action: 'transition', transition: 'approve', interactionId: c.id, mandate }, c.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setBusy(null);
+        setLocalBusy(false);
       }
     },
-    [session, agentAddress, refresh],
+    [session, agentAddress, post, setError],
   );
-
-  // Directory picker (spec 312 W3): only OPT-IN listings, community-scoped —
-  // there is no roster to browse without one (ADR-0025).
-  const browseDirectory = useCallback(async () => {
-    if (!session || !dirCommunity.trim()) return;
-    setError(null);
-    try {
-      const res = await fetch(`/connect/directory?communityId=${encodeURIComponent(dirCommunity.trim().toLowerCase())}`, {
-        headers: { authorization: `Bearer ${session.token}` },
-      });
-      const out = (await res.json()) as { listings?: { label: string; listing: { displayName: string } }[]; error?: string };
-      if (!res.ok) throw new Error(out.error ?? `lookup failed (${res.status})`);
-      setDirListings((out.listings ?? []).map((l) => ({ label: l.label, displayName: l.listing.displayName })));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [session, dirCommunity]);
-
-  const sendCompose = useCallback(async () => {
-    const ok = await post(
-      { action: 'send', toLabel: compose.toLabel, subject: compose.subject || undefined, bodyText: compose.bodyText },
-      'compose',
-    );
-    if (ok) {
-      setCompose({ toLabel: '', subject: '', bodyText: '' });
-      setComposeOpen(false);
-    }
-  }, [post, compose]);
 
   const pendingCases = useMemo(
     () => (view?.cases ?? []).filter((c) => PENDING_STATES.includes(c.state)),
     [view],
   );
-  const urgentUnread = useMemo(
-    () => (view?.items ?? []).filter((i) => i.unread && (i.priority === 'urgent' || i.priority === 'high') && i.folder !== 'trash'),
-    [view],
-  );
 
   const itemsByConv = useMemo(() => {
-    const map = new Map<string, InboxItemV1[]>();
+    const map = new Map<string, typeof view extends null ? never : NonNullable<typeof view>['items']>();
     for (const i of view?.items ?? []) {
       if (i.folder === 'trash') continue;
       map.set(i.conversationId, [...(map.get(i.conversationId) ?? []), i]);
@@ -297,13 +173,13 @@ export default function InboxPage() {
   }, [view]);
 
   const conversations = useMemo(() => {
-    let rows = view?.conversations ?? [];
+    let rows = inboxConversations;
     if (context) rows = rows.filter((c) => c.contextRefs.some((r) => r.kind === context.kind && r.id === context.id));
-    if (folder !== 'all') {
-      rows = rows.filter((c) => (itemsByConv.get(c.conversationId) ?? []).some((i) => i.folder === folder));
-    }
+    if (folder !== 'all') rows = rows.filter((c) => (itemsByConv.get(c.conversationId) ?? []).some((i) => i.folder === folder));
     return rows;
-  }, [view, context, folder, itemsByConv]);
+  }, [inboxConversations, context, folder, itemsByConv]);
+
+  const anyBusy = busy !== null || localBusy;
 
   if (!session) {
     return (
@@ -316,16 +192,14 @@ export default function InboxPage() {
   return (
     <SectionShell
       title="Inbox"
-      description="Conversations, requests, and everything acting in your name. Approving records a decision — authority is issued separately, on your terms. Bodies stay in your vault; deliveries are audited before they land."
+      description="Requests, approvals, and receipts for everything acting in your name. Approving records a decision — authority is issued separately, on your terms. Person-to-person conversations live in Chats."
     >
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
 
-      {/* ── Needs attention (Outlook focused-triage band) ── */}
-      {(pendingCases.length > 0 || urgentUnread.length > 0) && (
+      {/* ── Needs attention (Gmail/Outlook focused-triage band) ── */}
+      {pendingCases.length > 0 && (
         <div className="dash-section" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 8, padding: '1rem' }}>
-          <h2 style={{ marginTop: 0 }}>
-            Needs attention · {pendingCases.length} pending{urgentUnread.length > 0 ? ` · ${urgentUnread.length} urgent` : ''}
-          </h2>
+          <h2 style={{ marginTop: 0 }}>Needs attention · {pendingCases.length} pending</h2>
           {pendingCases.map((c) => {
             const card = view?.cards[c.id];
             const actions = card?.allowedActions ?? [
@@ -338,7 +212,7 @@ export default function InboxPage() {
                   <div>
                     <b>{card?.title ?? c.subject}</b>
                     <div style={{ fontSize: '0.85rem', opacity: 0.75 }}>
-                      {card?.summary ?? `${c.kind} · from ${short(c.requester)} · state: ${c.state}`}
+                      {card?.summary ?? `${c.kind} · from ${shortId(c.requester)} · state: ${c.state}`}
                     </div>
                     {(c.contextRefs ?? []).length > 0 && (
                       <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
@@ -356,7 +230,7 @@ export default function InboxPage() {
                           key={a.actionId}
                           className="btn"
                           style={a.style === 'destructive' ? { background: '#fee2e2', color: '#b91c1c' } : undefined}
-                          disabled={busy !== null}
+                          disabled={anyBusy}
                           title={issues ? 'Signs a scoped delegation + mandate (two prompts)' : undefined}
                           onClick={() =>
                             issues
@@ -376,82 +250,14 @@ export default function InboxPage() {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
       <div className="dash-section" style={{ marginTop: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h2>Conversations{view?.summary ? ` · ${view.summary.unreadTotal} unread` : ''}</h2>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="btn" onClick={() => setComposeOpen((v) => !v)} disabled={busy !== null}>
-              {composeOpen ? 'Close composer' : 'New message'}
-            </button>
-            <button className="btn" onClick={() => void sendDemoRequest()} disabled={busy !== null}>
-              {busy === 'demo' ? 'Delivering…' : 'Send yourself a demo request'}
-            </button>
-          </div>
+          <h2>Mail{view?.summary ? ` · ${view.summary.unreadTotal} unread` : ''}</h2>
+          <button className="btn" onClick={() => void sendDemoRequest()} disabled={anyBusy}>
+            {localBusy ? 'Delivering…' : 'Send yourself a demo request'}
+          </button>
         </div>
 
-        {/* ── Composer (directory picker lands in W3; name-addressed today) ── */}
-        {composeOpen && (
-          <div style={{ margin: '0.75rem 0', padding: '1rem', border: '1px solid #e5e7eb', borderRadius: 8, display: 'grid', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                placeholder="Find people: community id (opt-in listings only)"
-                value={dirCommunity}
-                onChange={(e) => setDirCommunity(e.target.value)}
-                style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, flex: 1, minWidth: 220 }}
-              />
-              <button className="btn" disabled={!dirCommunity.trim()} onClick={() => void browseDirectory()}>
-                Browse directory
-              </button>
-            </div>
-            {dirListings !== null && (
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                {dirListings.length === 0 ? (
-                  <span style={{ fontSize: '0.8rem', opacity: 0.65 }}>
-                    No one has opted in to this community&apos;s directory yet.
-                  </span>
-                ) : (
-                  dirListings.map((l) => (
-                    <button
-                      key={l.label}
-                      className="btn"
-                      style={{ fontSize: '0.78rem' }}
-                      onClick={() => setCompose((c) => ({ ...c, toLabel: l.label }))}
-                    >
-                      {l.displayName} ({l.label})
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-            <input
-              placeholder="To (their claimed name, e.g. sarah)"
-              value={compose.toLabel}
-              onChange={(e) => setCompose((c) => ({ ...c, toLabel: e.target.value }))}
-              style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
-            />
-            <input
-              placeholder="Subject (optional)"
-              value={compose.subject}
-              onChange={(e) => setCompose((c) => ({ ...c, subject: e.target.value }))}
-              style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
-            />
-            <textarea
-              placeholder="Message — stays in the recipient's vault, delivered through audited admission."
-              value={compose.bodyText}
-              onChange={(e) => setCompose((c) => ({ ...c, bodyText: e.target.value }))}
-              rows={4}
-              style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
-            />
-            <div>
-              <button className="btn" disabled={busy !== null || !compose.toLabel.trim() || !compose.bodyText.trim()} onClick={() => void sendCompose()}>
-                {busy === 'compose' ? 'Sending…' : 'Send'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Filter row: folders + active context chip ── */}
         <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0', flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn" style={folder === 'all' ? { fontWeight: 700 } : undefined} onClick={() => setFolder('all')}>
             All
@@ -471,17 +277,14 @@ export default function InboxPage() {
           )}
         </div>
 
-        {/* ── Conversation-first list (Slack) ── */}
         {conversations.length === 0 ? (
           <p style={{ opacity: 0.7 }}>
-            Nothing here yet. Start one with New message, or deliveries land via <code>/connect/inbox/deliver</code>.
+            No mail. Chats live in <Link href="/chats">Chats</Link>; find people in <Link href="/find">Find</Link>.
+            External deliveries land via <code>/connect/inbox/deliver</code>.
           </p>
         ) : (
           conversations.map((conv) => {
-            const descriptor = view?.descriptors[conv.conversationId];
-            const convItems = (itemsByConv.get(conv.conversationId) ?? []).filter(
-              (i) => folder === 'all' || i.folder === folder,
-            );
+            const convItems = (itemsByConv.get(conv.conversationId) ?? []).filter((i) => folder === 'all' || i.folder === folder);
             const isOpen = openConv === conv.conversationId;
             const newest = convItems[0];
             const newestMeta = newest ? view?.envelopeMeta[newest.messageId] : undefined;
@@ -494,7 +297,7 @@ export default function InboxPage() {
                   <div>
                     <span style={{ fontWeight: conv.unread > 0 ? 700 : 400 }}>
                       {conv.unread > 0 && <span style={{ color: '#4338ca' }}>● </span>}
-                      {descriptor?.title ?? newestMeta?.subject ?? `Conversation with ${newestMeta ? short(newestMeta.from) : '…'}`}
+                      {view?.descriptors[conv.conversationId]?.title ?? newestMeta?.subject ?? `From ${newestMeta ? shortId(newestMeta.from) : '…'}`}
                     </span>
                     <span style={{ fontSize: '0.8rem', opacity: 0.65 }}>
                       {' '}· {conv.messageCount} message{conv.messageCount === 1 ? '' : 's'}
@@ -515,7 +318,6 @@ export default function InboxPage() {
                   <div style={{ fontSize: '0.8rem', opacity: 0.65 }}>{new Date(conv.lastEventAt).toLocaleString()}</div>
                 </div>
 
-                {/* ── Conversation view: messages + signature chips (Signal) ── */}
                 {isOpen && (
                   <div style={{ padding: '0 0 0.75rem 1rem', display: 'grid', gap: '0.5rem' }}>
                     {[...convItems].reverse().map((i) => {
@@ -525,10 +327,16 @@ export default function InboxPage() {
                         <div key={i.messageId} style={{ padding: '0.6rem 0.8rem', background: i.folder === 'sent' ? '#f0fdf4' : '#f8fafc', borderRadius: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                              {i.folder === 'sent' ? 'You' : meta ? short(meta.from) : i.messageId}
+                              {i.folder === 'sent' ? 'You' : meta ? shortId(meta.from) : i.messageId}
                             </span>
                             <span style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
-                              <SignatureChip meta={meta} />
+                              {meta?.signatureSigner ? (
+                                <span style={{ fontSize: '0.72rem', color: '#15803d' }} title={meta.signatureSigner}>
+                                  ✓ signed by {shortId(meta.signatureSigner)}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '0.72rem', color: '#92400e' }}>⚠ no signature</span>
+                              )}
                               <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>{new Date(i.lastEventAt).toLocaleString()}</span>
                             </span>
                           </div>
@@ -537,12 +345,12 @@ export default function InboxPage() {
                           </div>
                           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem' }}>
                             {i.unread && (
-                              <button className="btn" style={{ fontSize: '0.75rem' }} disabled={busy !== null} onClick={() => void post({ action: 'read', messageId: i.messageId }, i.messageId)}>
+                              <button className="btn" style={{ fontSize: '0.75rem' }} disabled={anyBusy} onClick={() => void post({ action: 'read', messageId: i.messageId }, i.messageId)}>
                                 Mark read
                               </button>
                             )}
                             {i.folder !== 'archive' && i.folder !== 'sent' && (
-                              <button className="btn" style={{ fontSize: '0.75rem' }} disabled={busy !== null} onClick={() => void post({ action: 'archive', messageId: i.messageId }, i.messageId)}>
+                              <button className="btn" style={{ fontSize: '0.75rem' }} disabled={anyBusy} onClick={() => void post({ action: 'archive', messageId: i.messageId }, i.messageId)}>
                                 Archive
                               </button>
                             )}
@@ -551,7 +359,7 @@ export default function InboxPage() {
                       );
                     })}
                     <div style={{ fontSize: '0.72rem', opacity: 0.55 }}>
-                      Bodies are vault-resident; every admission and decision is audit-backed. Reply from New message with the sender&apos;s name.
+                      Bodies are vault-resident; every admission and decision is audit-backed.
                     </div>
                   </div>
                 )}

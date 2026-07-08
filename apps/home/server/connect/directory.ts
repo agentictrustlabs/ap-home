@@ -7,10 +7,14 @@
 //
 // ADR-0025 gates, fail-closed:
 //   1. structural validation (validateDirectoryListing — subject-signed shape)
-//   2. subject MUST be the session person (you can only list yourself)
-//   3. ERC-1271 over the RE-DERIVED digest against the subject SA
-//   4. subject must have a claimed on-chain name (delivery needs a label);
+//   2. ERC-1271 over the RE-DERIVED digest against the SUBJECT SA — a person
+//      lists themself; a steward lists an ORG only because their root
+//      credential controls the org SA (spec 313 §4). A signature that does not
+//      verify against the subject can never be indexed.
+//   3. subject must have a claimed on-chain name (delivery needs a label);
 //      the label is resolved server-side and stored alongside the listing.
+//   4. revoke: self-listings by session; org listings revoke by re-publishing
+//      with an immediate expiry (same signature gate as publish).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -90,12 +94,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const listing = body.listing;
     const errors = validateDirectoryListing(listing);
     if (errors.length > 0) return jsonCors({ error: `invalid listing: ${errors.join(', ')}` }, request, 400);
-    const me = homeCaip10(person as Address);
-    if (listing.subject.toLowerCase() !== me.toLowerCase()) {
-      return jsonCors({ error: 'you can only publish a listing for your own agent' }, request, 403);
-    }
+    const subjectAddr = listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() as Address | undefined;
+    if (!subjectAddr) return jsonCors({ error: 'listing subject must be an EVM agent' }, request, 400);
 
-    // ERC-1271 over the re-derived digest — never a client-supplied digest.
+    // ERC-1271 over the re-derived digest against the SUBJECT SA — never a
+    // client-supplied digest, never a different account (spec 313 §4).
     const { proof, ...draft } = listing;
     const digest = await listingDigest(draft);
     const accounts = new AgentAccountClient({
@@ -106,11 +109,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     let verified = false;
     try {
-      verified = await accounts.isValidSignature(person as Address, digest, proof.signature as Hex);
+      verified = await accounts.isValidSignature(subjectAddr, digest, proof.signature as Hex);
     } catch {
       verified = false;
     }
-    if (!verified) return jsonCors({ error: 'listing signature failed ERC-1271 verification' }, request, 403);
+    if (!verified) return jsonCors({ error: 'listing signature failed ERC-1271 verification against the subject agent' }, request, 403);
 
     // Delivery is name-addressed — a listing without a claimed name is unreachable.
     const naming = new AgentNamingClient({
@@ -119,12 +122,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       registry: CONTRACTS.agentNameRegistry,
       universalResolver: CONTRACTS.agentNameUniversalResolver,
     });
-    const name = await naming.reverseResolve(person as Address);
+    const name = await naming.reverseResolve(subjectAddr);
     if (!name) return jsonCors({ error: 'claim a name first — directory entries are name-addressed' }, request, 409);
 
     const communityId = listing.context.id.trim().toLowerCase();
     const rows = (await readIndex(env, communityId)).filter(
-      (l) => l.listing.subject.toLowerCase() !== me.toLowerCase(),
+      (l) => l.listing.subject.toLowerCase() !== listing.subject.toLowerCase(),
     );
     rows.push({ listing, label: nameLabel(name) });
     await env.AUTH_CODES.put(KEY(communityId), JSON.stringify(rows));

@@ -16,9 +16,14 @@ export async function listingDigest(draft: ListingUnsigned): Promise<Hex> {
   return sha256Hex32(canonicalizeMessage(draft));
 }
 
-/** Build + sign a listing for a community context under the person's SA. */
+/**
+ * Build + sign a listing. `subject` defaults to the signer's own SA; a steward
+ * may pass their ORG's address (spec 313 Networks) — the server verifies the
+ * signature against the SUBJECT SA, so this only works when the signing
+ * credential actually controls that account.
+ */
 export async function issueDirectoryListing(
-  person: Address,
+  signerAgent: Address,
   signHash: SignHash,
   opts: {
     communityId: string;
@@ -26,20 +31,23 @@ export async function issueDirectoryListing(
     displayName: string;
     roles?: string[];
     validityDays?: number;
+    subject?: Address;
+    contextKind?: string;
+    visibility?: 'community' | 'public';
   },
 ): Promise<DirectoryListingV1> {
-  const me = homeCaip10(person);
+  const subject = homeCaip10(opts.subject ?? signerAgent);
   const now = Date.now();
   const draft: ListingUnsigned = {
     type: 'ap.home.directory-listing.v1',
-    subject: me,
-    context: { kind: 'community', id: opts.communityId, label: opts.communityLabel },
+    subject,
+    context: { kind: opts.contextKind ?? 'community', id: opts.communityId, label: opts.communityLabel },
     displayName: opts.displayName,
     roles: opts.roles,
-    visibility: 'community',
+    visibility: opts.visibility ?? 'community',
     publishedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (opts.validityDays ?? 180) * 86_400_000).toISOString(),
   };
   const signature = await signHash(await listingDigest(draft));
-  return { ...draft, proof: { signer: me, scheme: 'erc1271', signature } };
+  return { ...draft, proof: { signer: subject, scheme: 'erc1271', signature } };
 }

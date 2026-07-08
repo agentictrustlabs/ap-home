@@ -1,0 +1,109 @@
+'use client';
+// Shared client state for the Interactions surfaces (spec 313): one fetch of
+// the owner's inbox view + one POST helper, used by Inbox and Chats. The
+// chat/inbox partition is DETERMINISTIC (spec 313 §2): a conversation is a
+// chat iff none of its messages carries an interactionId and all are 'plain'.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  ContextRefV1,
+  ConversationDescriptorV1,
+  ConversationSummaryV1,
+  FolderSummaryV1,
+  InboxItemV1,
+} from '@agenticprimitives/messaging';
+import type { ActionCardV1, InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/interactions';
+import type { HomeInboxSummaryV1 } from '@agenticprimitives/home';
+
+export interface EnvelopeMeta {
+  from: string;
+  subject?: string;
+  kind: string;
+  interactionId?: string;
+  contextRefs?: ContextRefV1[];
+  signatureSigner?: string;
+  createdAt: string;
+}
+
+export interface InboxView {
+  items: InboxItemV1[];
+  folders: FolderSummaryV1[];
+  summary: HomeInboxSummaryV1;
+  cases: InteractionCaseV1[];
+  cards: Record<string, ActionCardV1>;
+  bodies: Record<string, string>;
+  mandates: Record<string, InteractionMandateV1>;
+  conversations: ConversationSummaryV1[];
+  descriptors: Record<string, ConversationDescriptorV1>;
+  envelopeMeta: Record<string, EnvelopeMeta>;
+}
+
+export function useInboxView(session: { token: string } | null) {
+  const [view, setView] = useState<InboxView | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!session) return;
+    const res = await fetch('/connect/inbox', { headers: { authorization: `Bearer ${session.token}` } });
+    if (res.ok) setView((await res.json()) as InboxView);
+  }, [session]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const post = useCallback(
+    async (body: Record<string, unknown>, key: string): Promise<boolean> => {
+      if (!session) return false;
+      setBusy(key);
+      setError(null);
+      try {
+        const res = await fetch('/connect/inbox', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+          body: JSON.stringify(body),
+        });
+        const out = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !out.ok) throw new Error(out.error ?? `failed (${res.status})`);
+        await refresh();
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return false;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [session, refresh],
+  );
+
+  /** Deterministic chat test (spec 313 §2). */
+  const isChat = useCallback(
+    (conversationId: string): boolean => {
+      if (!view) return false;
+      const items = view.items.filter((i) => i.conversationId === conversationId);
+      if (items.length === 0) return false;
+      return items.every((i) => {
+        const meta = view.envelopeMeta[i.messageId];
+        return !i.interactionId && (meta ? meta.kind === 'plain' : true);
+      });
+    },
+    [view],
+  );
+
+  const chatConversations = useMemo(
+    () => (view?.conversations ?? []).filter((c) => isChat(c.conversationId)),
+    [view, isChat],
+  );
+  const inboxConversations = useMemo(
+    () => (view?.conversations ?? []).filter((c) => !isChat(c.conversationId)),
+    [view, isChat],
+  );
+
+  return { view, refresh, post, busy, error, setError, chatConversations, inboxConversations };
+}
+
+export const shortId = (caip: string): string => {
+  const addr = caip.match(/0x[0-9a-fA-F]{40}$/)?.[0];
+  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : caip.slice(0, 18);
+};
