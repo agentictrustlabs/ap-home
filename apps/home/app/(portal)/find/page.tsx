@@ -8,8 +8,8 @@ import Link from 'next/link';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
+import { searchAgentsKb, type AgentSearchHit } from '../../../src/lib/agent-search';
 
-interface NameHit { exists: boolean; name: string; agent?: string }
 interface Listing { label: string; listing: { displayName: string; roles?: string[]; subject: string } }
 
 export default function FindPage() {
@@ -18,7 +18,7 @@ export default function FindPage() {
   const orgs = agents.filter((a) => a.kind === 'org');
 
   const [nameQuery, setNameQuery] = useState('');
-  const [nameHit, setNameHit] = useState<NameHit | null>(null);
+  const [nameHits, setNameHits] = useState<AgentSearchHit[] | null>(null);
   const [community, setCommunity] = useState('');
   const [listings, setListings] = useState<Listing[] | null>(null);
   const [messageTo, setMessageTo] = useState<{ label: string; display: string } | null>(null);
@@ -27,16 +27,15 @@ export default function FindPage() {
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Spec 314 W2 — partial match against the discovery knowledge base (the KB the
+  // indexer keeps current from on-chain events). One mechanism; no chain fallback.
   const lookupName = useCallback(async () => {
     if (!nameQuery.trim()) return;
     setBusy(true);
     setError(null);
-    setNameHit(null);
+    setNameHits(null);
     try {
-      const res = await fetch(`/connect/name-info?name=${encodeURIComponent(nameQuery.trim().toLowerCase())}`);
-      const out = (await res.json()) as NameHit & { error?: string };
-      if (!res.ok) throw new Error(out.error ?? `lookup failed (${res.status})`);
-      setNameHit(out);
+      setNameHits(await searchAgentsKb(nameQuery.trim().toLowerCase()));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -130,31 +129,48 @@ export default function FindPage() {
       )}
 
       <div className="dash-section" style={{ marginTop: '1rem' }}>
-        <h2>By exact name</h2>
+        <h2>By name</h2>
+        <p style={{ fontSize: '0.85rem', opacity: 0.75 }}>
+          Partial match over the knowledge base — the graph the indexer keeps current from on-chain
+          naming, profile, and registry facts. Matches names, display names, descriptions, and skills.
+        </p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <input
-            placeholder="Agent name (e.g. sarah)"
+            placeholder="Any part of a name, e.g. sar"
             value={nameQuery}
             onChange={(e) => setNameQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void lookupName(); }}
             style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, flex: 1, minWidth: 220 }}
           />
-          <button className="btn" disabled={busy || !nameQuery.trim()} onClick={() => void lookupName()}>Look up</button>
+          <button className="btn" disabled={busy || !nameQuery.trim()} onClick={() => void lookupName()}>Search</button>
         </div>
-        {nameHit && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-            {nameHit.exists ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div>
-                  <b>{nameHit.name}</b>
-                  <div style={{ fontSize: '0.8rem', opacity: 0.65 }}><code>{nameHit.agent}</code></div>
-                </div>
-                <button className="btn" onClick={() => setMessageTo({ label: nameQuery.trim().toLowerCase(), display: nameHit.name })}>
-                  Message
-                </button>
-              </div>
+        {nameHits !== null && (
+          <div style={{ marginTop: '0.75rem' }}>
+            {nameHits.length === 0 ? (
+              <span style={{ opacity: 0.7 }}>No indexed agent matches “{nameQuery.trim()}”. Newly claimed names appear within a minute.</span>
             ) : (
-              <span style={{ opacity: 0.7 }}>No agent has claimed “{nameHit.name}”.</span>
+              nameHits.map((h) => (
+                <div key={h.smartAgent} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.6rem 0', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div>
+                    <b>{h.displayName ?? h.name}</b>{' '}
+                    <span style={{ opacity: 0.6, fontSize: '0.85rem' }}>({h.name})</span>
+                    {h.registryStatus && (
+                      <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', color: '#15803d', background: '#f0fdf4', borderRadius: 999, padding: '0.1rem 0.5rem' }}>
+                        {h.registryStatus}
+                      </span>
+                    )}
+                    {(h.description || h.skills) && (
+                      <div style={{ fontSize: '0.78rem', opacity: 0.65 }}>
+                        {[h.description, h.skills].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '0.72rem', opacity: 0.5 }}><code>{h.smartAgent}</code></div>
+                  </div>
+                  <button className="btn" onClick={() => setMessageTo({ label: h.label, display: h.displayName ?? h.name })}>
+                    Message
+                  </button>
+                </div>
+              ))
             )}
           </div>
         )}

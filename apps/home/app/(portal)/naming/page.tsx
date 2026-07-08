@@ -10,6 +10,7 @@ import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName } from '../../../src/connect-client';
+import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../src/lib/name-properties';
 import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding';
 import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
@@ -47,6 +48,7 @@ export default function NamingPage() {
   const [rows, setRows] = useState<NameRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<NameRow | null>(null);
+  const [propsFor, setPropsFor] = useState<NameRow | null>(null);
   // The connected home is deployed but NAMELESS (spec 257 name-deferral, e.g. Google onboarding) → offer
   // the nameless→named transition right here. Publishing a connection is a SEPARATE opt-in choice.
   const isNameless = !!agentAddress && agentDeployed && !agentName;
@@ -114,6 +116,7 @@ export default function NamingPage() {
                     {r.connectionKind
                       ? <span style={BADGE}>● connect: {r.connectionKind}{r.connectionAddress ? ` · ${shortAddr(r.connectionAddress)}` : ''}</span>
                       : <span style={NEUTRAL}>no connection published</span>}
+                    <button style={btnSty} onClick={() => setPropsFor(r)}>Properties</button>
                     <button style={btnPrimarySty} onClick={() => setEditFor(r)}>{r.connectionKind ? 'Update' : 'Publish connection'}</button>
                   </div>
                 </div>
@@ -132,7 +135,119 @@ export default function NamingPage() {
           onDone={() => { setEditFor(null); void load(); }}
         />
       )}
+
+      {propsFor && (
+        <PropertiesPanel
+          row={propsFor}
+          via={memberVia}
+          token={session?.token ?? null}
+          onClose={() => setPropsFor(null)}
+        />
+      )}
     </SectionShell>
+  );
+}
+
+/** SHACL property manager (spec 314 W3). Edits the ontology-registered naming records — the same
+ *  attribute store the discovery indexer projects into the knowledge base. Validation happens twice:
+ *  the TS mirror (`encodeRecords`) before any prompt, and the on-chain `OntologyTermRegistry` at write.
+ *  One batched, sponsored userOp by the name's own SA; the KB re-indexes within seconds. */
+function PropertiesPanel({ row, via: viaStr, token, onClose }: {
+  row: NameRow; via: string; token: string | null; onClose: () => void;
+}) {
+  const via: Via = viaStr.toLowerCase() === 'wallet' ? 'wallet' : viaStr.toLowerCase() === 'google' ? 'google' : viaStr.toLowerCase() === 'youversion' ? 'youversion' : 'passkey';
+  const [current, setCurrent] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
+  const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
+  const [system, setSystem] = useState<{ addr?: string; agentKind?: string }>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readNameRecords(row.name!)
+      .then((r) => {
+        if (cancelled) return;
+        const cur: Partial<Record<EditablePropKey, string>> = {};
+        for (const { key } of EDITABLE_PROPS) { const v = r[key]; if (typeof v === 'string') cur[key] = v; }
+        setCurrent(cur);
+        setDraft(cur);
+        setSystem({ addr: r.addr, agentKind: r.agentKind });
+      })
+      .catch((e) => { if (!cancelled) setError(String((e as Error)?.message ?? e)); });
+    return () => { cancelled = true; };
+  }, [row.name]);
+
+  const changes: Partial<Record<EditablePropKey, string>> = {};
+  if (current) {
+    for (const { key } of EDITABLE_PROPS) {
+      const d = (draft[key] ?? '').trim();
+      const c = (current[key] ?? '').trim();
+      if (d !== c) changes[key] = d;
+    }
+  }
+  const dirty = Object.keys(changes).length > 0;
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const signHash = await signHashFor(via, row.subjectAgent, token ? { token } : undefined);
+      const res = await writeNameProperties(row.subjectAgent, row.name!, changes, signHash);
+      if (res.ok) setDone(true);
+      else setError(res.error);
+    } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }} onClick={busy ? undefined : onClose}>
+      <div style={{ ...cardSty, maxWidth: 600, width: '100%', padding: '1.5rem', boxShadow: '0 24px 60px rgba(15,23,42,.35)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Properties of {row.name}</h3>
+        <p style={{ fontSize: '.82rem', color: '#475569', marginTop: 0 }}>
+          These are the SHACL-registered records on the naming service — every write is validated against
+          the on-chain ontology and indexed into the knowledge base, so search and discovery see it within
+          seconds. Public by nature.
+        </p>
+        {done ? (
+          <>
+            <p style={{ fontSize: '.9rem', color: '#047857' }}><strong>Saved ✓</strong> — the knowledge base is re-indexing {row.name}.</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}><button style={btnPrimarySty} onClick={onClose}>Done</button></div>
+          </>
+        ) : !current && !error ? (
+          <p style={{ color: '#64748b' }}>Reading current records…</p>
+        ) : (
+          <>
+            {current && (
+              <div style={{ display: 'grid', gap: '.7rem', margin: '.8rem 0' }}>
+                {EDITABLE_PROPS.map(({ key, label, hint }) => (
+                  <label key={key} style={{ display: 'grid', gap: '.2rem', fontSize: '.82rem', color: '#334155' }}>
+                    <span style={{ fontWeight: 700 }}>{label}</span>
+                    <input
+                      value={draft[key] ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                      placeholder={hint}
+                      style={{ padding: '.5rem .7rem', borderRadius: 8, border: '1.5px solid #cbd5e1', font: 'inherit' }}
+                    />
+                  </label>
+                ))}
+                <div style={{ fontSize: '.76rem', color: '#64748b' }}>
+                  System records (managed by their own ceremonies):{' '}
+                  <span style={mono}>addr {system.addr ? shortAddr(system.addr) : '—'}</span>
+                  {' · '}<span style={mono}>agentKind {system.agentKind ?? '—'}</span>
+                </div>
+              </div>
+            )}
+            {error && <p style={{ fontSize: '.82rem', color: '#b91c1c' }}>{error}</p>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
+              <button style={btnSty} onClick={onClose} disabled={busy}>Cancel</button>
+              <button style={btnPrimarySty} onClick={save} disabled={busy || !dirty || !current}>
+                {busy ? 'Signing…' : `Sign & save${dirty ? ` (${Object.keys(changes).length})` : ''}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
