@@ -10,8 +10,8 @@ import type {
   ConversationSummaryV1,
   FolderSummaryV1,
   InboxItemV1,
-} from '@agenticprimitives/messaging';
-import type { ActionCardV1, InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/interactions';
+} from '@agenticprimitives/fabric/messaging';
+import type { ActionCardV1, InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/fabric/interactions';
 import type { HomeInboxSummaryV1 } from '@agenticprimitives/home';
 
 export interface EnvelopeMeta {

@@ -11,8 +11,8 @@ import {
   encodeTimestampTerms,
   encodeValueTerms,
 } from '@agenticprimitives/delegation';
-import type { InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/interactions';
-import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/messaging';
+import type { InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/fabric/interactions';
+import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/fabric/messaging';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { CONTRACTS } from '../lib/chain';
 import { issueScopedDelegation, toWire, type DelegationWire } from '../lib/delegation';

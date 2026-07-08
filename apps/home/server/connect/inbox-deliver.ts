@@ -6,8 +6,8 @@
 // Admission is the packages' audited fail-closed pipeline (validate → body-hash
 // → audit-accept → commit; case submit/admit transitions audited the same way).
 // A message is never authority — nothing here grants anything (spec 309 §4).
-import type { ConversationDescriptorV1, MessageEnvelopeV1 } from '@agenticprimitives/messaging';
-import type { ActionCardV1, InteractionCaseV1 } from '@agenticprimitives/interactions';
+import type { ConversationDescriptorV1, MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
+import type { ActionCardV1, InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 import type { FnContext } from '../_lib/server-broker';

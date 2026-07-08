@@ -15,7 +15,7 @@
 // admissions are audit-backed fail-closed inside src/home/inbox-data.ts.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import type { InteractionMandateV1, InteractionTransitionType } from '@agenticprimitives/interactions';
+import type { InteractionMandateV1, InteractionTransitionType } from '@agenticprimitives/fabric/interactions';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -25,7 +25,7 @@ import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { agentNameForLabel } from '../../src/lib/domain';
-import type { ContextRefV1 } from '@agenticprimitives/messaging';
+import type { ContextRefV1 } from '@agenticprimitives/fabric/messaging';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';

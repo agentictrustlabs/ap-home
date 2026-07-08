@@ -8,7 +8,7 @@
 // separate destinations — different objects, not 1:1 messaging.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import type { InteractionCaseV1 } from '@agenticprimitives/interactions';
+import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { connectWallet, personalSign } from '../../../src/lib/wallet';

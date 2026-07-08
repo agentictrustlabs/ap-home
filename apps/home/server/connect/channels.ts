@@ -22,7 +22,7 @@ import {
   validateMessageEnvelope,
   type ConversationDescriptorV1,
   type MessageEnvelopeV1,
-} from '@agenticprimitives/messaging';
+} from '@agenticprimitives/fabric/messaging';
 import { isListingCurrent } from '@agenticprimitives/home';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';

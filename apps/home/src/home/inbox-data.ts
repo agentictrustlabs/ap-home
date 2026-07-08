@@ -21,7 +21,7 @@ import {
   type InboxProjector,
   type MessageEnvelopeV1,
   type MessageEventV1,
-} from '@agenticprimitives/messaging';
+} from '@agenticprimitives/fabric/messaging';
 import {
   createAuditedInteractionStore,
   createInMemoryInteractionStore,
@@ -33,7 +33,7 @@ import {
   type InteractionStore,
   type InteractionTransitionEventV1,
   type InteractionTransitionType,
-} from '@agenticprimitives/interactions';
+} from '@agenticprimitives/fabric/interactions';
 import { projectHomeInboxSummary, type HomeInboxSummaryV1 } from '@agenticprimitives/home';
 import type { AuditEvent, AuditSink } from '@agenticprimitives/audit';
 import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
@@ -306,7 +306,7 @@ export async function sendFromInbox(
   const me = homeCaip10(person);
   const them = homeCaip10(opts.recipient);
   const now = new Date().toISOString();
-  const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/messaging');
+  const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
   const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
   const envelope: MessageEnvelopeV1 = {
     version: 'ap.message.v1',
