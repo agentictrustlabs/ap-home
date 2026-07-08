@@ -34,6 +34,14 @@ proxies selected MCP requests during local demos.
 pnpm --filter @agenticprimitives-demo/a2a typecheck
 ```
 
+## Deploy — NEVER bare `wrangler deploy`
+
+Deploy ONLY via `pnpm deploy:cloudflare` (repo root). The wrangler.toml production vars are
+fail-closed placeholders (`ALLOWED_ORIGINS=""`, `MCP_URL=""`); the script injects the real values
+via `--var` (plus PAYMASTER, BROKER_ISS/JWKS, edge flags, KMS backend). A bare
+`wrangler deploy --env production` wipes them → every browser POST fails CSRF with 403
+(2026-07-07 incident; fixed by `wrangler rollback`).
+
 ## Generated Files
 
 `.wrangler/`, `dist/`, `node_modules/`.
