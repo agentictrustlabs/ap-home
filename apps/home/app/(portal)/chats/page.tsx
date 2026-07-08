@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { useInboxView, shortId } from '../../../src/home/use-inbox';
+import { useInboxView, agentLabel } from '../../../src/home/use-inbox';
 
 export default function ChatsPage() {
   const { session, agentName } = useSession();
@@ -26,11 +26,18 @@ export default function ChatsPage() {
   }, [view, activeId]);
 
   const counterpartyName = (conversationId: string): string => {
+    // Prefer the resolved agent NAME of the other participant; then the
+    // descriptor title; then the short address.
     const d = view?.descriptors[conversationId];
+    const other = d?.participants.find((p) => {
+      const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+      return a && view?.names?.[a];
+    });
+    if (other) return agentLabel(other, view?.names);
     if (d?.title) return d.title;
     const firstItem = view?.items.find((i) => i.conversationId === conversationId && i.folder !== 'sent');
     const meta = firstItem ? view?.envelopeMeta[firstItem.messageId] : undefined;
-    return meta ? shortId(meta.from) : 'Conversation';
+    return meta ? agentLabel(meta.from, view?.names) : 'Conversation';
   };
 
   const sendReply = async () => {

@@ -18,7 +18,7 @@ import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/con
 import { nameLabel } from '../../../src/lib/domain';
 import { homeCaip10 } from '../../../src/home/manifest';
 import { issueMandateForCase } from '../../../src/home/mandate';
-import { useInboxView, shortId } from '../../../src/home/use-inbox';
+import { useInboxView, shortId, agentLabel } from '../../../src/home/use-inbox';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -212,7 +212,7 @@ export default function InboxPage() {
                   <div>
                     <b>{card?.title ?? c.subject}</b>
                     <div style={{ fontSize: '0.85rem', opacity: 0.75 }}>
-                      {card?.summary ?? `${c.kind} · from ${shortId(c.requester)} · state: ${c.state}`}
+                      {card?.summary ?? `${c.kind} · from ${agentLabel(c.requester, view?.names)} · state: ${c.state}`}
                     </div>
                     {(c.contextRefs ?? []).length > 0 && (
                       <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
@@ -297,7 +297,7 @@ export default function InboxPage() {
                   <div>
                     <span style={{ fontWeight: conv.unread > 0 ? 700 : 400 }}>
                       {conv.unread > 0 && <span style={{ color: '#4338ca' }}>● </span>}
-                      {view?.descriptors[conv.conversationId]?.title ?? newestMeta?.subject ?? `From ${newestMeta ? shortId(newestMeta.from) : '…'}`}
+                      {view?.descriptors[conv.conversationId]?.title ?? newestMeta?.subject ?? `From ${newestMeta ? agentLabel(newestMeta.from, view?.names) : '…'}`}
                     </span>
                     <span style={{ fontSize: '0.8rem', opacity: 0.65 }}>
                       {' '}· {conv.messageCount} message{conv.messageCount === 1 ? '' : 's'}
@@ -327,7 +327,7 @@ export default function InboxPage() {
                         <div key={i.messageId} style={{ padding: '0.6rem 0.8rem', background: i.folder === 'sent' ? '#f0fdf4' : '#f8fafc', borderRadius: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                              {i.folder === 'sent' ? 'You' : meta ? shortId(meta.from) : i.messageId}
+                              {i.folder === 'sent' ? 'You' : meta ? agentLabel(meta.from, view?.names) : i.messageId}
                             </span>
                             <span style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
                               {meta?.signatureSigner ? (

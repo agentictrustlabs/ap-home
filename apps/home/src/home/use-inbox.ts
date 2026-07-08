@@ -35,6 +35,8 @@ export interface InboxView {
   conversations: ConversationSummaryV1[];
   descriptors: Record<string, ConversationDescriptorV1>;
   envelopeMeta: Record<string, EnvelopeMeta>;
+  /** Counterparty display names, keyed by lowercase 0x address (server reverse-resolves + caches). */
+  names?: Record<string, string>;
 }
 
 export function useInboxView(session: { token: string } | null) {
@@ -120,4 +122,10 @@ export function useInboxView(session: { token: string } | null) {
 export const shortId = (caip: string): string => {
   const addr = caip.match(/0x[0-9a-fA-F]{40}$/)?.[0];
   return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : caip.slice(0, 18);
+};
+
+/** Display label for an agent: claimed name when the server resolved one, short address otherwise. */
+export const agentLabel = (caip: string, names?: Record<string, string>): string => {
+  const addr = caip.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+  return (addr && names?.[addr]) || shortId(caip);
 };

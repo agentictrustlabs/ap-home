@@ -50,6 +50,33 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
+/** Reverse-resolve counterparty SAs → names for display, KV-cached (10 min).
+ *  One mechanism (reverseResolve, ADR-0013) — the cache holds the canonical
+ *  answer; unnamed agents cache as '' and the UI falls back to the address. */
+async function displayNames(env: FnContext['env'], addrs: Set<string>): Promise<Record<string, string>> {
+  const naming = new AgentNamingClient({
+    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry,
+    universalResolver: CONTRACTS.agentNameUniversalResolver,
+  });
+  const out: Record<string, string> = {};
+  await Promise.all(
+    [...addrs].slice(0, 50).map(async (addr) => {
+      const key = `namecache:${addr}`;
+      const cached = await env.AUTH_CODES.get(key);
+      if (cached !== null) {
+        if (cached) out[addr] = cached;
+        return;
+      }
+      const name = (await naming.reverseResolve(addr as Address).catch(() => null)) ?? '';
+      await env.AUTH_CODES.put(key, name, { expirationTtl: 600 });
+      if (name) out[addr] = name;
+    }),
+  );
+  return out;
+}
+
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
@@ -64,7 +91,21 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     });
     return jsonCors({ items }, request);
   }
-  return jsonCors(await readInboxView(env.AUTH_CODES, person), request);
+  const view = await readInboxView(env.AUTH_CODES, person);
+  // Counterparty display names: every sender + every conversation participant.
+  const addrs = new Set<string>();
+  for (const m of Object.values(view.envelopeMeta)) {
+    const a = m.from.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+    if (a && a !== person) addrs.add(a);
+  }
+  for (const d of Object.values(view.descriptors)) {
+    for (const p of d.participants) {
+      const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+      if (a && a !== person) addrs.add(a);
+    }
+  }
+  const names = await displayNames(env, addrs);
+  return jsonCors({ ...view, names }, request);
 };
 
 const OWNER_TRANSITIONS: readonly InteractionTransitionType[] = ['view', 'triage', 'ask-info', 'approve', 'deny', 'revoke'];
