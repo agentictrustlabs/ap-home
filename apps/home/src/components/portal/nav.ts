@@ -34,13 +34,27 @@ export function buildNav(
   wl: WhiteLabelConfig,
   badges: { apps?: number; inbox?: number } = {},
   active: WorkspaceScope = { kind: 'person' },
+  // spec 318: 'member' = authority-only — the nav shows ONLY the surfaces membership grants
+  // (channels); the custody surfaces (overview/data/treasury/org inbox) are steward-only and their
+  // servers re-verify control anyway (defense in depth, never nav-only).
+  orgRelationship: 'steward' | 'member' = 'steward',
 ): NavGroup[] {
   // ORG workspace (spec 315): the left nav is that org's actions, URL-scoped under /org/<sa>/….
   if (active.kind === 'org') {
     const a = active.org;
+    if (orgRelationship === 'member') {
+      return [
+        {
+          heading: 'Organization · member',
+          items: [
+            { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: ChatIcon, status: 'live' },
+          ],
+        },
+      ];
+    }
     return [
       {
-        heading: 'Organization',
+        heading: 'Organization · steward',
         items: [
           { id: 'org-overview', label: 'Overview', href: orgHref(a, 'overview'), Icon: BuildingIcon, status: 'live' },
           { id: 'org-data', label: 'Data', href: orgHref(a, 'data'), Icon: DatabaseIcon, status: 'live' },

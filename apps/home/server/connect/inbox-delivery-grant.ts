@@ -59,8 +59,13 @@ async function sessionPerson(request: Request, env: FnContext['env']): Promise<s
  *  in the org's vault (spec 318). Fail-closed: uncontrolled owner → 403. */
 async function controlsOwner(env: FnContext['env'], person: string, owner: string): Promise<boolean> {
   if (owner === person.toLowerCase()) return true;
-  const idx = JSON.parse((await (env as { AUTH_CODES: { get(k: string): Promise<string | null> } }).AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
-  return idx.some((a) => a.toLowerCase() === owner);
+  const kv = (env as { AUTH_CODES: { get(k: string): Promise<string | null> } }).AUTH_CODES;
+  const idx = JSON.parse((await kv.get(`related-idx:${person}`)) ?? '[]') as string[];
+  if (!idx.some((a) => a.toLowerCase() === owner)) return false;
+  // spec 318: relationship:'member' is authority-only — a member may NOT store the org's grants.
+  const raw = await kv.get(`related:${person}:${owner}`);
+  const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
+  return link?.relationship !== 'member';
 }
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {

@@ -28,7 +28,11 @@ export function AgentSwitcher() {
   const { agents } = useManagedAgents(session?.token ?? null);
 
   const active = useMemo(() => parseWorkspacePath(pathname ?? '/'), [pathname]);
-  const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
+  const allOrgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
+  // spec 318: custody vs membership are DIFFERENT relations — stewarded orgs (you control them)
+  // vs orgs you belong to (authority-only: channels + visibility, no custody).
+  const orgs = allOrgs.filter((a) => a.relationship !== 'member');
+  const memberOrgs = allOrgs.filter((a) => a.relationship === 'member');
   const services = agents.filter((a) => agentClassOf(a.kind) === 'service');
 
   if (!session || !profile) return null;
@@ -37,7 +41,7 @@ export function AgentSwitcher() {
   const lineageFor = (a: (typeof agents)[number]) =>
     [...authorityLineage(a, agents, 'you').map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n))), serviceRoleOf(a.kind)].join(' → ');
 
-  const activeOrg = active.kind === 'org' ? orgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
+  const activeOrg = active.kind === 'org' ? allOrgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
   const activeService = active.kind === 'service' ? services.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
   const triggerName =
     active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
@@ -123,6 +127,18 @@ export function AgentSwitcher() {
                 sub={`organization · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
                 activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
                 onClick={() => go(orgHref(o.agent, 'overview'))}
+              />
+            ))}
+
+            {memberOrgs.length > 0 && heading('Organizations you belong to')}
+            {memberOrgs.map((o) => (
+              <Row
+                key={o.agent}
+                icon={<BuildingIcon size={17} />}
+                title={o.name ? nameLabel(o.name) : short(o.agent)}
+                sub="organization · member (no custody)"
+                activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
+                onClick={() => go(orgHref(o.agent, 'channels'))}
               />
             ))}
 

@@ -87,6 +87,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const me = homeCaip10(person as Address).toLowerCase();
     const rows = (await readIndex(env, communityId)).filter((l) => l.listing.subject.toLowerCase() !== me);
     await env.AUTH_CODES.put(KEY(communityId), JSON.stringify(rows));
+    // Leaving an ORG's channels revokes the AUTHORITY-ONLY member link too (never a steward link —
+    // custody is not granted or revoked here; spec 318 membership).
+    if (/^0x[0-9a-fA-F]{40}$/.test(communityId)) {
+      const linkKey = `related:${person.toLowerCase()}:${communityId}`;
+      const raw = await env.AUTH_CODES.get(linkKey);
+      const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
+      if (link?.relationship === 'member') {
+        await env.AUTH_CODES.delete(linkKey);
+        const idxKey = `related-idx:${person.toLowerCase()}`;
+        const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
+        await env.AUTH_CODES.put(idxKey, JSON.stringify(idx.filter((a) => a.toLowerCase() !== communityId)));
+      }
+    }
     return jsonCors({ ok: true }, request);
   }
 
@@ -133,6 +146,35 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await env.AUTH_CODES.put(KEY(communityId), JSON.stringify(rows));
     // Timeline row: publishing a listing is a visibility grant the person made.
     await appendControlEvent(env, person as Address, 'grant-issued');
+    // spec 318 membership: joining an ORG's channels (communityId = the org SA) IS becoming an
+    // AUTHORITY-ONLY member of that org — record the person→org link in the person's home store
+    // (ADR-0025: derived from THEIR self-signed listing, no extra signature, never a public edge).
+    // relationship:'member' carries NO custody: the control checks (org inbox, delivery-grant,
+    // org workspace nav) exclude member links; only the workspace switcher + channels gain it.
+    // Absent-only: an existing steward link is NEVER downgraded.
+    if (/^0x[0-9a-fA-F]{40}$/.test(communityId) && communityId !== person.toLowerCase()) {
+      const linkKey = `related:${person.toLowerCase()}:${communityId}`;
+      if (!(await env.AUTH_CODES.get(linkKey))) {
+        const orgName = await naming.reverseResolve(communityId as Address).catch(() => null);
+        await env.AUTH_CODES.put(linkKey, JSON.stringify({
+          orgAgent: communityId,
+          orgName: orgName ?? communityId,
+          purpose: 'channel membership',
+          requestedBy: 'home-channels',
+          siteDelegation: null,
+          proofHash: null,
+          createdAt: Date.now(),
+          kind: 'org',
+          parent: person.toLowerCase(),
+          relationship: 'member',
+        }));
+        const idxKey = `related-idx:${person.toLowerCase()}`;
+        const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
+        if (!idx.some((a) => a.toLowerCase() === communityId)) {
+          await env.AUTH_CODES.put(idxKey, JSON.stringify([...idx, communityId]));
+        }
+      }
+    }
     return jsonCors({ ok: true }, request);
   }
 

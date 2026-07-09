@@ -95,7 +95,12 @@ async function resolveInboxOwner(
   const target = requested.toLowerCase();
   if (target === person.toLowerCase()) return person;
   const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
-  return idx.some((a) => a.toLowerCase() === target) ? target : null;
+  if (!idx.some((a) => a.toLowerCase() === target)) return null;
+  // spec 318: a relationship:'member' link is AUTHORITY-ONLY (channels + switcher) — it never
+  // confers control of the agent's inbox. Legacy/steward links keep control.
+  const raw = await env.AUTH_CODES.get(`related:${person}:${target}`);
+  const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
+  return link?.relationship === 'member' ? null : target;
 }
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {

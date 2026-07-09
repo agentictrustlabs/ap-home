@@ -1082,6 +1082,9 @@ export interface ManagedAgent {
   parent: Address;
   createdAt: number | null;
   proofHash?: string;
+  /** spec 318: 'steward' = custodial control (default); 'member' = authority-only (channels +
+   *  switcher visibility, never inbox/data/treasury control). */
+  relationship?: 'steward' | 'member';
 }
 
 export interface CreateManagedAgentResult {
@@ -1381,7 +1384,7 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
   const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as {
-    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string }>;
+    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string }>;
   };
   return (b.orgs ?? []).map((o) => ({
     agent: o.orgAgent,
@@ -1390,6 +1393,7 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
     parent: (o.parent ?? ('' as Address)) as Address,
     createdAt: o.createdAt,
     proofHash: o.proofHash,
+    relationship: (o.relationship === 'member' ? 'member' : 'steward') as 'steward' | 'member',
   }));
 }
 

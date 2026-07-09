@@ -61,7 +61,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       membershipDelegation?: unknown; stewardshipDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
-    const l = link as typeof link & { kind?: string; parent?: string };
+    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string };
     orgs.push({
       orgAgent: link.orgAgent,
       orgName: link.orgName,
@@ -78,6 +78,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // links (no kind) default to a person-parented 'org' so the tree still renders.
       kind: l.kind ?? 'org',
       parent: l.parent ?? person,
+      // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
+      // records default to 'steward' — the pre-membership control semantics, preserved.
+      relationship: l.relationship ?? 'steward',
     });
   }
   return jsonCors({ orgs }, request);
