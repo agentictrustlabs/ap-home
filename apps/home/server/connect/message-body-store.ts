@@ -13,8 +13,12 @@
 // SIGNER** — so the correct path is to route THROUGH the edge (`DEMO_EDGE_URL`, exactly as the browser's
 // `/a2a/mcp/*` does), letting the edge sign the assertion. `baseUrl` therefore prefers `DEMO_EDGE_URL`, falling
 // back to a direct demo-a2a origin (`A2A_VAULT_URL`/`A2A_CUSTODY_URL`) only for an EDGE-LESS deploy
-// (`EDGE_REQUIRED=false`). Open posture question (§5.1): whether the edge ADMITS the Home's server-side
-// (session-less) call — if not, deploy edge-less or add a first-party edge-admit rule.
+// (`EDGE_REQUIRED=false`). RESOLVED (§5.1 posture question): the edge DOES admit the Home's server-side
+// (session-less) call — `demo-edge`'s `runAdmission` is route+size+rate ONLY, NOT session-gated (spec 288
+// §4 / ADR-0043: admission is not authority), and `/mcp/vault/*` matches its `a2a.data` route → A2A binding
+// → demo-a2a server-mint. No first-party edge-admit rule is required; no proof-of-possession, no Origin
+// rejection (Origin only shapes CORS response headers, which this server-side caller ignores). The edge
+// signs the GatewayAssertion; demo-a2a verifies it + mints the `sub=owner` token.
 import type { MessageBodyStore } from '@agenticprimitives/fabric/messaging';
 import { createOwnerMessageBodyStore } from '../lib/vault-transport';
 import { loadInboxDeliveryGrant } from './inbox-delivery-grant';
