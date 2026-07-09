@@ -3474,6 +3474,25 @@ const IS_REVOKED_ABI = [
 /** spec 253 — the approved-hash sentinel wire signature (validated via the SA's ERC-1271 0x03 branch). */
 const APPROVED_HASH_SENTINEL = '0x03';
 
+// spec 316 §3a — the ARGS-INDEPENDENT authority verdict (this digest is not-revoked + its signature
+// ERC-1271-verifies) is cacheable; the per-call caveat pass is NOT and stays downstream. Without this,
+// every vault body read re-runs 2 eth_calls, and an inbox poll resolving N bodies every 5s per user
+// multiplies straight into RPC 429s (2026-07-09 Alchemy throttle). POSITIVE verdicts only (a transient
+// RPC error must never stick; failures always re-check), short TTL so an owner revocation takes effect
+// off-chain within ≤60s (on-chain redeem enforces it instantly regardless). Isolate-local by design.
+const VERDICT_TTL_MS = 60_000;
+const delegationVerdictCache = new Map<string, number>(); // digest → expiry epoch-ms
+function verdictCached(digest: string): boolean {
+  const exp = delegationVerdictCache.get(digest);
+  if (exp === undefined) return false;
+  if (Date.now() >= exp) { delegationVerdictCache.delete(digest); return false; }
+  return true;
+}
+function cacheVerdict(digest: string): void {
+  if (delegationVerdictCache.size > 500) delegationVerdictCache.clear(); // bound the isolate's memory
+  delegationVerdictCache.set(digest, Date.now() + VERDICT_TTL_MS);
+}
+
 interface IncomingCaveat {
   enforcer: Address;
   terms: Hex;
@@ -3544,6 +3563,9 @@ async function verifyDelegation(
     Number(env.CHAIN_ID ?? 84532),
     env.DELEGATION_MANAGER as Address,
   );
+  // spec 316 §3a — a fresh POSITIVE verdict for this exact digest skips the two eth_calls below
+  // (the time-window checks above already re-ran; the caveat pass runs downstream regardless).
+  if (verdictCached(digest)) return { ok: true };
   // spec 253 (auditor P0 #2) — fail closed on revocation BEFORE trusting the signature. For an
   // approved-hash (0x03 sentinel) delegation the approved hash never expires, so owner revocation
   // is the only kill switch; it must be honored here off-chain, not only at on-chain redeem. We
@@ -3674,6 +3696,7 @@ async function verifyDelegation(
       }
       return { ok: false, reason: `ERC-1271 returned ${magic} (expected ${ERC1271_MAGIC})` };
     }
+    cacheVerdict(digest); // spec 316 §3a — not-revoked + signature-valid, TTL-bounded
     return { ok: true };
   } catch (e) {
     console.error('[verifyDelegation] ERC-1271 call threw:', delegation.delegator, String(e));
