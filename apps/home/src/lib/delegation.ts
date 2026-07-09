@@ -13,7 +13,7 @@ import {
   encodeValueTerms,
   buildPaymentMandateCaveats,
   buildVaultKeyUseCaveat,
-  buildDataScopeCaveat,
+  buildVaultRecordScopeCaveat,
   hashDelegation,
   buildSessionDelegation,
   ROOT_AUTHORITY,
@@ -181,10 +181,12 @@ export const INBOX_DELIVERY_RESOURCE_SCOPE = 'vault:message.body:*' as const;
 
 /**
  * spec 317 §3.2 — issue the standing inbox-delivery delegation `recipient → deliveryServiceSA`,
- * signed once at onboarding by the recipient's ROOT credential (`signHash`). A `DATA_SCOPE` caveat
- * scopes the delegate to `INBOX_DELIVERY_RESOURCE_SCOPE` writes ONLY; demo-mcp decodes + enforces it
- * (deny-by-default) AND-ed with the recipient's vault-key binding, so the delivery service can act as
- * the recipient for message bodies and NOTHING else (least-privilege, ADR-0025). The delegate is a
+ * signed once at onboarding by the recipient's ROOT credential (`signHash`). A `VAULT_RECORD_SCOPE`
+ * caveat scopes the delegate to `INBOX_DELIVERY_RESOURCE_SCOPE` with op `write` ONLY — NO read, NO
+ * list, NO delete (tombstone), per the security audit (F1): the delivery service can create/update
+ * inbound message bodies and NOTHING else. demo-mcp decodes + enforces it (deny-by-default) AND-ed with
+ * the recipient's vault-key binding, so it can act as the recipient for message bodies and nothing else
+ * (least-privilege, ADR-0025). The delegate is a
  * DISTINCT delivery-service SA (never the vault-key `serverKey`), so its authority IS exactly this
  * grant. Stored server-side; the delivery service presents it at delivery to mint a `sub = recipient`
  * token (client-mint, delegate-signed — never `DEMO_ALLOW_SERVER_MINT`). Web3 is the authority
@@ -205,7 +207,7 @@ export async function issueInboxDeliveryDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildDataScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE], fields: [] }]),
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE], ops: ['write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];

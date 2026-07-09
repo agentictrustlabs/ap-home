@@ -57,7 +57,8 @@ import { defineSurface, buildMcpToolsList, buildMcpServerCapabilities, mcpListCa
 import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
 import { createMemorySoftRateLimiter, type SoftRateLimiter } from '@agenticprimitives/rate-control';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
-import type { Delegation, AgenticInvocationProofV1, DataScopeGrant } from '@agenticprimitives/delegation';
+import { vaultRecordScopeAllows } from '@agenticprimitives/delegation';
+import type { Delegation, AgenticInvocationProofV1, DataScopeGrant, VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 
 // Spec 290 §8 — the per-SA hard-budget Durable Object must be exported from the Worker entry so CF can
 // bind it. demo-mcp hosts + enforces its own (it is the authority point — it has the verified principal).
@@ -196,6 +197,21 @@ type SensitiveReadResult =
 /** Field-scoping (spec 291-A): when the delegation carried DATA_SCOPE grants, RESTRICT the released fields
  *  to what the issuer granted for THIS resource. No grants ⇒ unchanged (owner-self / full-authority reads).
  *  Grants present but none for this resource ⇒ [] (fail-closed: scoped access doesn't reach this resource). */
+/** spec 317 §3.2 — per-delegation vault-record-scope gate (Option X). Delegates to the CANONICAL matcher
+ *  `vaultRecordScopeAllows` (delegation package, golden-tested) so this server never re-implements the
+ *  anchored/op/server matching (security-audit F3 — divergent matchers are where widening creeps in).
+ *  When the access delegation carried a VAULT_RECORD_SCOPE caveat (surfaced as `recordScopes` post-verify),
+ *  an op is authorized only by a grant for THIS server whose resources cover `resource` (anchored) and
+ *  whose ops include `op`; deny-by-default. NO caveat ⇒ inert (binding-only). This NARROWS, never widens,
+ *  the vault-key binding: callers MUST still run `authorizePersonVaultOp` (the two gates AND). */
+function recordScopeAllows(
+  recordScopes: VaultRecordScopeGrant[] | undefined,
+  resource: string,
+  op: 'read' | 'write' | 'delete',
+): boolean {
+  return vaultRecordScopeAllows(recordScopes, { server: VAULT_SERVER_ID, resource, op });
+}
+
 function applyDataScope(grants: DataScopeGrant[] | undefined, resource: string, requested?: string[]): string[] | undefined {
   if (!grants || grants.length === 0) return requested;
   const allowed = new Set<string>();
@@ -1116,10 +1132,14 @@ app.post('/tools/get_vault_record', async (c) => {
   try {
     const handler = withDelegation<Args>(
       vaultConfig(c.env, body.enforceBinding),
-      async ({ principal, args }) => {
+      async ({ principal, args, recordScopes }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
         const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
+        // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
+        if (!recordScopeAllows(recordScopes, resource, 'read')) {
+          return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_vault_record' };
+        }
         const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'internal');
         if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:get_vault_record' };
         const obj = await gate.pv.vault.read({ owner: principal, resource });
@@ -1158,14 +1178,21 @@ app.post('/tools/set_vault_record', async (c) => {
   try {
     const handler = withDelegation<Args>(
       vaultConfig(c.env, body.enforceBinding),
-      async ({ principal, args }) => {
+      async ({ principal, args, recordScopes }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
         const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
-        // spec 278 write gate: sealing requires op:'write' on the person's vault-key authorization.
+        // `data === null` is a soft-delete (tombstone) by contract — a DISTINCT op for the record-scope
+        // gate, so a write-only delegate cannot censor records (spec 317 §3.2 / audit F1).
+        const isTombstone = (args?.data ?? null) === null;
+        // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
+        if (!recordScopeAllows(recordScopes, resource, isTombstone ? 'delete' : 'write')) {
+          return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:set_vault_record' };
+        }
+        // spec 278 write gate: sealing requires op:'write' on the person's vault-key authorization
+        // (the binding has no separate delete op; the finer write/delete split is the record-scope gate's).
         const gate = await authorizePersonVaultOp(c.env, principal, resource, 'write', 'internal');
         if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:set_vault_record' };
-        // `data === null` is a soft-delete (tombstone) by contract.
         await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
         return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
       },
@@ -1202,7 +1229,7 @@ app.post('/tools/list_vault_record', async (c) => {
   try {
     const handler = withDelegation<Args>(
       vaultConfig(c.env, body.enforceBinding),
-      async ({ principal }) => {
+      async ({ principal, recordScopes }) => {
         // spec 278: listing the owner's own records still requires the vault-key binding
         // (the listing comes from the per-person-KEK vault). `vault:` prefix → 'internal'.
         const gate = await authorizePersonVaultOp(c.env, principal, VAULT_RECORD_PREFIX, 'read', 'internal');
@@ -1211,6 +1238,10 @@ app.post('/tools/list_vault_record', async (c) => {
         const refs = await gate.pv.vault.list(principal);
         const records = refs
           .filter((r) => r.resource.startsWith(VAULT_RECORD_PREFIX))
+          // spec 317 §3.2: a record-scoped delegation only ENUMERATES record types it may READ, so a
+          // write-only delivery delegate lists nothing (no leakage of which records exist). No caveat ⇒
+          // unchanged (recordScopeAllows returns true).
+          .filter((r) => recordScopeAllows(recordScopes, r.resource, 'read'))
           .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
         return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
       },
