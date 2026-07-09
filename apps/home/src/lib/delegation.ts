@@ -13,6 +13,7 @@ import {
   encodeValueTerms,
   buildPaymentMandateCaveats,
   buildVaultKeyUseCaveat,
+  buildDataScopeCaveat,
   hashDelegation,
   buildSessionDelegation,
   ROOT_AUTHORITY,
@@ -167,6 +168,51 @@ export function buildVaultKeyAuthorization(
   };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   return { delegation: d, digest, expiresAt: new Date(validUntil * 1000).toISOString() };
+}
+
+// ─── spec 317 W2a — the standing inbox-delivery delegation (record-scoped) ────────────────────
+
+/** The vault resource scope an inbox-delivery delegate may write: message bodies ONLY. Mirrors
+ *  demo-mcp's `resource = vault:<recordType>` (VAULT_RECORD_PREFIX) over fabric's `message.body:<id>`
+ *  record type (`@agenticprimitives/fabric` `MESSAGE_BODY_RECORD_TYPE`) — kept as a local literal so
+ *  this transport-agnostic module takes no fabric dependency. demo-mcp enforces the match (spec 317
+ *  §3.2), intersected deny-by-default with the recipient's vault-key binding. */
+export const INBOX_DELIVERY_RESOURCE_SCOPE = 'vault:message.body:*' as const;
+
+/**
+ * spec 317 §3.2 — issue the standing inbox-delivery delegation `recipient → deliveryServiceSA`,
+ * signed once at onboarding by the recipient's ROOT credential (`signHash`). A `DATA_SCOPE` caveat
+ * scopes the delegate to `INBOX_DELIVERY_RESOURCE_SCOPE` writes ONLY; demo-mcp decodes + enforces it
+ * (deny-by-default) AND-ed with the recipient's vault-key binding, so the delivery service can act as
+ * the recipient for message bodies and NOTHING else (least-privilege, ADR-0025). The delegate is a
+ * DISTINCT delivery-service SA (never the vault-key `serverKey`), so its authority IS exactly this
+ * grant. Stored server-side; the delivery service presents it at delivery to mint a `sub = recipient`
+ * token (client-mint, delegate-signed — never `DEMO_ALLOW_SERVER_MINT`). Web3 is the authority
+ * (ADR-0041); revoking this delegation stops inbound body writes at the substrate, fail-closed.
+ *
+ * `mcpServerId` is the demo-mcp server identifier the `DataScopeGrant.server` field binds (the scope
+ * applies at that resource server); demo-mcp matches its own id before honoring the grant.
+ */
+export async function issueInboxDeliveryDelegation(
+  recipient: Address,
+  deliveryServiceSA: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildDataScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE], fields: [] }]),
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: recipient, delegate: deliveryServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // recipient's ROOT credential authorizes the delivery service
+  return d;
 }
 
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────
