@@ -14,6 +14,8 @@ import { SectionShell } from '../../components/portal/SectionShell';
 import { connectWallet, personalSign } from '../../lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueMandateForCase } from '../../home/mandate';
+import { activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 
@@ -72,6 +74,37 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [hits, setHits] = useState<AgentSearchHit[] | null>(null);
   const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
   const [composeBody, setComposeBody] = useState('');
+
+  // Vault-storage upgrade (spec 317): existing members provision the standing inbox-delivery grant HERE,
+  // by explicit action — the grant is only auto-issued inside enroll flows, and a surprise signature at
+  // sign-in is not a consent step (feedback_value_steps_not_signatures). null = still checking / not
+  // applicable; false = offer the upgrade; true = vault path active for this member.
+  const [vaultBodies, setVaultBodies] = useState<boolean | null>(null);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  useEffect(() => {
+    // Person-scope only: the grant is the PERSON's (delegator = their SA); org/service inboxes are out of
+    // scope here. Hidden entirely until the delivery service is provisioned.
+    if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
+    let cancelled = false;
+    void fetch(`/connect/inbox/delivery-grant?owner=${agentAddress}`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })
+      .then((r) => r.json())
+      .then((d: { stored?: boolean }) => { if (!cancelled) setVaultBodies(d.stored === true); })
+      .catch(() => { /* leave null — no banner on a read hiccup */ });
+    return () => { cancelled = true; };
+  }, [session, agentAddress, targetAgent]);
+
+  const enableVaultBodies = useCallback(async () => {
+    if (!session || !agentAddress) return;
+    setVaultBusy(true);
+    try {
+      const via = session.via as Via;
+      const r = await activateInboxDeliveryIfNeeded(agentAddress as Address, via, isKmsVia(via) ? { token: session.token } : undefined);
+      if (r.ok) setVaultBodies(true);
+      else setError(r.error);
+    } finally { setVaultBusy(false); }
+  }, [session, agentAddress, setError]);
 
   // DM deep-link (`/messages?to=<label>`, e.g. from an org channel's "Message" button): resolve the
   // label through the SAME KB search the composer uses (one mechanism, spec 314) and open compose
@@ -258,6 +291,19 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── Vault-storage upgrade (spec 317) — explicit consent, one signature, once ── */}
+      {vaultBodies === false && (
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid #6ee7b7', background: '#ecfdf5', borderRadius: 10, padding: '0.5rem 0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.83rem', color: '#065f46' }}>
+            <b>Secure your message storage.</b> Store message contents encrypted in your personal vault instead
+            of app storage — you sign one standing authorization your Home can never widen.
+          </span>
+          <button className="btn" disabled={vaultBusy} onClick={() => void enableVaultBodies()}>
+            {vaultBusy ? 'Signing…' : 'Enable vault storage'}
+          </button>
         </div>
       )}
 
