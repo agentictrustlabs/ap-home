@@ -26,7 +26,8 @@ import {
 } from '../connect-client';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
-import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import type { DemoPasskey } from '../lib/passkey';
 import type { Home } from './types';
 import { homeLabel } from './types';
@@ -485,7 +486,7 @@ export async function activateVault(
     if (!prov?.ok || !prov.kmsKeyRef) {
       return { ok: false, error: prov?.error_description ?? prov?.detail ?? 'could not provision vault key' };
     }
-    return bindVaultKey(
+    const bound = await bindVaultKey(
       owner,
       {
         vaultId: 'demo-mcp',
@@ -498,6 +499,12 @@ export async function activateVault(
       via,
       auth,
     );
+    // spec 317 W2 — once the vault is bound, provision the standing inbox-delivery grant too. Best-effort,
+    // idempotent, and INERT until DELIVERY_SERVICE_SA is provisioned (so no extra device prompt today).
+    // UX follow-up when provisioned: BATCH this signature with the vault-key authorization above rather
+    // than a second consecutive prompt (feedback_value_steps_not_signatures / minimal device prompts).
+    if (bound.ok) void activateInboxDeliveryIfNeeded(owner, via, auth);
+    return bound;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'vault activation failed' };
   }
@@ -534,6 +541,50 @@ export async function activateVaultIfNeeded(
     /* fall through to activate */
   }
   const coversNamespace = Array.isArray(status.allowedResources) && status.allowedResources.includes('vault:*');
-  if (status.bound === true && coversNamespace) return { ok: true, skipped: true };
+  if (status.bound === true && coversNamespace) {
+    // Already-bound members (incl. those who predate the inbox-delivery grant) still get it provisioned —
+    // idempotent + inert until DELIVERY_SERVICE_SA exists.
+    void activateInboxDeliveryIfNeeded(owner, via, auth);
+    return { ok: true, skipped: true };
+  }
   return activateVault(owner, via, auth);
+}
+
+/**
+ * spec 317 §3.2 / W2 — mint + store the standing INBOX-DELIVERY delegation: the recipient authorizes the
+ * Home's delivery-service SA to WRITE message bodies (`message.body:*`) into the recipient's vault, so
+ * inbound deliveries land the body under the recipient's OWN authority (residency, W3). Signed ONCE by
+ * the recipient's ROOT credential (same rail as the vault-key authorization); stored server-side keyed by
+ * the recipient. Best-effort + idempotent like `activateVaultIfNeeded`:
+ *   - `DELIVERY_SERVICE_SA` unset ⇒ skip (the delivery service isn't provisioned yet — INERT, deploy-safe).
+ *   - already stored ⇒ skip (no re-prompt).
+ * The scope is `ops:['write']` only (audit F1) — the delegate can create/update bodies and nothing else;
+ * demo-mcp enforces it per-delegation (spec 317 §3.2), AND-ed with the vault-key binding.
+ */
+export async function activateInboxDeliveryIfNeeded(
+  recipient: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ skipped?: boolean }>> {
+  if (!DELIVERY_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
+  try {
+    const st = (await fetch(`/connect/inbox/delivery-grant?owner=${recipient}`).then((r) => r.json())) as { stored?: boolean };
+    if (st?.stored) return { ok: true, skipped: true };
+  } catch {
+    /* fall through to (re)issue — a read hiccup never blocks provisioning the grant */
+  }
+  try {
+    const signHash = await signHashFor(via, recipient, auth);
+    const delegation = await issueInboxDeliveryDelegation(recipient, DELIVERY_SERVICE_SA, MCP_SERVER_ID, signHash);
+    const res = await fetch('/connect/inbox/delivery-grant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner: recipient, delegation: toWire(delegation) }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `inbox-delivery store failed (HTTP ${res.status})` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'inbox-delivery activation failed' };
+  }
 }
