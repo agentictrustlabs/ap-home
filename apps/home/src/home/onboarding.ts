@@ -29,8 +29,23 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import type { DemoPasskey } from '../lib/passkey';
+import { readSsoCookie } from '../lib/sso-cookie';
+import { SESSION_KEY } from '../context/session';
 import type { Home } from './types';
 import { homeLabel } from './types';
+
+/** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
+ *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the inbox-delivery-grant store)
+ *  reject without it, and NOT every caller threads `auth` (passkey flows pass none). */
+function storedSessionToken(auth?: Auth): string | null {
+  if (auth?.token) return auth.token;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    const t = raw ? (JSON.parse(raw) as { token?: string }).token : undefined;
+    if (t) return t;
+  } catch { /* fall through */ }
+  return readSsoCookie()?.token ?? null;
+}
 
 export type Via = 'passkey' | 'wallet' | 'google' | 'youversion';
 /** Extra auth a server-custodied op needs: the custody session token demo-a2a verifies. */
@@ -567,8 +582,14 @@ export async function activateInboxDeliveryIfNeeded(
   auth?: Auth,
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!DELIVERY_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
+  // The grant store is SESSION-gated (owner must equal the session principal — the anti-DoS rule in
+  // inbox-delivery-grant.ts). Without the Bearer both calls 401 and, being best-effort, that failure was
+  // SILENT — the reason no grant ever stored from onboarding.
+  const bearer = storedSessionToken(auth);
+  if (!bearer) return { ok: false, error: 'no home session — sign in before enabling inbox delivery' };
+  const authed = { authorization: `Bearer ${bearer}` };
   try {
-    const st = (await fetch(`/connect/inbox/delivery-grant?owner=${recipient}`).then((r) => r.json())) as { stored?: boolean };
+    const st = (await fetch(`/connect/inbox/delivery-grant?owner=${recipient}`, { headers: authed }).then((r) => r.json())) as { stored?: boolean };
     if (st?.stored) return { ok: true, skipped: true };
   } catch {
     /* fall through to (re)issue — a read hiccup never blocks provisioning the grant */
@@ -578,7 +599,7 @@ export async function activateInboxDeliveryIfNeeded(
     const delegation = await issueInboxDeliveryDelegation(recipient, DELIVERY_SERVICE_SA, MCP_SERVER_ID, signHash);
     const res = await fetch('/connect/inbox/delivery-grant', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authed },
       body: JSON.stringify({ owner: recipient, delegation: toWire(delegation) }),
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
