@@ -15,6 +15,13 @@ export const A2A_DOMAIN = 'impact-agent.io';
 /** The TLD names are claimed under (the `.impact` permissionless subregistry). */
 export const AGENT_NAME_PARENT = 'impact';
 
+/** The Agentic Edge origin (spec 288) — the admission Worker that signs the GatewayAssertion demo-a2a
+ *  requires on `/mcp/*`. This MUST equal the `next.config` `DEMO_EDGE_URL` default: the browser MCP-data
+ *  path (`/a2a/mcp/*` rewrite) and the server-side vault body-store both route THROUGH the edge, so both
+ *  fall back to this same origin when `DEMO_EDGE_URL` is unset (the reason the edge "just works" on Vercel
+ *  with no per-deploy env var). Override only for an edge-less local dev (`DEMO_EDGE_URL=''`). */
+export const DEMO_EDGE_ORIGIN_DEFAULT = 'https://demo-edge-production.richardpedersen3.workers.dev';
+
 /** Alias kept for existing imports. */
 export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
 /** Platform (apex) Connect origin — landing + bootstrap default. */

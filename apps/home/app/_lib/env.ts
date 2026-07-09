@@ -7,6 +7,7 @@
 // sees the real Host, so `resolveOrigin` degrades to `new URL(request.url).origin`
 // — the per-person OP issuer is correct natively (no proxy hop, no secret).
 import type { Env } from '../../server/_lib/server-broker';
+import { DEMO_EDGE_ORIGIN_DEFAULT } from '../../src/lib/domain';
 import { kv } from './kv';
 
 // Trim surrounding whitespace from env values — pasted dashboard values often carry a trailing
@@ -34,6 +35,13 @@ export function makeEnv(): Env {
     // KMS-custodied SA. Without these the callback degrades to login-grade (no custody).
     A2A_CUSTODY_URL: t(process.env.A2A_CUSTODY_URL),
     A2A_CUSTODY_BRIDGE_SECRET: t(process.env.A2A_CUSTODY_BRIDGE_SECRET),
+    // Vault message-body path (spec 317). The edge defaults to the prod origin (mirrors next.config), so it
+    // needs no Vercel var; `''` disables it (edge-less dev). The server enable-flag SA falls back to the
+    // public var, so setting ONLY `NEXT_PUBLIC_DELIVERY_SERVICE_SA` turns on BOTH the client onboarding grant
+    // and the server body-store — one variable, no drift between the two.
+    DEMO_EDGE_URL: t(process.env.DEMO_EDGE_URL) ?? DEMO_EDGE_ORIGIN_DEFAULT,
+    A2A_VAULT_URL: t(process.env.A2A_VAULT_URL),
+    DELIVERY_SERVICE_SA: t(process.env.DELIVERY_SERVICE_SA) ?? t(process.env.NEXT_PUBLIC_DELIVERY_SERVICE_SA),
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };

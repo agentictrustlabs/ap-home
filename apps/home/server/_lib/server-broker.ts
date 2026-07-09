@@ -71,6 +71,18 @@ export interface Env {
    *  login-grade (they onboard members through the Personal Home). */
   DEMO_SSO_AUD?: string;
 
+  // ─── Vault message-body path (spec 317) ───────────────────────────
+  /** The Agentic Edge origin (assertion signer) the server-side vault body-store routes `/mcp/vault/*`
+   *  through. Defaults to the prod edge (`DEMO_EDGE_ORIGIN_DEFAULT`, mirroring `next.config`) — you do NOT
+   *  set it on Vercel; override only for an edge-less local dev. */
+  DEMO_EDGE_URL?: string;
+  /** Direct demo-a2a origin serving `/mcp/vault/*` — used ONLY for an edge-less deploy (`DEMO_EDGE_URL=''`). */
+  A2A_VAULT_URL?: string;
+  /** The provisioned delivery-service SA (spec 317 §3.4). Its PRESENCE is the vault-body ENABLE flag. Derived
+   *  from `NEXT_PUBLIC_DELIVERY_SERVICE_SA` when the server-only var is unset, so ONE Vercel var enables both
+   *  the client onboarding grant AND the server body-store. */
+  DELIVERY_SERVICE_SA?: string;
+
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
    *  When unset, defaults to the production patterns (impact-agent.me + its subdomains
