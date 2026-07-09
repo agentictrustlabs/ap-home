@@ -19,8 +19,8 @@ import { SectionShell } from './SectionShell';
 import { connectWallet, personalSign } from '../../lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueDirectoryListing } from '../../home/directory';
-import { issueInboxDeliveryDelegation, toWire } from '../../lib/delegation';
-import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../../lib/inbox-delivery';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
@@ -168,27 +168,30 @@ export function OrgChannelsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [newTitle, communityId, authed, load]);
 
-  // Steward action (spec 318): sign the ORG's standing delivery grant (delegator = the org SA — the
-  // steward's credential signs; demo-mcp ERC-1271-verifies it against the org account at redemption)
-  // and store it under owner = the org. Until this exists, posting fails closed.
+  // Steward action (spec 318): the org's vault enablement is the SAME owner-generic ceremony pair a
+  // person runs — (1) the vault-KEY binding (spec 278: the org SA authorizes the host to wield the ORG's
+  // KEK; without it every org vault write is vault_key_unauthorized, VKB-D1) and (2) the standing
+  // delivery grant (delegator = the org SA). activateVaultIfNeeded(org) runs both, idempotently — the
+  // steward's credential signs; demo-mcp ERC-1271-verifies each against the ORG account at redemption.
+  // The person's own enablement can NEVER substitute: vault rows are keyed + encrypted per-owner.
   const enableOrgVault = useCallback(async () => {
     if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
     setBusy(true); setError(null);
     try {
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
-      const delegation = await issueInboxDeliveryDelegation(org, DELIVERY_SERVICE_SA, MCP_SERVER_ID, sign);
-      const res = await fetch('/connect/inbox/delivery-grant', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({ owner: org, delegation: toWire(delegation) }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || data.ok !== true) throw new Error(data.error ?? `org vault enable failed (${res.status})`);
+      const via = session.via as Via;
+      const auth = isKmsVia(via) ? { token: session.token } : undefined;
+      const bound = await activateVaultIfNeeded(org, via, auth); // org KEK binding (idempotent)
+      if (!bound.ok) throw new Error(bound.error);
+      // The grant half is fire-and-forget inside activateVaultIfNeeded — await it here (idempotent) so
+      // the gate flips on truth, not a race.
+      const grant = await activateInboxDeliveryIfNeeded(org, via, auth);
+      if (!grant.ok) throw new Error(grant.error);
       setOrgVault(true);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [session, agentAddress, org, authed, load]);
+  }, [session, agentAddress, org, load]);
 
   const post = useCallback(async () => {
     if (!active || !draft.trim()) return;
@@ -372,8 +375,8 @@ export function OrgChannelsView({ org }: { org: Address }) {
               {orgVault === false && (
                 <div style={{ border: '1px solid #fcd34d', background: '#fffbeb', color: '#92400e', borderRadius: 8, padding: '0.5rem 0.8rem', marginTop: '0.6rem', fontSize: '0.82rem', display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span>
-                    <b>Channel storage isn&rsquo;t enabled yet.</b> A steward signs one authorization so posts are
-                    stored encrypted in the organization&rsquo;s vault.
+                    <b>Channel storage isn&rsquo;t enabled yet.</b> A steward authorizes the organization&rsquo;s
+                    vault (its own key + delivery grant) so posts are stored encrypted under the org&rsquo;s authority.
                   </span>
                   <button className="btn" disabled={busy} onClick={() => void enableOrgVault()}>
                     {busy ? 'Signing…' : 'Enable (steward)'}
