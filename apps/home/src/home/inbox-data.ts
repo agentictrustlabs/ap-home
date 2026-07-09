@@ -254,10 +254,11 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
     });
     const submitted = await audited.applyEvent(mk('submit', c.requester));
     if (!submitted.ok) throw new Error(`case submit rejected: ${submitted.reason}`);
-    const admitted = await audited.applyEvent(mk('admit', recipient));
-    if (!admitted.ok) throw new Error(`case admit rejected: ${admitted.reason}`);
+    // 13→11 reconciliation: there is no `admit` case transition — the case stays `submitted`. Delivery is
+    // the message `eventType:'delivered'` event (an inbox fact); the responder's first case move is `triage`
+    // (submitted→triaged). `recipient` is still validated as the responder above.
     doc.draftCases.push(c);
-    doc.caseEvents.push(mk('submit', c.requester), mk('admit', recipient));
+    doc.caseEvents.push(mk('submit', c.requester));
 
     if (payload.card) {
       if (payload.card.interactionId !== c.id) throw new Error('card interaction id mismatch');
