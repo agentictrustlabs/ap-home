@@ -3478,19 +3478,28 @@ const APPROVED_HASH_SENTINEL = '0x03';
 // ERC-1271-verifies) is cacheable; the per-call caveat pass is NOT and stays downstream. Without this,
 // every vault body read re-runs 2 eth_calls, and an inbox poll resolving N bodies every 5s per user
 // multiplies straight into RPC 429s (2026-07-09 Alchemy throttle). POSITIVE verdicts only (a transient
-// RPC error must never stick; failures always re-check), short TTL so an owner revocation takes effect
-// off-chain within ≤60s (on-chain redeem enforces it instantly regardless). Isolate-local by design.
+// RPC error must never stick; failures always re-check). Isolate-local by design.
+//
+// HONEST TRADEOFF (FAB-A2A-1): the routes this fronts (/mcp/vault/*, /mcp/person/pii, /mcp/youversion/*)
+// are PURE off-chain reads — there is NO on-chain redeem to catch a revoked delegation, so a revoked
+// delegate keeps reading for up to VERDICT_TTL_MS per warm isolate. This is an accepted TESTNET posture;
+// the durable fix is spec 316 open-decision (b) (pin one freshness policy in chain-state) + retiring this
+// inline verifyDelegation for the fabric AuthorityVerdictCache (spec 316 §9-W2). Tracked: findings.yaml
+// FAB-A2A-1. The key BINDS THE SIGNATURE (FAB-A2A-2): hashDelegation excludes `signature` from the digest,
+// so a bogus signature over identical fields must NOT ride a cached verdict — key = `digest:signature`.
 const VERDICT_TTL_MS = 60_000;
-const delegationVerdictCache = new Map<string, number>(); // digest → expiry epoch-ms
-function verdictCached(digest: string): boolean {
-  const exp = delegationVerdictCache.get(digest);
+const delegationVerdictCache = new Map<string, number>(); // `digest:signature` → expiry epoch-ms
+const verdictKey = (digest: string, signature: string): string => `${digest}:${signature.toLowerCase()}`;
+function verdictCached(digest: string, signature: string): boolean {
+  const k = verdictKey(digest, signature);
+  const exp = delegationVerdictCache.get(k);
   if (exp === undefined) return false;
-  if (Date.now() >= exp) { delegationVerdictCache.delete(digest); return false; }
+  if (Date.now() >= exp) { delegationVerdictCache.delete(k); return false; }
   return true;
 }
-function cacheVerdict(digest: string): void {
+function cacheVerdict(digest: string, signature: string): void {
   if (delegationVerdictCache.size > 500) delegationVerdictCache.clear(); // bound the isolate's memory
-  delegationVerdictCache.set(digest, Date.now() + VERDICT_TTL_MS);
+  delegationVerdictCache.set(verdictKey(digest, signature), Date.now() + VERDICT_TTL_MS);
 }
 
 interface IncomingCaveat {
@@ -3565,7 +3574,7 @@ async function verifyDelegation(
   );
   // spec 316 §3a — a fresh POSITIVE verdict for this exact digest skips the two eth_calls below
   // (the time-window checks above already re-ran; the caveat pass runs downstream regardless).
-  if (verdictCached(digest)) return { ok: true };
+  if (verdictCached(digest, delegation.signature)) return { ok: true };
   // spec 253 (auditor P0 #2) — fail closed on revocation BEFORE trusting the signature. For an
   // approved-hash (0x03 sentinel) delegation the approved hash never expires, so owner revocation
   // is the only kill switch; it must be honored here off-chain, not only at on-chain redeem. We
@@ -3696,7 +3705,7 @@ async function verifyDelegation(
       }
       return { ok: false, reason: `ERC-1271 returned ${magic} (expected ${ERC1271_MAGIC})` };
     }
-    cacheVerdict(digest); // spec 316 §3a — not-revoked + signature-valid, TTL-bounded
+    cacheVerdict(digest, delegation.signature); // spec 316 §3a — not-revoked + signature-valid, TTL-bounded
     return { ok: true };
   } catch (e) {
     console.error('[verifyDelegation] ERC-1271 call threw:', delegation.delegator, String(e));

@@ -54,8 +54,6 @@ export interface InboxDataV1 {
   version: 1;
   envelopes: MessageEnvelopeV1[];
   events: MessageEventV1[];
-  /** messageId → plaintext body (the owner reading their own inbox). */
-  bodies: Record<string, string>;
   /** Cases as they entered (draft) — current state is replayed from caseEvents. */
   draftCases: InteractionCaseV1[];
   caseEvents: InteractionTransitionEventV1[];
@@ -65,13 +63,15 @@ export interface InboxDataV1 {
   mandates?: Record<string, InteractionMandateV1>;
   /** Owner-side conversation descriptors (spec 312) — this side's copies. */
   conversations?: ConversationDescriptorV1[];
+  // NOTE (spec 317 cutover): the `bodies` KV map is GONE — message bodies live only in the owner's
+  // vault (resolved at render into InboxView.bodies). Legacy docs may still carry a `bodies` key on
+  // disk; it is ignored on load and dropped on the next save.
 }
 
 const EMPTY: InboxDataV1 = {
   version: 1,
   envelopes: [],
   events: [],
-  bodies: {},
   draftCases: [],
   caseEvents: [],
   cards: {},
@@ -79,7 +79,10 @@ const EMPTY: InboxDataV1 = {
 
 export async function loadInboxData(kv: KV, person: string): Promise<InboxDataV1> {
   const raw = await kv.get(DATA_KEY(person));
-  return raw ? (JSON.parse(raw) as InboxDataV1) : { ...EMPTY, bodies: {}, cards: {}, envelopes: [], events: [], draftCases: [], caseEvents: [] };
+  if (!raw) return { ...EMPTY, cards: {}, envelopes: [], events: [], draftCases: [], caseEvents: [] };
+  // Drop any legacy `bodies` key from a pre-cutover doc (dead storage; never re-read).
+  const { bodies: _legacyBodies, ...doc } = JSON.parse(raw) as InboxDataV1 & { bodies?: unknown };
+  return doc as InboxDataV1;
 }
 
 async function saveInboxData(kv: KV, person: string, doc: InboxDataV1): Promise<void> {

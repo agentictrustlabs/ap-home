@@ -42,14 +42,18 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   if (!person) return jsonCors({ error: 'no person address in token sub' }, request, 401);
 
-  // The orgs the person governs (from the related vault) → their inbound grants.
+  // The orgs the person STEWARDS (custody) → their inbound grants. spec 318: `related-idx` now also holds
+  // authority-only `relationship:'member'` links (channel membership, ADR-0025) — a member has NO custody
+  // and MUST NOT see the org's private inbound-delegation graph. Fail-closed: read each link and skip
+  // members (same exclusion as inbox.ts resolveInboxOwner + inbox-delivery-grant.ts controlsOwner).
   const orgIdx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
   const received: Array<Record<string, unknown>> = [];
   for (const org of orgIdx) {
     const linkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
-    const orgName = linkRaw ? (JSON.parse(linkRaw) as { orgName?: string }).orgName ?? '' : '';
+    const link = linkRaw ? (JSON.parse(linkRaw) as { orgName?: string; relationship?: string }) : null;
+    if (link?.relationship === 'member') continue; // authority-only — never the org's grant graph
     const grants = JSON.parse((await env.AUTH_CODES.get(`delegated-idx:${org}`)) ?? '[]') as Array<Record<string, unknown>>;
-    for (const g of grants) received.push({ viaOrg: org, viaOrgName: orgName, ...g });
+    for (const g of grants) received.push({ viaOrg: org, viaOrgName: link?.orgName ?? '', ...g });
   }
   return jsonCors({ received }, request);
 };
