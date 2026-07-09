@@ -1,10 +1,10 @@
 // Gated message-body store construction (spec 317 §5.1 — the vault cutover).
 //
-// Returns a fabric `MessageBodyStore` over an owner's MCP vault WHEN the vault-backed body path is configured,
-// else `undefined` ⇒ `inbox-data` uses the KV `doc.bodies` (unchanged, deploy-safe). ONE mechanism per call
-// (ADR-0013): config decides, never a runtime fallback. The store is uniform per owner (read+write grant, the
-// §5.1 testnet posture) — `bodyStoreFor(owner)` serves deliver/send (write) AND read from the owner's own
-// standing inbox-delivery grant.
+// Returns a fabric `MessageBodyStore` over an owner's MCP vault WHEN the owner's standing delivery grant is
+// provisioned, else `undefined` — which is FAIL-CLOSED, not a KV path: `persistBody` throws and `resolveBodies`
+// yields nothing until the grant exists (spec 316 §11a cutover — the vault is the ONLY body residency; there is
+// no KV `doc.bodies`). ONE mechanism (ADR-0013), never a runtime fallback. The store is uniform per owner
+// (read+write grant) — `bodyStoreFor(owner)` serves deliver/send (write) AND read from the owner's own grant.
 //
 // Transport + edge posture (spec 288): the server posts `{delegation, requester, recordType, data}` to
 // `/mcp/vault/*` (server-mint — demo-a2a's `DEMO_ALLOW_SERVER_MINT=true`, ALREADY set in wrangler.toml, mints
@@ -58,7 +58,7 @@ export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Prom
   return async (owner: string) => {
     if (!vaultBodiesEnabled(env)) return undefined;
     const grant = await loadInboxDeliveryGrant(env, owner);
-    if (!grant?.delegator || !grant.signature || grant.signature === '0x') return undefined; // no standing grant ⇒ KV
+    if (!grant?.delegator || !grant.signature || grant.signature === '0x') return undefined; // no grant ⇒ fail-closed (no bodies until provisioned; NOT KV)
     // Routing through the edge means the edge signs the GatewayAssertion — no header minted here (the Home is
     // not the signer; there is no buildGatewayAssertion). For an edge-less base the a2a call is direct.
     return createOwnerMessageBodyStore({

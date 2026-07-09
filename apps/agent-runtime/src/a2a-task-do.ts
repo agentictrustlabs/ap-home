@@ -32,6 +32,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
+import { makeMessagingSkills } from './messaging-skills.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
@@ -240,7 +241,11 @@ export class A2aTaskDO {
       agentSA, chainId, delegationManager: dm,
       enforcers: { timestamp: this.env.TIMESTAMP_ENFORCER as Address, allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER as Address, allowedMethods: this.env.ALLOWED_METHODS_ENFORCER as Address },
       taskStore: createDurableObjectTaskStore(this.state.storage),
-      checks, handlers: [echo, makeOrchestrateSkill(this.env)], vault, mcp, hashBody, budget,
+      // spec 309 §7 / spec 316 §11a — the A2A messaging skills (messaging.deliver / interactions.respond /
+      // interactions.deliverCredential): delivery rides standard `message/send`, authorized by the delegation
+      // gate, then admitted DIRECTLY into the recipient's vault inbox (no Home callback). Registered on EVERY
+      // agent's DO (this IS its inbox gateway).
+      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA)], vault, mcp, hashBody, budget,
       // spec 303 W3 — mint verification receipts at the message/send +
       // resubmit terminals; the accept receipt rides the send result so the
       // SENDER retains it, and rows persist to D1 (migration 0002).

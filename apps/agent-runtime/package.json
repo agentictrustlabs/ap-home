@@ -21,6 +21,7 @@
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
+    "@agenticprimitives/fabric": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/orchestration": "workspace:*",
@@ -28,6 +29,7 @@
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/related-agents": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
+    "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
     "hono": "^4.12.23",
     "viem": "^2.52.2"
