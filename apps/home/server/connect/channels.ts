@@ -107,7 +107,14 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!name) return jsonCors({ error: 'join this community first — publish a directory listing to enter its channels' }, request, 403);
   // Reconcile the membership projection from the truth just proven (the CURRENT listing): a listed
   // member whose related-link is missing (joined before the projection existed) self-heals here.
-  await ensureOrgMemberLink(env, person, communityId).catch(() => { /* projection only — never block the read */ });
+  // Non-blocking, but VISIBLE: the outcome rides in the response so a failing write is evidence,
+  // never a silent swallow.
+  let membership: 'linked' | `link-failed: ${string}` = 'linked';
+  try {
+    await ensureOrgMemberLink(env, person, communityId);
+  } catch (e) {
+    membership = `link-failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
   const channels = await readChannels(env, communityId);
   // Strip legacy inline bodies from the wire (cutover: the vault is the only body residency).
   const wire = channels.map((c) => ({ ...c, messages: c.messages.map(({ envelope, authorName }) => ({ envelope, authorName })) }));
@@ -124,7 +131,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       try { bodies[m.envelope.id] = new TextDecoder().decode(await orgStore.loadBody(normalized)); } catch { /* omitted — fail-closed */ }
     }));
   }
-  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled: !!orgStore }, request);
+  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled: !!orgStore, membership }, request);
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {

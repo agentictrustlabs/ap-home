@@ -113,7 +113,8 @@ export function OrgChannelsView({ org }: { org: Address }) {
     }
     if (chRes.status === 403) { setMember(false); setChannels(null); return; }
     if (!chRes.ok) { setError(`channels read failed (${chRes.status})`); return; }
-    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean };
+    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean; membership?: string };
+    if (c.membership && c.membership !== 'linked') setError(`membership link: ${c.membership}`);
     setMember(true);
     setYou(c.you);
     setChannels(c.channels);
