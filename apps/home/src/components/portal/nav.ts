@@ -53,6 +53,9 @@ export function buildNav(
         heading: 'Interactions',
         items: [
           { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
+          // Topic channels INSIDE this org (spec 318 demo realization): communityId = the org SA;
+          // membership = a self-signed directory listing in the org's community (ADR-0025 opt-in).
+          { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: ChatIcon, status: 'live' },
         ],
       },
     ];

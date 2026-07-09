@@ -60,6 +60,22 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
   const [composeBody, setComposeBody] = useState('');
 
+  // DM deep-link (`/messages?to=<label>`, e.g. from an org channel's "Message" button): resolve the
+  // label through the SAME KB search the composer uses (one mechanism, spec 314) and open compose
+  // with the recipient picked. window.location (not useSearchParams) — no Suspense boundary needed.
+  useEffect(() => {
+    const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
+    if (!to) return;
+    let cancelled = false;
+    void searchAgentsKb(to).then((found) => {
+      if (cancelled || found.length === 0) return;
+      const hit = found.find((h) => h.label.toLowerCase() === to) ?? found[0]!;
+      setRecipient(hit);
+      setComposeOpen(true);
+    }).catch(() => { /* unresolved label → the user just gets the normal composer */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const conversations = useMemo(
     () => [...(view?.conversations ?? [])].sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt)),
     [view],
