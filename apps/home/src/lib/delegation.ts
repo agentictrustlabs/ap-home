@@ -207,7 +207,11 @@ export async function issueInboxDeliveryDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE], ops: ['write'] }]),
+    // TESTNET POSTURE (spec 317 §5.1): read+write. The audit's write-only ideal (F1) requires a SEPARATE
+    // owner read-delegation for `readInboxView` (the owner reading their OWN bodies); until that is provisioned,
+    // the standing grant carries read+write so one grant serves deliver/send (write) AND read. Documented
+    // relaxation — the delivery service can read the owner's message bodies (an accepted testnet hole).
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];

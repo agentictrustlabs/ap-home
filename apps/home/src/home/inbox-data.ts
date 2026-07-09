@@ -340,19 +340,23 @@ export async function sendFromInbox(
     conversationId?: string;
     title?: string;
   },
-  // spec 317 W4/W3 — residency flip: `sender` stores the sender's copy in the sender's vault, `recipient` the
-  // delivered copy in the recipient's vault. Both omitted (default) ⇒ KV bodies (unchanged, deploy-safe).
-  stores?: { sender?: MessageBodyStore; recipient?: MessageBodyStore },
+  // spec 317 W4/W3 — residency flip: `bodyStoreFor(owner)` yields the owner's vault body store (sender's copy →
+  // sender's vault, delivered copy → recipient's vault) or `undefined`. Omitted (default) ⇒ KV bodies
+  // (unchanged, deploy-safe). A factory (not concrete stores) so `replyInConversation` — whose counterparty is
+  // resolved internally — can reuse it.
+  bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
 ): Promise<{ messageId: string; conversationId: string }> {
   const me = homeCaip10(person);
   const them = homeCaip10(opts.recipient);
   const now = new Date().toISOString();
+  const senderStore = bodyStoreFor ? await bodyStoreFor(person) : undefined;
+  const recipientStore = bodyStoreFor ? await bodyStoreFor(opts.recipient) : undefined;
   const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
   const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
   const messageId = generateMessageId();
-  // When the message is vault-backed (any store), the body ref is the real vault resource `message.body:<id>`
-  // (resolved in each owner's own vault); otherwise the legacy KV stub.
-  const bodyResource = stores?.sender || stores?.recipient ? messageBodyResource(messageId) : 'inline:home-send';
+  // When the message is vault-backed, the body ref is the real vault resource `message.body:<id>` (resolved in
+  // each owner's own vault); otherwise the legacy KV stub.
+  const bodyResource = senderStore || recipientStore ? messageBodyResource(messageId) : 'inline:home-send';
   const envelope: MessageEnvelopeV1 = {
     version: 'ap.message.v1',
     id: messageId,
@@ -385,7 +389,7 @@ export async function sendFromInbox(
     envelope,
     bodyText: opts.bodyText,
     conversation: descriptor,
-  }, stores?.recipient);
+  }, recipientStore);
 
   // Self-send: the delivered copy IS the record; no second copy.
   if (opts.recipient.toLowerCase() === person.toLowerCase()) {
@@ -407,7 +411,7 @@ export async function sendFromInbox(
   doc.envelopes.push(envelope);
   doc.events.push(sent);
   // spec 317 W4 — the sender's own copy → the sender's vault when supplied, else the KV map.
-  await persistBody(doc, envelope, opts.bodyText, stores?.sender);
+  await persistBody(doc, envelope, opts.bodyText, senderStore);
   const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
   if (!(doc.conversations ?? []).some((d) => d.id === conversationId)) {
     doc.conversations = [...(doc.conversations ?? []), mine];
@@ -426,6 +430,7 @@ export async function replyInConversation(
   person: Address,
   conversationId: string,
   bodyText: string,
+  bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
 ): Promise<{ messageId: string; conversationId: string }> {
   const doc = await loadInboxData(kv, person);
   const descriptor = (doc.conversations ?? []).find((d) => d.id === conversationId);
@@ -442,7 +447,7 @@ export async function replyInConversation(
     contextRefs: descriptor.contextRefs as ContextRefV1[] | undefined,
     conversationId,
     title: descriptor.title,
-  });
+  }, bodyStoreFor);
 }
 
 /** Owner-side message action (mark read / archive). */

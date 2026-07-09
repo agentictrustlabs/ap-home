@@ -21,6 +21,7 @@ import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker'
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
+import { makeBodyStoreFactory } from './message-body-store';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -114,7 +115,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     });
     return jsonCors({ items }, request);
   }
-  const view = await readInboxView(env.AUTH_CODES, owner);
+  const view = await readInboxView(env.AUTH_CODES, owner, await makeBodyStoreFactory(env)(owner));
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {
@@ -193,7 +194,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         bodyText: body.bodyText,
         contextRefs: body.contextRefs,
         conversationId: body.conversationId,
-      });
+      }, makeBodyStoreFactory(env));
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'reply') {
@@ -202,7 +203,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!body.conversationId || !body.bodyText?.trim()) {
         return jsonCors({ error: 'conversationId + bodyText required' }, request, 400);
       }
-      const out = await replyInConversation(env.AUTH_CODES, owner as Address, body.conversationId, body.bodyText);
+      const out = await replyInConversation(env.AUTH_CODES, owner as Address, body.conversationId, body.bodyText, makeBodyStoreFactory(env));
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {

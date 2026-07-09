@@ -14,6 +14,7 @@ import type { FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import { deliverToInbox } from '../../src/home/inbox-data';
+import { makeBodyStoreFactory } from './message-body-store';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
 const json = (body: unknown, status = 200): Response =>
@@ -61,7 +62,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       interactionCase: body.interactionCase,
       card: body.card,
       conversation: body.conversation,
-    });
+    }, await makeBodyStoreFactory(env)(recipient));
     return json({ ok: true, messageId: body.envelope.id }, 200);
   } catch (e) {
     // Rejections were already audited as `denied` inside the admitter.
