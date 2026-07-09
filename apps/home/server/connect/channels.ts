@@ -164,6 +164,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (body?.action === 'create') {
       const title = (body.title ?? '').trim();
       if (!title || title.length > 80) return jsonCors({ error: 'title required (≤ 80 chars)' }, request, 400);
+      // Scope gate BEFORE the vault write (spec 316 §11a): creating a channel writes the board doc to the
+      // org's vault (`channels.data`). A stale org grant (no `channels.data` scope) would otherwise surface
+      // the raw `record_scope_denied` from demo-mcp; instead fail with the actionable steward prompt — the
+      // same gate the 'post' action uses.
+      if (!grantCoversCurrentScope(await loadInboxDeliveryGrant(env, communityId))) {
+        return jsonCors({ error: "org vault grant missing — a steward must enable vault storage for this organization's channels" }, request, 409);
+      }
       const descriptor: ConversationDescriptorV1 = {
         version: 'ap.conversation.v1',
         id: generateConversationId(),

@@ -289,14 +289,31 @@ export function OrgChannelsView({ org }: { org: Address }) {
   return (
     <SectionShell title="Channels" description="Topic discussion inside this organization">
       {error && <p style={{ color: '#b91c1c', fontSize: '0.8rem' }}>{error}</p>}
+      {/* Top-level steward gate (spec 316 §11a): the channel board lives in the ORG's vault, so NOTHING —
+          create OR post — works until a steward re-signs the org's grant to cover `vault:channels.data`.
+          Shown regardless of whether a channel is selected, so a FRESH org (no channels yet) sees it BEFORE
+          hitting a raw record_scope_denied on create. */}
+      {orgVault === false && (
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid #fcd34d', background: '#fffbeb', color: '#92400e', borderRadius: 10, padding: '0.6rem 0.9rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.85rem' }}>
+            <b>Channel storage isn&rsquo;t enabled for this organization yet.</b> A steward authorizes the
+            organization&rsquo;s vault (its own key + delivery grant) once — then channels + posts are stored
+            encrypted under the org&rsquo;s authority. Until then, creating a channel will fail.
+          </span>
+          <button className="btn" disabled={busy} onClick={() => void enableOrgVault()}>
+            {busy ? 'Signing…' : 'Enable (steward)'}
+          </button>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', minHeight: 480 }}>
         {/* ── Channels rail ── */}
         <div style={{ width: 210, flex: 'none', borderRight: '1px solid #e5e7eb', paddingRight: '0.75rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
             <strong style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>Channels</strong>
-            <button className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setCreating((v) => !v)} title="New channel">＋</button>
+            {/* Disabled until org vault storage is enabled — creating writes the board to the org vault. */}
+            <button className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title={orgVault === false ? 'Enable channel storage first' : 'New channel'}>＋</button>
           </div>
-          {creating && (
+          {creating && orgVault !== false && (
             <div style={{ marginBottom: '0.6rem' }}>
               <input
                 placeholder="Topic, e.g. fundraising"
@@ -373,17 +390,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
                   <p style={{ fontSize: '0.85rem', opacity: 0.6 }}>Start the discussion in <b># {channel.title}</b>.</p>
                 )}
               </div>
-              {orgVault === false && (
-                <div style={{ border: '1px solid #fcd34d', background: '#fffbeb', color: '#92400e', borderRadius: 8, padding: '0.5rem 0.8rem', marginTop: '0.6rem', fontSize: '0.82rem', display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span>
-                    <b>Channel storage isn&rsquo;t enabled yet.</b> A steward authorizes the organization&rsquo;s
-                    vault (its own key + delivery grant) so posts are stored encrypted under the org&rsquo;s authority.
-                  </span>
-                  <button className="btn" disabled={busy} onClick={() => void enableOrgVault()}>
-                    {busy ? 'Signing…' : 'Enable (steward)'}
-                  </button>
-                </div>
-              )}
+              {/* The steward gate is now a top-level banner (shown even with no channels) — no per-feed copy. */}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
                 <input
                   disabled={orgVault === false}
