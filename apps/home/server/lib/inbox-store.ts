@@ -1,24 +1,25 @@
-// Vault-resident inbox store (spec 316 §11a cutover — the inbox is the vault, not the Home's KV).
+// Vault-resident inbox + channel store (spec 316 §11a cutover — the inbox/board is the vault, not the Home's KV).
 //
-// The `InboxDataV1` document (`inbox-data:<owner>`) now lives in the OWNER'S MCP vault as the record
-// `inbox.data`, alongside the message bodies that moved there in spec 317. `makeInboxKv(env, owner)` returns a
-// `KV`-shaped adapter so the whole inbox surface (`readInboxView` / `sendFromInbox` / `applyMessageAction` /
-// case transitions / …) is UNCHANGED — only the `inbox-data:` key is routed to the vault; every other key
-// (the `inbox-audit:` log, name caches) passes through to the real KV.
+// The `InboxDataV1` document (`inbox-data:<owner>`) and the community channel board (`channels:<orgSA>`) now
+// live in the OWNER'S MCP vault as records `inbox.data` / `channels.data`, alongside the message bodies that
+// moved there in spec 317. `makeInboxKv` / `makeChannelsKv` return `KV`-shaped adapters so the whole surface
+// (`readInboxView` / `sendFromInbox` / `readChannels` / channel post / …) is UNCHANGED — only the one doc key
+// is routed to the vault; every other key (the `inbox-audit:` log, directory, name caches) passes through to
+// the real KV.
 //
 // Authority: the owner's standing inbox-delivery grant (delegator = owner, scoped `vault:inbox.data` +
-// `vault:message.body:*`, read+write) — the SAME grant the a2a `messaging.deliver` skill uses to append on
-// delivery. Web3 is the authority (ADR-0041); demo-mcp record-scope-gates every read/write.
+// `vault:channels.data` + `vault:message.body:*`, read+write) — the SAME grant the a2a `messaging.deliver`
+// skill and the channel body store use. Web3 is the authority (ADR-0041); demo-mcp record-scope-gates every op.
 //
-// Fail-closed (ADR-0013), no legacy KV inbox: an owner with no provisioned grant / no transport base has an
-// EMPTY inbox (reads resolve null ⇒ `loadInboxData` returns the empty doc) and CANNOT be written (send/receive
-// throw a clear "provision your vault" error) — never a silent KV fallback. Provisioning the grant is the one
-// path to a live inbox (value-steps doctrine).
+// Fail-closed (ADR-0013), no legacy KV doc: an owner with no provisioned grant / no transport base reads the
+// doc EMPTY and CANNOT write it (send/receive/post throw a clear "provision your vault" error) — never a silent
+// KV fallback. Provisioning the grant (person: "enable vault storage"; org: a steward enables it) is the one
+// path to a live inbox/board (value-steps doctrine).
 import { createServerVaultTransport } from './vault-transport';
 import { loadInboxDeliveryGrant } from '../connect/inbox-delivery-grant';
 import type { DelegationWire } from '../../src/lib/delegation';
 
-/** The KV surface the inbox-data functions consume (raw strings). */
+/** The KV surface the inbox/channel functions consume (raw strings). */
 export interface InboxKV {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
@@ -32,35 +33,28 @@ interface InboxStoreEnv {
   DELIVERY_SERVICE_SA?: string;
 }
 
-/** The vault record type that holds the owner's inbox document (matches `INBOX_DATA_RESOURCE_SCOPE`
- *  `vault:inbox.data` — demo-mcp prefixes `vault:` on the recordType). */
-const INBOX_DATA_RECORD = 'inbox.data';
 const nonEmpty = (s?: string): boolean => !!(s && s.trim());
-const dataKeyFor = (owner: string): string => `inbox-data:${owner.toLowerCase()}`;
 const vaultBaseUrl = (env: InboxStoreEnv): string | undefined =>
   [env.DEMO_EDGE_URL, env.A2A_VAULT_URL, env.A2A_CUSTODY_URL].find(nonEmpty);
 
 /**
- * Build the inbox KV for one owner. The `inbox-data:<owner>` key reads/writes the `inbox.data` vault record
- * over the owner's delivery grant; all other keys pass through to `env.AUTH_CODES`. When the owner has no
- * provisioned grant (or no transport base), the inbox reads EMPTY and writes fail closed — the vault is the
- * only inbox residency (no KV fallback).
+ * Build a `KV` for one owner where a SINGLE `docKey` reads/writes one `recordType` vault record over the
+ * owner's delivery grant; all other keys pass through to `env.AUTH_CODES`. Un-provisioned owner ⇒ the doc
+ * reads EMPTY and writes fail closed — the vault is the only doc residency (no KV fallback).
  */
-export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<InboxKV> {
+async function makeVaultDocKv(env: InboxStoreEnv, owner: string, docKey: string, recordType: string): Promise<InboxKV> {
   const real = env.AUTH_CODES;
-  const dataKey = dataKeyFor(owner);
   const base = vaultBaseUrl(env);
   const grant = nonEmpty(env.DELIVERY_SERVICE_SA) && base ? await loadInboxDeliveryGrant(env, owner) : null;
 
   if (!base || !grant?.delegator || !grant.signature || grant.signature === '0x') {
-    // Un-provisioned owner: empty, fail-closed inbox (never the old KV doc).
     return {
       async get(key) {
-        return key === dataKey ? null : real.get(key);
+        return key === docKey ? null : real.get(key);
       },
       async put(key, value, opts) {
-        if (key === dataKey) {
-          throw new Error('inbox vault not provisioned for this owner — enable vault storage to send/receive');
+        if (key === docKey) {
+          throw new Error(`vault not provisioned for ${owner} — enable vault storage before send/receive/post`);
         }
         return real.put(key, value, opts);
       },
@@ -70,13 +64,32 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<In
   const transport = createServerVaultTransport({ baseUrl: base, delegation: grant as DelegationWire });
   return {
     async get(key) {
-      if (key !== dataKey) return real.get(key);
-      const data = await transport.get(INBOX_DATA_RECORD);
-      return data == null ? null : JSON.stringify(data);
+      if (key !== docKey) return real.get(key);
+      // Empty is an answer (ADR-0013): a stale grant that doesn't yet cover this record (record_scope_denied)
+      // or a not-yet-written doc resolves to an EMPTY inbox/board — never a KV fallback. The WRITE path below
+      // still fails closed, and the "stored" freshness check drives re-provisioning, so this only makes READS
+      // graceful (no 500) while the owner re-signs the widened grant.
+      try {
+        const data = await transport.get(recordType);
+        return data == null ? null : JSON.stringify(data);
+      } catch {
+        return null;
+      }
     },
     async put(key, value, opts) {
-      if (key !== dataKey) return real.put(key, value, opts);
-      await transport.set(INBOX_DATA_RECORD, JSON.parse(value));
+      if (key !== docKey) return real.put(key, value, opts);
+      await transport.set(recordType, JSON.parse(value));
     },
   };
+}
+
+/** The personal inbox document (`inbox-data:<owner>`) → the owner's vault record `inbox.data`. */
+export function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<InboxKV> {
+  return makeVaultDocKv(env, owner, `inbox-data:${owner.toLowerCase()}`, 'inbox.data');
+}
+
+/** The community channel board (`channels:<orgSA>`) → the ORG's vault record `channels.data`. Same grant,
+ *  same fail-closed rules; the org SA is the owner (a steward enables its vault storage). */
+export function makeChannelsKv(env: InboxStoreEnv, orgSA: string): Promise<InboxKV> {
+  return makeVaultDocKv(env, orgSA, `channels:${orgSA.toLowerCase()}`, 'channels.data');
 }

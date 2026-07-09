@@ -186,6 +186,11 @@ export const INBOX_DELIVERY_RESOURCE_SCOPE = 'vault:message.body:*' as const;
  *  grant. demo-mcp record-scope-gates it exactly as it does the body records. */
 export const INBOX_DATA_RESOURCE_SCOPE = 'vault:inbox.data' as const;
 
+/** The vault record that holds an ORG's community channel board (`channels.data`). spec 318 + 316 §11a: the
+ *  channel board joins the personal inbox in the owner's vault, so a steward-signed org grant must authorize
+ *  read+write of it too. Harmless on a person's grant (they own no board). */
+export const CHANNELS_DATA_RESOURCE_SCOPE = 'vault:channels.data' as const;
+
 /**
  * spec 317 §3.2 — issue the standing inbox-delivery delegation `recipient → deliveryServiceSA`,
  * signed once at onboarding by the recipient's ROOT credential (`signHash`). A `VAULT_RECORD_SCOPE`
@@ -218,9 +223,10 @@ export async function issueInboxDeliveryDelegation(
     // owner read-delegation for `readInboxView` (the owner reading their OWN bodies); until that is provisioned,
     // the standing grant carries read+write so one grant serves deliver/send (write) AND read. Documented
     // relaxation — the delivery service can read the owner's message bodies (an accepted testnet hole).
-    // spec 316 §11a cutover: the grant covers the message-body records AND the vault-resident inbox document
-    // (`inbox.data`) — read+write, so delivery (a2a skill append) + render/mutate (owner Home) run on ONE grant.
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    // spec 316 §11a cutover: the grant covers the message-body records AND the vault-resident documents —
+    // the personal inbox (`inbox.data`) and the org channel board (`channels.data`) — read+write, so delivery
+    // (a2a skill append) + render/mutate (owner Home) + channel post/read run on ONE grant.
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
