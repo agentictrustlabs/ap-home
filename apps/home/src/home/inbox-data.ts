@@ -339,11 +339,7 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
  * in their own store. One descriptor per conversation on each side.
  */
 export async function sendFromInbox(
-  // spec 316 §11a cutover: the inbox is vault-resident + PER-OWNER, so send needs BOTH owners' vault KVs —
-  // `inboxKvFor(owner)` yields each. The recipient copy is admitted into the RECIPIENT's vault (the Home acts
-  // as the recipient-authorized delivery custodian, spec 309 §8.3 — it holds the recipient's delivery grant);
-  // the sender's 'sent' copy lands in the SENDER's vault. No Home KV, no cross-service callback.
-  inboxKvFor: (owner: string) => Promise<KV>,
+  kv: KV,
   person: Address,
   opts: {
     recipient: Address;
@@ -353,17 +349,15 @@ export async function sendFromInbox(
     conversationId?: string;
     title?: string;
   },
-  // spec 316 §11a / 317 — `bodyStoreFor(owner)` yields the owner's VAULT body store (sender's copy → sender's
-  // vault, delivered copy → recipient's vault). The vault is the ONLY body residency: a missing store makes
-  // `persistBody` throw (fail-closed) — there is NO KV bodies path. A factory (not concrete stores) so
-  // `replyInConversation` — whose counterparty is resolved internally — can reuse it.
+  // spec 317 W4/W3 — residency flip: `bodyStoreFor(owner)` yields the owner's vault body store (sender's copy →
+  // sender's vault, delivered copy → recipient's vault) or `undefined`. Omitted (default) ⇒ KV bodies
+  // (unchanged, deploy-safe). A factory (not concrete stores) so `replyInConversation` — whose counterparty is
+  // resolved internally — can reuse it.
   bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
 ): Promise<{ messageId: string; conversationId: string }> {
   const me = homeCaip10(person);
   const them = homeCaip10(opts.recipient);
   const now = new Date().toISOString();
-  const senderKv = await inboxKvFor(person);
-  const recipientKv = await inboxKvFor(opts.recipient);
   const senderStore = bodyStoreFor ? await bodyStoreFor(person) : undefined;
   const recipientStore = bodyStoreFor ? await bodyStoreFor(opts.recipient) : undefined;
   const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
@@ -400,7 +394,7 @@ export async function sendFromInbox(
 
   // Recipient side first — audited, fail-closed; nothing recorded on failure. The recipient's body store
   // (residency flip) is threaded through.
-  await deliverToInbox(recipientKv, opts.recipient, {
+  await deliverToInbox(kv, opts.recipient, {
     envelope,
     bodyText: opts.bodyText,
     conversation: descriptor,
@@ -412,7 +406,7 @@ export async function sendFromInbox(
   }
 
   // Sender's own copy: same envelope, 'sent' perspective.
-  const doc = await loadInboxData(senderKv, person);
+  const doc = await loadInboxData(kv, person);
   const { projector } = hydrate(person, doc);
   projector.putMessage(envelope);
   const sent: MessageEventV1 = {
@@ -431,7 +425,7 @@ export async function sendFromInbox(
   if (!(doc.conversations ?? []).some((d) => d.id === conversationId)) {
     doc.conversations = [...(doc.conversations ?? []), mine];
   }
-  await saveInboxData(senderKv, person, doc);
+  await saveInboxData(kv, person, doc);
   return { messageId: envelope.id, conversationId };
 }
 
@@ -441,13 +435,13 @@ export async function sendFromInbox(
  * participant. One mechanism — no label round-trip needed.
  */
 export async function replyInConversation(
-  inboxKvFor: (owner: string) => Promise<KV>,
+  kv: KV,
   person: Address,
   conversationId: string,
   bodyText: string,
   bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
 ): Promise<{ messageId: string; conversationId: string }> {
-  const doc = await loadInboxData(await inboxKvFor(person), person);
+  const doc = await loadInboxData(kv, person);
   const descriptor = (doc.conversations ?? []).find((d) => d.id === conversationId);
   if (!descriptor) throw new Error('unknown conversation');
   const me = homeCaip10(person).toLowerCase();
@@ -455,7 +449,7 @@ export async function replyInConversation(
   if (others.length !== 1) throw new Error('reply requires a two-party conversation');
   const otherAddr = others[0]!.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
   if (!otherAddr) throw new Error('counterparty is not an EVM agent');
-  return sendFromInbox(inboxKvFor, person, {
+  return sendFromInbox(kv, person, {
     recipient: otherAddr,
     subject: descriptor.title,
     bodyText,

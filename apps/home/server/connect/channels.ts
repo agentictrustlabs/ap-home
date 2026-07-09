@@ -36,8 +36,6 @@ import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { homeCaip10 } from '../../src/home/manifest';
 import { homeAuditSink } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
-import { makeChannelsKv, type InboxKV } from '../lib/inbox-store';
-import { loadInboxDeliveryGrant, grantCoversCurrentScope } from './inbox-delivery-grant';
 import { ensureOrgMemberLink } from './membership';
 import { messageBodyResource } from '@agenticprimitives/fabric/messaging';
 import type { IndexedListing } from './directory';
@@ -95,10 +93,8 @@ async function memberName(env: FnContext['env'], communityId: string, person: st
   return mine?.listing.displayName ?? null;
 }
 
-// spec 316 §11a: the channel board doc is vault-resident (`channels.data` in the ORG's vault), read/written
-// through `channelsKv` (the `channels:<orgSA>` key routes to the vault; all else passes through to KV).
-async function readChannels(channelsKv: InboxKV, communityId: string): Promise<ChannelV1[]> {
-  const raw = await channelsKv.get(CHANNELS_KEY(communityId));
+async function readChannels(env: FnContext['env'], communityId: string): Promise<ChannelV1[]> {
+  const raw = await env.AUTH_CODES.get(CHANNELS_KEY(communityId));
   return raw ? (JSON.parse(raw) as ChannelV1[]) : [];
 }
 
@@ -119,8 +115,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   } catch (e) {
     membership = `link-failed: ${e instanceof Error ? e.message : String(e)}`;
   }
-  const channelsKv = await makeChannelsKv(env, communityId);
-  const channels = await readChannels(channelsKv, communityId);
+  const channels = await readChannels(env, communityId);
   // Strip legacy inline bodies from the wire (cutover: the vault is the only body residency).
   const wire = channels.map((c) => ({ ...c, messages: c.messages.map(({ envelope, authorName }) => ({ envelope, authorName })) }));
   // The ORG's body store (communityId = the org SA). undefined ⇒ no steward-signed grant yet.
@@ -136,11 +131,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       try { bodies[m.envelope.id] = new TextDecoder().decode(await orgStore.loadBody(normalized)); } catch { /* omitted — fail-closed */ }
     }));
   }
-  // `orgVaultEnabled` is scope-aware (spec 316 §11a): true only when the org grant covers the board record
-  // (`vault:channels.data`), so a stale org grant prompts the steward to re-enable (re-sign the widened scope)
-  // instead of silently failing channel posts with record_scope_denied.
-  const orgVaultEnabled = grantCoversCurrentScope(await loadInboxDeliveryGrant(env, communityId));
-  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled, membership }, request);
+  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled: !!orgStore, membership }, request);
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -157,8 +148,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors({ error: 'join this community first — publish a directory listing to enter its channels' }, request, 403);
   }
   const me = homeCaip10(person as Address);
-  // The org channel board is vault-resident (spec 316 §11a); one adapter per request serves read + write.
-  const channelsKv = await makeChannelsKv(env, communityId);
 
   try {
     if (body?.action === 'create') {
@@ -176,19 +165,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       };
       const errors = validateConversationDescriptor(descriptor);
       if (errors.length > 0) return jsonCors({ error: `invalid channel: ${errors.join(', ')}` }, request, 400);
-      const channels = await readChannels(channelsKv, communityId);
+      const channels = await readChannels(env, communityId);
       if (channels.some((c) => c.title.toLowerCase() === title.toLowerCase())) {
         return jsonCors({ error: 'a channel with this title already exists' }, request, 409);
       }
       channels.push({ descriptor, title, createdBy: authorName, messages: [] });
-      await channelsKv.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
+      await env.AUTH_CODES.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
       return jsonCors({ ok: true, channelId: descriptor.id }, request);
     }
 
     if (body?.action === 'post') {
       const bodyText = (body.bodyText ?? '').trim();
       if (!body.channelId || !bodyText) return jsonCors({ error: 'channelId + bodyText required' }, request, 400);
-      const channels = await readChannels(channelsKv, communityId);
+      const channels = await readChannels(env, communityId);
       const channel = channels.find((c) => c.descriptor.id === body.channelId);
       if (!channel) return jsonCors({ error: 'unknown channel' }, request, 404);
 
@@ -237,7 +226,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       channel.messages.push({ envelope, authorName });
       // Bounded history for the demo store (KV doc, newest kept).
       if (channel.messages.length > 200) channel.messages.splice(0, channel.messages.length - 200);
-      await channelsKv.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
+      await env.AUTH_CODES.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
       return jsonCors({ ok: true, messageId: envelope.id }, request);
     }
 

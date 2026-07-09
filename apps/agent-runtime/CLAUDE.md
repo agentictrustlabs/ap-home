@@ -12,12 +12,6 @@ proxies selected MCP requests during local demos.
 - Demo relayer behavior for contract calls and UserOps.
 - Delegation-token minting for MCP calls.
 - Local Worker bindings and CSRF/CORS enforcement.
-- The per-agent A2A Task runtime (`A2aTaskDO`, spec 269) + its `SkillHandler`s: `echo`, `orchestrate`
-  (ADR-0044), and the **A2A messaging skills** `messaging.deliver` / `interactions.respond` /
-  `interactions.deliverCredential` (`src/messaging-skills.ts`, spec 309 §7 / **316 §11a**). Delivery rides
-  standard `message/send`; the skill delegation-authorizes it, then admits DIRECTLY into the recipient's
-  **vault** inbox (`message.body:<id>` + `inbox.data`, via `ctx.delegation`) — no Home callback. A message
-  is never authority (ADR-0041).
 
 ## What this app does not own
 

@@ -22,7 +22,6 @@ import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
-import { makeInboxKv, type InboxKV } from '../lib/inbox-store';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -113,16 +112,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
   // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
   // the same projection the inbox renders, filtered; never a second index.
-  const inboxKv = await makeInboxKv(env, owner);
   const contextKind = url.searchParams.get('contextKind');
   if (contextKind) {
-    const items = await readMessagesByContext(inboxKv, owner, {
+    const items = await readMessagesByContext(env.AUTH_CODES, owner, {
       kind: contextKind,
       id: url.searchParams.get('contextId') ?? undefined,
     });
     return jsonCors({ items }, request);
   }
-  const view = await readInboxView(inboxKv, owner, await makeBodyStoreFactory(env)(owner));
+  const view = await readInboxView(env.AUTH_CODES, owner, await makeBodyStoreFactory(env)(owner));
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {
@@ -170,10 +168,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const owner = await resolveInboxOwner(env, person, body?.agent);
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
 
-  // The inbox is vault-resident (spec 316 §11a): each owner's `inbox.data` lives in their MCP vault.
-  const inboxKvFor = (o: string): Promise<InboxKV> => makeInboxKv(env, o);
-  const inboxKv = await inboxKvFor(owner);
-
   try {
     if (body?.action === 'send') {
       // Composer send (spec 312): recipient by claimed name — one on-chain
@@ -199,7 +193,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       });
       const recipient = await naming.resolveName(name);
       if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
-      const out = await sendFromInbox(inboxKvFor, owner as Address, {
+      const out = await sendFromInbox(env.AUTH_CODES, owner as Address, {
         recipient,
         subject: body.subject,
         bodyText: body.bodyText,
@@ -214,12 +208,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!body.conversationId || !body.bodyText?.trim()) {
         return jsonCors({ error: 'conversationId + bodyText required' }, request, 400);
       }
-      const out = await replyInConversation(inboxKvFor, owner as Address, body.conversationId, body.bodyText, makeBodyStoreFactory(env));
+      const out = await replyInConversation(env.AUTH_CODES, owner as Address, body.conversationId, body.bodyText, makeBodyStoreFactory(env));
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {
       if (!body.messageId) return jsonCors({ error: 'messageId required' }, request, 400);
-      await applyMessageAction(inboxKv, owner as Address, body.messageId, body.action === 'read' ? 'read' : 'archived');
+      await applyMessageAction(env.AUTH_CODES, owner as Address, body.messageId, body.action === 'read' ? 'read' : 'archived');
       return jsonCors({ ok: true }, request);
     }
     if (body?.action === 'transition') {
@@ -239,7 +233,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
           factory: CONTRACTS.agentAccountFactory,
         });
         const updated = await applyApproveWithMandate(
-          inboxKv,
+          env.AUTH_CODES,
           owner as Address,
           body.interactionId,
           body.mandate,
@@ -259,7 +253,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         return jsonCors({ ok: true, case: updated }, request);
       }
 
-      const updated = await applyCaseTransition(inboxKv, owner as Address, body.interactionId, transition, body.reason);
+      const updated = await applyCaseTransition(env.AUTH_CODES, owner as Address, body.interactionId, transition, body.reason);
       // Decisions land on the control-plane timeline (spec 310 W4); view/triage
       // are navigation, not decisions.
       if (transition === 'approve' || transition === 'deny' || transition === 'ask-info' || transition === 'revoke') {

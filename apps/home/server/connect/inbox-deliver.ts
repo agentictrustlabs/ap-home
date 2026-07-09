@@ -15,7 +15,6 @@ import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import { deliverToInbox } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
-import { makeInboxKv } from '../lib/inbox-store';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
 const json = (body: unknown, status = 200): Response =>
@@ -57,7 +56,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 
   try {
-    await deliverToInbox(await makeInboxKv(env, recipient), recipient, {
+    await deliverToInbox(env.AUTH_CODES, recipient, {
       envelope: body.envelope,
       bodyText: body.bodyText,
       interactionCase: body.interactionCase,
