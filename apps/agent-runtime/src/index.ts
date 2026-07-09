@@ -587,6 +587,13 @@ app.use('*', async (c, next) => {
   // edge agent-addressed shape) — no browser cookie/CSRF; authorization is per the A2A protocol (delegation
   // + the edge GatewayAssertion), not double-submit.
   if (c.req.path === '/api/a2a' || c.req.path.startsWith('/api/a2a/')) return next();
+  // /mcp/vault/* is the generic per-agent vault proxy (spec 247 / spec 317 body-store). Its authorization is
+  // ENTIRELY body-carried — a client-minted `token` OR a delegator-signed `delegation` + `requester` (verified
+  // downstream via ERC-1271 + record-scope + the edge GatewayAssertion when required). There is NO ambient
+  // cookie/session authority to forge (a cross-site page cannot produce a victim-SA-signed delegation), so
+  // double-submit CSRF adds nothing — same rationale as /api/a2a. This is what lets the Home's server-to-server
+  // body-store call through (no browser origin/cookie); the delegation + assertion remain the gates.
+  if (c.req.path.startsWith('/mcp/vault/')) return next();
   // /custody/google/resolve + /custody/google/sign-site-delegation are server-to-server calls from the
   // Connect broker (no browser cookie). They're authenticated by the bridge HMAC envelope, not CSRF.
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
