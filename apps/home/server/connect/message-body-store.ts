@@ -6,10 +6,15 @@
 // §5.1 testnet posture) — `bodyStoreFor(owner)` serves deliver/send (write) AND read from the owner's own
 // standing inbox-delivery grant.
 //
-// Transport: the server posts `{delegation, requester, recordType, data}` to demo-a2a `/mcp/vault/*`
-// (server-mint — demo-a2a's `DEMO_ALLOW_SERVER_MINT=true` mints the `sub=owner` token; demo-mcp ERC-1271-
-// verifies the grant + record-scope-gates it). `A2A_VAULT_URL` is the demo-a2a origin serving `/mcp/vault/*`;
-// prod `/mcp/*` is edge-gated (spec 288), so `EDGE_GATEWAY_ASSERTION` (if set) rides as the assertion header.
+// Transport + edge posture (spec 288): the server posts `{delegation, requester, recordType, data}` to
+// `/mcp/vault/*` (server-mint — demo-a2a's `DEMO_ALLOW_SERVER_MINT=true`, ALREADY set in wrangler.toml, mints
+// the `sub=owner` token; demo-mcp ERC-1271-verifies the grant + record-scope-gates it). In the default prod
+// posture `/mcp/*` is EDGE-GATED (`DEMO_REQUIRE_GATEWAY_ASSERTION=true`) and the **Agentic Edge is the assertion
+// SIGNER** — so the correct path is to route THROUGH the edge (`DEMO_EDGE_URL`, exactly as the browser's
+// `/a2a/mcp/*` does), letting the edge sign the assertion. `baseUrl` therefore prefers `DEMO_EDGE_URL`, falling
+// back to a direct demo-a2a origin (`A2A_VAULT_URL`/`A2A_CUSTODY_URL`) only for an EDGE-LESS deploy
+// (`EDGE_REQUIRED=false`). Open posture question (§5.1): whether the edge ADMITS the Home's server-side
+// (session-less) call — if not, deploy edge-less or add a first-party edge-admit rule.
 import type { MessageBodyStore } from '@agenticprimitives/fabric/messaging';
 import { createOwnerMessageBodyStore } from '../lib/vault-transport';
 import { loadInboxDeliveryGrant } from './inbox-delivery-grant';
@@ -17,20 +22,25 @@ import type { DelegationWire } from '../../src/lib/delegation';
 
 interface BodyStoreEnv {
   AUTH_CODES: { get(k: string): Promise<string | null> };
-  /** demo-a2a origin serving `/mcp/vault/*` (server-to-server). Falls back to `A2A_CUSTODY_URL`. */
+  /** The Agentic Edge origin (assertion signer) — PREFERRED base; the server routes `/mcp/vault/*` through it. */
+  DEMO_EDGE_URL?: string;
+  /** Direct demo-a2a origin serving `/mcp/vault/*` — used only for an EDGE-LESS deploy. */
   A2A_VAULT_URL?: string;
   A2A_CUSTODY_URL?: string;
   /** The provisioned delivery-service SA — its presence is the vault-path ENABLE flag (spec 317 §3.4). */
   DELIVERY_SERVICE_SA?: string;
-  /** Optional spec-288 edge gateway-assertion header for a server-side `/mcp/*` call (posture TBD, §5.1). */
-  EDGE_GATEWAY_ASSERTION?: string;
 }
 
 const nonEmpty = (s?: string): boolean => !!(s && s.trim());
 
-/** Vault bodies are enabled only when the delivery-service SA is provisioned AND an a2a vault URL is set. */
+/** The transport base: the edge (assertion signer) when set, else a direct a2a origin (edge-less deploy). */
+function vaultBaseUrl(env: BodyStoreEnv): string | undefined {
+  return [env.DEMO_EDGE_URL, env.A2A_VAULT_URL, env.A2A_CUSTODY_URL].find(nonEmpty);
+}
+
+/** Vault bodies are enabled only when the delivery-service SA is provisioned AND a transport base is resolvable. */
 export function vaultBodiesEnabled(env: BodyStoreEnv): boolean {
-  return nonEmpty(env.DELIVERY_SERVICE_SA) && (nonEmpty(env.A2A_VAULT_URL) || nonEmpty(env.A2A_CUSTODY_URL));
+  return nonEmpty(env.DELIVERY_SERVICE_SA) && !!vaultBaseUrl(env);
 }
 
 /**
@@ -45,11 +55,11 @@ export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Prom
     if (!vaultBodiesEnabled(env)) return undefined;
     const grant = await loadInboxDeliveryGrant(env, owner);
     if (!grant?.delegator || !grant.signature || grant.signature === '0x') return undefined; // no standing grant ⇒ KV
-    const headers = nonEmpty(env.EDGE_GATEWAY_ASSERTION) ? { 'x-gateway-assertion': env.EDGE_GATEWAY_ASSERTION! } : undefined;
+    // Routing through the edge means the edge signs the GatewayAssertion — no header minted here (the Home is
+    // not the signer; there is no buildGatewayAssertion). For an edge-less base the a2a call is direct.
     return createOwnerMessageBodyStore({
-      baseUrl: (env.A2A_VAULT_URL ?? env.A2A_CUSTODY_URL)!,
+      baseUrl: vaultBaseUrl(env)!,
       delegation: grant as DelegationWire,
-      headers,
     });
   };
 }
