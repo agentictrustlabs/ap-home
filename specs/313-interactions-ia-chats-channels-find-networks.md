@@ -27,12 +27,12 @@ conversation never renders in both.
 
 ## 3. Channels (app-layer composition)
 
-> **Full org/channel architecture** — the exhaustive landscape (Slack/Discord/Telegram/Matrix/Status-Communities/
-> Nostr/Lens/XMTP/Quiet/… + MLS/MIMI standards), the capability→fabric mapping, and our target approach (org SA +
-> gateway DO; **roles = org delegations**; token-gating = entitlement credentials; two per-channel confidentiality
-> modes {org-readable vault vs MLS member-private}; intent-native org agent) live in
-> [`agentic-interaction-fabric-analysis.md` §16](../docs/architecture/agentic-interaction-fabric-analysis.md#16-organization--channel-messaging-teamgroup-context--landscape--fabric-mapping--approach).
-> The app-layer composition below is the shipped-today slice; §16 is where it graduates.
+> **Full org/channel architecture is [spec 318](318-organization-channel-messaging.md)** (design of record): org SA +
+> gateway DO; **roles = org delegations** (kick = revoke); token-gating = entitlement credentials; two per-channel
+> confidentiality modes {org-readable vault vs MLS member-private}; intent-native org agent; and **channel bots as
+> Service Smart Agents** (admission delegation + skills + intent invocation). The exhaustive product survey +
+> capability→fabric mapping is in [analysis §16](../docs/architecture/agentic-interaction-fabric-analysis.md#16-organization--channel-messaging-teamgroup-context--landscape--fabric-mapping--approach).
+> The app-layer composition below is the shipped-today slice; spec 318 is where it graduates.
 
 A channel is a `ConversationDescriptorV1` with `participantPolicy: 'open-to-context'` anchored to
 `{ kind: 'community', id }`, stored WITH its messages in a per-community KV document (the channel is
