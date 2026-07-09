@@ -88,7 +88,7 @@ High-fan-in org principals **shard** the fan-out and go **async**: the org DO is
 
 ## 11. Waves — part of the messaging work
 
-Sequenced **on top of** the fabric core (spec 316 gateway-DO wave + spec 317 delivery), because a channel is the org SA's gateway DO:
+Sequenced **on top of** the fabric core (spec 316 gateway-DO wave + spec 317 delivery), because a channel is the org SA's gateway DO. **C1–C4 are folded into the fabric master wave plan as the "Channel track" after W2 in [spec 316 §9](316-agentic-interaction-fabric.md#9-migration-waves-each-shippable--verifiable)** — one ordered messaging backlog:
 - **C1** — channel state onto the org SA's `PrincipalGatewayDO` ExchangeStream (replaces `CHANNELS_KEY`, `channels.ts`); org-readable mode; membership = directory listing (as today).
 - **C2** — **roles = org delegations** (member/mod/admin caveats; kick = revoke).
 - **C3** — **token-gated join** via entitlement credentials (§6).
