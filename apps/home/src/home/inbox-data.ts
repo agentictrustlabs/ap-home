@@ -147,25 +147,23 @@ export interface InboxView {
   >;
 }
 
-// ─── Message-body residency seam (spec 317 W3–W5) ─────────────────────────────────────────────────────────
-// The body of a message lives EITHER in the KV `doc.bodies` map (today's default — an app-KV bolt-on) OR, when
-// a `MessageBodyStore` is supplied (the fabric vault store, `createOwnerMessageBodyStore` over the owner's MCP
-// vault), in the owner's VAULT — hash-verified, residency-flipped (spec 316 §11a). The store is INJECTED so
-// this stays deploy-safe: with no store (the current wiring) behavior is unchanged; the vault cutover is
-// "supply the store" once the delivery-service SA + server-side edge-auth are provisioned (spec 317 §3.4).
-// ONE mechanism per call (ADR-0013): a store is used or it isn't — never a runtime KV fallback.
+// ─── Message-body residency (spec 317 — CUT OVER) ─────────────────────────────────────────────────────────
+// Message bodies live in the owner's VAULT, full stop — written and read through the fabric body store
+// (`createOwnerMessageBodyStore` → edge → a2a server-mint → demo-mcp, hash-verified; spec 316 §11a). The old
+// KV `doc.bodies` map is dead storage: never written, never read (deletes > deprecations — pre-cutover
+// bodies are gone with it). ONE mechanism (ADR-0013): no store (owner hasn't signed their delivery grant) ⇒
+// writes FAIL loudly, reads resolve NO bodies — empty is the answer, never a KV fallback.
 
-/** Resolve every envelope's body. Residency is a PER-MESSAGE fact recorded at write time (`persistBody`
- *  wrote each body to exactly one place): present in KV `doc.bodies` ⇒ KV-resident; absent + a store ⇒ the
- *  owner's vault. This is a dispatch on recorded state, NOT a runtime fallback (ADR-0013) — a member who
- *  provisions a grant mid-history keeps their KV-era bodies while new mail resolves from the vault.
+/** Resolve every envelope's body — from the owner's VAULT, the only body residency (spec 317 cutover;
+ *  the KV `doc.bodies` map is dead storage, never read or written — deletes > deprecations). No store
+ *  (the owner hasn't provisioned their delivery grant) ⇒ NO bodies: empty is the answer (ADR-0013),
+ *  never a KV fallback — the UI's "Enable vault storage" action is the one path to readable bodies.
  *  Vault reads go to `message.body:<id>` — the resource `putBody` actually keys by — never the
  *  sender-supplied `envelope.body.resource` (an external app's envelope may carry an `inline:*` stub). */
 async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore): Promise<Record<string, string>> {
-  const out: Record<string, string> = { ...doc.bodies };
-  if (!bodyStore) return out;
-  const vaultBacked = doc.envelopes.filter((e) => out[e.id] === undefined);
-  await Promise.all(vaultBacked.map(async (e) => {
+  if (!bodyStore) return {};
+  const out: Record<string, string> = {};
+  await Promise.all(doc.envelopes.map(async (e) => {
     // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
     // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
     const normalized: MessageEnvelopeV1 = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
@@ -174,18 +172,18 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore): Pr
   return out;
 }
 
-/** Persist a body — to the owner's vault when a store is given (dropped from the KV map), else the KV map. */
-async function persistBody(doc: InboxDataV1, envelope: MessageEnvelopeV1, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
-  if (bodyStore) {
-    await bodyStore.putBody({
-      messageId: envelope.id,
-      bytes: new TextEncoder().encode(bodyText),
-      contentType: envelope.bodyContentType ?? 'text/plain',
-      classification: envelope.classification,
-    });
-    return;
+/** Persist a body — to the owner's vault, the ONLY residency (spec 317 cutover). A write without a
+ *  store fails LOUDLY: the owner must provision their standing delivery grant first (no KV fallback). */
+async function persistBody(_doc: InboxDataV1, envelope: MessageEnvelopeV1, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
+  if (!bodyStore) {
+    throw new Error('vault delivery grant required — enable vault storage for this agent before sending or receiving messages');
   }
-  doc.bodies[envelope.id] = bodyText;
+  await bodyStore.putBody({
+    messageId: envelope.id,
+    bytes: new TextEncoder().encode(bodyText),
+    contentType: envelope.bodyContentType ?? 'text/plain',
+    classification: envelope.classification,
+  });
 }
 
 export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyStore): Promise<InboxView> {
@@ -362,9 +360,9 @@ export async function sendFromInbox(
   const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
   const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
   const messageId = generateMessageId();
-  // When the message is vault-backed, the body ref is the real vault resource `message.body:<id>` (resolved in
-  // each owner's own vault); otherwise the legacy KV stub.
-  const bodyResource = senderStore || recipientStore ? messageBodyResource(messageId) : 'inline:home-send';
+  // The body ref IS the vault resource `message.body:<id>` (resolved in each owner's own vault) — the
+  // only residency (spec 317 cutover).
+  const bodyResource = messageBodyResource(messageId);
   const envelope: MessageEnvelopeV1 = {
     version: 'ap.message.v1',
     id: messageId,

@@ -19,6 +19,8 @@ import { SectionShell } from './SectionShell';
 import { connectWallet, personalSign } from '../../lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueDirectoryListing } from '../../home/directory';
+import { issueInboxDeliveryDelegation, toWire } from '../../lib/delegation';
+import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
@@ -33,7 +35,7 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
 
 // Server shapes (server/connect/channels.ts + directory.ts) — mirrored, not imported (server module
 // pulls server-only deps).
-interface ChannelMessage { envelope: MessageEnvelopeV1; bodyText: string; authorName: string }
+interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string }
 interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[] }
 interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
 
@@ -67,6 +69,10 @@ export function OrgChannelsView({ org }: { org: Address }) {
   const communityId = org.toLowerCase();
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
+  // Post bodies of the ACTIVE channel, resolved server-side from the ORG's vault (spec 318 residency).
+  const [bodies, setBodies] = useState<Record<string, string>>({});
+  // Has a steward signed the org's standing delivery grant? false ⇒ posting is blocked (fail-closed).
+  const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null); // null = loading
@@ -96,8 +102,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
   const load = useCallback(async () => {
     if (!session) return;
+    const qs = active ? `&channelId=${encodeURIComponent(active)}` : '';
     const [chRes, dirRes] = await Promise.all([
-      fetch(`/connect/channels?communityId=${communityId}`, { headers: authed }),
+      fetch(`/connect/channels?communityId=${communityId}${qs}`, { headers: authed }),
       fetch(`/connect/directory?communityId=${communityId}`, { headers: authed }),
     ]);
     if (dirRes.ok) {
@@ -106,12 +113,14 @@ export function OrgChannelsView({ org }: { org: Address }) {
     }
     if (chRes.status === 403) { setMember(false); setChannels(null); return; }
     if (!chRes.ok) { setError(`channels read failed (${chRes.status})`); return; }
-    const c = (await chRes.json()) as { channels: Channel[]; you: string };
+    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean };
     setMember(true);
     setYou(c.you);
     setChannels(c.channels);
+    setBodies(c.bodies ?? {});
+    setOrgVault(c.orgVaultEnabled === true);
     setActive((cur) => cur ?? c.channels[0]?.descriptor.id ?? null);
-  }, [session, communityId, authed]);
+  }, [session, communityId, authed, active]);
 
   useEffect(() => { void load(); }, [load]);
   // Board polling — same cadence as the inbox (spec 313).
@@ -158,6 +167,28 @@ export function OrgChannelsView({ org }: { org: Address }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }, [newTitle, communityId, authed, load]);
+
+  // Steward action (spec 318): sign the ORG's standing delivery grant (delegator = the org SA — the
+  // steward's credential signs; demo-mcp ERC-1271-verifies it against the org account at redemption)
+  // and store it under owner = the org. Until this exists, posting fails closed.
+  const enableOrgVault = useCallback(async () => {
+    if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
+    setBusy(true); setError(null);
+    try {
+      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      const delegation = await issueInboxDeliveryDelegation(org, DELIVERY_SERVICE_SA, MCP_SERVER_ID, sign);
+      const res = await fetch('/connect/inbox/delivery-grant', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ owner: org, delegation: toWire(delegation) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || data.ok !== true) throw new Error(data.error ?? `org vault enable failed (${res.status})`);
+      setOrgVault(true);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }, [session, agentAddress, org, authed, load]);
 
   const post = useCallback(async () => {
     if (!active || !draft.trim()) return;
@@ -327,7 +358,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
                             </button>
                           )}
                         </div>
-                        <div style={{ fontSize: '0.92rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.bodyText}</div>
+                        <div style={{ fontSize: '0.92rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', opacity: bodies[m.envelope.id] ? 1 : 0.45 }}>
+                          {bodies[m.envelope.id] ?? '[content unavailable — stored before vault cutover or not yet decrypted]'}
+                        </div>
                       </div>
                     </div>
                   );
@@ -336,8 +369,20 @@ export function OrgChannelsView({ org }: { org: Address }) {
                   <p style={{ fontSize: '0.85rem', opacity: 0.6 }}>Start the discussion in <b># {channel.title}</b>.</p>
                 )}
               </div>
+              {orgVault === false && (
+                <div style={{ border: '1px solid #fcd34d', background: '#fffbeb', color: '#92400e', borderRadius: 8, padding: '0.5rem 0.8rem', marginTop: '0.6rem', fontSize: '0.82rem', display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>
+                    <b>Channel storage isn&rsquo;t enabled yet.</b> A steward signs one authorization so posts are
+                    stored encrypted in the organization&rsquo;s vault.
+                  </span>
+                  <button className="btn" disabled={busy} onClick={() => void enableOrgVault()}>
+                    {busy ? 'Signing…' : 'Enable (steward)'}
+                  </button>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
                 <input
+                  disabled={orgVault === false}
                   placeholder={`Message # ${channel.title}`}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}

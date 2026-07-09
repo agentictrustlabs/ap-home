@@ -3,7 +3,8 @@
 // (`participantPolicy: 'open-to-context'`) stored WITH its messages in a
 // per-community KV document (shared state, unlike per-person inboxes).
 //
-//   GET  ?communityId=…                          → { channels } (member-gated)
+//   GET  ?communityId=…[&channelId=…]            → { channels, bodies?, you, orgVaultEnabled } (member-gated;
+//                                                   bodies resolved from the ORG's vault for the one channel)
 //   POST { action:'create', communityId, title }
 //   POST { action:'post', communityId, channelId, bodyText }
 //
@@ -12,7 +13,12 @@
 //   2. MEMBERSHIP = a current directory listing in the community (spec 312 —
 //      joining channels and being discoverable are the same opt-in consent);
 //   3. posts are envelope-shaped (validated, body-hash-bound) and audited to
-//      the community audit log BEFORE commit (spec 291 discipline).
+//      the community audit log BEFORE commit (spec 291 discipline);
+//   4. BODY RESIDENCY (spec 317 cutover / spec 318): post bodies live in the ORG's VAULT, written and
+//      read through the fabric body store (edge → a2a server-mint → demo-mcp) under the ORG's standing
+//      delivery grant (delegator = the org SA, steward-signed, stored via /connect/inbox/delivery-grant).
+//      No grant ⇒ posting FAILS loudly and reads resolve no bodies — never an inline-KV fallback
+//      (ADR-0013). The KV channel doc keeps only envelopes + author names (the projection).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import {
   generateConversationId,
@@ -29,6 +35,8 @@ import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/ser
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { homeCaip10 } from '../../src/home/manifest';
 import { homeAuditSink } from '../../src/home/inbox-data';
+import { makeBodyStoreFactory } from './message-body-store';
+import { messageBodyResource } from '@agenticprimitives/fabric/messaging';
 import type { IndexedListing } from './directory';
 
 const CHANNELS_KEY = (communityId: string): string => `channels:${communityId.toLowerCase()}`;
@@ -36,7 +44,9 @@ const DIRECTORY_KEY = (communityId: string): string => `directory:${communityId.
 
 export interface ChannelMessageV1 {
   envelope: MessageEnvelopeV1;
-  bodyText: string;
+  /** DEAD (spec 317 cutover): pre-cutover docs carry it; never written or served — bodies live in the
+   *  org's vault, keyed `message.body:<envelope.id>`. */
+  bodyText?: string;
   /** Poster's directory display name at post time (render convenience). */
   authorName: string;
 }
@@ -94,7 +104,23 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
   const name = await memberName(env, communityId, person);
   if (!name) return jsonCors({ error: 'join this community first — publish a directory listing to enter its channels' }, request, 403);
-  return jsonCors({ channels: await readChannels(env, communityId), you: name }, request);
+  const channels = await readChannels(env, communityId);
+  // Strip legacy inline bodies from the wire (cutover: the vault is the only body residency).
+  const wire = channels.map((c) => ({ ...c, messages: c.messages.map(({ envelope, authorName }) => ({ envelope, authorName })) }));
+  // The ORG's body store (communityId = the org SA). undefined ⇒ no steward-signed grant yet.
+  const orgStore = await makeBodyStoreFactory(env)(communityId);
+  // Bodies are resolved ONLY for the one requested channel — a full-board resolve on every poll would
+  // hammer the vault path (each body is an edge→a2a→mcp read).
+  const channelId = new URL(request.url).searchParams.get('channelId');
+  const bodies: Record<string, string> = {};
+  if (orgStore && channelId) {
+    const channel = channels.find((c) => c.descriptor.id === channelId);
+    await Promise.all((channel?.messages ?? []).map(async (m) => {
+      const normalized = { ...m.envelope, body: { ...m.envelope.body, resource: messageBodyResource(m.envelope.id) } };
+      try { bodies[m.envelope.id] = new TextDecoder().decode(await orgStore.loadBody(normalized)); } catch { /* omitted — fail-closed */ }
+    }));
+  }
+  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled: !!orgStore }, request);
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -144,10 +170,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const channel = channels.find((c) => c.descriptor.id === body.channelId);
       if (!channel) return jsonCors({ error: 'unknown channel' }, request, 404);
 
+      // Body residency gate FIRST (spec 318): the org's vault store must exist before anything commits.
+      const orgStore = await makeBodyStoreFactory(env)(communityId);
+      if (!orgStore) {
+        return jsonCors({ error: "org vault grant missing — a steward must enable vault storage for this organization's channels" }, request, 409);
+      }
       const now = new Date().toISOString();
+      const generatedId = generateMessageId();
       const envelope: MessageEnvelopeV1 = {
         version: 'ap.message.v1',
-        id: generateMessageId(),
+        id: generatedId,
         conversationId: channel.descriptor.id,
         kind: 'plain',
         from: me,
@@ -156,7 +188,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         to: [channel.descriptor.owner],
         createdAt: now,
         classification: 'internal',
-        body: { resource: `inline:channel:${communityId}`, classification: 'internal', updatedAt: now },
+        body: { resource: messageBodyResource(generatedId), classification: 'internal', updatedAt: now },
         bodyHash: await sha256Hex32(new TextEncoder().encode(bodyText)),
         bodyContentType: 'text/plain',
         contextRefs: channel.descriptor.contextRefs,
@@ -173,7 +205,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         actor: { type: 'user', id: person },
         subject: { type: 'channel-post', id: envelope.id },
       });
-      channel.messages.push({ envelope, bodyText, authorName });
+      // The body goes to the ORG's vault (hash-bound to the envelope); the KV doc keeps only the projection.
+      await orgStore.putBody({
+        messageId: envelope.id,
+        bytes: new TextEncoder().encode(bodyText),
+        contentType: 'text/plain',
+        classification: 'internal',
+      });
+      channel.messages.push({ envelope, authorName });
       // Bounded history for the demo store (KV doc, newest kept).
       if (channel.messages.length > 200) channel.messages.splice(0, channel.messages.length - 200);
       await env.AUTH_CODES.put(CHANNELS_KEY(communityId), JSON.stringify(channels));

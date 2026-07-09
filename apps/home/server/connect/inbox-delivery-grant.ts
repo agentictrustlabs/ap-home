@@ -53,11 +53,23 @@ async function sessionPerson(request: Request, env: FnContext['env']): Promise<s
   return v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
 }
 
+/** May `person` store/read the grant for `owner`? Themselves, or a managed org/service SA they control —
+ *  the SAME control set the inbox `?agent=` scope and the workspace switcher gate on (`related-idx:<person>`,
+ *  spec 315 / ADR-0025). This is what lets a steward provision the ORG's grant so channel-post bodies land
+ *  in the org's vault (spec 318). Fail-closed: uncontrolled owner → 403. */
+async function controlsOwner(env: FnContext['env'], person: string, owner: string): Promise<boolean> {
+  if (owner === person.toLowerCase()) return true;
+  const idx = JSON.parse((await (env as { AUTH_CODES: { get(k: string): Promise<string | null> } }).AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+  return idx.some((a) => a.toLowerCase() === owner);
+}
+
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await sessionPerson(request, env);
   if (!person) return json({ error: 'session required' }, 401);
   const owner = (new URL(request.url).searchParams.get('owner') ?? '').toLowerCase();
-  if (!owner || owner !== person) return json({ error: 'owner must be the session principal' }, 403);
+  if (!owner || !(await controlsOwner(env, person, owner))) {
+    return json({ error: 'owner must be the session principal or a managed agent' }, 403);
+  }
   return json({ stored: (await loadInboxDeliveryGrant(env, owner)) !== null });
 };
 
@@ -68,7 +80,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const owner = (body?.owner ?? '').toLowerCase();
   const d = body?.delegation;
   if (!owner || !d) return json({ error: 'owner and delegation required' }, 400);
-  if (owner !== person) return json({ error: 'owner must be the session principal' }, 403);
+  if (!(await controlsOwner(env, person, owner))) {
+    return json({ error: 'owner must be the session principal or a managed agent' }, 403);
+  }
   // Structural fail-closed checks (the on-chain signature + record-scope are re-verified at redemption):
   if ((d.delegator ?? '').toLowerCase() !== owner) return json({ error: 'delegation delegator must be the owner' }, 400);
   if (!d.signature || d.signature === '0x') return json({ error: 'delegation must be signed' }, 400);
