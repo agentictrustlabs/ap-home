@@ -25,7 +25,7 @@ import {
 } from '@agenticprimitives/fabric/messaging';
 import { isListingCurrent } from '@agenticprimitives/home';
 import type { Address } from '@agenticprimitives/types';
-import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { homeCaip10 } from '../../src/home/manifest';
 import { homeAuditSink } from '../../src/home/inbox-data';
@@ -66,7 +66,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: resolveOrigin(request, env) });
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }

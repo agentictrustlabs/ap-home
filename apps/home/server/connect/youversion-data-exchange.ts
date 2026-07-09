@@ -9,7 +9,7 @@
 // data-exchange callback; afterwards the access_token is authorized for GET /v1/highlights. The federated
 // access_token never reaches the browser — only the dx-token (which is DESIGNED to ride the browser URL).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { getServer, resolveOrigin, json, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, json, type FnContext } from '../_lib/server-broker';
 import { signBridgeCall } from '../_lib/bridge-hmac';
 
 const YV_BASE = 'https://api.youversion.com';
@@ -22,7 +22,7 @@ async function personFromSession(env: FnContext['env'], request: Request): Promi
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
 }

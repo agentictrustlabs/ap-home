@@ -12,7 +12,7 @@
 // signature is the AUTHORITY at redemption (demo-mcp ERC-1271-verifies + record-scope-gates it, spec 317
 // §3.2); this endpoint only decides WHO may store WHOSE grant. Structural checks fail closed.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 
 /** KV key for a recipient's stored inbox-delivery grant (the signed delegation wire). */
@@ -48,7 +48,7 @@ async function sessionPerson(request: Request, env: FnContext['env']): Promise<s
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
 }

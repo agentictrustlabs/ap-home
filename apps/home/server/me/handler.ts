@@ -10,8 +10,8 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, json, type FnContext } from '../_lib/server-broker';
+import { isOwnConnectOrigin } from '../_lib/origin';
 import { basicProfile, sensitivePii } from '../../src/lib/pii';
-import { CONNECT_DOMAIN } from '../../src/lib/domain';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 /** Parse the SA address out of a CAIP-10 `eip155:<chain>:0x…` subject; null if it isn't one. */
@@ -23,25 +23,8 @@ function addressFromSub(sub: string | undefined): Address | null {
 /** The person MCP's own audience (same-origin demo; the server-client mints with this aud). */
 const AUD = 'demo-sso';
 
-/**
- * Is `origin` one of THIS site's own Connect origins (ADR-0021 app policy)? The apex + per-handle
- * `https://<label>.<CONNECT_DOMAIN>` homes (spec 232). A Google session is minted on the central
- * origin (the Google callback runs there) but consumed on the member's subdomain — same broker
- * key + JWKS, same registrable domain — so its `iss` is trusted here even when it isn't the exact
- * request origin. https + a single DNS label only.
- */
-function isOwnConnectOrigin(origin: string): boolean {
-  try {
-    const u = new URL(origin);
-    if (u.protocol !== 'https:') return false;
-    const h = u.hostname.toLowerCase();
-    if (h === CONNECT_DOMAIN) return true;
-    const sfx = '.' + CONNECT_DOMAIN;
-    return h.endsWith(sfx) && /^[a-z0-9-]+$/.test(h.slice(0, -sfx.length));
-  } catch {
-    return false;
-  }
-}
+// isOwnConnectOrigin moved to server/_lib/origin.ts (shared with every /connect/* session
+// verifier via ownIssuer) — the Google-session cross-origin rationale lives there now.
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const url = new URL(request.url);

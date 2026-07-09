@@ -9,7 +9,7 @@
 // challenge is needed. No person identity of the grantors is exposed (ADR-0025) —
 // only org↔org grants.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 
 function cors(request: Request): Record<string, string> {
@@ -36,7 +36,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();

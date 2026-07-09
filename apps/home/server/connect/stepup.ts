@@ -13,7 +13,7 @@ import { mintAgentSession, verifyAgentSession, importJwks } from '@agenticprimit
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { addressOf } from '@agenticprimitives/identity-directory-adapters';
 import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
-import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, json, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -37,7 +37,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // The target agent is bound to the verified Google session — not client-chosen.
   const keys = await importJwks(jwks);
-  const g = await verifyAgentSession(body.googleToken, { keys, expectedIss: iss, expectedAud: body.aud });
+  const g = await verifyAgentSession(body.googleToken, { keys, expectedIss: ownIssuer(request, env), expectedAud: body.aud });
   if (!g.ok) return json({ error: 'invalid Google session' }, 401);
   const agentId = g.session.sub;
   const agent = addressOf(agentId);

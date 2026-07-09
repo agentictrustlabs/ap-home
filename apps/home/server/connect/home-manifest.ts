@@ -18,7 +18,7 @@ import { validateHomeManifest, type HomeManifestV1 } from '@agenticprimitives/ho
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { Address, Hex } from '@agenticprimitives/types';
-import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
@@ -46,7 +46,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: resolveOrigin(request, env) });
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }

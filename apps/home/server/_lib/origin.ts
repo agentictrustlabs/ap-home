@@ -12,6 +12,7 @@
 //
 // The Cloudflare Option-2 `X-Forwarded-Host`/`PROXY_SHARED_SECRET` proxy branch is GONE
 // here (spec 232 §5) — there is no Worker proxy hop on Vercel.
+import { CONNECT_DOMAIN } from '../../src/lib/domain';
 
 /** Comma-separated env list of allowed issuer hosts. Entries may be exact (`impact-agent.me`)
  *  or wildcard (`*.impact-agent.me`). Wildcards match exactly ONE label (no dots) — the
@@ -69,4 +70,30 @@ export class IssuerHostNotAllowedError extends Error {
     super(`Host "${host}" is not in ALLOWED_ISSUER_HOSTS — refusing to sign id_token for this origin (SEC-006).`);
     this.name = 'IssuerHostNotAllowedError';
   }
+}
+
+/** Is `origin` one of THIS deployment's own Connect origins — the apex or a one-label subdomain of
+ *  CONNECT_DOMAIN, https only? All of them sign with the SAME broker key + JWKS, so a session any of
+ *  them minted carries identical authority. */
+export function isOwnConnectOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    if (h === CONNECT_DOMAIN) return true;
+    const sfx = '.' + CONNECT_DOMAIN;
+    return h.endsWith(sfx) && /^[a-z0-9-]+$/.test(h.slice(0, -sfx.length));
+  } catch {
+    return false;
+  }
+}
+
+/** The issuer predicate for verifying OUR OWN Home session tokens: the exact request origin OR any
+ *  own Connect origin. Exact-origin-only breaks the parent-domain SSO cookie — a session minted on
+ *  www/apex 401s on `<handle>.impact-agent.me` even though the SAME key signed it (the /me handler
+ *  set this policy first; the /connect/* endpoints must match or the portal shows "signed in" while
+ *  every data call rejects). Never widens beyond CONNECT_DOMAIN: SEC-006's signing gate is untouched. */
+export function ownIssuer(request: Request, env?: { ALLOWED_ISSUER_HOSTS?: string }): (iss: string) => boolean {
+  const exact = resolveOrigin(request, env);
+  return (iss: string) => iss === exact || isOwnConnectOrigin(iss);
 }

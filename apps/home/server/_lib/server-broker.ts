@@ -8,7 +8,7 @@
 
 import { publishJwks } from '@agenticprimitives/connect';
 import { signerFromPrivateJwk } from '../../src/lib/broker-core';
-export { resolveOrigin } from './origin';
+export { resolveOrigin, ownIssuer } from './origin';
 import { buildRealDirectory } from '../../src/lib/real-directory';
 import { createKvIndexer } from '../../src/lib/kv-indexer';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';

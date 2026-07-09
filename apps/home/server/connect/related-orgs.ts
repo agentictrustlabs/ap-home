@@ -8,7 +8,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Hex, type Address } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
-import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
 //  spec-275 session-authorized POST branch below — same verifier as the GET.)
@@ -44,7 +44,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
@@ -128,7 +128,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
     const { jwks } = await getServer(env);
     const keys = await importJwks(jwks);
-    const v = await verifyAgentSession(bearer, { keys, expectedAud: homeAud, expectedIss: iss });
+    const v = await verifyAgentSession(bearer, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
     if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
     const sessionPerson = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
     if (!sessionPerson || sessionPerson !== person) {

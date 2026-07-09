@@ -11,7 +11,7 @@
 // read per Bible chapter (GET /v1/highlights?bible_id=&passage_id=<chapter>). There is no notes/bookmarks/
 // saved-verses API, so highlights is the only data type.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { getServer, resolveOrigin, json, type FnContext } from '../_lib/server-broker';
+import { getServer, resolveOrigin, ownIssuer, json, type FnContext } from '../_lib/server-broker';
 import { getClient, getClientDelegate } from '../../src/lib/oidc-clients';
 import { signBridgeCall } from '../_lib/bridge-hmac';
 
@@ -28,7 +28,7 @@ async function personFromSession(env: FnContext['env'], request: Request): Promi
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: iss });
+  const v = await verifyAgentSession(token, { keys, expectedAud: homeAud, expectedIss: ownIssuer(request, env) });
   if (!v.ok) return null;
   return v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
 }
