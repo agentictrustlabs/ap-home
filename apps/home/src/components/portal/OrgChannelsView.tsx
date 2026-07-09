@@ -19,6 +19,7 @@ import { SectionShell } from './SectionShell';
 import { connectWallet, personalSign } from '../../lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueDirectoryListing } from '../../home/directory';
+import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -79,6 +80,14 @@ export function OrgChannelsView({ org }: { org: Address }) {
   const [newTitle, setNewTitle] = useState('');
   // Composer
   const [draft, setDraft] = useState('');
+  // Invite (spec 318 §invite): find a Person in the KB (naming/knowledge-graph search, spec 314) and
+  // send them an ordinary inbox message carrying an `org-channels` context ref — the chip in THEIR
+  // /messages routes them to this join gate. The invite never enrolls anyone (ADR-0025): the invitee
+  // still signs their own listing to appear here.
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteQuery, setInviteQuery] = useState('');
+  const [inviteHits, setInviteHits] = useState<AgentSearchHit[] | null>(null);
+  const [inviteSent, setInviteSent] = useState<string | null>(null);
 
   const authed = useMemo(
     () => ({ 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` }),
@@ -166,6 +175,34 @@ export function OrgChannelsView({ org }: { org: Address }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }, [active, draft, communityId, authed, load]);
+
+  const searchInvitees = useCallback(async () => {
+    if (!inviteQuery.trim()) return;
+    setInviteHits(await searchAgentsKb(inviteQuery.trim()).catch(() => []));
+  }, [inviteQuery]);
+
+  const invite = useCallback(async (hit: AgentSearchHit) => {
+    setBusy(true); setError(null); setInviteSent(null);
+    try {
+      const res = await fetch('/connect/inbox', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({
+          action: 'send',
+          toName: hit.name,
+          bodyText:
+            `You're invited to join this organization's channel discussion. ` +
+            `Open the invitation chip on this conversation to join — you'll sign a listing you can revoke anytime.`,
+          contextRefs: [{ kind: 'org-channels', id: communityId, label: 'Join the discussion' }],
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || body.ok === false) throw new Error(body.error ?? `invite failed (${res.status})`);
+      setInviteSent(hit.displayName ?? hit.name);
+      setInviteQuery(''); setInviteHits(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }, [authed, communityId]);
 
   // Poster → member listing (CAIP subject match) so any author with a current listing gets a DM link.
   const listingBySubject = useMemo(() => {
@@ -319,9 +356,37 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
         {/* ── Members rail ── */}
         <div style={{ width: 200, flex: 'none', borderLeft: '1px solid #e5e7eb', paddingLeft: '0.75rem' }}>
-          <strong style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>
-            Members · {listings.length}
-          </strong>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>
+              Members · {listings.length}
+            </strong>
+            <button className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite a person">
+              ＋
+            </button>
+          </div>
+          {inviteOpen && (
+            <div style={{ margin: '0.5rem 0 0.25rem' }}>
+              <input
+                placeholder="Find a person by name…"
+                value={inviteQuery}
+                onChange={(e) => setInviteQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void searchInvitees(); }}
+                style={{ width: '100%', marginBottom: '0.3rem' }}
+              />
+              {inviteHits?.map((h) => (
+                <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: 2 }}>
+                  <div style={{ minWidth: 0, flex: 1, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <b>{h.displayName ?? h.label}</b> <span style={{ opacity: 0.55 }}>{h.name}</span>
+                  </div>
+                  <button className="btn" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>
+                    Invite
+                  </button>
+                </div>
+              ))}
+              {inviteHits && inviteHits.length === 0 && <p style={{ fontSize: '0.75rem', opacity: 0.6 }}>No one found.</p>}
+              {inviteSent && <p style={{ fontSize: '0.75rem', color: '#047857' }}>Invitation sent to {inviteSent}.</p>}
+            </div>
+          )}
           <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
             {listings.map((l) => (
               <div key={l.listing.subject} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center' }}>

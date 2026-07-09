@@ -32,6 +32,19 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
 const PENDING_STATES = ['submitted', 'triaged'];
 
 function ContextChip({ r }: { r: { kind: string; id: string; label?: string } }) {
+  // An org-channels invite (spec 318): the chip IS the accept action — it routes the invitee to the
+  // org's channels join gate, where they sign their own listing (ADR-0025 — the invite never enrolls).
+  if (r.kind === 'org-channels') {
+    return (
+      <a
+        href={`/org/${r.id}/channels`}
+        style={{ border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#047857', borderRadius: 999, padding: '0.05rem 0.55rem', fontSize: '0.7rem', textDecoration: 'none', fontWeight: 600 }}
+        title={`Organization ${r.id}`}
+      >
+        {r.label ?? 'Join the discussion'} →
+      </a>
+    );
+  }
   return (
     <span
       style={{ border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca', borderRadius: 999, padding: '0.05rem 0.55rem', fontSize: '0.7rem' }}

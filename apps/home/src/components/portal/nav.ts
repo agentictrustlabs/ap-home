@@ -98,12 +98,11 @@ export function buildNav(
   }));
 
   // Interactions (spec 313 v2): ONE Messages surface (requests + chats +
-  // search/compose — Telegram model); Channels = communities, Networks = org
-  // presence. The old /inbox /chats /find routes redirect to /messages.
+  // search/compose — Telegram model). Channels/Networks are ORG-workspace surfaces (spec 318 —
+  // topic discussion inside an organization), so they appear only when an org agent is selected,
+  // never in the person scope. The old /inbox /chats /find routes redirect to /messages.
   const interactions: NavItem[] = [
     { id: 'messages', label: 'Messages', href: '/messages', Icon: ChatIcon, status: 'live', badge: badges.inbox },
-    { id: 'channels', label: 'Channels', href: '/channels', Icon: HashIcon, status: 'live' },
-    { id: 'networks', label: 'Networks', href: '/networks', Icon: GlobeIcon, status: 'live' },
   ];
 
   const portal: NavItem[] = [];
