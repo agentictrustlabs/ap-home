@@ -47,7 +47,13 @@ export function AgentSwitcher() {
     active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
     : active.kind === 'service' ? (activeService?.name ? nameLabel(activeService.name) : short(active.agent))
     : personLabel;
-  const caption = active.kind === 'person' ? 'acting as you' : 'acting as custodian';
+  // spec 318: the caption states the RELATIONSHIP truthfully — a member org is authority-only
+  // (never custody), and an org not in the list at all is a guest visit.
+  const caption =
+    active.kind === 'person' ? 'acting as you'
+    : active.kind === 'org' && activeOrg?.relationship === 'member' ? 'member · no custody'
+    : active.kind === 'org' && !activeOrg ? 'visiting · no custody'
+    : 'acting as custodian';
 
   const go = (href: string) => { router.push(href); setOpen(false); };
 
