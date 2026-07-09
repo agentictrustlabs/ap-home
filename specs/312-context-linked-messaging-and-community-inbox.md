@@ -4,6 +4,11 @@
 **Doctrine:** ADR-0021 (packages generic, vertical vocabulary in apps), ADR-0025 (person↔org links are PRIVATE), ADR-0010 (SA address is the canonical id), ADR-0013 (no silent fallbacks).
 **Architect-of-record for:** `ContextRefV1` + `ConversationDescriptorV1` in `@agenticprimitives/messaging`, `contextRefs` on `InteractionCaseV1`, the Home community directory + composer + related-messages surfaces, and the per-app messaging adapters.
 
+> **Post-absorption note (spec 316 W1):** the owning packages were absorbed into
+> `@agenticprimitives/fabric` — these types now live at `fabric/messaging` / `fabric/interactions`
+> with semantics unchanged. The synthesis-inbox UI this spec describes was consolidated by
+> spec 313 W4 (v2) into the single `/messages` surface.
+
 ## 1. Problem
 
 Spec 309/310 shipped the pipes: signed envelopes, audited delivery, an approval queue, mandates. But the

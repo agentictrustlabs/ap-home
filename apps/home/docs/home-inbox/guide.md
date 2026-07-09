@@ -21,10 +21,11 @@ the portable Home contracts from `@agenticprimitives/home`, published and render
 ## Inbox surface (W3)
 
 - `GET /connect/inbox` returns items, folder summaries, the deterministic `projectHomeInboxSummary`
-  (unread / pending approvals / needs-info counts), open cases, sender-proposed cards, and bodies.
-- `app/(portal)/inbox/page.tsx` renders the pending-approvals queue and folders with native components.
-  A sender-proposed card's `allowedActions` drive the buttons; unknown actions never resolve
-  (`resolveCardAction` ⇒ null ⇒ reject).
+  (unread / pending approvals / needs-info counts), open cases, sender-proposed cards, bodies, and
+  reverse-resolved display names.
+- The unified `app/(portal)/messages/page.tsx` (spec 313 v2) renders the pending queue and threads with
+  native components. A sender-proposed card's `allowedActions` drive the buttons; unknown actions never
+  resolve (`resolveCardAction` ⇒ null ⇒ reject).
 - Every decision routes through the audited interactions store; the Home **renders authority, never
   mints it** — approve is a lifecycle fact, issuance belongs to the authority packages.
 
@@ -54,7 +55,7 @@ the portable Home contracts from `@agenticprimitives/home`, published and render
 
 ## Synthesis inbox + community messaging (spec 312)
 
-- **Conversation-first UI** (`app/(portal)/inbox/page.tsx`, per
+- **Conversation-first UI** (now `app/(portal)/messages/page.tsx`, per
   `docs/architecture/inbox-ux-synthesis.md`): a "Needs attention" triage band (pending approvals +
   urgent — Outlook's focused inbox), conversation rows from `summarizeConversations` (Slack), context
   chips from `ContextRefV1` that filter the whole inbox, and a signature chip per message —
@@ -73,26 +74,32 @@ the portable Home contracts from `@agenticprimitives/home`, published and render
 - **Other apps deliver context-linked mail** to `/connect/inbox/deliver` with `contextRefs`
   (e.g. demo-jp people-group/agreement notes, demo-gs need/offering discussions).
 
-## Interactions IA (spec 313)
+## Interactions IA (spec 313, v2 consolidated)
 
-The Home UX separates interaction *tempos* into a left-nav "Interactions" group; the read path is
-one shared view (`src/home/use-inbox.ts`) with a **deterministic** partition — a conversation is a
-chat iff none of its messages carries an `interactionId` and all are kind `plain`:
+W1–W3 shipped tempo-separated tabs (Inbox / Chats / Channels / Find / Networks); **W4 (v2) merged
+Inbox + Chats + Find into ONE `/messages` surface** — three tabs that all ended in "send a message"
+became one (Telegram/Slack model). The old routes redirect. The read path is one shared view
+(`src/home/use-inbox.ts`, 5s visible-tab polling + reverse-resolved names); the chat/request
+distinction is still **mechanical** (a case attached or not) but is now presentation, not navigation:
 
-- **Inbox** (`/inbox`) — Gmail-tempo triage: Needs-attention band, cases, typed requests, receipts,
-  folders + context-chip filters. No DMs.
-- **Chats** (`/chats`) — Signal-tempo person↔person threads with an in-thread reply
-  (`POST /connect/inbox {action:'reply'}` — the recipient comes from the owner's OWN conversation
-  descriptor, never the wire).
+- **Messages** (`/messages`) — pending requests pinned in a "Needs attention" band (approve/deny/
+  ask-info; approve can issue a mandate); every conversation in one rail (request threads get a
+  "needs review" badge + in-thread decision card; two-party chats get a reply box —
+  `POST /connect/inbox {action:'reply'}`, recipient from the owner's OWN conversation descriptor,
+  never the wire); KB partial-match search + compose in the header (`action:'send'` with `toName`,
+  one on-chain `resolveName`); opening a thread marks it read.
 - **Channels** (`/channels`, `server/connect/channels.ts`) — Slack-tempo community boards.
   Membership = a **current directory listing** in the community (one consent artifact for both
   discoverability and channel access); posts are envelope-shaped and audited before commit.
-- **Find** (`/find`) — exact name lookup (naming service) + opt-in community listings + your orgs as
-  entry points; message anyone found via the standard `send` path. No global roster exists.
 - **Networks** (`/networks`) — orgs publish a `DirectoryListingV1` (subject = ORG SA, signature
   ERC-1271-verified **against the org account**) into the reserved `networks` index; other orgs
   browse and contact the org's inbox. Discoverability prompts (claim name → publish listing →
   publish org) appear on empty states.
+
+> **Fabric note (spec 316):** the primitives this guide names now live at
+> `@agenticprimitives/fabric/messaging` + `fabric/interactions` (spec 309's packages were absorbed;
+> semantics unchanged, 11-state case machine). See
+> `docs/messaging-interactions/guide.md` for the end-to-end interaction diagrams.
 
 ## Doctrine checklist for other Home implementations
 

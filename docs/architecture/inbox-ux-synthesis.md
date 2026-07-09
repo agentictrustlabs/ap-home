@@ -2,7 +2,12 @@
 
 Companion to [spec 312](../../specs/312-context-linked-messaging-and-community-inbox.md) §7. This is
 the component-level contract for the `demo-sso-next` inbox; the primitives it renders live in
-`messaging` / `interactions` / `home`.
+`@agenticprimitives/fabric` (`/messaging` + `/interactions` subpaths, post spec-316 absorption) + `home`.
+
+> **v2 note (spec 313 W4):** the techniques below were originally rendered across separate Inbox /
+> Chats / Find tabs; they now compose ONE `/messages` surface — triage band (Outlook) pinned above a
+> single conversation rail (Slack), signature cues per bubble (Signal), consent-only discovery in the
+> composer (Diode). The technique → component mappings still hold; only the navigation collapsed.
 
 ## Interaction archetypes
 
