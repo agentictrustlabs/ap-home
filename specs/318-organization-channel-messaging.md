@@ -1,6 +1,37 @@
 # Spec 318 — Organization & Channel Messaging on the Fabric (+ Channel Agents as Service SAs)
 
-**Status:** Draft v0 (2026-07-08)
+**Status:** Draft v1 (2026-07-09) — a demo interim slice is SHIPPED (see the addendum below); the DO-native C1–C4 design remains the target.
+
+> **SHIPPED INTERIM SLICE (2026-07-09).** Ahead of the DO-native channel design (C1–C4, which live on the
+> org's `PrincipalGatewayDO`), a demo realization ships in `demo-sso-next` over the existing
+> `/connect/channels` + `/connect/directory` KV endpoints. It is the C1 *predecessor state*, recorded here
+> so it is not documented only in code comments:
+>
+> 1. **Membership = a self-signed directory listing** in the org's community (`communityId` = the org SA),
+>    ADR-0025 opt-in. Joining is publishing the listing; leaving is revoking it.
+> 2. **Authority-only org membership.** Joining also writes a person→org link with `relationship:'member'`
+>    into the person's home store (`server/connect/membership.ts` — a **projection of the listing**, the
+>    source of truth; reconciled on every channels read; absent-only; never downgrades a steward link;
+>    removed on revoke). This link is **authority-only — it confers NO custody**: it is excluded from every
+>    control gate (`resolveInboxOwner`, `controlsOwner`, `received-delegations`). It grants exactly:
+>    visibility in the workspace switcher ("Organizations you belong to") + the org's Channels surface.
+>    Custody stays with stewards (the person who controls the org SA).
+> 3. **Invite = ordinary mail.** A member invites a Person found via KB search by sending an inbox message
+>    carrying an `org-channels` context ref; the invitee's Messages renders it as a "Join the discussion"
+>    action routing to the join gate. The invite NEVER enrolls anyone — the invitee still signs their own
+>    listing (ADR-0025).
+> 4. **Channel-post bodies land in the ORG's vault** (owner = org SA), written/read through the same
+>    edge → a2a (server-mint) → demo-mcp body store as DMs, under a **steward-signed org delivery grant**
+>    (delegator = the org SA; provisioned by the "Enable (steward)" gate, which runs the same owner-generic
+>    vault-key-binding + delivery-grant pair a person runs). Posting fails closed with no org grant. This is
+>    the C1 org-readable mode — **not** member-private; member-private (MLS) is C5.
+>
+> **Known interim gaps (tracked in findings.yaml):** the fabric channel-role store (`channel-store.ts`) is
+> an ACL table, not yet the delegation-as-permission model §5/C2 specifies (**FAB-ARCH-1**); the org
+> delivery grant scope (`vault:message.body:*`) is shared between channel posts and org direct-inbox bodies,
+> isolated only in app logic (**FAB-SSO-2**).
+
+Draft v0 (2026-07-08).
 **Builds on:** [spec 316](316-agentic-interaction-fabric.md) (the fabric — org SA gateway DO, ExchangeRecord, tiers, intent alignment §15), [spec 313](313-interactions-ia-chats-channels-find-networks.md) (Channels/Find/Networks IA — shipped app slice), [spec 312](312-context-linked-messaging-and-community-inbox.md) (context refs, conversations, directory), [spec 282](282-skills.md) (skills), [spec 291](291-verified-entitlements-and-d1-audit.md) (entitlements), [spec 317](317-messaging-fabric-substrate-migration.md) (delivery + record-scoped authority), [spec 247](247-delegated-member-records.md) (delegated records / vault residency).
 **Architect-of-record for:** organization/channel (team/group) messaging on the fabric **and channel-participant Service Agents ("bots")**.
 **Full landscape + capability→fabric mapping:** [`docs/architecture/agentic-interaction-fabric-analysis.md` §16](../docs/architecture/agentic-interaction-fabric-analysis.md#16-organization--channel-messaging-teamgroup-context--landscape--fabric-mapping--approach) (this spec is the design of record; §16 holds the exhaustive product survey).
