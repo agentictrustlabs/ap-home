@@ -155,14 +155,22 @@ export interface InboxView {
 // "supply the store" once the delivery-service SA + server-side edge-auth are provisioned (spec 317 §3.4).
 // ONE mechanism per call (ADR-0013): a store is used or it isn't — never a runtime KV fallback.
 
-/** Resolve every envelope's body — from the vault (hash-verified) when a store is given, else the KV map. */
+/** Resolve every envelope's body. Residency is a PER-MESSAGE fact recorded at write time (`persistBody`
+ *  wrote each body to exactly one place): present in KV `doc.bodies` ⇒ KV-resident; absent + a store ⇒ the
+ *  owner's vault. This is a dispatch on recorded state, NOT a runtime fallback (ADR-0013) — a member who
+ *  provisions a grant mid-history keeps their KV-era bodies while new mail resolves from the vault.
+ *  Vault reads go to `message.body:<id>` — the resource `putBody` actually keys by — never the
+ *  sender-supplied `envelope.body.resource` (an external app's envelope may carry an `inline:*` stub). */
 async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore): Promise<Record<string, string>> {
-  if (!bodyStore) return doc.bodies;
-  const out: Record<string, string> = {};
-  for (const e of doc.envelopes) {
-    // Fail-closed: a missing record or a bodyHash mismatch throws in loadBody — omit rather than serve bad bytes.
-    try { out[e.id] = new TextDecoder().decode(await bodyStore.loadBody(e)); } catch { /* omitted */ }
-  }
+  const out: Record<string, string> = { ...doc.bodies };
+  if (!bodyStore) return out;
+  const vaultBacked = doc.envelopes.filter((e) => out[e.id] === undefined);
+  await Promise.all(vaultBacked.map(async (e) => {
+    // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
+    // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
+    const normalized: MessageEnvelopeV1 = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
+    try { out[e.id] = new TextDecoder().decode(await bodyStore.loadBody(normalized)); } catch { /* omitted */ }
+  }));
   return out;
 }
 
