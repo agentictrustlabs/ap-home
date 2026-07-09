@@ -19,6 +19,7 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { isListingCurrent, validateDirectoryListing, type DirectoryListingV1 } from '@agenticprimitives/home';
+import { ensureOrgMemberLink, removeOrgMemberLink } from './membership';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -89,17 +90,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await env.AUTH_CODES.put(KEY(communityId), JSON.stringify(rows));
     // Leaving an ORG's channels revokes the AUTHORITY-ONLY member link too (never a steward link —
     // custody is not granted or revoked here; spec 318 membership).
-    if (/^0x[0-9a-fA-F]{40}$/.test(communityId)) {
-      const linkKey = `related:${person.toLowerCase()}:${communityId}`;
-      const raw = await env.AUTH_CODES.get(linkKey);
-      const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
-      if (link?.relationship === 'member') {
-        await env.AUTH_CODES.delete(linkKey);
-        const idxKey = `related-idx:${person.toLowerCase()}`;
-        const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
-        await env.AUTH_CODES.put(idxKey, JSON.stringify(idx.filter((a) => a.toLowerCase() !== communityId)));
-      }
-    }
+    await removeOrgMemberLink(env, person, communityId);
     return jsonCors({ ok: true }, request);
   }
 
@@ -147,34 +138,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Timeline row: publishing a listing is a visibility grant the person made.
     await appendControlEvent(env, person as Address, 'grant-issued');
     // spec 318 membership: joining an ORG's channels (communityId = the org SA) IS becoming an
-    // AUTHORITY-ONLY member of that org — record the person→org link in the person's home store
-    // (ADR-0025: derived from THEIR self-signed listing, no extra signature, never a public edge).
-    // relationship:'member' carries NO custody: the control checks (org inbox, delivery-grant,
-    // org workspace nav) exclude member links; only the workspace switcher + channels gain it.
-    // Absent-only: an existing steward link is NEVER downgraded.
-    if (/^0x[0-9a-fA-F]{40}$/.test(communityId) && communityId !== person.toLowerCase()) {
-      const linkKey = `related:${person.toLowerCase()}:${communityId}`;
-      if (!(await env.AUTH_CODES.get(linkKey))) {
-        const orgName = await naming.reverseResolve(communityId as Address).catch(() => null);
-        await env.AUTH_CODES.put(linkKey, JSON.stringify({
-          orgAgent: communityId,
-          orgName: orgName ?? communityId,
-          purpose: 'channel membership',
-          requestedBy: 'home-channels',
-          siteDelegation: null,
-          proofHash: null,
-          createdAt: Date.now(),
-          kind: 'org',
-          parent: person.toLowerCase(),
-          relationship: 'member',
-        }));
-        const idxKey = `related-idx:${person.toLowerCase()}`;
-        const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
-        if (!idx.some((a) => a.toLowerCase() === communityId)) {
-          await env.AUTH_CODES.put(idxKey, JSON.stringify([...idx, communityId]));
-        }
-      }
-    }
+    // AUTHORITY-ONLY member of that org — the person→org link (relationship:'member') is a projection
+    // of THIS self-signed listing (ADR-0025: no extra signature, never a public edge, no custody;
+    // absent-only — an existing steward link is never downgraded).
+    await ensureOrgMemberLink(env, person, communityId);
     return jsonCors({ ok: true }, request);
   }
 

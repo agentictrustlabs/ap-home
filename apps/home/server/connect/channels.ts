@@ -36,6 +36,7 @@ import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { homeCaip10 } from '../../src/home/manifest';
 import { homeAuditSink } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
+import { ensureOrgMemberLink } from './membership';
 import { messageBodyResource } from '@agenticprimitives/fabric/messaging';
 import type { IndexedListing } from './directory';
 
@@ -104,6 +105,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
   const name = await memberName(env, communityId, person);
   if (!name) return jsonCors({ error: 'join this community first — publish a directory listing to enter its channels' }, request, 403);
+  // Reconcile the membership projection from the truth just proven (the CURRENT listing): a listed
+  // member whose related-link is missing (joined before the projection existed) self-heals here.
+  await ensureOrgMemberLink(env, person, communityId).catch(() => { /* projection only — never block the read */ });
   const channels = await readChannels(env, communityId);
   // Strip legacy inline bodies from the wire (cutover: the vault is the only body residency).
   const wire = channels.map((c) => ({ ...c, messages: c.messages.map(({ envelope, authorName }) => ({ envelope, authorName })) }));
