@@ -353,10 +353,10 @@ export async function sendFromInbox(
     conversationId?: string;
     title?: string;
   },
-  // spec 317 W4/W3 — residency flip: `bodyStoreFor(owner)` yields the owner's vault body store (sender's copy →
-  // sender's vault, delivered copy → recipient's vault) or `undefined`. Omitted (default) ⇒ KV bodies
-  // (unchanged, deploy-safe). A factory (not concrete stores) so `replyInConversation` — whose counterparty is
-  // resolved internally — can reuse it.
+  // spec 316 §11a / 317 — `bodyStoreFor(owner)` yields the owner's VAULT body store (sender's copy → sender's
+  // vault, delivered copy → recipient's vault). The vault is the ONLY body residency: a missing store makes
+  // `persistBody` throw (fail-closed) — there is NO KV bodies path. A factory (not concrete stores) so
+  // `replyInConversation` — whose counterparty is resolved internally — can reuse it.
   bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
 ): Promise<{ messageId: string; conversationId: string }> {
   const me = homeCaip10(person);
