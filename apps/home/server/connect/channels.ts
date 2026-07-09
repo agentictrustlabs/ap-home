@@ -37,6 +37,7 @@ import { homeCaip10 } from '../../src/home/manifest';
 import { homeAuditSink } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
 import { makeChannelsKv, type InboxKV } from '../lib/inbox-store';
+import { loadInboxDeliveryGrant, grantCoversCurrentScope } from './inbox-delivery-grant';
 import { ensureOrgMemberLink } from './membership';
 import { messageBodyResource } from '@agenticprimitives/fabric/messaging';
 import type { IndexedListing } from './directory';
@@ -135,7 +136,11 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       try { bodies[m.envelope.id] = new TextDecoder().decode(await orgStore.loadBody(normalized)); } catch { /* omitted — fail-closed */ }
     }));
   }
-  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled: !!orgStore, membership }, request);
+  // `orgVaultEnabled` is scope-aware (spec 316 §11a): true only when the org grant covers the board record
+  // (`vault:channels.data`), so a stale org grant prompts the steward to re-enable (re-sign the widened scope)
+  // instead of silently failing channel posts with record_scope_denied.
+  const orgVaultEnabled = grantCoversCurrentScope(await loadInboxDeliveryGrant(env, communityId));
+  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled, membership }, request);
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
