@@ -108,7 +108,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   return jsonCors({ ...view, names }, request);
 };
 
-const OWNER_TRANSITIONS: readonly InteractionTransitionType[] = ['view', 'triage', 'ask-info', 'approve', 'deny', 'revoke'];
+// 13→11 reconciliation: `view` is no longer a case transition (viewing marks the inbox MESSAGE read, an
+// inbox fact — not a case state). Owner review moves are triage/ask-info/approve/deny/revoke.
+const OWNER_TRANSITIONS: readonly InteractionTransitionType[] = ['triage', 'ask-info', 'approve', 'deny', 'revoke'];
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
