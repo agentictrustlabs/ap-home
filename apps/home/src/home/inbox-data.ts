@@ -21,6 +21,8 @@ import {
   type InboxProjector,
   type MessageEnvelopeV1,
   type MessageEventV1,
+  type MessageBodyStore,
+  messageBodyResource,
 } from '@agenticprimitives/fabric/messaging';
 import {
   createAuditedInteractionStore,
@@ -145,7 +147,40 @@ export interface InboxView {
   >;
 }
 
-export async function readInboxView(kv: KV, person: string): Promise<InboxView> {
+// ─── Message-body residency seam (spec 317 W3–W5) ─────────────────────────────────────────────────────────
+// The body of a message lives EITHER in the KV `doc.bodies` map (today's default — an app-KV bolt-on) OR, when
+// a `MessageBodyStore` is supplied (the fabric vault store, `createOwnerMessageBodyStore` over the owner's MCP
+// vault), in the owner's VAULT — hash-verified, residency-flipped (spec 316 §11a). The store is INJECTED so
+// this stays deploy-safe: with no store (the current wiring) behavior is unchanged; the vault cutover is
+// "supply the store" once the delivery-service SA + server-side edge-auth are provisioned (spec 317 §3.4).
+// ONE mechanism per call (ADR-0013): a store is used or it isn't — never a runtime KV fallback.
+
+/** Resolve every envelope's body — from the vault (hash-verified) when a store is given, else the KV map. */
+async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore): Promise<Record<string, string>> {
+  if (!bodyStore) return doc.bodies;
+  const out: Record<string, string> = {};
+  for (const e of doc.envelopes) {
+    // Fail-closed: a missing record or a bodyHash mismatch throws in loadBody — omit rather than serve bad bytes.
+    try { out[e.id] = new TextDecoder().decode(await bodyStore.loadBody(e)); } catch { /* omitted */ }
+  }
+  return out;
+}
+
+/** Persist a body — to the owner's vault when a store is given (dropped from the KV map), else the KV map. */
+async function persistBody(doc: InboxDataV1, envelope: MessageEnvelopeV1, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
+  if (bodyStore) {
+    await bodyStore.putBody({
+      messageId: envelope.id,
+      bytes: new TextEncoder().encode(bodyText),
+      contentType: envelope.bodyContentType ?? 'text/plain',
+      classification: envelope.classification,
+    });
+    return;
+  }
+  doc.bodies[envelope.id] = bodyText;
+}
+
+export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyStore): Promise<InboxView> {
   const doc = await loadInboxData(kv, person);
   const { projector, interactions } = hydrate(person, doc);
   const items = projector.listInbox();
@@ -170,7 +205,7 @@ export async function readInboxView(kv: KV, person: string): Promise<InboxView> 
     summary: projectHomeInboxSummary({ items, cases }),
     cases,
     cards: doc.cards,
-    bodies: doc.bodies,
+    bodies: await resolveBodies(doc, bodyStore),
     mandates: doc.mandates ?? {},
     conversations: summarizeConversations(items),
     descriptors,
@@ -209,7 +244,7 @@ export interface DeliverPayload {
  * validate + body-hash + audit-accept (messaging.createAuditedInboxDelivery) →
  * case binding checks → audited submit+admit transitions → persist.
  */
-export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPayload): Promise<void> {
+export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPayload, bodyStore?: MessageBodyStore): Promise<void> {
   const recipient: CanonicalAgentId = homeCaip10(person);
   const doc = await loadInboxData(kv, person);
   const { projector, interactions } = hydrate(person, doc);
@@ -282,7 +317,9 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
 
   doc.envelopes.push(envelope);
   doc.events.push(event);
-  doc.bodies[envelope.id] = bodyText;
+  // spec 317 W3 — residency flips to the RECIPIENT: body → the recipient's vault (hash-verified) when a store
+  // is supplied, else the KV map (default). The `delivery.admit` above already verified the bodyHash.
+  await persistBody(doc, envelope, bodyText, bodyStore);
   await saveInboxData(kv, person, doc);
 }
 
@@ -303,15 +340,22 @@ export async function sendFromInbox(
     conversationId?: string;
     title?: string;
   },
+  // spec 317 W4/W3 — residency flip: `sender` stores the sender's copy in the sender's vault, `recipient` the
+  // delivered copy in the recipient's vault. Both omitted (default) ⇒ KV bodies (unchanged, deploy-safe).
+  stores?: { sender?: MessageBodyStore; recipient?: MessageBodyStore },
 ): Promise<{ messageId: string; conversationId: string }> {
   const me = homeCaip10(person);
   const them = homeCaip10(opts.recipient);
   const now = new Date().toISOString();
   const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
   const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
+  const messageId = generateMessageId();
+  // When the message is vault-backed (any store), the body ref is the real vault resource `message.body:<id>`
+  // (resolved in each owner's own vault); otherwise the legacy KV stub.
+  const bodyResource = stores?.sender || stores?.recipient ? messageBodyResource(messageId) : 'inline:home-send';
   const envelope: MessageEnvelopeV1 = {
     version: 'ap.message.v1',
-    id: generateMessageId(),
+    id: messageId,
     conversationId,
     kind: 'plain',
     from: me,
@@ -319,7 +363,7 @@ export async function sendFromInbox(
     subject: opts.subject,
     createdAt: now,
     classification: 'internal',
-    body: { resource: `inline:home-send`, classification: 'internal', updatedAt: now },
+    body: { resource: bodyResource, classification: 'internal', updatedAt: now },
     bodyHash: await sha256Hex32(new TextEncoder().encode(opts.bodyText)),
     bodyContentType: 'text/plain',
     contextRefs: opts.contextRefs,
@@ -335,12 +379,13 @@ export async function sendFromInbox(
     createdAt: now,
   };
 
-  // Recipient side first — audited, fail-closed; nothing recorded on failure.
+  // Recipient side first — audited, fail-closed; nothing recorded on failure. The recipient's body store
+  // (residency flip) is threaded through.
   await deliverToInbox(kv, opts.recipient, {
     envelope,
     bodyText: opts.bodyText,
     conversation: descriptor,
-  });
+  }, stores?.recipient);
 
   // Self-send: the delivered copy IS the record; no second copy.
   if (opts.recipient.toLowerCase() === person.toLowerCase()) {
@@ -361,7 +406,8 @@ export async function sendFromInbox(
   projector.appendEvent(sent);
   doc.envelopes.push(envelope);
   doc.events.push(sent);
-  doc.bodies[envelope.id] = opts.bodyText;
+  // spec 317 W4 — the sender's own copy → the sender's vault when supplied, else the KV map.
+  await persistBody(doc, envelope, opts.bodyText, stores?.sender);
   const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
   if (!(doc.conversations ?? []).some((d) => d.id === conversationId)) {
     doc.conversations = [...(doc.conversations ?? []), mine];
