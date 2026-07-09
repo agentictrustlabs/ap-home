@@ -14,7 +14,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { VAULT_RECORD_SCOPE_ENFORCER, decodeVaultRecordScopeTerms } from '@agenticprimitives/delegation';
-import { INBOX_DATA_RESOURCE_SCOPE } from '../../src/lib/delegation';
+import { INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE } from '../../src/lib/delegation';
 
 /** KV key for a recipient's stored inbox-delivery grant (the signed delegation wire). */
 const GRANT_KEY = (owner: string): string => `inbox-delivery-grant:${owner.toLowerCase()}`;
@@ -26,21 +26,22 @@ interface DelegationWireLike {
   signature?: string;
 }
 
-/** spec 316 §11a — a grant is "current" only when its record-scope covers the vault-resident inbox document
- *  (`vault:inbox.data`), not just the message-body records. A grant signed before the cutover (message.body:*
- *  only) is STALE: `stored` reports false so onboarding re-issues + the Home banner prompts re-enable, and the
- *  owner re-signs the widened grant. Without this, a stale grant would be kept and every inbox.data write would
- *  be record-scope-denied (fail-closed empty inbox). */
-function grantCoversInboxData(d: DelegationWireLike | null): boolean {
+/** spec 316 §11a — a grant is "current" only when its record-scope covers BOTH vault-resident documents:
+ *  the personal inbox (`vault:inbox.data`) AND the org channel board (`vault:channels.data`), not just the
+ *  message-body records. A grant signed before the cutover (message.body:* only), or after only the first
+ *  cutover step (inbox.data but no channels.data), is STALE: `stored`/`orgVaultEnabled` report false so
+ *  onboarding re-issues + the Home/channels UI prompts re-enable, and the owner re-signs the FULL widened
+ *  grant. Requiring both keeps the person "enable" banner and the org "enable vault storage" prompt consistent
+ *  with what a write actually needs — without it, a stale grant is kept and the doc write is record-scope-denied. */
+export function grantCoversCurrentScope(d: DelegationWireLike | null): boolean {
   if (!d?.signature || d.signature === '0x') return false;
   const cav = (d.caveats ?? []).find(
     (c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase(),
   );
   if (!cav?.terms) return false;
   try {
-    return decodeVaultRecordScopeTerms(cav.terms as `0x${string}`).some((g) =>
-      g.resources.some((r) => r === INBOX_DATA_RESOURCE_SCOPE),
-    );
+    const resources = new Set(decodeVaultRecordScopeTerms(cav.terms as `0x${string}`).flatMap((g) => g.resources));
+    return resources.has(INBOX_DATA_RESOURCE_SCOPE) && resources.has(CHANNELS_DATA_RESOURCE_SCOPE);
   } catch {
     return false;
   }
@@ -96,9 +97,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!owner || !(await controlsOwner(env, person, owner))) {
     return json({ error: 'owner must be the session principal or a managed agent' }, 403);
   }
-  // "stored" ⇒ a CURRENT grant (covers `vault:inbox.data`, spec 316 §11a). A pre-cutover message-body-only
-  // grant reports false so onboarding re-issues + the Home prompts re-enable — the owner re-signs the widened scope.
-  return json({ stored: grantCoversInboxData(await loadInboxDeliveryGrant(env, owner)) });
+  // "stored" ⇒ a CURRENT grant (covers `vault:inbox.data` + `vault:channels.data`, spec 316 §11a). A grant
+  // missing either reports false so onboarding re-issues + the Home/channels UI prompts re-enable — the owner
+  // re-signs the full widened scope.
+  return json({ stored: grantCoversCurrentScope(await loadInboxDeliveryGrant(env, owner)) });
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
