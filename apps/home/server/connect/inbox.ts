@@ -77,31 +77,54 @@ async function displayNames(env: FnContext['env'], addrs: Set<string>): Promise<
   return out;
 }
 
+/**
+ * Resolve which inbox to act on. Default = the session person's OWN inbox. When `?agent=<sa>` (GET) or
+ * `body.agent` (POST) names a managed org/service SA, the person may act on THAT agent's inbox ONLY if they
+ * control it — i.e. it is in their managed-agents set (`related-idx:<person>`, the same control set the
+ * workspace switcher gates org/service access on, spec 315 / ADR-0025). Fail-closed: an uncontrolled agent
+ * → `null` (the caller returns 403). Each inbox is keyed by SA (`inbox-data:<sa>`), so this simply chooses
+ * which SA's inbox the person is authorized to read/act on.
+ */
+async function resolveInboxOwner(
+  env: FnContext['env'],
+  person: string,
+  requested: string | null | undefined,
+): Promise<string | null> {
+  if (!requested) return person;
+  const target = requested.toLowerCase();
+  if (target === person.toLowerCase()) return person;
+  const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+  return idx.some((a) => a.toLowerCase() === target) ? target : null;
+}
+
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  const url = new URL(request.url);
+  // `?agent=<sa>` scopes the read to a managed org/service inbox the person controls (else 403).
+  const owner = await resolveInboxOwner(env, person, url.searchParams.get('agent'));
+  if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
   // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
   // the same projection the inbox renders, filtered; never a second index.
-  const url = new URL(request.url);
   const contextKind = url.searchParams.get('contextKind');
   if (contextKind) {
-    const items = await readMessagesByContext(env.AUTH_CODES, person, {
+    const items = await readMessagesByContext(env.AUTH_CODES, owner, {
       kind: contextKind,
       id: url.searchParams.get('contextId') ?? undefined,
     });
     return jsonCors({ items }, request);
   }
-  const view = await readInboxView(env.AUTH_CODES, person);
+  const view = await readInboxView(env.AUTH_CODES, owner);
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {
     const a = m.from.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-    if (a && a !== person) addrs.add(a);
+    if (a && a !== owner) addrs.add(a);
   }
   for (const d of Object.values(view.descriptors)) {
     for (const p of d.participants) {
       const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-      if (a && a !== person) addrs.add(a);
+      if (a && a !== owner) addrs.add(a);
     }
   }
   const names = await displayNames(env, addrs);
@@ -130,8 +153,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         bodyText?: string;
         contextRefs?: ContextRefV1[];
         conversationId?: string;
+        /** Optional managed org/service SA to act as — the person must control it (else 403). */
+        agent?: string;
       }
     | null;
+
+  // Scope the action to the person's own inbox, or a managed org/service inbox they control.
+  const owner = await resolveInboxOwner(env, person, body?.agent);
+  if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
 
   try {
     if (body?.action === 'send') {
@@ -158,7 +187,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       });
       const recipient = await naming.resolveName(name);
       if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
-      const out = await sendFromInbox(env.AUTH_CODES, person as Address, {
+      const out = await sendFromInbox(env.AUTH_CODES, owner as Address, {
         recipient,
         subject: body.subject,
         bodyText: body.bodyText,
@@ -173,12 +202,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!body.conversationId || !body.bodyText?.trim()) {
         return jsonCors({ error: 'conversationId + bodyText required' }, request, 400);
       }
-      const out = await replyInConversation(env.AUTH_CODES, person as Address, body.conversationId, body.bodyText);
+      const out = await replyInConversation(env.AUTH_CODES, owner as Address, body.conversationId, body.bodyText);
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {
       if (!body.messageId) return jsonCors({ error: 'messageId required' }, request, 400);
-      await applyMessageAction(env.AUTH_CODES, person as Address, body.messageId, body.action === 'read' ? 'read' : 'archived');
+      await applyMessageAction(env.AUTH_CODES, owner as Address, body.messageId, body.action === 'read' ? 'read' : 'archived');
       return jsonCors({ ok: true }, request);
     }
     if (body?.action === 'transition') {
@@ -199,12 +228,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         });
         const updated = await applyApproveWithMandate(
           env.AUTH_CODES,
-          person as Address,
+          owner as Address,
           body.interactionId,
           body.mandate,
           async (digest, signature) => {
             try {
-              return await accounts.isValidSignature(person as Address, digest, signature as Hex);
+              return await accounts.isValidSignature(owner as Address, digest, signature as Hex);
             } catch {
               return false;
             }
@@ -212,17 +241,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
           mandateDigest,
         );
         // The mandate (scoped delegation + signed intent) is the issued artifact.
-        await appendControlEvent(env, person as Address, 'credential-issued', [
+        await appendControlEvent(env, owner as Address, 'credential-issued', [
           { kind: 'delegation', hash: body.mandate.delegationHash },
         ]);
         return jsonCors({ ok: true, case: updated }, request);
       }
 
-      const updated = await applyCaseTransition(env.AUTH_CODES, person as Address, body.interactionId, transition, body.reason);
+      const updated = await applyCaseTransition(env.AUTH_CODES, owner as Address, body.interactionId, transition, body.reason);
       // Decisions land on the control-plane timeline (spec 310 W4); view/triage
       // are navigation, not decisions.
       if (transition === 'approve' || transition === 'deny' || transition === 'ask-info' || transition === 'revoke') {
-        await appendControlEvent(env, person as Address, 'inbox-decision', updated.authorityRefs.slice(-1));
+        await appendControlEvent(env, owner as Address, 'inbox-decision', updated.authorityRefs.slice(-1));
       }
       return jsonCors({ ok: true, case: updated }, request);
     }

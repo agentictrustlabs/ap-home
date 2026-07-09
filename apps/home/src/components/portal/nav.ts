@@ -47,6 +47,14 @@ export function buildNav(
           { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
         ],
       },
+      // Messages sent TO this org's agent (spec 313/315) — the person reads the org inbox because they
+      // control it (server re-verifies via managed-agents). Channels/Networks follow the same pattern.
+      {
+        heading: 'Interactions',
+        items: [
+          { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
+        ],
+      },
     ];
   }
   // SERVICE workspace (ADR-0046): one custodial service-class agent's actions. Role-agnostic —
@@ -57,6 +65,13 @@ export function buildNav(
         heading: 'Service',
         items: [
           { id: 'service-overview', label: 'Overview', href: serviceHref(active.agent), Icon: LandmarkIcon, status: 'live' },
+        ],
+      },
+      // Messages sent TO this service agent (spec 313/315), read by the managing person (server-verified).
+      {
+        heading: 'Interactions',
+        items: [
+          { id: 'service-messages', label: 'Messages', href: `${serviceHref(active.agent)}/messages`, Icon: ChatIcon, status: 'live' },
         ],
       },
     ];

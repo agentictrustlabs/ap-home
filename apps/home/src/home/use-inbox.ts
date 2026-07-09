@@ -39,16 +39,22 @@ export interface InboxView {
   names?: Record<string, string>;
 }
 
-export function useInboxView(session: { token: string } | null) {
+/**
+ * Shared Interactions view for a Home inbox. `targetAgent` scopes it to a managed org/service SA the person
+ * controls (workspace-scoped Messages, spec 315); omitted → the person's own inbox. The server re-verifies
+ * control on every read/action (`related-idx`), so passing an uncontrolled SA is a 403.
+ */
+export function useInboxView(session: { token: string } | null, targetAgent?: string) {
   const [view, setView] = useState<InboxView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const agentQs = targetAgent ? `?agent=${encodeURIComponent(targetAgent)}` : '';
 
   const refresh = useCallback(async () => {
     if (!session) return;
-    const res = await fetch('/connect/inbox', { headers: { authorization: `Bearer ${session.token}` } });
+    const res = await fetch(`/connect/inbox${agentQs}`, { headers: { authorization: `Bearer ${session.token}` } });
     if (res.ok) setView((await res.json()) as InboxView);
-  }, [session]);
+  }, [session, agentQs]);
 
   // Initial load + light polling (5s, paused while the tab is hidden) so new
   // deliveries appear without a manual refresh.
@@ -77,7 +83,7 @@ export function useInboxView(session: { token: string } | null) {
         const res = await fetch('/connect/inbox', {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
-          body: JSON.stringify(body),
+          body: JSON.stringify(targetAgent ? { ...body, agent: targetAgent } : body),
         });
         const out = (await res.json()) as { ok?: boolean; error?: string };
         if (!res.ok || !out.ok) throw new Error(out.error ?? `failed (${res.status})`);
@@ -90,7 +96,7 @@ export function useInboxView(session: { token: string } | null) {
         setBusy(null);
       }
     },
-    [session, refresh],
+    [session, refresh, targetAgent],
   );
 
   /** Deterministic chat test (spec 313 §2). */
