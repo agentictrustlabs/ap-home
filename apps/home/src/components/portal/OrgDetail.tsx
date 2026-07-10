@@ -327,7 +327,7 @@ function MemberCard({ m, onRemove, removing }: { m: ReceivedDelegation; onRemove
  *  remove a member (W3: listing + link + grant index removed; the org's member-access grant is
  *  revoked ON-CHAIN with the steward's credential). */
 export function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
-  const { session, profile } = useSession();
+  const { session, profile, agentAddress } = useSession();
   const [members, setMembers] = useState<ReceivedDelegation[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -378,19 +378,45 @@ export function OrgMembers({ org, token }: { org: MyOrg; token: string | null })
       {err && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>{err}</p>}
       {!loaded ? (
         <p className="manage-card-blurb">Loading members…</p>
-      ) : members.length === 0 ? (
-        <p className="manage-card-blurb">No members yet — members are added when they accept an invitation (or join the channels) and grant their membership delegation.</p>
       ) : (
         <div className="manage-grid">
-          {members.map((m, i) => (
-            <MemberCard
-              key={`${m.orgAgent}-${i}`}
-              m={m}
-              onRemove={() => void remove(m.orgAgent)}
-              removing={removing === m.orgAgent}
-            />
-          ))}
+          {/* The viewer stewards this org (that's how they reached this panel) — show them FIRST,
+              always: an org is never "empty" to its own steward. If their membership delegation is
+              recorded (org create now mints it), the same card carries the Member badge too. */}
+          {(() => {
+            const selfLc = (agentAddress ?? '').toLowerCase();
+            const selfMember = members.some((m) => m.orgAgent.toLowerCase() === selfLc);
+            return (
+              <div className="manage-card">
+                <div className="manage-card-head">
+                  <span className="manage-card-label">You</span>
+                  <span className="manage-card-badge live">Steward</span>
+                  {selfMember && <span className="manage-card-badge">Member</span>}
+                </div>
+                {agentAddress && <div style={{ margin: '.45rem 0' }}><AddressChip address={agentAddress} size="sm" withName /></div>}
+                <p className="manage-card-blurb" style={{ margin: 0 }}>
+                  You hold this organization&rsquo;s stewardship delegation — admin read/oversight of its data.
+                  {!selfMember && ' (No membership delegation recorded — orgs created from now on add one automatically.)'}
+                </p>
+              </div>
+            );
+          })()}
+          {members
+            .filter((m) => m.orgAgent.toLowerCase() !== (agentAddress ?? '').toLowerCase())
+            .map((m, i) => (
+              <MemberCard
+                key={`${m.orgAgent}-${i}`}
+                m={m}
+                onRemove={() => void remove(m.orgAgent)}
+                removing={removing === m.orgAgent}
+              />
+            ))}
         </div>
+      )}
+      {loaded && members.filter((m) => m.orgAgent.toLowerCase() !== (agentAddress ?? '').toLowerCase()).length === 0 && (
+        <p className="manage-card-blurb" style={{ marginTop: '.7rem' }}>
+          No other members yet — they&rsquo;re added when they accept an invitation (or join the channels) and grant their membership delegation.
+        </p>
       )}
     </div>
   );

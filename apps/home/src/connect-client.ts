@@ -34,6 +34,7 @@ import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
+import { recordOrgMembership } from './lib/org-membership';
 import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
@@ -1271,6 +1272,12 @@ export async function createManagedAgent(
   }
 
   requestReindex([child]); // auto-index: the new managed agent (treasury/org) appears in discovery now
+  // spec 321/246 — the creator is the org's FIRST MEMBER: mint their membership delegation now
+  // ("deferred to first need" — this is it). Best-effort inside recordOrgMembership.
+  if (input.kind === 'org') {
+    onStep?.('Adding you as the first member…');
+    await recordOrgMembership(input.person, child, signHash, sessionToken);
+  }
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
 }
 
@@ -1388,6 +1395,11 @@ async function createManagedAgentSocial(
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
   }
   requestReindex([child]); // auto-index: the new managed agent (treasury/org, Google path) appears now
+  // Creator = first member (same as the device-credential path): C_sub signs, zero prompts.
+  if (input.kind === 'org') {
+    onStep?.('Adding you as the first member…');
+    await recordOrgMembership(input.person, child, googleSignHash(input.person, sessionToken), sessionToken);
+  }
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
 }
 
