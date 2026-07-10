@@ -47,7 +47,11 @@ export function buildNav(
     items: [{ id: 'back-home', label: 'Back to your home', href: '/', Icon: HomeIcon, status: 'live' }],
   };
 
-  // ORG workspace (spec 315): the left nav is that org's actions, URL-scoped under /org/<sa>/….
+  // Every workspace reads the same way: the agent's LIVE surfaces first, then a "Manage" band whose
+  // items ARE the settings/config sections (real routes, not a hidden tabbed page) — one mental model
+  // across person / org / service.
+
+  // ORG workspace (spec 315): URL-scoped under /org/<sa>/….
   if (active.kind === 'org') {
     const a = active.org;
     if (orgRelationship === 'member') {
@@ -66,38 +70,31 @@ export function buildNav(
         heading: workspaceName ?? 'Organization',
         items: [
           { id: 'org-overview', label: 'Overview', href: orgHref(a, 'overview'), Icon: BuildingIcon, status: 'live' },
-          { id: 'org-data', label: 'Data', href: orgHref(a, 'data'), Icon: DatabaseIcon, status: 'live' },
-          { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
+          { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
+          { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: HashIcon, status: 'live' },
         ],
       },
-      // Messages sent TO this org's agent (spec 313/315) — the person reads the org inbox because they
-      // control it (server re-verifies via managed-agents). Channels/Networks follow the same pattern.
+      // Manage: the old scrolling "Data" page split into its real pieces (spec 315) + Treasury.
       {
-        heading: 'Interactions',
+        heading: 'Manage',
         items: [
-          { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
-          // Topic channels INSIDE this org (spec 318 demo realization): communityId = the org SA;
-          // membership = a self-signed directory listing in the org's community (ADR-0025 opt-in).
-          { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: HashIcon, status: 'live' },
+          { id: 'org-profile', label: 'Profile', href: orgHref(a, 'profile'), Icon: BuildingIcon, status: 'live' },
+          { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
+          { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
+          { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
+          { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
         ],
       },
       backHome,
     ];
   }
-  // SERVICE workspace (ADR-0046): one custodial service-class agent's actions. Role-agnostic —
-  // treasuries today; any future service role joins here with zero IA change.
+  // SERVICE workspace (ADR-0046): one custodial service-class agent. Role-agnostic.
   if (active.kind === 'service') {
     return [
       {
         heading: workspaceName ?? 'Service',
         items: [
           { id: 'service-overview', label: 'Overview', href: serviceHref(active.agent), Icon: LandmarkIcon, status: 'live' },
-        ],
-      },
-      // Messages sent TO this service agent (spec 313/315), read by the managing person (server-verified).
-      {
-        heading: 'Interactions',
-        items: [
           { id: 'service-messages', label: 'Messages', href: `${serviceHref(active.agent)}/messages`, Icon: ChatIcon, status: 'live' },
         ],
       },
@@ -105,14 +102,12 @@ export function buildNav(
     ];
   }
 
+  // ── PERSON (your home) ──────────────────────────────────────────────────────────────────────────
   const agents = wl.manageableAgents;
   const person = agents.find((a) => a.id === 'person');
-  const others = agents.filter((a) => a.id !== 'person');
+  // "Data sources · Soon" removed — it was placeholder noise in the steward list.
+  const others = agents.filter((a) => a.id !== 'person' && a.id !== 'data-source');
 
-  // Top-level destinations — Home first (the dashboard was previously only reachable
-  // via the brand logo), then the single Messages surface (spec 313 v2 — requests +
-  // chats + search/compose, Telegram model). Channels/Networks are ORG-workspace
-  // surfaces (spec 318) and appear only when an org agent is selected.
   const top: NavItem[] = [
     { id: 'home', label: 'Home', href: '/', Icon: HomeIcon, status: 'live' },
     { id: 'messages', label: 'Messages', href: '/messages', Icon: ChatIcon, status: 'live', badge: badges.inbox },
@@ -126,36 +121,33 @@ export function buildNav(
     status: a.status,
   }));
 
-  // Agent-network tools: how you and your agents are found and described.
-  const network: NavItem[] = [
-    // Discovery registry (spec 279): every named agent + its registration.
+  // Discovery: how you and your agents are found + described.
+  const discovery: NavItem[] = [
     { id: 'registry', label: 'Registry', href: '/registry', Icon: DatabaseIcon, status: 'live' },
-    // Agent Naming Service (spec 280): manage the names you steward.
-    { id: 'naming', label: 'Naming Service', href: '/naming', Icon: TagIcon, status: 'live' },
-    // Skills (spec 282): manage skills privately + assert a public subset for discovery.
+    { id: 'naming', label: 'Naming', href: '/naming', Icon: TagIcon, status: 'live' },
     { id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' },
   ];
 
-  // Account: you, your access, and your audit trail — settings-shaped surfaces last,
-  // mirroring how GitHub/Linear/Discord anchor profile+settings at the nav's end.
-  const account: NavItem[] = [];
+  // Manage (was "Account"): the settings sections as real left items — the /you tabs merged in here so
+  // there's ONE place for each. Profile = /you (personal + identity + attestations); Security/Connected/
+  // Activity are their own routes. No duplicate "My Profile page with its own tab strip".
+  const manage: NavItem[] = [];
   if (person) {
-    account.push({ id: 'you', label: 'My Profile', href: '/you', Icon: UserIcon, status: person.status });
-  }
-  if (wl.services.connectedApps) {
-    account.push({ id: 'apps', label: 'Connected Apps', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
+    manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
   }
   if (wl.services.devices) {
-    account.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
+    manage.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   }
-  // Control-plane timeline (spec 310 W4) — audit-backed grant/agent/inbox/manifest events.
-  account.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'live' });
+  if (wl.services.connectedApps) {
+    manage.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
+  }
+  manage.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'live' });
 
   return [
     { items: top },
     { heading: 'You steward', items: yourAgents },
-    { heading: 'Agent network', items: network },
-    { heading: 'Account', items: account },
+    { heading: 'Discovery', items: discovery },
+    { heading: 'Manage', items: manage },
   ].filter((g) => g.items.length > 0);
 }
 

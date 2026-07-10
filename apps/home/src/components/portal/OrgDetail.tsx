@@ -68,7 +68,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function DelegationCard({ kind, d }: { kind: 'App access' | 'Membership' | 'Stewardship'; d: DelegationWire }) {
+export function DelegationCard({ kind, d }: { kind: 'App access' | 'Membership' | 'Stewardship'; d: DelegationWire }) {
   return (
     <div className="manage-card">
       <div className="manage-card-head">
@@ -91,7 +91,7 @@ function DelegationCard({ kind, d }: { kind: 'App access' | 'Membership' | 'Stew
 }
 
 /** Live read over a delegation: list the delegator's vault records, expand each to JSON. */
-function VaultReader({ title, hint, delegation }: { title: string; hint: string; delegation: DelegationWire }) {
+export function VaultReader({ title, hint, delegation }: { title: string; hint: string; delegation: DelegationWire }) {
   const [records, setRecords] = useState<VaultRecordRef[] | null>(null);
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(true);
@@ -169,7 +169,7 @@ const inputStyle: React.CSSProperties = {
 
 /** Manage the org's own details over the STEWARDSHIP delegation (write to the org's vault).
  *  Read on mount, edit the fields, Save → vaultWriteWithDelegation(stewardship, org:profile). */
-function OrgProfileManager({ delegation }: { delegation: DelegationWire }) {
+export function OrgProfileManager({ delegation }: { delegation: DelegationWire }) {
   const [p, setP] = useState<OrgProfile>({ v: 1 });
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -316,7 +316,7 @@ function MemberCard({ m }: { m: ReceivedDelegation }) {
 /** Members of the org = the agents that delegated TO it (the broker pool). Person-session
  *  authorized via /connect/received-delegations, filtered to this org. Each carries the
  *  member→org delegation, so we can read each member's details over it. */
-function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
+export function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
   const [members, setMembers] = useState<ReceivedDelegation[]>([]);
   const [loaded, setLoaded] = useState(false);
 
