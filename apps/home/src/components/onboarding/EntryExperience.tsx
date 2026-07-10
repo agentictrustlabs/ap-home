@@ -28,7 +28,7 @@ import { HomeResolvedView } from './HomeResolvedView';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
-const CONNECTION_LABEL: Record<string, string> = { wallet: 'wallet', google: 'Google', youversion: 'YouVersion', passkey: 'passkey', multi: 'any of the below' };
+const CONNECTION_LABEL: Record<string, string> = { wallet: 'wallet', google: 'Google', youversion: 'YouVersion', passkey: 'passkey', email: 'email', phone: 'phone', multi: 'any of the below' };
 async function nameInfo(name: string): Promise<NameInfo> {
   try {
     return (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json()) as NameInfo;
@@ -691,8 +691,16 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
   // custodian address is KMS-derived and LOOKS like an EOA (so hasEoa=true), which would otherwise make a
   // youversion/google home wrongly offer "Continue with wallet". The connection-bootstrap kind (spec 280)
   // is the authoritative signer signal, so it drives the CTA.
-  const socialKind: 'google' | 'youversion' | null =
-    info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ? info.connectionKind : null;
+  // email/phone (specs 319/320) join google/youversion as social/KMS custodians — their published
+  // connectionKind drives the CTA AND suppresses the misleading wallet button (their C_sub looks like an EOA).
+  const socialKind: 'google' | 'youversion' | 'email' | 'phone' | null =
+    info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ||
+    info?.connectionKind === 'email' || info?.connectionKind === 'phone' ? info.connectionKind : null;
+  // When the home publishes email/phone, auto-open the matching code card so it's the primary path.
+  useEffect(() => {
+    if (info?.connectionKind === 'email') setShowEmail(true);
+    if (info?.connectionKind === 'phone') setShowPhone(true);
+  }, [info?.connectionKind]);
 
   // Recognized: the member already has a live session for THIS home → one tap, no fresh credential.
   if (recognized) {

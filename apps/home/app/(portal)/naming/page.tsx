@@ -21,12 +21,14 @@ import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, i
 const BADGE = badgeStyle('ok');
 const NEUTRAL = badgeStyle('neutral');
 
-const KINDS: ConnectionKind[] = ['wallet', 'google', 'youversion', 'passkey', 'multi'];
+const KINDS: ConnectionKind[] = ['wallet', 'google', 'youversion', 'passkey', 'email', 'phone', 'multi'];
 const viaToKind = (via: string | undefined): ConnectionKind => {
   const v = (via ?? '').toLowerCase();
   if (v === 'wallet') return 'wallet';
   if (v === 'youversion') return 'youversion';
   if (v === 'google') return 'google';
+  if (v === 'email') return 'email';
+  if (v === 'phone') return 'phone';
   if (v === 'passkey') return 'passkey';
   return 'passkey';
 };
@@ -152,7 +154,8 @@ export default function NamingPage() {
 function PropertiesPanel({ row, via: viaStr, token, onClose }: {
   row: NameRow; via: string; token: string | null; onClose: () => void;
 }) {
-  const via: Via = viaStr.toLowerCase() === 'wallet' ? 'wallet' : viaStr.toLowerCase() === 'google' ? 'google' : viaStr.toLowerCase() === 'youversion' ? 'youversion' : 'passkey';
+  const vl = viaStr.toLowerCase();
+  const via: Via = vl === 'wallet' ? 'wallet' : vl === 'google' ? 'google' : vl === 'youversion' ? 'youversion' : vl === 'email' ? 'email' : vl === 'phone' ? 'phone' : 'passkey';
   const [current, setCurrent] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
   const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
   const [system, setSystem] = useState<{ addr?: string; agentKind?: string }>({});
@@ -253,7 +256,8 @@ function PropertiesPanel({ row, via: viaStr, token, onClose }: {
 function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
   row: NameRow; via: string; name: string | null; token: string | null; onClose: () => void; onDone: () => void;
 }) {
-  const via: Via = viaStr.toLowerCase() === 'wallet' ? 'wallet' : viaStr.toLowerCase() === 'google' ? 'google' : viaStr.toLowerCase() === 'youversion' ? 'youversion' : 'passkey';
+  const vl = viaStr.toLowerCase();
+  const via: Via = vl === 'wallet' ? 'wallet' : vl === 'google' ? 'google' : vl === 'youversion' ? 'youversion' : vl === 'email' ? 'email' : vl === 'phone' ? 'phone' : 'passkey';
   const [kind, setKind] = useState<ConnectionKind>(row.connectionKind ?? viaToKind(viaStr));
   const [publishAddr, setPublishAddr] = useState<boolean>(!!row.connectionAddress);
   const [busy, setBusy] = useState(false);
