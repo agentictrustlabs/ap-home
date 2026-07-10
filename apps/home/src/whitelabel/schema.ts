@@ -126,7 +126,7 @@ export interface WhiteLabelConfig {
   /** Deployment domains — sourced from lib/domain.ts (the ADR-0021 single source). */
   domains: { connect: string; a2a: string; nameParent: string };
   onboarding: {
-    credentialMethods: Array<'passkey' | 'wallet' | 'google' | 'youversion'>;
+    credentialMethods: Array<'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone'>;
   };
   /** Which Portal surfaces are enabled for this deployment. */
   services: { devices: boolean; connectedApps: boolean };

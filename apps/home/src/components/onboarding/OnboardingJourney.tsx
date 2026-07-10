@@ -16,7 +16,9 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, activateVault, activateVaultIfNeeded, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVault, activateVaultIfNeeded, type Via } from '../../home/onboarding';
+import { EmailAuthCard } from '../portal/EmailAuthCard';
+import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { listManagedAgents } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
@@ -34,7 +36,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
-type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'vault-activate' | 'grant' | 'connected' | 'error';
+type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'vault-activate' | 'grant' | 'connected' | 'error' | 'contact';
 
 export function OnboardingJourney({
   variant,
@@ -76,6 +78,8 @@ export function OnboardingJourney({
   // passkey + google are always available; wallet needs an injected provider.
   const methods = whitelabel.onboarding.credentialMethods.filter((m) => (m === 'wallet' ? hasWallet() : true));
   const [error, setError] = useState<string>('');
+  const [socialOpen, setSocialOpen] = useState(false); // "Continue with Social" → Google/YouVersion picker
+  const [contactKind, setContactKind] = useState<'email' | 'phone'>('email');
   const failBack = useRef<Screen>('overview');
 
   // Surface the real reason — secureHome/etc. return error STRINGS, not Error objects.
@@ -130,6 +134,16 @@ export function OnboardingJourney({
     // relay channel rather than treating the severed `popup.closed` as a cancel. No-op otherwise.
     api?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
     continueWithGoogle(name, stash);
+  }
+
+  // YouVersion — identical redirect machinery to Google (shared post-redirect resume; only the IdP differs).
+  function onYouVersion() {
+    const stash =
+      hasApp && api?.enroll
+        ? JSON.stringify({ enroll: api.enroll, popupMode: api.popupMode, name })
+        : undefined;
+    api?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with YouVersion…', idp: true });
+    continueWithYouVersion(name, stash);
   }
 
   // Wallet — no key-create step; the wallet prompts (SIWE + deploy/claim) ARE the gestures.
@@ -351,14 +365,58 @@ export function OnboardingJourney({
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
           )}
-          {methods.includes('google') && (
-            // Self-serve → returns to GoogleSecureHome. Relying-app enrollment → onGoogle stashes
-            // the enroll request so the post-redirect resume finishes the grant + returns the code.
-            <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>
-              Continue with Google
+          {(methods.includes('google') || methods.includes('youversion')) && !socialOpen && (
+            // ONE social entry ("Continue with Social") that expands to the configured IdPs — the
+            // product asked for the IdP choice to live BEHIND the social option, not headline it.
+            <button className="btn-ghost onboarding-secondary" onClick={() => setSocialOpen(true)}>
+              Continue with Social
+            </button>
+          )}
+          {socialOpen && (
+            <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {methods.includes('google') && (
+                // Self-serve → returns to GoogleSecureHome. Relying-app enrollment → onGoogle stashes
+                // the enroll request so the post-redirect resume finishes the grant + returns the code.
+                <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>Google</button>
+              )}
+              {methods.includes('youversion') && (
+                <button className="btn-ghost onboarding-secondary" onClick={onYouVersion}>YouVersion</button>
+              )}
+            </div>
+          )}
+          {/* Email / phone (specs 319/320): OTP-verified, KMS-custodied homes. SELF-SERVE only for
+              now — the relying-app enrollment resume machinery (stash → grant → code) exists for the
+              redirect IdPs but not yet for the OTP cards (RecognizedEnroll dual-path rule: don't
+              offer a method on one path that silently dead-ends the other). */}
+          {!hasApp && methods.includes('email') && (
+            <button className="btn-ghost onboarding-secondary" onClick={() => { setContactKind('email'); setScreen('contact'); }}>
+              Continue with email
+            </button>
+          )}
+          {!hasApp && methods.includes('phone') && (
+            <button className="btn-ghost onboarding-secondary" onClick={() => { setContactKind('phone'); setScreen('contact'); }}>
+              Continue with phone
             </button>
           )}
         </div>
+      </Frame>
+    );
+  }
+
+  if (screen === 'contact') {
+    // Email/phone secure-home (specs 319/320): the OTP card verifies the contact, bootstraps the
+    // KMS-custodied home, and opens the session — the session context then routes into the portal.
+    return (
+      <Frame>
+        <h1 className="onboarding-h1">{contactKind === 'email' ? 'Continue with email' : 'Continue with phone'}</h1>
+        <p className="onboarding-sub">
+          We send you a one-time code. Your home is secured by a managed key tied to your verified{' '}
+          {contactKind === 'email' ? 'email address' : 'phone number'} — no password, nothing to install.
+        </p>
+        <div style={{ textAlign: 'left', margin: '0 auto', maxWidth: 420 }}>
+          {contactKind === 'email' ? <EmailAuthCard /> : <PhoneAuthCard />}
+        </div>
+        <button className="btn-ghost onboarding-secondary" onClick={() => setScreen('overview')}>← Back</button>
       </Frame>
     );
   }
