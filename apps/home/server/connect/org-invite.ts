@@ -11,6 +11,7 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { sendEmail, inviteEmail, emailSendingEnabled } from '../_lib/email-sender';
 import { emailHash } from '../../src/lib/kv-indexer';
+import { orgVault } from '../lib/org-vault';
 import { whitelabel } from '../../src/whitelabel/config';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
@@ -58,11 +59,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }).reverseResolve(org as Address).then((n) => (n ? nameLabel(n) : null)).catch(() => null);
 
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
-  await env.AUTH_CODES.put(
-    `orginvite:${token}`,
-    JSON.stringify({ org, orgName: orgName ?? org, emailHash: await emailHash(email), createdAt: Date.now() }),
-    { expirationTtl: 60 * 60 * 24 * 7 }, // 7 days
-  );
+  // KV: capability pointer ONLY — random token → public org SA. NO invitee PII (blast-zone, spec 315).
+  await env.AUTH_CODES.put(`orginvite:${token}`, JSON.stringify({ org }), { expirationTtl: 60 * 60 * 24 * 7 });
+  // Org vault: the tracking record (invitee email HASH — never raw — + status), encrypted under the org's
+  // KEK, delegation-gated. Best-effort: a bearer invite is fully usable from the KV pointer alone; this is
+  // the org's own "who did I invite" tracking, kept OUT of KV so an infra leak exposes no invitee data.
+  try {
+    const vault = await orgVault(env, org);
+    if (vault) await vault.set(`org.invite:${token}`, { emailHash: await emailHash(email), createdAt: Date.now(), status: 'pending' });
+  } catch { /* tracking is best-effort; the invite remains valid via the KV pointer */ }
 
   const joinUrl = `${resolveOrigin(request, env)}/invite/${token}`;
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name));

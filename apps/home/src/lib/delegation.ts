@@ -191,6 +191,11 @@ export const INBOX_DATA_RESOURCE_SCOPE = 'vault:inbox.data' as const;
  *  read+write of it too. Harmless on a person's grant (they own no board). */
 export const CHANNELS_DATA_RESOURCE_SCOPE = 'vault:channels.data' as const;
 
+/** The vault record family that holds an ORG's invite tracking (`org.invite:<token>` — invitee email
+ *  hash + status). Blast-zone (spec 315): invitee PII lives ENCRYPTED in the org vault, not KV; KV holds
+ *  only a random-token→public-org pointer. Read+write over the org's steward-signed grant. */
+export const ORG_INVITE_RESOURCE_SCOPE = 'vault:org.invite:*' as const;
+
 /**
  * spec 317 §3.2 — issue the standing inbox-delivery delegation `recipient → deliveryServiceSA`,
  * signed once at onboarding by the recipient's ROOT credential (`signHash`). A `VAULT_RECORD_SCOPE`
@@ -226,7 +231,7 @@ export async function issueInboxDeliveryDelegation(
     // spec 316 §11a cutover: the grant covers the message-body records AND the vault-resident documents —
     // the personal inbox (`inbox.data`) and the org channel board (`channels.data`) — read+write, so delivery
     // (a2a skill append) + render/mutate (owner Home) + channel post/read run on ONE grant.
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE, ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
