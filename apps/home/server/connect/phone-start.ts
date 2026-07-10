@@ -4,8 +4,9 @@
 // keyed by SHA-256(E.164) so the verify step knows the requesting audience. The raw number is never stored.
 // DEPLOY-SAFE: with Twilio unset, we self-generate a dev OTP (stored + logged) so the flow still works.
 import type { FnContext } from '../_lib/server-broker';
-import { sendPhoneVerification, smsVerifyEnabled, normalizeE164 } from '../_lib/sms-sender';
+import { sendPhoneVerification, smsVerifyEnabled, smsMessagingEnabled, sendSms, normalizeE164 } from '../_lib/sms-sender';
 import { phoneHash } from '../../src/lib/kv-indexer';
+import { whitelabel } from '../../src/whitelabel/config';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
 const json = (b: unknown, s = 200): Response =>
@@ -26,21 +27,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   const aud = body?.aud ?? env.DEMO_SSO_AUD ?? 'demo-sso';
   const key = `phoneverify:${await phoneHash(phone)}`;
-  const twilio = smsVerifyEnabled(env);
+  const useVerify = smsVerifyEnabled(env);
+  const useMessaging = !useVerify && smsMessagingEnabled(env);
 
-  let devCode: string | undefined;
-  if (twilio) {
-    // Twilio owns the code — we stash only the aud (+ provider) so verify knows how to check.
+  // Twilio VERIFY (managed OTP) — Twilio owns the code; we stash only the aud so verify knows to check.
+  if (useVerify) {
     await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'twilio' }), { expirationTtl: 600 });
-  } else {
-    // Dev fallback: self-generate + store the code (logged by the sender), verified locally.
-    const code = devOtp();
-    await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'dev', code, attempts: 0 }), { expirationTtl: 600 });
-    console.log(`[phone-start] (dev) OTP for ${phone} = ${code}`);
-    if (env.DEV_OTP_ECHO === 'true') devCode = code; // testing convenience (unconfigured only, opt-in)
+    const sent = await sendPhoneVerification(env, phone);
+    if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
+    return json({ ok: true, delivery: 'sent' });
   }
 
-  const sent = await sendPhoneVerification(env, phone);
-  if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
-  return json({ ok: true, delivery: twilio ? 'sent' : 'logged', ...(devCode ? { devCode } : {}) });
+  // Otherwise WE own the code (verified locally in phone-verify's `dev` path). Deliver it via Twilio
+  // Programmable Messaging when configured (trial-friendly, no Verify upgrade), else log/echo it.
+  const code = devOtp();
+  await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'dev', code, attempts: 0 }), { expirationTtl: 600 });
+
+  if (useMessaging) {
+    const sent = await sendSms(env, phone, `${code} is your ${whitelabel.brand.name} sign-in code. It expires in 10 minutes.`);
+    if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
+    return json({ ok: true, delivery: 'sent' });
+  }
+
+  console.log(`[phone-start] (dev) OTP for ${phone} = ${code}`);
+  const devCode = env.DEV_OTP_ECHO === 'true' ? code : undefined; // opt-in echo (unconfigured only)
+  return json({ ok: true, delivery: 'logged', ...(devCode ? { devCode } : {}) });
 };

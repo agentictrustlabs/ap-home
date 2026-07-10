@@ -11,11 +11,22 @@ export interface TwilioEnv {
   TWILIO_API_KEY_SECRET?: string;
   /** Verify Service SID (VA…) — the configured Verify service that owns templating + rate limits. */
   TWILIO_VERIFY_SERVICE_SID?: string;
+  /** Account SID (AC…) — needed in the Programmable Messaging URL path. */
+  TWILIO_ACCOUNT_SID?: string;
+  /** A Twilio phone number you own (+1…) OR a Messaging Service SID (MG…) — the SMS `From`. A trial
+   *  account gets one free number and can text your own VERIFIED number without a Verify upgrade. */
+  TWILIO_FROM_NUMBER?: string;
 }
 
-/** True once Twilio Verify is configured — the caller uses the managed OTP; otherwise a dev OTP fallback. */
+/** True once Twilio VERIFY (managed OTP) is configured — the caller uses Twilio's OTP. */
 export function smsVerifyEnabled(env: TwilioEnv): boolean {
   return !!(env.TWILIO_API_KEY?.trim() && env.TWILIO_API_KEY_SECRET?.trim() && env.TWILIO_VERIFY_SERVICE_SID?.trim());
+}
+
+/** True once Twilio Programmable MESSAGING is configured — the caller texts OUR OWN dev OTP (no Verify
+ *  service / upgrade needed; a trial account can send to a verified number). Requires account SID + a From. */
+export function smsMessagingEnabled(env: TwilioEnv): boolean {
+  return !!(env.TWILIO_ACCOUNT_SID?.trim() && env.TWILIO_API_KEY?.trim() && env.TWILIO_API_KEY_SECRET?.trim() && env.TWILIO_FROM_NUMBER?.trim());
 }
 
 const authHeader = (env: TwilioEnv): string =>
@@ -82,6 +93,32 @@ export async function checkPhoneVerification(
     return { approved: body.status === 'approved' };
   } catch (e) {
     return { approved: false, error: e instanceof Error ? e.message : 'sms check failed' };
+  }
+}
+
+/** Twilio Programmable Messaging: send a plain SMS (used to deliver OUR OWN dev OTP without Verify). Auth
+ *  is the same API key (or Account SID + Auth Token); the Account SID scopes the URL. `From` is a Twilio
+ *  number (+1…) or a Messaging Service SID (MG…). Only called when `smsMessagingEnabled`. */
+export async function sendSms(env: TwilioEnv, to: string, body: string): Promise<{ ok: boolean; error?: string }> {
+  const from = env.TWILIO_FROM_NUMBER?.trim() ?? '';
+  const params = new URLSearchParams({ To: to, Body: body });
+  // A Messaging Service SID (MG…) goes in `MessagingServiceSid`; a plain number goes in `From`.
+  if (from.startsWith('MG')) params.set('MessagingServiceSid', from);
+  else params.set('From', from);
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID?.trim()}/Messages.json`, {
+      method: 'POST',
+      headers: { authorization: authHeader(env), 'content-type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      const twMsg = (() => { try { return (JSON.parse(detail) as { message?: string }).message; } catch { return detail.slice(0, 160); } })();
+      return { ok: false, error: `twilio sms ${res.status}${twMsg ? `: ${twMsg}` : ''}${res.status === 401 ? ` — ${credHint(env)}` : ''}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'sms send failed' };
   }
 }
 

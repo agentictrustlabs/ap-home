@@ -95,6 +95,10 @@ export interface Env {
   TWILIO_API_KEY_SECRET?: string;
   /** Twilio Verify Service SID (VA…) — the configured Verify service. */
   TWILIO_VERIFY_SERVICE_SID?: string;
+  /** Twilio Account SID (AC…) + a From (a +1… number or MG… Messaging Service SID) — enables Programmable
+   *  Messaging delivery of our own dev OTP (trial-friendly, no Verify upgrade). */
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_FROM_NUMBER?: string;
   /** Testing convenience: when `'true'` AND the provider is UNCONFIGURED, the email/phone start routes
    *  echo the self-generated dev OTP in the response (so a tester needn't read server logs). OFF by
    *  default — a CONFIGURED provider (SendGrid/Twilio) NEVER echoes. Never enable on a real deployment. */
