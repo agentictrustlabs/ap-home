@@ -2105,10 +2105,35 @@ app.post('/session/direct-deploy', async (c) => {
 // The SA we act for is always DERIVED from the verified (iss,sub) — never
 // client-supplied — and cross-checked against the session's claimed `sub`.
 
-/** Gate config for the client-facing custody endpoints (JWKS + pinned iss/aud). */
-function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: string; expectedAud: string } | null {
+/** Accept the broker's apex issuer AND any single-label `<handle>.<domain>` home origin — the broker
+ *  signs them ALL with the same key, so a custody session minted on a per-handle subdomain (spec 232)
+ *  must verify here too. Mirrors the broker's own `ownIssuer`/`isOwnConnectOrigin` widening; without it
+ *  an email/Google sign-in on `<handle>.impact-agent.me` 401s at "Securing your home" (iss mismatch).
+ *  The registrable domain is derived from BROKER_ISS (no hardcoded hostname). */
+function ownConnectIssuer(brokerIss: string): (iss: string) => boolean {
+  let base = '';
+  try {
+    const parts = new URL(brokerIss).hostname.toLowerCase().split('.');
+    base = parts.length >= 2 ? parts.slice(-2).join('.') : parts.join('.'); // registrable domain (last 2 labels)
+  } catch { /* leave base empty → only the exact brokerIss matches */ }
+  return (iss: string): boolean => {
+    if (iss === brokerIss) return true;
+    if (!base) return false;
+    try {
+      const u = new URL(iss);
+      if (u.protocol !== 'https:') return false;
+      const h = u.hostname.toLowerCase();
+      if (h === base) return true; // apex
+      const sfx = '.' + base;
+      return h.endsWith(sfx) && /^[a-z0-9-]+$/.test(h.slice(0, -sfx.length)); // exactly one extra label
+    } catch { return false; }
+  };
+}
+
+/** Gate config for the client-facing custody endpoints (JWKS + iss predicate + aud). */
+function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: (iss: string) => boolean; expectedAud: string } | null {
   if (!env.BROKER_JWKS_URL || !env.BROKER_ISS || !env.DEMO_SSO_AUD) return null;
-  return { jwksUrl: env.BROKER_JWKS_URL, expectedIss: env.BROKER_ISS, expectedAud: env.DEMO_SSO_AUD };
+  return { jwksUrl: env.BROKER_JWKS_URL, expectedIss: ownConnectIssuer(env.BROKER_ISS), expectedAud: env.DEMO_SSO_AUD };
 }
 
 /**

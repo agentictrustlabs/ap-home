@@ -89,7 +89,10 @@ export type GateResult =
 
 export interface VerifyCustodySessionOpts {
   jwksUrl: string;
-  expectedIss: string;
+  // A predicate (or string / string[]) — the broker signs the apex AND every `<label>.<domain>` home
+  // with the SAME key, so a custody session minted on a per-handle subdomain must verify here too
+  // (mirrors the broker's own `ownIssuer` widening; exact-string-only 401'd cross-subdomain sessions).
+  expectedIss: string | readonly string[] | ((iss: string) => boolean);
   expectedAud: string;
 }
 
