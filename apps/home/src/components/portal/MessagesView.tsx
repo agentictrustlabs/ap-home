@@ -21,16 +21,19 @@ import { useAvatar } from './chat/use-avatar';
 
 const PENDING_STATES = ['submitted', 'triaged'];
 
-function ContextChip({ r }: { r: { kind: string; id: string; label?: string } }) {
+function ContextChip({ r, names }: { r: { kind: string; id: string; label?: string }; names?: Record<string, string> }) {
   if (r.kind === 'org-channels') {
+    // Name the ORG on the chip — a thread can carry invites to DIFFERENT orgs (contextRefs union),
+    // and generic "Join the organization" chips were indistinguishable.
+    const orgName = names?.[r.id.toLowerCase()];
     return (
       <a
         href={`/org/${r.id}/channels`}
         className="badge"
         style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', textDecoration: 'none', fontWeight: 600 }}
-        title={`Organization ${r.id}`}
+        title={`Organization ${orgName ?? r.id}`}
       >
-        {r.label ?? 'Join the discussion'} →
+        {orgName ? `Join ${orgName}` : (r.label ?? 'Join the discussion')} →
       </a>
     );
   }
@@ -442,7 +445,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="chat-thread-header__title">{titleFor(activeId)}</div>
                     <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
-                      {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} />)}
+                      {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={view?.names} />)}
                     </div>
                   </div>
                 </div>

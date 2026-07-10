@@ -134,6 +134,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
       if (a && a !== owner) addrs.add(a);
     }
+    // Context orgs too — the Join chips label themselves with the ORG's name (two invites in one
+    // thread were indistinguishable as generic "Join the organization" chips).
+    for (const r of d.contextRefs ?? []) {
+      const a = r.id.match(/^0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+      if (a) addrs.add(a);
+    }
   }
   const names = await displayNames(env, addrs);
   return jsonCors({ ...view, names }, request);

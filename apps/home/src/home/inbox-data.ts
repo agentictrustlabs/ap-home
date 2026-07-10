@@ -320,8 +320,17 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
     const errors = validateConversationDescriptor(mine);
     if (errors.length > 0) throw new Error(`invalid conversation descriptor: ${errors.join(', ')}`);
     const existing = doc.conversations ?? [];
-    // First descriptor wins for this owner; later proposals never overwrite.
-    if (!existing.some((d) => d.id === mine.id)) doc.conversations = [...existing, mine];
+    // First descriptor wins for this owner; later proposals never overwrite — EXCEPT contextRefs,
+    // which UNION (by kind:id): a second invite into the same thread carries a DIFFERENT org context,
+    // and the conversation-level chips must show both (the stale-chip bug: rich-phone5-org's invite
+    // rendered the old rich-phone-organization Join chip, 2026-07-10).
+    const prior = existing.find((d) => d.id === mine.id);
+    if (!prior) doc.conversations = [...existing, mine];
+    else if (mine.contextRefs?.length) {
+      const seen = new Set((prior.contextRefs ?? []).map((r) => `${r.kind}:${r.id}`));
+      const fresh = mine.contextRefs.filter((r) => !seen.has(`${r.kind}:${r.id}`));
+      if (fresh.length) prior.contextRefs = [...(prior.contextRefs ?? []), ...fresh];
+    }
   }
 
   doc.envelopes.push(envelope);
@@ -428,8 +437,14 @@ export async function sendFromInbox(
   // spec 317 W4 — the sender's own copy → the sender's vault when supplied, else the KV map.
   await persistBody(doc, envelope, opts.bodyText, senderStore);
   const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
-  if (!(doc.conversations ?? []).some((d) => d.id === conversationId)) {
+  const priorMine = (doc.conversations ?? []).find((d) => d.id === conversationId);
+  if (!priorMine) {
     doc.conversations = [...(doc.conversations ?? []), mine];
+  } else if (opts.contextRefs?.length) {
+    // Same union-by-kind:id as the recipient side — the sender's copy of the thread shows the new chip too.
+    const seen = new Set((priorMine.contextRefs ?? []).map((r) => `${r.kind}:${r.id}`));
+    const fresh = opts.contextRefs.filter((r) => !seen.has(`${r.kind}:${r.id}`));
+    if (fresh.length) priorMine.contextRefs = [...(priorMine.contextRefs ?? []), ...fresh];
   }
   await saveInboxData(senderKv, person, doc);
   return { messageId: envelope.id, conversationId };
