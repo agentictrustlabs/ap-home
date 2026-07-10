@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useSession } from '../../context/session';
 import { secureHomeNoName, activateVault } from '../../home/onboarding';
+import { seedImpactProfileFields } from '../../profile-store';
 
 export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
   const { session, openSession } = useSession();
@@ -55,7 +56,11 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
           if (!res.ok) throw new Error(res.error);
           void activateVault(res.home.address, 'phone', { token: d.token }); // spec 278 — best-effort vault
         }
-        await openSession(d.token, 'phone', false);
+        const p = await openSession(d.token, 'phone', false);
+        // Metadata-tiers doctrine: the VERIFIED phone number is tier-1 PII — seed the private vault
+        // profile (fill-only-empty, best-effort; the member edits/removes it on /profile anytime).
+        const addr = p?.agent?.split(':').pop();
+        if (addr) void seedImpactProfileFields(addr as `0x${string}`, { phone: phone.trim() });
       } else if (d.status === 'bootstrap') {
         setErr('We couldn’t set up a home for this number automatically — sign up with a passkey or Google, then add phone.');
       }

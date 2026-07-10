@@ -101,3 +101,30 @@ export async function saveImpactProfile(addr: Address, profile: ImpactStoredProf
   const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
 }
+
+/** Seed vault-profile fields from a CONNECTION (metadata-tiers doctrine: a verified contact point is
+ *  tier-1 PII — it belongs in the private vault, seeded automatically). FILL-ONLY-EMPTY: a value the
+ *  member already saved is never overwritten. Best-effort with a short retry — the vault-key bind
+ *  (`activateVault`, fired in parallel by the bootstrap flows) may still be landing when this runs. */
+export async function seedImpactProfileFields(addr: Address, fields: Partial<ImpactContactProfile>): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const cur = await loadImpactProfile(addr);
+      const contact: ImpactContactProfile = { ...(cur.contact ?? {}) };
+      let changed = false;
+      for (const [k, v] of Object.entries(fields) as Array<[ImpactProfileFieldKey, string | undefined]>) {
+        if (v && !contact[k]) { contact[k] = v; changed = true; }
+      }
+      if (changed) await saveImpactProfile(addr, { ...cur, contact });
+      return;
+    } catch (e) {
+      if (e instanceof VaultKeyUnauthorizedError) {
+        await new Promise((r) => setTimeout(r, 2500)); // key bind racing us — retry
+        continue;
+      }
+      console.warn('[profile-seed] connection data not seeded (edit it on /profile):', e);
+      return;
+    }
+  }
+  console.warn('[profile-seed] vault key never bound — connection data not seeded (edit it on /profile)');
+}
