@@ -56,6 +56,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
+  const [steward, setSteward] = useState(false);
   // spec 321 W2b — the org info a MEMBER may read over their member-access grant (org→member,
   // vault:org:profile). Steward-independent: read from the ORG's vault via the delegation itself.
   const [orgAbout, setOrgAbout] = useState<{ displayName?: string; description?: string; website?: string } | null>(null);
@@ -91,9 +92,10 @@ export function OrgChannelsView({ org }: { org: Address }) {
     }
     if (chRes.status === 403) { setMember(false); setChannels(null); return; }
     if (!chRes.ok) { setError(`channels read failed (${chRes.status})`); return; }
-    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean; membership?: string };
+    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean; membership?: string; steward?: boolean };
     if (c.membership && c.membership !== 'linked') setError(`membership link: ${c.membership}`);
     setMember(true);
+    setSteward(c.steward === true);
     setYou(c.you);
     setChannels(c.channels);
     setBodies(c.bodies ?? {});
@@ -309,9 +311,17 @@ export function OrgChannelsView({ org }: { org: Address }) {
           <span style={{ fontSize: '0.85rem' }}>
             <b>Channel storage isn&rsquo;t enabled yet.</b> A steward authorizes the org vault once — then channels + posts are encrypted under the org&rsquo;s authority.
           </span>
-          <button type="button" className="btn" disabled={busy} onClick={() => void enableOrgVault()} style={{ marginTop: '0.5rem' }}>
-            {busy ? 'Signing…' : 'Enable (steward)'}
-          </button>
+          {/* Steward-only: the ceremony signs AS THE ORG — a member's credential can't (and the old
+              always-shown button just failed them with sender_mismatch). */}
+          {steward ? (
+            <button type="button" className="btn" disabled={busy} onClick={() => void enableOrgVault()} style={{ marginTop: '0.5rem' }}>
+              {busy ? 'Signing…' : 'Enable (steward)'}
+            </button>
+          ) : (
+            <span style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.78rem', opacity: 0.8 }}>
+              You&rsquo;re a member — ask one of this organization&rsquo;s stewards to enable it.
+            </span>
+          )}
         </div>
       )}
 

@@ -140,7 +140,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // (`vault:channels.data`), so a stale org grant prompts the steward to re-enable (re-sign the widened scope)
   // instead of silently failing channel posts with record_scope_denied.
   const orgVaultEnabled = grantCoversCurrentScope(await loadInboxDeliveryGrant(env, communityId));
-  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled, membership }, request);
+  // Steward flag (spec 321): the enable-storage ceremony signs AS THE ORG — only a steward can run
+  // it; a MEMBER offered that button just hits sender_mismatch. Steward = a related link that is not
+  // the authority-only 'member' relationship.
+  const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${communityId}`);
+  const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+  const steward = !!stewardLink && stewardLink.relationship !== 'member';
+  return jsonCors({ channels: wire, bodies, you: name, orgVaultEnabled, membership, steward }, request);
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {

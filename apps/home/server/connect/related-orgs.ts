@@ -8,8 +8,10 @@
 import { createPublicClient, http, keccak256, toBytes, type Hex, type Address } from 'viem';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
 //  spec-275 session-authorized POST branch below — same verifier as the GET.)
 
@@ -62,6 +64,19 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
     const l = link as typeof link & { kind?: string; parent?: string; relationship?: string };
+    // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
+    // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
+    // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
+    if (!link.orgName || link.orgName.toLowerCase() === link.orgAgent.toLowerCase()) {
+      const healed = await new AgentNamingClient({
+        rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+        registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+      }).reverseResolve(link.orgAgent as Address).catch(() => null);
+      if (healed) {
+        link.orgName = healed;
+        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...l, orgName: healed }));
+      }
+    }
     orgs.push({
       orgAgent: link.orgAgent,
       orgName: link.orgName,
