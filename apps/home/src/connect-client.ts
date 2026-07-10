@@ -1550,15 +1550,6 @@ export async function readCredentialCounts(personAgent: Address): Promise<{ cust
   return { custodians: Number(c), passkeys: Number(p) };
 }
 
-/** The signer for an on-behalf op using the CURRENT credential (the one this session signed in with). */
-export async function currentCredentialSignHash(via: 'passkey' | 'wallet'): Promise<SignHash> {
-  if (via === 'wallet') {
-    const addr = await connectWallet();
-    return (h: Hex) => personalSign(addr, h);
-  }
-  return passkeySignHash;
-}
-
 /** Remove a WALLET (EOA) custodian. The current credential signs `execute(self, removeCustodian)`. */
 export async function removeWalletCredential(
   personAgent: Address,
@@ -1654,6 +1645,7 @@ export async function revokeGrantedDelegation(
  *  EXISTING passkey signs `execute(self, addCustodian(newEoa))`. */
 export async function addWalletCredential(
   personAgent: Address,
+  authorizerSignHash: SignHash, // the CURRENT custodian authorizes the on-chain add (passkey / wallet / KMS)
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; added: Address } | { ok: false; error: string }> {
   onStep?.('Connecting the wallet to add…');
@@ -1663,17 +1655,19 @@ export async function addWalletCredential(
 
   const inner = encodeFunctionData({ abi: ADD_CUSTODIAN_ABI, functionName: 'addCustodian', args: [addr] });
   const callData = buildExecuteCallData({ to: personAgent, value: 0n, data: inner });
-  onStep?.(`Adding ${addr.slice(0, 6)}…${addr.slice(-4)} — confirm with your passkey…`);
-  const res = await executeCall(personAgent, passkeySignHash, callData, { attempts: 5 });
+  onStep?.(`Adding ${addr.slice(0, 6)}…${addr.slice(-4)} — confirming with your current sign-in…`);
+  const res = await executeCall(personAgent, authorizerSignHash, callData, { attempts: 5 });
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true, added: addr };
 }
 
-/** Add a PASSKEY custodian to an agent currently controlled by a WALLET.
- *  Registers a fresh passkey on this device, then the EXISTING wallet signs
- *  `execute(self, addPasskey(digest, x, y))`. */
+/** Add a PASSKEY custodian. Registers a fresh passkey on this device, then the agent's CURRENT custodian
+ *  signs `execute(self, addPasskey(digest, x, y))`. The authorizer is whatever secures the home today —
+ *  a wallet (MetaMask), a passkey, OR a KMS/Google/email custodian (signed server-side, no device prompt) —
+ *  so this must NOT assume a wallet (that popped MetaMask for KMS-custodied homes, which have none). */
 export async function addPasskeyCredential(
   personAgent: Address,
+  authorizerSignHash: SignHash,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; credentialIdDigest: Hex } | { ok: false; error: string }> {
   onStep?.('Creating the passkey to add…');
@@ -1686,9 +1680,8 @@ export async function addPasskeyCredential(
     args: [pk.credentialIdDigest, pk.pubKeyX, pk.pubKeyY, rpIdHash],
   });
   const callData = buildExecuteCallData({ to: personAgent, value: 0n, data: inner });
-  onStep?.('Adding the passkey — confirm with your wallet…');
-  const addr = await connectWallet(); // the EXISTING wallet custodian signs the add
-  const res = await executeCall(personAgent, (h) => personalSign(addr, h), callData, { attempts: 5 });
+  onStep?.('Adding the passkey — confirming with your current sign-in…');
+  const res = await executeCall(personAgent, authorizerSignHash, callData, { attempts: 5 });
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true, credentialIdDigest: pk.credentialIdDigest };
 }

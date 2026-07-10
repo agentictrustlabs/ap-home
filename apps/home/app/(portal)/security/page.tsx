@@ -11,10 +11,10 @@ import {
   removeWalletCredential,
   removePasskeyCredential,
   readCredentialCounts,
-  currentCredentialSignHash,
   stepUpToAgent,
 } from '../../../src/connect-client';
 import { loadPasskey } from '../../../src/lib/passkey';
+import { resolveVia, signHashFor } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { DeviceRow } from '../../../src/components/portal/DeviceRow';
@@ -27,7 +27,7 @@ import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/component
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 export default function SecurityPage() {
-  const { session, agentAddress, openSession } = useSession();
+  const { session, profile, agentAddress, openSession } = useSession();
   const via = session?.via ?? '';
   const [add, setAdd] = useState<{ step?: string; done?: string; error?: string } | null>(null);
   const [showApprove, setShowApprove] = useState(false);
@@ -73,16 +73,25 @@ export default function SecurityPage() {
   const total = counts ? counts.custodians + counts.passkeys : null;
   const canRemove = total != null && total > 1; // the contract refuses the last one too
 
+  // The agent's CURRENT custodian signs every credential change — resolved from the home's ACTUAL
+  // on-chain credential (a wallet home → MetaMask; a KMS/Google/email home → server-side, no prompt),
+  // NEVER the raw session `via` (which popped MetaMask for KMS homes, which have no wallet custodian).
+  const currentAuthorizer = () => {
+    if (!personAgent || !session) throw new Error('no active session');
+    return signHashFor(resolveVia(profile?.credential, via), personAgent, { token: session.token });
+  };
+
   const addComplementary = async () => {
-    if (!personAgent) return;
+    if (!personAgent || !session) return;
     setAdd({ step: 'Starting…' });
     try {
       const onStep = (s: string) => setAdd({ step: s });
+      const authorizer = await currentAuthorizer();
       if (via === 'passkey') {
-        const r = await addWalletCredential(personAgent, onStep);
+        const r = await addWalletCredential(personAgent, authorizer, onStep);
         setAdd(r.ok ? { done: `Wallet ${shortAddr(r.added)} added` } : { error: r.error });
       } else {
-        const r = await addPasskeyCredential(personAgent, onStep);
+        const r = await addPasskeyCredential(personAgent, authorizer, onStep);
         setAdd(r.ok ? { done: 'Passkey added' } : { error: r.error });
       }
     } catch (e) {
@@ -100,7 +109,7 @@ export default function SecurityPage() {
     }
     setRemove((r) => ({ ...r, step: 'Confirm with your current sign-in…', error: undefined }));
     try {
-      const signHash = await currentCredentialSignHash(via as 'passkey' | 'wallet');
+      const signHash = await currentAuthorizer();
       const res = await removeWalletCredential(personAgent, addr as Address, signHash);
       setRemove(res.ok ? { done: `Wallet ${shortAddr(addr)} removed` } : { open: true, addr, error: res.error });
     } catch (e) {
@@ -112,7 +121,7 @@ export default function SecurityPage() {
     if (!personAgent || !pk) return;
     setRemove((r) => ({ ...r, step: 'Removing this device…', error: undefined }));
     try {
-      const signHash = await currentCredentialSignHash(via as 'passkey' | 'wallet');
+      const signHash = await currentAuthorizer();
       const res = await removePasskeyCredential(personAgent, pk.credentialIdDigest, signHash);
       setRemove(res.ok ? { done: 'This device’s passkey was removed' } : { open: true, error: res.error });
     } catch (e) {
