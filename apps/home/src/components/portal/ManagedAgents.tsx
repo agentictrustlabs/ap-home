@@ -12,6 +12,7 @@ import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../home/onboarding';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
@@ -162,8 +163,25 @@ export function CreateAgentForm({
       { kind, label: named ? clean : undefined, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
       token, setStep,
     );
+    if (!res.ok) { setBusy(false); setErr(res.error); return; }
+    // spec 321 — enable channel storage AT CREATE so the steward never meets the "Enable (steward)"
+    // banner: bind the org's vault key + issue its standing delivery grant (channels.data + message
+    // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
+    // the org); device prompts on passkey/wallet. Best-effort — the steward-gated Enable button on
+    // the channels page remains the recovery path if either leg fails.
+    if (kind === 'org') {
+      try {
+        const v = via.toLowerCase() as Via;
+        setStep('Enabling channel storage…');
+        const bound = await activateVaultIfNeeded(res.result.agent, v, { token });
+        if (!bound.ok) throw new Error(bound.error);
+        const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
+        if (!grant.ok) throw new Error(grant.error);
+      } catch (e) {
+        console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
+      }
+    }
     setBusy(false);
-    if (!res.ok) { setErr(res.error); return; }
     // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
     void emitControlEvent(token, 'agent-added', []);
     setOpen(false); setLabel('');

@@ -220,6 +220,17 @@ export async function createOrganization(
     : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts, via);
   if (!r.ok) return r;
   const x = r.result;
+  // spec 321 — enable channel storage AT CREATE (vault-key bind + standing delivery grant, signed as
+  // the org): zero prompts on the KMS family; best-effort — the steward-gated Enable button on the
+  // channels page remains the recovery path.
+  try {
+    const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
+    if (!bound.ok) throw new Error(bound.error);
+    const grant = await activateInboxDeliveryIfNeeded(x.childAgent, via, auth);
+    if (!grant.ok) throw new Error(grant.error);
+  } catch (e) {
+    console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
+  }
   // ADR-0025: the `org` payload carries the private credential + the person SA so the
   // server's /oidc/grant step can write the vault; the relying app receives only the org
   // metadata + proofHash + (optional) brokerDelegation back via /token.
