@@ -10,7 +10,7 @@
 // Every poster/member resolves to their agent NAME, and "Message" deep-links to the person's own
 // /messages composer (`?to=<label>`) — a channel post is a board fact; a DM is ordinary 1:1 mail on
 // the same substrate (spec 312), never a second messaging mechanism.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
@@ -22,6 +22,9 @@ import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
+import { Avatar } from './chat/Avatar';
+import { EmojiButton } from './chat/EmojiButton';
+import { ProfilePopover, type ProfileTarget } from './chat/ProfilePopover';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -44,24 +47,6 @@ const timeShort = (iso: string): string => {
   const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
-
-/** Deterministic avatar hue per author name — the familiar chat-app identity cue. */
-const hueOf = (s: string): number => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-
-function Avatar({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        width: 30, height: 30, borderRadius: 8, flex: 'none', display: 'inline-flex', alignItems: 'center',
-        justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700, color: '#fff',
-        background: `hsl(${hueOf(name)} 55% 45%)`,
-      }}
-    >
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-  );
-}
 
 export function OrgChannelsView({ org }: { org: Address }) {
   const router = useRouter();
@@ -94,6 +79,8 @@ export function OrgChannelsView({ org }: { org: Address }) {
   const [inviteQuery, setInviteQuery] = useState('');
   const [inviteHits, setInviteHits] = useState<AgentSearchHit[] | null>(null);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
+  // Channel→DM (Telegram flow): clicking a poster/member opens a profile popover anchored to the click.
+  const [profile, setProfile] = useState<ProfileTarget | null>(null);
 
   const authed = useMemo(
     () => ({ 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` }),
@@ -248,6 +235,18 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
   const dmHref = (label: string): string => `/messages?to=${encodeURIComponent(label)}`;
 
+  // Open the profile popover anchored to the clicked avatar/name. `label` present ⇒ the person is a
+  // current member (has a listing) and can be DM'd.
+  const openProfile = (e: ReactMouseEvent, name: string, label?: string) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setProfile({ name, label, subtitle: label ? undefined : 'Not a current member', isYou: name === you, x: r.left, y: r.bottom });
+  };
+  // "Send message" → the person's own /messages with this recipient (correct scope for person↔person).
+  const messageFromProfile = (t: ProfileTarget) => {
+    setProfile(null);
+    if (t.label) router.push(dmHref(t.label));
+  };
+
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
   const posters = useMemo(() => {
     if (!channel) return [];
@@ -356,52 +355,76 @@ export function OrgChannelsView({ org }: { org: Address }) {
                   {posters.length > 0 ? `posted by ${posters.map((p) => p.name).join(', ')}` : 'no posts yet'}
                 </span>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                {channel.messages.map((m) => {
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.12rem', padding: '0.25rem 0.15rem' }}>
+                {channel.messages.map((m, idx) => {
                   const l = listingBySubject.get(m.envelope.from.toLowerCase());
                   const mine = m.authorName === you;
+                  const prev = channel.messages[idx - 1];
+                  const next = channel.messages[idx + 1];
+                  const firstOfGroup = !prev || prev.authorName !== m.authorName;
+                  const lastOfGroup = !next || next.authorName !== m.authorName;
+                  const body = bodies[m.envelope.id];
                   return (
-                    <div key={m.envelope.id} style={{ display: 'flex', gap: '0.55rem', alignItems: 'flex-start' }}>
-                      <Avatar name={m.authorName} />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '0.8rem', marginBottom: 1 }}>
-                          <strong>{m.authorName}</strong>
-                          {l && <span style={{ opacity: 0.55 }}> · {l.label}</span>}
-                          <span style={{ opacity: 0.45, marginLeft: '0.5rem' }}>{timeShort(m.envelope.createdAt)}</span>
-                          {!mine && l && (
-                            <button
-                              className="btn"
-                              style={{ marginLeft: '0.6rem', padding: '0 0.45rem', fontSize: '0.72rem' }}
-                              onClick={() => router.push(dmHref(l.label))}
-                              title={`Direct-message ${m.authorName}`}
-                            >
-                              Message
-                            </button>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '0.92rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', opacity: bodies[m.envelope.id] ? 1 : 0.45 }}>
-                          {bodies[m.envelope.id] ?? '[content unavailable — stored before vault cutover or not yet decrypted]'}
+                    <div key={m.envelope.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexDirection: mine ? 'row-reverse' : 'row', marginTop: firstOfGroup ? '0.5rem' : 0 }}>
+                      {/* Avatar only under others' messages, once per group (Telegram) */}
+                      {!mine && (
+                        lastOfGroup
+                          ? <span style={{ cursor: 'pointer' }} onClick={(e) => openProfile(e, m.authorName, l?.label)}><Avatar name={m.authorName} size={30} /></span>
+                          : <span style={{ width: 30, flex: 'none' }} />
+                      )}
+                      <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                        {firstOfGroup && !mine && (
+                          <div
+                            onClick={(e) => openProfile(e, m.authorName, l?.label)}
+                            style={{ fontSize: '0.74rem', fontWeight: 600, color: `hsl(${[...m.authorName].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 55% 42%)`, margin: '0 0 0.1rem 0.15rem', cursor: 'pointer' }}
+                          >
+                            {m.authorName}{l ? '' : ' ·'} <span style={{ opacity: 0.5, fontWeight: 400 }}>{l?.label}</span>
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            background: mine ? 'linear-gradient(135deg,#6366f1,#4338ca)' : '#f1f5f9',
+                            color: mine ? '#fff' : '#111827',
+                            padding: '0.4rem 0.7rem 0.3rem', fontSize: '0.9rem', lineHeight: 1.35,
+                            whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                            borderRadius: 16,
+                            borderBottomRightRadius: mine && lastOfGroup ? 4 : 16,
+                            borderBottomLeftRadius: !mine && lastOfGroup ? 4 : 16,
+                            opacity: body ? 1 : 0.5,
+                          }}
+                        >
+                          {body ?? <i style={{ opacity: 0.7 }}>content in vault…</i>}
+                          <span style={{ fontSize: '0.62rem', opacity: mine ? 0.7 : 0.45, marginLeft: '0.5rem', float: 'right', marginTop: '0.3rem' }}>
+                            {timeShort(m.envelope.createdAt)}
+                          </span>
                         </div>
                       </div>
                     </div>
                   );
                 })}
                 {channel.messages.length === 0 && (
-                  <p style={{ fontSize: '0.85rem', opacity: 0.6 }}>Start the discussion in <b># {channel.title}</b>.</p>
+                  <p style={{ fontSize: '0.85rem', opacity: 0.6, margin: 'auto' }}>Start the discussion in <b># {channel.title}</b>.</p>
                 )}
               </div>
               {/* The steward gate is now a top-level banner (shown even with no channels) — no per-feed copy. */}
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.6rem', alignItems: 'center', border: '1px solid #e5e7eb', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem', background: orgVault === false ? '#f8fafc' : '#fff' }}>
                 <input
                   disabled={orgVault === false}
-                  placeholder={`Message # ${channel.title}`}
+                  placeholder={orgVault === false ? 'Enable channel storage to post' : `Message # ${channel.title}`}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) void post(); }}
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
                 />
-                <button className="btn" disabled={busy || !draft.trim()} onClick={() => void post()}>
-                  {busy ? '…' : 'Send'}
+                <EmojiButton onPick={(em) => setDraft((d) => d + em)} />
+                <button
+                  className="btn"
+                  disabled={busy || !draft.trim()}
+                  onClick={() => void post()}
+                  title="Send"
+                  style={{ borderRadius: '50%', width: 36, height: 36, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  {busy ? '…' : '➤'}
                 </button>
               </div>
             </>
@@ -443,32 +466,30 @@ export function OrgChannelsView({ org }: { org: Address }) {
               {inviteSent && <p style={{ fontSize: '0.75rem', color: '#047857' }}>Invitation sent to {inviteSent}.</p>}
             </div>
           )}
-          <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+          <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
             {listings.map((l) => (
-              <div key={l.listing.subject} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center' }}>
-                <Avatar name={l.listing.displayName} />
+              <button
+                key={l.listing.subject}
+                onClick={(e) => openProfile(e, l.listing.displayName, l.label)}
+                title={l.listing.displayName === you ? 'You' : `View ${l.listing.displayName} · message`}
+                style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 10, padding: '0.35rem 0.4rem', minHeight: 0 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Avatar name={l.listing.displayName} size={34} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {l.listing.displayName}{l.listing.displayName === you ? ' (you)' : ''}
                   </div>
                   <div style={{ fontSize: '0.72rem', opacity: 0.55 }}>{l.label}</div>
                 </div>
-                {l.listing.displayName !== you && (
-                  <button
-                    className="btn"
-                    style={{ padding: '0 0.4rem', fontSize: '0.72rem' }}
-                    onClick={() => router.push(dmHref(l.label))}
-                    title={`Direct-message ${l.listing.displayName}`}
-                  >
-                    ✉
-                  </button>
-                )}
-              </div>
+              </button>
             ))}
             {listings.length === 0 && <p style={{ fontSize: '0.78rem', opacity: 0.6 }}>No one has joined yet.</p>}
           </div>
         </div>
       </div>
+      <ProfilePopover target={profile} onClose={() => setProfile(null)} onMessage={messageFromProfile} />
     </SectionShell>
   );
 }

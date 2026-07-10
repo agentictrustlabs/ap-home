@@ -18,6 +18,8 @@ import { activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/on
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
+import { Avatar } from './chat/Avatar';
+import { EmojiButton } from './chat/EmojiButton';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -355,17 +357,25 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 <span style={{ opacity: 0.6 }}>({recipient.name})</span>{' '}
                 <button className="ghost" style={{ fontSize: '0.75rem', minHeight: 0, padding: '0.15rem 0.5rem' }} onClick={() => setRecipient(null)}>change</button>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input
-                  value={composeBody}
-                  onChange={(e) => setComposeBody(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void sendNew(); }}
-                  placeholder="Write your message…"
-                  autoFocus
-                  style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 8 }}
-                />
-                <button disabled={anyBusy || !composeBody.trim()} onClick={() => void sendNew()}>
-                  {busy === 'compose' ? '…' : 'Send'}
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.3rem', border: '1px solid #d1d5db', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem', background: '#fff' }}>
+                  <input
+                    value={composeBody}
+                    onChange={(e) => setComposeBody(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void sendNew(); }}
+                    placeholder="Write your message…"
+                    autoFocus
+                    style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
+                  />
+                  <EmojiButton onPick={(em) => setComposeBody((d) => d + em)} />
+                </div>
+                <button
+                  disabled={anyBusy || !composeBody.trim()}
+                  onClick={() => void sendNew()}
+                  title="Send"
+                  style={{ borderRadius: '50%', width: 38, height: 38, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  {busy === 'compose' ? '…' : '➤'}
                 </button>
               </div>
             </>
@@ -387,23 +397,26 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   key={c.conversationId}
                   onClick={() => setOpen(c.conversationId)}
                   style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '0.7rem 0.9rem',
+                    display: 'flex', gap: '0.6rem', alignItems: 'center', width: '100%', textAlign: 'left', padding: '0.6rem 0.8rem',
                     border: 'none', borderRadius: 0, borderBottom: '1px solid #f1f5f9', minHeight: 0,
                     background: c.conversationId === activeId ? '#eef2ff' : '#fff',
                     color: '#111827', fontWeight: 400, cursor: 'pointer',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontWeight: c.unread > 0 ? 700 : 500 }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titleFor(c.conversationId)}</span>
-                    {c.unread > 0 && (
-                      <span style={{ background: '#4338ca', color: '#fff', borderRadius: 999, fontSize: '0.68rem', padding: '0.05rem 0.45rem', alignSelf: 'center' }}>
-                        {c.unread}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', opacity: 0.6, display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
-                    {isPending && <span style={{ color: '#b45309', fontWeight: 700 }}>● needs review</span>}
-                    <span>{new Date(c.lastEventAt).toLocaleString()}</span>
+                  <Avatar name={titleFor(c.conversationId)} size={42} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontWeight: c.unread > 0 ? 700 : 500 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titleFor(c.conversationId)}</span>
+                      {c.unread > 0 && (
+                        <span style={{ background: '#4338ca', color: '#fff', borderRadius: 999, fontSize: '0.68rem', padding: '0.05rem 0.45rem', alignSelf: 'center' }}>
+                          {c.unread}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', opacity: 0.6, display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
+                      {isPending && <span style={{ color: '#b45309', fontWeight: 700 }}>● needs review</span>}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{new Date(c.lastEventAt).toLocaleString()}</span>
+                    </div>
                   </div>
                 </button>
               );
@@ -413,8 +426,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
           <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', display: 'flex', flexDirection: 'column', minHeight: 420 }}>
             {activeId ? (
               <>
-                <div style={{ fontWeight: 600, borderBottom: '1px solid #f1f5f9', paddingBottom: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {titleFor(activeId)}
+                <div style={{ fontWeight: 600, borderBottom: '1px solid #f1f5f9', paddingBottom: '0.5rem', display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Avatar name={titleFor(activeId)} size={34} />
+                  <span>{titleFor(activeId)}</span>
                   {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} />)}
                 </div>
 
@@ -435,19 +449,33 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   </div>
                 )}
 
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem 0', overflowY: 'auto' }}>
-                  {thread.map((i) => {
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.12rem', padding: '0.75rem 0.15rem', overflowY: 'auto' }}>
+                  {thread.map((i, idx) => {
                     const meta = view?.envelopeMeta[i.messageId];
                     const mine = i.folder === 'sent';
+                    const prev = thread[idx - 1];
+                    const next = thread[idx + 1];
+                    const firstOfGroup = !prev || (prev.folder === 'sent') !== mine;
+                    const lastOfGroup = !next || (next.folder === 'sent') !== mine;
+                    const body = view?.bodies[i.messageId];
                     return (
-                      <div key={i.messageId} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '75%' }}>
-                        <div style={{ background: mine ? '#4338ca' : '#f1f5f9', color: mine ? '#fff' : '#111827', borderRadius: 14, padding: '0.5rem 0.8rem', fontSize: '0.9rem' }}>
-                          {view?.bodies[i.messageId] ?? <i>body in vault</i>}
-                        </div>
-                        <div style={{ fontSize: '0.68rem', opacity: 0.55, marginTop: '0.15rem', textAlign: mine ? 'right' : 'left' }}>
-                          {!mine && meta && <>{agentLabel(meta.from, view?.names)} · </>}
-                          {new Date(i.lastEventAt).toLocaleTimeString()}
-                          {meta?.signatureSigner ? ' · ✓ signed' : ''}
+                      <div key={i.messageId} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '76%', marginTop: firstOfGroup ? '0.5rem' : 0 }}>
+                        <div
+                          style={{
+                            background: mine ? 'linear-gradient(135deg,#6366f1,#4338ca)' : '#f1f5f9',
+                            color: mine ? '#fff' : '#111827', fontSize: '0.9rem', lineHeight: 1.35,
+                            padding: '0.42rem 0.75rem 0.34rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                            borderRadius: 16,
+                            borderBottomRightRadius: mine && lastOfGroup ? 4 : 16,
+                            borderBottomLeftRadius: !mine && lastOfGroup ? 4 : 16,
+                            opacity: body ? 1 : 0.6,
+                          }}
+                        >
+                          {body ?? <i style={{ opacity: 0.7 }}>content in vault…</i>}
+                          <span style={{ fontSize: '0.62rem', opacity: mine ? 0.7 : 0.45, marginLeft: '0.5rem', float: 'right', marginTop: '0.3rem' }}>
+                            {new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {meta?.signatureSigner ? ' ✓' : ''}
+                          </span>
                         </div>
                       </div>
                     );
@@ -455,16 +483,24 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 </div>
 
                 {canReply ? (
-                  <div style={{ display: 'flex', gap: '0.5rem', borderTop: '1px solid #f1f5f9', paddingTop: '0.75rem' }}>
-                    <input
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') void sendReply(); }}
-                      placeholder="Message…"
-                      style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 999 }}
-                    />
-                    <button disabled={anyBusy || !draft.trim()} onClick={() => void sendReply()}>
-                      {busy === `reply:${activeId}` ? '…' : 'Send'}
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '0.75rem' }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.3rem', border: '1px solid #d1d5db', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem' }}>
+                      <input
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void sendReply(); }}
+                        placeholder="Message…"
+                        style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
+                      />
+                      <EmojiButton onPick={(em) => setDraft((d) => d + em)} />
+                    </div>
+                    <button
+                      disabled={anyBusy || !draft.trim()}
+                      onClick={() => void sendReply()}
+                      title="Send"
+                      style={{ borderRadius: '50%', width: 38, height: 38, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      {busy === `reply:${activeId}` ? '…' : '➤'}
                     </button>
                   </div>
                 ) : (
