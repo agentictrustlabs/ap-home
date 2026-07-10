@@ -136,6 +136,17 @@ export function OnboardingJourney({
     continueWithGoogle(name, stash);
   }
 
+  // Email/phone — the OTP cards secure a KMS home; stash the journey's CHOSEN NAME first (the same
+  // `pendingHomeName` mechanism the Google redirect uses) so `secureHomeNoName` claims it — without
+  // the stash the chosen name was silently dropped and the home came out nameless (rich-phone3).
+  function openContact(kind: 'email' | 'phone') {
+    try {
+      if (name) sessionStorage.setItem('pendingHomeName', name);
+    } catch { /* storage blocked — the member can claim the name from the Naming page */ }
+    setContactKind(kind);
+    setScreen('contact');
+  }
+
   // YouVersion — identical redirect machinery to Google (shared post-redirect resume; only the IdP differs).
   function onYouVersion() {
     const stash =
@@ -389,12 +400,12 @@ export function OnboardingJourney({
               redirect IdPs but not yet for the OTP cards (RecognizedEnroll dual-path rule: don't
               offer a method on one path that silently dead-ends the other). */}
           {!hasApp && methods.includes('email') && (
-            <button className="btn-ghost onboarding-secondary" onClick={() => { setContactKind('email'); setScreen('contact'); }}>
+            <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('email'); }}>
               Continue with email
             </button>
           )}
           {!hasApp && methods.includes('phone') && (
-            <button className="btn-ghost onboarding-secondary" onClick={() => { setContactKind('phone'); setScreen('contact'); }}>
+            <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('phone'); }}>
               Continue with phone
             </button>
           )}

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SessionProvider, useSession } from '../../src/context/session';
 import { activateVaultIfNeeded } from '../../src/home/onboarding';
 import { PortalShell } from '../../src/components/portal/PortalShell';
+import { notifyAgentsChanged } from '../../src/components/portal/ManagedAgents';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
 import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
 import { GoogleEnrollResume, readPendingEnroll } from '../../src/components/onboarding/GoogleEnrollResume';
@@ -28,7 +29,7 @@ function hasEnrollParams(): boolean {
 }
 
 function Gate({ children }: { children: ReactNode }) {
-  const { phase, session, agentName, agentAddress, agentDeployed, notice, clearNotice } = useSession();
+  const { phase, session, agentName, agentAddress, agentDeployed, notice, clearNotice, refreshProfile } = useSession();
   const [mounted, setMounted] = useState(false);
   const [enroll, setEnroll] = useState(false);
   const [pendingEnroll, setPendingEnroll] = useState(false);
@@ -78,6 +79,25 @@ function Gate({ children }: { children: ReactNode }) {
     const via = sessionViaLc === 'youversion' || sessionViaLc === 'email' || sessionViaLc === 'phone' ? sessionViaLc : 'google';
     void activateVaultIfNeeded(agentAddress, via, { token: session.token }).catch(() => { /* non-fatal */ });
   }, [phase, isOidcHome, agentDeployed, agentAddress, session?.token, session?.via]);
+
+  // Stale-header self-heal: a home that just claimed its name (any surface — OTP secure-home, the
+  // claim cards) can land in the portal while the server's reverse-resolve still lags, so the topbar
+  // shows the raw ADDRESS until a manual refresh. Bounded poll: re-read the profile a few times while
+  // a deployed home is nameless, then nudge the workspace dropdowns. Genuinely-nameless homes just
+  // spend 5 cheap reads and stop — never an infinite loop.
+  const nameHealRef = useRef(false);
+  useEffect(() => {
+    if (nameHealRef.current) return;
+    if (phase !== 'authed' || !agentDeployed || agentName || !session?.token) return;
+    nameHealRef.current = true;
+    void (async () => {
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        await refreshProfile();
+      }
+      notifyAgentsChanged();
+    })();
+  }, [phase, agentDeployed, agentName, session?.token, refreshProfile]);
 
   // A fresh OIDC return that already has a home (no secure-home step, no enroll) → show the welcome-back
   // beat once. (Passkey/wallet/name surface their own beat in EntryExperience.)

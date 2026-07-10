@@ -50,7 +50,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           // derives + holds the per-subject key — no device gesture), then open the session so the portal
           // loads a deployed, resolvable home.
           setNote('Securing your home…');
-          const res = await secureHomeNoName({ token: d.token });
+          const res = await secureHomeNoName({ token: d.token }, { claimPendingNameVia: 'email' });
           if (!res.ok) throw new Error(res.error);
           void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
         }

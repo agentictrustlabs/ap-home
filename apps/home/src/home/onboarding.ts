@@ -21,10 +21,12 @@ import {
   secureHomeGoogleNoName,
   chargePayment,
   collectSubscriptions,
+  claimName,
   AUD,
   type SignHash,
 } from '../connect-client';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
+import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation } from '../lib/vault-client';
@@ -163,10 +165,33 @@ export async function secureHome(
  * FREE. The member is name-free after onboarding and claims a public handle LATER, by choice, via
  * the portal's ClaimPublicNameCard (`claimName`). Returns a home with an empty `name`.
  */
-export async function secureHomeNoName(auth?: Auth): Promise<Result<{ home: Home }>> {
+export async function secureHomeNoName(auth?: Auth, opts: { claimPendingNameVia?: Via } = {}): Promise<Result<{ home: Home }>> {
   if (!auth?.token) return { ok: false, error: 'no custody session' };
   const out = await secureHomeGoogleNoName(auth.token);
-  return out.ok ? { ok: true, home: { address: out.agent, name: '' } } : { ok: false, error: out.error };
+  if (!out.ok) return { ok: false, error: out.error };
+  // OPT-IN (email/phone cards only — the Google flows consume `pendingHomeName` themselves): a member
+  // who CHOSE a name before securing with email/phone (the journey's contact screen stashes it exactly
+  // like the Google redirect does) gets it claimed here — KMS-signed, zero prompts. Without this the
+  // chosen name was silently dropped and the home came out nameless (rich-phone3, 2026-07-10).
+  let claimed = '';
+  if (opts.claimPendingNameVia) {
+    try {
+      const pending = sessionStorage.getItem('pendingHomeName');
+      if (pending) {
+        sessionStorage.removeItem('pendingHomeName');
+        const label = nameLabel(pending);
+        if (label) {
+          const signHash = await signHashFor(opts.claimPendingNameVia, out.agent, auth);
+          const res = await claimName(out.agent, signHash, label);
+          if (res.ok) claimed = res.name;
+          else console.warn('[secure-home] chosen name not claimed (claim it from the Naming page):', res.error);
+        }
+      }
+    } catch (e) {
+      console.warn('[secure-home] chosen name not claimed (claim it from the Naming page):', e);
+    }
+  }
+  return { ok: true, home: { address: out.agent, name: claimed } };
 }
 
 /** Open your home from this device (prove it's you → a session). `via` = the credential. */

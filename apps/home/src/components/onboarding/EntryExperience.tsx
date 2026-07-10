@@ -109,7 +109,7 @@ type View =
 
 export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   const api = useEnrollReq();
-  const { openSession } = useSession();
+  const { openSession, session } = useSession();
 
   const [view, setView] = useState<View>(() => {
     if (mode === 'enroll') return { k: 'checking' };
@@ -129,6 +129,16 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     // is a public handle, not a login key; social/passkey resolve the home without it.
     return { k: 'credential' };
   });
+
+  // spec 321 — OTP continuation for relying-app enrolls: the email/phone cards open the session
+  // INTERNALLY (they never call this component's onSession), so an enroll that reaches the
+  // credential-first entry would otherwise stall signed-in with no grant. When a session appears
+  // while we're on the enroll entry, re-enter the RECOGNIZED path — the one-tap authorize runs the
+  // grant on the fresh home session and returns the code (same machinery the owner-op resume uses).
+  useEffect(() => {
+    if (mode !== 'enroll' || !api.enroll || !session) return;
+    if (view.k === 'enroll-entry') setView({ k: 'enroll-recognized' });
+  }, [mode, api.enroll, session, view.k]);
 
   // Enroll mode: resolve the requested name → new vs existing vs org-create.
   useEffect(() => {

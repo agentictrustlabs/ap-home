@@ -51,7 +51,7 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
           // Phone-bootstrap: this phone owns a KMS-custodied home. Secure it on-chain (no gesture), then
           // open the session. Add a passkey from Security & Recovery for the durable credential.
           setNote('Securing your home…');
-          const res = await secureHomeNoName({ token: d.token });
+          const res = await secureHomeNoName({ token: d.token }, { claimPendingNameVia: 'phone' });
           if (!res.ok) throw new Error(res.error);
           void activateVault(res.home.address, 'phone', { token: d.token }); // spec 278 — best-effort vault
         }
