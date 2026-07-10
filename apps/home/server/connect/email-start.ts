@@ -38,5 +38,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name));
   if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
   // `delivery:'logged'` tells the client (dev) the code was console-logged, not emailed (no provider key).
-  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged' });
+  // Testing convenience: echo the code when UNCONFIGURED + DEV_OTP_ECHO=true (a real SendGrid key never echoes).
+  const echo = !emailSendingEnabled(env) && env.DEV_OTP_ECHO === 'true';
+  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', ...(echo ? { devCode: code } : {}) });
 };

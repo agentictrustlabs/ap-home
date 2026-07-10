@@ -28,6 +28,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const key = `phoneverify:${await phoneHash(phone)}`;
   const twilio = smsVerifyEnabled(env);
 
+  let devCode: string | undefined;
   if (twilio) {
     // Twilio owns the code — we stash only the aud (+ provider) so verify knows how to check.
     await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'twilio' }), { expirationTtl: 600 });
@@ -36,9 +37,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const code = devOtp();
     await env.AUTH_CODES.put(key, JSON.stringify({ aud, provider: 'dev', code, attempts: 0 }), { expirationTtl: 600 });
     console.log(`[phone-start] (dev) OTP for ${phone} = ${code}`);
+    if (env.DEV_OTP_ECHO === 'true') devCode = code; // testing convenience (unconfigured only, opt-in)
   }
 
   const sent = await sendPhoneVerification(env, phone);
   if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
-  return json({ ok: true, delivery: twilio ? 'sent' : 'logged' });
+  return json({ ok: true, delivery: twilio ? 'sent' : 'logged', ...(devCode ? { devCode } : {}) });
 };

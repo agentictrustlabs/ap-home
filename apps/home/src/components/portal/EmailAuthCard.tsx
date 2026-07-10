@@ -22,11 +22,11 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string };
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string; devCode?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? 'could not send the code');
       setStep('code');
       setNote(d.delivery === 'logged'
-        ? 'Email sending isn’t configured yet — the code was logged server-side (dev).'
+        ? (d.devCode ? `Email isn’t configured (dev) — your code is ${d.devCode}.` : 'Email sending isn’t configured yet — the code was logged server-side (dev).')
         : `We sent a 6-digit code to ${email.trim()}.`);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };

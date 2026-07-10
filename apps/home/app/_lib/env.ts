@@ -49,6 +49,8 @@ export function makeEnv(): Env {
     TWILIO_API_KEY: t(process.env.TWILIO_API_KEY),
     TWILIO_API_KEY_SECRET: t(process.env.TWILIO_API_KEY_SECRET),
     TWILIO_VERIFY_SERVICE_SID: t(process.env.TWILIO_VERIFY_SERVICE_SID),
+    // Testing only: echo the dev OTP in the response when a provider is unconfigured (never with a real provider).
+    DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO),
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };

@@ -95,6 +95,10 @@ export interface Env {
   TWILIO_API_KEY_SECRET?: string;
   /** Twilio Verify Service SID (VA…) — the configured Verify service. */
   TWILIO_VERIFY_SERVICE_SID?: string;
+  /** Testing convenience: when `'true'` AND the provider is UNCONFIGURED, the email/phone start routes
+   *  echo the self-generated dev OTP in the response (so a tester needn't read server logs). OFF by
+   *  default — a CONFIGURED provider (SendGrid/Twilio) NEVER echoes. Never enable on a real deployment. */
+  DEV_OTP_ECHO?: string;
 
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
