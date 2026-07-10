@@ -611,6 +611,10 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState<NameInfo | null>(null);
+  // An email-custodied home signs in via the code, not a device credential — its KMS custodian looks
+  // like an EOA on-chain (→ a misleading "Continue with wallet"). Always offer email here so an email
+  // home can get in; EmailAuthCard resolves the home via the email facet + opens the session.
+  const [showEmail, setShowEmail] = useState(false);
   // Recognize an existing cross-subdomain `ap_sso` session that resolves to THIS home → offer a one-tap
   // "Continue as <name>" without a fresh credential assertion (mirrors the relying-app RecognizedEnroll
   // path). Fixes the dead-end where a direct visit to a passkey-only home on a device WITHOUT the passkey
@@ -754,6 +758,11 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
               Continue with wallet
             </button>
           )}
+          {/* Email-custodied home: sign in with the code sent to the email that opens this home. */}
+          <button className="btn-ghost onboarding-secondary" onClick={() => setShowEmail((v) => !v)}>
+            Continue with email
+          </button>
+          {showEmail && <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>}
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}
