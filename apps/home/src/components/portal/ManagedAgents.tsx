@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
@@ -122,9 +123,9 @@ export function FundForm({
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>USDC</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
-        <button type="button" className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void go()}>
-          {busy ? (step || 'Funding…') : 'Fund'}
-        </button>
+        <BusyButton busy={busy} busyLabel={step || 'Funding…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
+          Fund
+        </BusyButton>
         <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => { setOpen(false); setErr(''); }}>
           Cancel
         </button>
@@ -185,9 +186,9 @@ export function CreateAgentForm({
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
-        <button type="button" className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(true)}>
-          {busy ? (step || 'Working…') : 'Create + name'}
-        </button>
+        <BusyButton busy={busy} busyLabel={step || 'Working…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void create(true)}>
+          Create + name
+        </BusyButton>
         {!nameRequired && (
           <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void create(false)}>
             Create without a name
@@ -248,9 +249,9 @@ export function NameAgentForm({
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
-        <button type="button" className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => void go()}>
-          {busy ? (step || 'Naming…') : 'Name it'}
-        </button>
+        <BusyButton busy={busy} busyLabel={step || 'Naming…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
+          Name it
+        </BusyButton>
         <button type="button" className="btn-ghost" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} disabled={busy} onClick={() => { setOpen(false); setErr(''); }}>
           Cancel
         </button>

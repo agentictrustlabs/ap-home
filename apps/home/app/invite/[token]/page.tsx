@@ -11,6 +11,7 @@ import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 import { recordOrgMembership } from '../../../src/lib/org-membership';
+import { BusyButton } from '../../../src/components/shared/BusyButton';
 
 // Coerce ANY thrown shape to a readable string — Error, a string, or a plain object with a `.message`
 // (MetaMask/RPC rejections are objects like `{ code: 4001, message: 'User rejected …' }`, NOT Error
@@ -122,9 +123,9 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                 onChange={(e) => setDisplayName(e.target.value)}
                 style={{ width: '100%', padding: '.55rem .7rem', margin: '.6rem 0', borderRadius: 8, border: '1px solid #d1d5db' }}
               />
-              <button className="btn" disabled={busy} onClick={() => void accept()}>
-                {busy ? 'Signing…' : `Accept & join ${invite.orgName}`}
-              </button>
+              <BusyButton busy={busy} busyLabel="Signing…" onClick={() => void accept()}>
+                Accept &amp; join {invite.orgName}
+              </BusyButton>
               {(() => {
                 const via = resolveVia(profile?.credential, session.via);
                 const label = via === 'wallet' ? 'your wallet — a signature request will appear'
@@ -153,9 +154,9 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                 <>
                   {/* One-click: the emailed link is the email-validation proof (magic link) → the server
                       bootstraps a KMS home bound to the invited email and this handler joins the org. */}
-                  <button className="btn" disabled={busy} onClick={() => void redeemWithLink()}>
-                    {busy ? 'Setting up your home…' : `Accept & join ${invite.orgName}`}
-                  </button>
+                  <BusyButton busy={busy} busyLabel="Setting up your home…" onClick={() => void redeemWithLink()}>
+                    Accept &amp; join {invite.orgName}
+                  </BusyButton>
                   <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`} style={{ display: 'block', marginTop: '.7rem' }}>
                     Already have a home? Use a passkey, wallet, or Google
                   </a>

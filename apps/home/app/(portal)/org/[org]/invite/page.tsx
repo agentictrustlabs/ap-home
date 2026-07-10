@@ -10,6 +10,7 @@ import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
 import { searchAgentsKb, type AgentSearchHit } from '../../../../../src/lib/agent-search';
 import { Avatar } from '../../../../../src/components/portal/chat/Avatar';
+import { BusyButton } from '../../../../../src/components/shared/BusyButton';
 import { signHashFor, resolveVia } from '../../../../../src/home/onboarding';
 import { issueMemberAccessDelegation, toWire, type DelegationWire } from '../../../../../src/lib/delegation';
 import { MCP_SERVER_ID } from '../../../../../src/lib/inbox-delivery';
@@ -34,9 +35,10 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
     setHits(await searchAgentsKb(query.trim()).catch(() => []));
   }, [query]);
 
+  const [busyFor, setBusyFor] = useState<string | null>(null);
   const inviteAgent = useCallback(async (hit: AgentSearchHit) => {
     if (!session) return;
-    setBusy(true); setErr(null); setNote(null);
+    setBusy(true); setBusyFor(hit.name); setErr(null); setNote(null);
     let grantNote = '';
     try {
       // spec 321 W2b — the invitee's SA is KNOWN: pre-sign the org→invitee member-access grant and
@@ -67,7 +69,7 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
       if (!res.ok || b.ok === false) throw new Error(b.error ?? `invite failed (${res.status})`);
       setNote(`Invitation sent to ${hit.displayName ?? hit.name}.` + grantNote);
       setQuery(''); setHits(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); setBusyFor(null); }
   }, [authed, communityId, profile?.credential, session]);
 
   const inviteEmail = useCallback(async () => {
@@ -126,7 +128,7 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
           <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.5rem 0', borderBottom: '1px solid #f1f5f9' }}>
             <Avatar name={h.displayName ?? h.label} size={30} />
             <div style={{ flex: 1, minWidth: 0, fontSize: '.85rem' }}><b>{h.displayName ?? h.label}</b> <span style={{ opacity: 0.55 }}>{h.name}</span></div>
-            <button className="btn" disabled={busy} onClick={() => void inviteAgent(h)}>Invite</button>
+            <BusyButton busy={busy && busyFor === h.name} busyLabel="Signing & sending…" disabled={busy} onClick={() => void inviteAgent(h)}>Invite</BusyButton>
           </div>
         ))}
         {hits && hits.length === 0 && <p style={{ fontSize: '.78rem', opacity: 0.6 }}>No one found.</p>}
@@ -141,7 +143,7 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
           <input type="email" placeholder="name@example.org" value={email}
             onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void inviteEmail(); }}
             style={{ flex: 1, padding: '.5rem .7rem', borderRadius: 8, border: '1px solid #d1d5db' }} />
-          <button className="btn" disabled={busy || !email.trim()} onClick={() => void inviteEmail()}>Send invite</button>
+          <BusyButton busy={busy && !busyFor} busyLabel="Signing & sending…" disabled={busy || !email.trim()} onClick={() => void inviteEmail()}>Send invite</BusyButton>
         </div>
       </div>
     </SectionShell>
