@@ -39,49 +39,58 @@
   margin-top: 0.15rem;
 }
 
+/* HORIZONTAL tabs (product direction): the section nav is a single scrollable row of pills ABOVE
+   the panel, on desktop and mobile alike — not a left rail. */
 .settings-hub__body {
-  display: grid;
-  grid-template-columns: 220px 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 420px;
 }
 
 .settings-nav {
   display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--color-border);
-  background: var(--color-surface-sunken);
-  padding: 0.65rem 0.5rem;
-  overflow-y: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.3rem;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  padding: 0.15rem 0 0.55rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
+/* The group wrappers become transparent so ALL section buttons form one flat horizontal row. */
+.settings-nav > div {
+  display: contents;
+}
+
+/* Group labels ("My profile" / "Account") are redundant as horizontal tabs — hidden. */
 .settings-nav__group-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-faint);
-  padding: 0.5rem 0.55rem 0.35rem;
+  display: none;
 }
 
 .settings-nav__item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  text-align: left;
+  gap: 0.4rem;
+  flex: none;
+  width: auto;
+  white-space: nowrap;
+  text-align: center;
   border: none;
   background: transparent;
   cursor: pointer;
-  border-radius: var(--radius-8);
-  padding: 0.5rem 0.6rem;
-  font-size: 0.88rem;
-  color: var(--color-text-body);
-  min-height: 40px;
-  transition: background 150ms ease;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  min-height: 0;
+  transition: background 150ms ease, color 150ms ease;
 }
 
 .settings-nav__item:hover {
-  background: var(--color-surface);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-body);
 }
 
 .settings-nav__item--active {
@@ -105,12 +114,9 @@
   margin: 0 0 0.35rem;
 }
 
+/* Per-tab descriptions are dropped (product direction: no page/section descriptions). */
 .settings-panel__desc {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  margin: 0 0 1.1rem;
-  line-height: 1.5;
-  max-width: 52ch;
+  display: none;
 }
 
 .settings-panel .dash-section {
