@@ -31,6 +31,7 @@ export function IdentityChip() {
           {agentAddress && <AddressChip address={agentAddress} size="sm" />}
           <div className="identity-popover-divider" />
           <a className="identity-popover-item" href="/" role="menuitem">View your portal</a>
+          <a className="identity-popover-item" href="/names" role="menuitem">Registered names</a>
           <button type="button" className="identity-popover-item danger" role="menuitem" onClick={signOut}>
             Sign out
           </button>
