@@ -56,9 +56,12 @@ function Gate({ children }: { children: ReactNode }) {
     }
   }, [bootstrapReward, session?.fresh, phase]);
 
-  // KMS-custodied OIDC homes (Google + YouVersion) share the server-side secure-home / enroll-resume /
-  // welcome-back beats — the demo-a2a bridge derives the custodian from the session (iss, sub) for both.
-  const isOidcHome = session?.via === 'Google' || session?.via === 'YouVersion';
+  // KMS-custodied OIDC homes (Google / YouVersion / email / phone — specs 235/319/320) share the
+  // server-side secure-home / enroll-resume / welcome-back beats — the demo-a2a bridge derives the
+  // custodian from the session (iss, sub) for all of them. Case-insensitive, whole family (the exact
+  // 'Google'|'YouVersion' match excluded phone/email homes from the spec-278 vault self-heal).
+  const sessionViaLc = (session?.via ?? '').toLowerCase();
+  const isOidcHome = sessionViaLc === 'google' || sessionViaLc === 'youversion' || sessionViaLc === 'email' || sessionViaLc === 'phone';
 
   // spec 278 self-heal — a deployed-but-UNBOUND OIDC member would otherwise be stuck at
   // `vault_key_unauthorized` in relying apps (e.g. onboarded before the enroll-time bind, or after a
@@ -72,7 +75,7 @@ function Gate({ children }: { children: ReactNode }) {
     if (healedRef.current) return;
     if (phase !== 'authed' || !isOidcHome || !agentDeployed || !agentAddress || !session?.token) return;
     healedRef.current = true;
-    const via = session.via === 'YouVersion' ? 'youversion' : 'google';
+    const via = sessionViaLc === 'youversion' || sessionViaLc === 'email' || sessionViaLc === 'phone' ? sessionViaLc : 'google';
     void activateVaultIfNeeded(agentAddress, via, { token: session.token }).catch(() => { /* non-fatal */ });
   }, [phase, isOidcHome, agentDeployed, agentAddress, session?.token, session?.via]);
 

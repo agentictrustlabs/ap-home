@@ -1147,10 +1147,14 @@ export async function createManagedAgent(
     return { ok: false, error: 'Organizations require a name — pick a label of at least 3 characters.' };
   }
 
-  // SOCIAL (Google / YouVersion): the member is KMS-custodied by C_sub, which (spec 235 §5.4) only
-  // signs for the SAs it custodies — built SERVER-SIDE. So the whole deploy+name+grant runs on the
-  // worker (/custody/google/bootstrap-agent), zero device prompts, and we just record the vault link.
-  if (input.via === 'Google' || input.via === 'YouVersion') {
+  // KMS family (Google / YouVersion / email / phone — specs 235/319/320): the member is KMS-custodied
+  // by C_sub, which (spec 235 §5.4) only signs for the SAs it custodies — built SERVER-SIDE. So the
+  // whole deploy+name+grant runs on the worker (/custody/oidc/bootstrap-agent), zero device prompts,
+  // and we just record the vault link. Case-insensitive + the WHOLE family (custodian-backs-all-
+  // authority): the old exact 'Google'|'YouVersion' match dropped phone/email sessions into the
+  // passkey branch — "Your passkey isn't on this device" for a member who connected by phone.
+  const viaLc = input.via.toLowerCase();
+  if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
     return createManagedAgentSocial(input, sessionToken, onStep);
   }
 
@@ -1164,13 +1168,11 @@ export async function createManagedAgent(
   let child: Address;
   let signHash: SignHash;
   let deployBody: Record<string, unknown>;
-  if (input.via === 'wallet') {
+  if (viaLc === 'wallet') {
     const owner = await connectWallet();
     child = await deriveEoaSa(owner, salt);
     signHash = (h) => personalSign(owner, h);
     deployBody = { initMethod: 'eoa', owner, salt: salt.toString() };
-  } else if (input.via === 'Google' || input.via === 'YouVersion') {
-    return { ok: false, error: 'Creating agents with a Google sign-in is coming soon — for now use a passkey or wallet credential.' };
   } else {
     const pk = loadPasskey();
     if (!pk) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
@@ -1208,7 +1210,14 @@ export async function createManagedAgent(
   // (spec 246). The child is its own delegator, so it pre-approves the digest (0x03 sentinel,
   // spec 253) INSIDE the deploy batch — no second prompt.
   const stewardship = buildApprovedSiteDelegation(child, input.parent);
-  const deployCallData = buildExecuteBatchCallData([...claimCalls, buildApproveHashCall(stewardship.digest)]);
+  // spec 321 W0 credential mirror (same as createChildAgentForSite): also install the person's
+  // cached KMS custodian so a phone/email session can steward this agent (never SA-as-custodian —
+  // the contract forbids it; custody is credential-shaped).
+  const mirrorCSub = cachedConnectionCustodian(input.person);
+  const mirrorCalls: ContractCall[] = mirrorCSub
+    ? [{ to: child, value: 0n, data: encodeFunctionData({ abi: ADD_CUSTODIAN_ABI, functionName: 'addCustodian', args: [mirrorCSub] }) }]
+    : [];
+  const deployCallData = buildExecuteBatchCallData([...claimCalls, buildApproveHashCall(stewardship.digest), ...mirrorCalls]);
 
   onStep?.(wantName ? 'Deploying your agent — name + access grant…' : 'Deploying your agent (unnamed)…');
   // deploy + claim exact name + approve stewardship — ONE signature from the root credential.
@@ -1273,13 +1282,16 @@ export async function nameManagedAgent(
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
-  // SOCIAL (Google / YouVersion): the worker's C_sub signs register+setPrimary AS the agent (server-side).
-  if (input.via === 'Google' || input.via === 'YouVersion') {
+  // KMS family (Google / YouVersion / email / phone): the worker's C_sub signs register+setPrimary AS
+  // the agent (server-side, zero device prompts). Case-insensitive, whole family — same fix as
+  // createManagedAgent (the exact 'Google'|'YouVersion' match stranded phone/email sessions).
+  const viaLc = input.via.toLowerCase();
+  if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
     return nameManagedAgentSocial(input, sessionToken, onStep);
   }
 
   let signHash: SignHash;
-  if (input.via === 'wallet') {
+  if (viaLc === 'wallet') {
     const owner = await connectWallet();
     signHash = (h) => personalSign(owner, h);
   } else {
@@ -1452,11 +1464,12 @@ export async function fundTreasury(
   const amount = BigInt(Math.round(input.usdc * 1_000_000)); // USDC has 6 decimals
 
   let signHash: SignHash;
-  if (input.via === 'wallet') {
+  const viaLc = input.via.toLowerCase();
+  if (viaLc === 'wallet') {
     const owner = await connectWallet();
     signHash = (h) => personalSign(owner, h);
-  } else if (input.via === 'Google' || input.via === 'YouVersion') {
-    signHash = googleSignHash(input.person, sessionToken); // C_sub signs for the home SA
+  } else if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
+    signHash = googleSignHash(input.person, sessionToken); // C_sub signs for the home SA (whole KMS family)
   } else {
     if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
     signHash = passkeySignHash;
