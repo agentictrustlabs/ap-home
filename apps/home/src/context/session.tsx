@@ -116,6 +116,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const addr = p.agent.split(':').pop() as Address;
       void cacheConnectionCustodian(addr, via, token);
     }
+    // Remember how THIS browser last opened this home, so the welcome-back sign-in leads with the
+    // same method (local convenience only — the PUBLIC pre-select stays the opt-in spec-280 record).
+    try {
+      if (p?.name) localStorage.setItem(`ap-last-via:${nameLabel(p.name)}`, via.toLowerCase());
+    } catch { /* storage blocked */ }
     return p;
   }, []);
 

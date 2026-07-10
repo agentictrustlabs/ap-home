@@ -711,6 +711,17 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
     if (info?.connectionKind === 'email') setShowEmail(true);
     if (info?.connectionKind === 'phone') setShowPhone(true);
   }, [info?.connectionKind]);
+  // LOCAL pre-select: this browser remembers how it last opened this home (set at every session
+  // open), so a returning phone/email member lands with their code card ALREADY open instead of
+  // re-picking the method. Private convenience only — the PUBLIC signal stays the opt-in spec-280
+  // connection record above; neither overrides the other, they both just open a card.
+  useEffect(() => {
+    try {
+      const last = localStorage.getItem(`ap-last-via:${nameLabel(name)}`);
+      if (last === 'email') setShowEmail(true);
+      if (last === 'phone') setShowPhone(true);
+    } catch { /* storage blocked */ }
+  }, [name]);
 
   // Recognized: the member already has a live session for THIS home → one tap, no fresh credential.
   if (recognized) {
