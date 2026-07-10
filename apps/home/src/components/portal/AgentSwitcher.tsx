@@ -65,7 +65,9 @@ export function AgentSwitcher() {
       style={{
         display: 'flex', alignItems: 'center', gap: '.55rem', width: '100%', textAlign: 'left',
         padding: '.5rem .6rem', border: 'none', borderRadius: 8, minHeight: 0,
-        background: activeRow ? '#eef2ff' : 'transparent', color: '#111827', cursor: 'pointer', fontWeight: 400,
+        background: activeRow ? 'var(--color-amber-50)' : 'transparent',
+        color: activeRow ? 'var(--color-amber-800)' : 'var(--color-text-primary)',
+        cursor: 'pointer', fontWeight: 400,
       }}
     >
       {icon}
@@ -91,8 +93,8 @@ export function AgentSwitcher() {
         aria-label="Switch workspace"
         style={{
           display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.3rem .6rem', minHeight: 0,
-          background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 8, color: '#111827',
-          cursor: 'pointer', fontWeight: 400, maxWidth: 260,
+          background: 'var(--color-surface)', border: '1px solid var(--color-border-strong)', borderRadius: 8,
+          color: 'var(--color-text-primary)', cursor: 'pointer', fontWeight: 400, maxWidth: 260,
         }}
       >
         {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
@@ -111,8 +113,8 @@ export function AgentSwitcher() {
           <div
             style={{
               position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 41, width: 300,
-              background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,.12)',
-              padding: '.4rem', maxHeight: '70vh', overflowY: 'auto',
+              background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12,
+              boxShadow: 'var(--shadow-modal)', padding: '.4rem', maxHeight: '70vh', overflowY: 'auto',
             }}
           >
             {heading('Your smart agents')}
@@ -160,12 +162,12 @@ export function AgentSwitcher() {
               />
             ))}
 
-            <div style={{ borderTop: '1px solid #f1f5f9', margin: '.4rem 0' }} />
+            <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
             <button
               onClick={() => go('/organizations')}
               style={{
                 display: 'block', width: '100%', textAlign: 'left', padding: '.45rem .6rem', minHeight: 0,
-                background: 'transparent', border: 'none', color: '#4338ca', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
+                background: 'transparent', border: 'none', color: 'var(--color-amber-700)', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
               }}
             >
               ＋ Create an organization or service

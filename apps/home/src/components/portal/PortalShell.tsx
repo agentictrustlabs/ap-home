@@ -13,6 +13,7 @@ import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
 import { useInboxView } from '../../home/use-inbox';
+import { nameLabel } from '../../lib/domain';
 
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
   const pathname = usePathname();
@@ -21,13 +22,17 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const { agents } = useManagedAgents(session?.token ?? null);
   const { view } = useInboxView(active.kind === 'person' ? session : null);
   const inboxUnread = active.kind === 'person' ? (view?.summary.unreadTotal ?? 0) : 0;
-  const rel = active.kind === 'org'
-    ? (agents.find((a) => a.agent.toLowerCase() === active.org.toLowerCase())?.relationship ?? 'member')
-    : 'steward';
+  const activeAgent = active.kind === 'org'
+    ? agents.find((a) => a.agent.toLowerCase() === active.org.toLowerCase())
+    : active.kind === 'service'
+      ? agents.find((a) => a.agent.toLowerCase() === active.agent.toLowerCase())
+      : undefined;
+  const rel = active.kind === 'org' ? (activeAgent?.relationship ?? 'member') : 'steward';
+  const workspaceName = activeAgent?.name ? nameLabel(activeAgent.name) : undefined;
   const groups = buildNav(whitelabel, {
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
-  }, active, rel);
+  }, active, rel, workspaceName);
   const tabs = bottomNav(groups);
   return (
     <div className="portal-root">

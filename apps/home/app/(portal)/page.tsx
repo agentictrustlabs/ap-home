@@ -30,6 +30,10 @@ export default function HomeDashboard() {
 
   return (
     <div className="dashboard">
+      <header className="section-head">
+        <h1>Home</h1>
+        <p className="section-desc">Everything you steward in the {whitelabel.brand.community} — at a glance.</p>
+      </header>
       {session?.fresh && (
         <div className="welcome-banner" role="status">
           <strong>{whitelabel.copy.portalWelcome}{agentName ? `, ${agentName}` : ''}</strong>

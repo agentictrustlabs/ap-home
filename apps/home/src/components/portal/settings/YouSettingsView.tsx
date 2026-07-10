@@ -5,7 +5,6 @@ import { useSession } from '../../../context/session';
 import { whitelabel } from '../../../whitelabel/config';
 import {
   loadImpactProfile,
-  VaultKeyUnauthorizedError,
   type ImpactContactProfile,
 } from '../../../profile-store';
 import { PersonalTreasurySection } from '../ManagedAgents';
@@ -17,11 +16,13 @@ import { rotateGoogleHome } from '../../../server-client';
 import { SettingsLayout, SettingsGroup, SettingsRow } from './SettingsLayout';
 import { ProfileHeader } from './ProfileHeader';
 import { PersonalInfoPanel } from './PersonalInfoPanel';
+import { SectionShell } from '../SectionShell';
 
 const EXPLORER = 'https://sepolia.basescan.org/address/';
 
+// No "Overview" tab: the left rail IS the overview — the first click lands on real
+// content (personal info), never on a second list of links (nav-pointing-at-nav).
 const TABS = [
-  { id: 'overview', label: 'Overview', group: 'My profile' },
   { id: 'personal', label: 'Personal info', group: 'My profile' },
   { id: 'identity', label: 'Identity', group: 'My profile' },
   { id: 'security', label: 'Security', group: 'Account' },
@@ -33,10 +34,6 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 const TAB_META: Record<TabId, { title: string; description: string }> = {
-  overview: {
-    title: 'Overview',
-    description: 'Your profile at a glance — tap any row to manage that area.',
-  },
   personal: {
     title: 'Personal info',
     description: 'Contact details sealed in your encrypted vault and re-used across community apps.',
@@ -64,17 +61,15 @@ const TAB_META: Record<TabId, { title: string; description: string }> = {
 };
 
 function parseTab(): TabId {
-  if (typeof window === 'undefined') return 'overview';
+  if (typeof window === 'undefined') return 'personal';
   const t = new URLSearchParams(window.location.search).get('tab');
-  return (TABS.find((x) => x.id === t)?.id ?? 'overview') as TabId;
+  return (TABS.find((x) => x.id === t)?.id ?? 'personal') as TabId;
 }
 
 export function YouSettingsView() {
   const { session, agentName, agentAddress, profile } = useSession();
-  const [tab, setTab] = useState<TabId>('overview');
+  const [tab, setTab] = useState<TabId>('personal');
   const [contact, setContact] = useState<ImpactContactProfile | null>(null);
-  const [contactLoading, setContactLoading] = useState(true);
-  const [vaultLocked, setVaultLocked] = useState(false);
 
   useEffect(() => {
     setTab(parseTab());
@@ -84,19 +79,18 @@ export function YouSettingsView() {
     const next = id as TabId;
     setTab(next);
     const url = new URL(window.location.href);
-    if (next === 'overview') url.searchParams.delete('tab');
+    if (next === 'personal') url.searchParams.delete('tab');
     else url.searchParams.set('tab', next);
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
+  // Load the vault name once for the header (PersonalInfoPanel owns the editing state).
   useEffect(() => {
     if (!agentAddress) return;
     let cancelled = false;
-    setContactLoading(true);
     loadImpactProfile(agentAddress)
       .then((p) => { if (!cancelled) setContact(p.contact ?? {}); })
-      .catch((err) => { if (!cancelled && err instanceof VaultKeyUnauthorizedError) setVaultLocked(true); })
-      .finally(() => { if (!cancelled) setContactLoading(false); });
+      .catch(() => { /* header falls back to agentName; the panel shows the vault banner */ });
   }, [agentAddress]);
 
   const displayName = useMemo(() => {
@@ -106,18 +100,15 @@ export function YouSettingsView() {
     return agentName ?? 'Your profile';
   }, [contact, agentName]);
 
-  const contactSummary = useMemo(() => {
-    if (vaultLocked) return 'Vault locked — activate key';
-    if (contactLoading) return 'Loading…';
-    const email = contact?.email?.trim();
-    if (email) return email;
-    const filled = [contact?.firstName, contact?.lastName].filter((x) => x?.trim()).length;
-    return filled > 0 ? 'Details saved' : 'Not set up yet';
-  }, [contact, contactLoading, vaultLocked]);
-
   const meta = TAB_META[tab];
 
+  // Same page scaffold as every other portal page (SectionShell h1 + description),
+  // with the settings hub as the page's single content block — no orphaned card.
   return (
+    <SectionShell
+      title="My Profile"
+      description="Who you are here — your contact details, identity, security, and what you've connected."
+    >
     <SettingsLayout
       tabs={[...TABS]}
       active={tab}
@@ -133,30 +124,10 @@ export function YouSettingsView() {
         />
       }
     >
-      {tab === 'overview' && (
-        <>
-          <SettingsGroup label="Profile">
-            <SettingsRow icon="👤" label="Personal info" value={contactSummary} onClick={() => selectTab('personal')} />
-            <SettingsRow icon="🪪" label="Identity" value={agentName ?? '—'} onClick={() => selectTab('identity')} />
-            <SettingsRow icon="📷" label="Profile photo" value="Tap avatar above to change" onClick={() => selectTab('personal')} />
-          </SettingsGroup>
-          <SettingsGroup label="Account">
-            <SettingsRow icon="🔐" label="Security & delegations" value="Manage access you granted" onClick={() => selectTab('security')} />
-            <SettingsRow icon="🔗" label="Connected services" value="Directory & manifest" onClick={() => selectTab('connected')} />
-            <SettingsRow icon="💰" label="Personal treasury" value="Funds agent" onClick={() => selectTab('treasury')} />
-          </SettingsGroup>
-          <SettingsGroup label="Community">
-            <SettingsRow icon="📜" label="Attestations" value="WEA Statement of Faith" onClick={() => selectTab('attestations')} />
-            <SettingsRow icon="💬" label="Messages" value="Direct messages & requests" href="/messages" />
-          </SettingsGroup>
-        </>
-      )}
-
       {tab === 'personal' && (
         <PersonalInfoPanel
           agentAddress={agentAddress ?? null}
           onSaved={setContact}
-          onNeedsVaultKey={() => setVaultLocked(true)}
         />
       )}
 
@@ -209,6 +180,7 @@ export function YouSettingsView() {
         </SettingsGroup>
       )}
     </SettingsLayout>
+    </SectionShell>
   );
 }
 

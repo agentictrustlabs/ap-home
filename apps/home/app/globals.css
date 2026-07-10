@@ -1029,7 +1029,9 @@
       .address-chip-copied { position: absolute; right: 0; top: calc(100% + 3px); font-family: var(--font-brand-stack); font-size: .68rem; color: var(--color-sage-700); }
 
       /* Section shell */
-      .section-shell { max-width: var(--portal-max); margin: 0 auto; }
+      /* Left-anchored (not centered): content aligns under the sidebar like GitHub/Linear —
+         the max-width only caps line length, it never floats the page in the middle. */
+      .section-shell { max-width: var(--portal-max); margin: 0; }
       .section-head { margin-bottom: 1.25rem; }
       .section-head h1 { font-size: 1.6rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.03em; margin: 0; }
       .section-desc { color: var(--color-text-muted); font-size: .9rem; margin: .4rem 0 0; line-height: 1.55; max-width: 48ch; }
@@ -1043,7 +1045,8 @@
       .coming-soon-cta { margin-top: .5rem; }
 
       /* Dashboard */
-      .dashboard { max-width: var(--portal-max); margin: 0 auto; display: flex; flex-direction: column; gap: 1.75rem; }
+      .dashboard { max-width: var(--portal-max); margin: 0; display: flex; flex-direction: column; gap: 1.75rem; }
+      .dashboard > .section-head { margin-bottom: -0.5rem; }
       .welcome-banner {
         background: linear-gradient(135deg, var(--color-amber-50), var(--color-sage-50));
         border: 1px solid var(--color-amber-100); border-radius: var(--radius-16);
