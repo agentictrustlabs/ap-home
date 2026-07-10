@@ -11,11 +11,13 @@ import { connectWallet, personalSign } from '../../../src/lib/wallet';
 import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/connect-client';
 import { issueDirectoryListing } from '../../../src/home/directory';
 import { orgHref } from '../../../src/lib/workspace';
+import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
   if (v === 'wallet') { const addr = await connectWallet(); return (h) => personalSign(addr, h); }
-  if (v === 'google') return googleSignHash(agent, token);
+  // KMS-custodied homes (Google / YouVersion / email-bootstrap) sign server-side via the session token.
+  if (v === 'google' || v === 'youversion' || v === 'email') return googleSignHash(agent, token);
   return passkeySignHash;
 }
 
@@ -82,9 +84,17 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
           ) : (
             <>
               <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
-                Sign in to accept this invitation — with a passkey, wallet, Google, or email.
+                Accept with your email — we&rsquo;ll send a 6-digit code and set up your home automatically,
+                no app to install. Then you&rsquo;re a member (your keys stay yours; the org gets no custody).
               </p>
-              <a className="btn" href={`/?invite=${encodeURIComponent(token)}`}>Sign in to accept</a>
+              <div style={{ margin: '.9rem 0' }}>
+                {/* Anonymous verify → email-bootstrap: EmailAuthCard secures a KMS-custodied home, the session
+                    updates, and this page re-renders straight into "Accept & join". */}
+                <EmailAuthCard />
+              </div>
+              <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`}>
+                Already have a home? Use a passkey, wallet, or Google
+              </a>
             </>
           )}
         </>
