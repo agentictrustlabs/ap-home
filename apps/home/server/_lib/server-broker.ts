@@ -89,6 +89,13 @@ export interface Env {
   /** Verified SendGrid sender address (e.g. no-reply@impact-agent.me) — required to actually send. */
   EMAIL_FROM?: string;
 
+  // ─── Phone auth (Twilio Verify) ────────────────────────────────────
+  /** Twilio API key SID (SK…) + secret — presence flips SMS verification from dev-OTP to Twilio Verify. */
+  TWILIO_API_KEY?: string;
+  TWILIO_API_KEY_SECRET?: string;
+  /** Twilio Verify Service SID (VA…) — the configured Verify service. */
+  TWILIO_VERIFY_SERVICE_SID?: string;
+
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
    *  When unset, defaults to the production patterns (impact-agent.me + its subdomains

@@ -45,6 +45,10 @@ export function makeEnv(): Env {
     // Email auth + invites (SendGrid). Unset ⇒ the sender logs instead of sending (deploy-safe).
     SENDGRID_API_KEY: t(process.env.SENDGRID_API_KEY),
     EMAIL_FROM: t(process.env.EMAIL_FROM),
+    // Phone auth (Twilio Verify). Unset ⇒ a self-generated dev OTP is logged instead (deploy-safe).
+    TWILIO_API_KEY: t(process.env.TWILIO_API_KEY),
+    TWILIO_API_KEY_SECRET: t(process.env.TWILIO_API_KEY_SECRET),
+    TWILIO_VERIFY_SERVICE_SID: t(process.env.TWILIO_VERIFY_SERVICE_SID),
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };

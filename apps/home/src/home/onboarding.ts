@@ -47,7 +47,7 @@ function storedSessionToken(auth?: Auth): string | null {
   return readSsoCookie()?.token ?? null;
 }
 
-export type Via = 'passkey' | 'wallet' | 'google' | 'youversion' | 'email';
+export type Via = 'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone';
 /** Extra auth a server-custodied op needs: the custody session token demo-a2a verifies. */
 export type Auth = { token: string };
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
@@ -56,9 +56,10 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
  *  session's (iss, sub) — spec 235). Both sign + recover with no device gesture, unlike passkey/wallet.
  *  The signer path (`signHashFor`), org-create, and the recognized-connect grant all branch on this. */
 export function isKmsVia(via: Via): boolean {
-  // `email` joins the KMS family (email-bootstrap): an email with no home of its own gets a per-subject
-  // KMS-custodied home (iss='email', sub=SHA-256(email)) — the same server-side C_sub signing as Google.
-  return via === 'google' || via === 'youversion' || via === 'email';
+  // `email` + `phone` join the KMS family (email/phone-bootstrap): a verified email/phone with no home of
+  // its own gets a per-subject KMS-custodied home (iss='email'|'phone', sub=SHA-256(value)) — the same
+  // server-side C_sub signing as Google.
+  return via === 'google' || via === 'youversion' || via === 'email' || via === 'phone';
 }
 
 /**
@@ -81,10 +82,11 @@ export function resolveVia(credential: string | undefined, cookieVia: string | u
   // distinguishing the label by the cookie via, defaulting to google. This is what stops a social
   // agent from being mis-routed to a (nonexistent) passkey.
   if (c.includes('email')) return 'email';
-  // An email-bootstrapped home shares the `oidc`/`kms` on-chain credential with Google (same C_sub
+  if (c.includes('phone')) return 'phone';
+  // An email/phone-bootstrapped home shares the `oidc`/`kms` on-chain credential with Google (same C_sub
   // mechanism); the cookie `via` disambiguates the label + KMS provider.
-  if (c.includes('oidc') || c.includes('kms')) return v === 'youversion' ? 'youversion' : v === 'email' ? 'email' : 'google';
-  return v === 'wallet' || v === 'google' || v === 'youversion' || v === 'email' || v === 'passkey' ? (v as Via) : 'passkey';
+  if (c.includes('oidc') || c.includes('kms')) return v === 'youversion' ? 'youversion' : v === 'email' ? 'email' : v === 'phone' ? 'phone' : 'google';
+  return v === 'wallet' || v === 'google' || v === 'youversion' || v === 'email' || v === 'phone' || v === 'passkey' ? (v as Via) : 'passkey';
 }
 
 /** ①a — your device becomes your key (passkey path only; wallet/Google have no create step). */

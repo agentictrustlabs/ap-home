@@ -22,6 +22,7 @@ import { ApproveDevice } from '../../../src/components/device-link';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { GoogleSignInPanel } from '../../../src/components/portal/settings/GoogleSignInPanel';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
+import { PhoneAuthCard } from '../../../src/components/portal/PhoneAuthCard';
 import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/components/shared/Icons';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -245,6 +246,17 @@ export default function SecurityPage() {
           (like Google); it never controls your keys.
         </p>
         <EmailAuthCard />
+      </div>
+
+      {/* Phone as an added login / recovery method (spec 320). Login-grade contact-control (SMS proves you
+          hold the number); it never controls your keys — your passkey does. */}
+      <div className="dash-section">
+        <h2>Phone (SMS)</h2>
+        <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .7rem' }}>
+          Add your phone as a sign-in / recovery method — you&rsquo;ll verify a code we text you. Login-grade
+          contact-control; SMS is SIM-swap-prone, so it never controls your keys or approves sensitive actions.
+        </p>
+        <PhoneAuthCard />
       </div>
     </SectionShell>
   );

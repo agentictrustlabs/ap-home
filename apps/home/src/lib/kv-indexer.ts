@@ -112,6 +112,33 @@ export async function recordEmailFacetByHash(kv: KvLike, hash: string, agent: Ca
   await appendLink(kv, emailFacetKey(hash), { agent, assurance: 'asserted', ref: 'kv-email-invite' });
 }
 
+// ── Phone (SMS) login facet (login-grade, asserted — structurally identical to the email facet) ──────
+// Phone proves telecom-address control (verified via Twilio Verify, spec 320), never on-chain custody.
+// The KEY is SHA-256(E.164) — the raw number is NEVER stored (privacy). `enroll.ts` rejects a
+// `kind:'phone'` facet the same way it rejects `email`/`oidc`. NOTE (spec 320 §hardening): the phone-number
+// space is enumerable, so a plaintext SHA-256 is reversible by brute force in a KV-leak scenario; a keyed
+// HMAC blind index (`HMAC(PHONE_LOOKUP_SECRET, e164)`) is the documented hardening — deferred here to keep
+// the derivation secret-free (a rotating lookup secret would orphan every phone-bootstrapped home).
+async function phoneHash(phoneE164: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(phoneE164.trim()));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+const phoneFacetKey = (hash: string): string => `facet:phone:${hash}`;
+
+/** SHA-256(E.164 phone) — the facet key + the CredentialPrincipal.id. Exported so the verify route uses
+ *  the identical hash (never the raw number). The caller normalizes to E.164 BEFORE hashing. */
+export { phoneHash };
+
+export async function readPhoneFacet(kv: KvLike, phoneE164: string): Promise<CanonicalAgentId | null> {
+  const links = await readLinks(kv, phoneFacetKey(await phoneHash(phoneE164)));
+  return links[0]?.agent ?? null;
+}
+
+/** Record a phone->agent login facet (login-grade). SEC-009: append-only. */
+export async function recordPhoneFacet(kv: KvLike, phoneE164: string, agent: CanonicalAgentId): Promise<void> {
+  await appendLink(kv, phoneFacetKey(await phoneHash(phoneE164)), { agent, assurance: 'asserted', ref: 'kv-phone' });
+}
+
 /** Read the per-(iss,sub) Google × KMS custody rotation (spec 235 §5b). Default 0 — the first
  *  home. The custody gate derives `C_sub(iss,sub,rotation)`, so the broker + demo-a2a must agree. */
 export async function readRotation(kv: KvLike, iss: string, sub: string): Promise<number> {
