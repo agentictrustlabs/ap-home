@@ -2,10 +2,10 @@
 // Full-bleed entry experience shown by the portal gate when NOT authed (or mid relying-app
 // enrollment). Routes: relying-app enroll (new / existing / org-create) and self-serve
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, type Via, type Auth } from '../../home/onboarding';
-import { passkeyLogin, fetchProfile, siweLogin } from '../../connect-client';
+import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
+import { passkeyLogin, fetchProfile, siweLogin, claimName } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
@@ -243,7 +243,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <OrgConsent personAgent={view.agent} api={api} />;
   }
   if (view.k === 'signin') {
-    return <SignInView name={view.name} onSession={async (t, via) => {
+    return <SignInView name={view.name} onCreate={(n) => setView({ k: 'journey', variant: 'self-serve', name: nameLabel(n) })} onSession={async (t, via) => {
       await openSession(t, via, false);
       // Step 3 — signing in for an OWNER-OP ceremony establishes the home session; re-enter the
       // recognized path to run the ceremony (not a grant) on it.
@@ -642,7 +642,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
 }
 
 // ── Returning member sign-in ──────────────────────────────────────────────────
-function SignInView({ name, onSession }: { name: string; onSession: (token: string, via: string) => Promise<void> }) {
+function SignInView({ name, onSession, onCreate }: { name: string; onSession: (token: string, via: string) => Promise<void>; onCreate?: (name: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState<NameInfo | null>(null);
@@ -722,6 +722,30 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
       if (last === 'phone') setShowPhone(true);
     } catch { /* storage blocked */ }
   }, [name]);
+  // Arriving at a NOT-YET-EXISTING name's subdomain and signing in with an OTP card can resolve an
+  // EXISTING NAMELESS home (the phone/email facet already points somewhere) — the member came here
+  // wanting to BE this name, so claim it for that home (KMS-signed, zero prompts, once). A home that
+  // already HAS a name is untouched — this only completes the nameless case (rich-phone3).
+  const { session: liveSession, profile: liveProfile, refreshProfile } = useSession();
+  const claimRef = useRef(false);
+  const notFoundNow = info ? info.exists === false : false;
+  useEffect(() => {
+    if (claimRef.current || !notFoundNow || !liveSession || !liveProfile) return;
+    const addr = addressOf(liveProfile.agent);
+    if (!addr || liveProfile.deployed === false || liveProfile.name) return;
+    claimRef.current = true;
+    void (async () => {
+      try {
+        const via = resolveVia(liveProfile.credential, liveSession.via);
+        const sign = await signHashFor(via, addr, { token: liveSession.token });
+        const res = await claimName(addr, sign, nameLabel(name));
+        if (res.ok) await refreshProfile();
+        else console.warn('[signin] name claim failed (claim it from the Naming page):', res.error);
+      } catch (e) {
+        console.warn('[signin] name claim failed (claim it from the Naming page):', e);
+      }
+    })();
+  }, [notFoundNow, liveSession, liveProfile, name, refreshProfile]);
 
   // Recognized: the member already has a live session for THIS home → one tap, no fresh credential.
   if (recognized) {
@@ -773,7 +797,13 @@ function SignInView({ name, onSession }: { name: string; onSession: (token: stri
       ) : notFound ? (
         <>
           <p className="onboarding-hint taken">No home named <strong>{nameLabel(name)}</strong> yet.</p>
-          <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Create it with Google</button>
+          {/* Route into the FULL creation journey (passkey / wallet / social / email / phone), which
+              claims THIS name with whichever credential is chosen — the old Google-only shortcut left
+              phone/email members creating NAMELESS homes at this subdomain (rich-phone3). */}
+          {onCreate && (
+            <button className="btn-primary" onClick={() => onCreate(name)}>Create {nameLabel(name)}</button>
+          )}
+          <button className={onCreate ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => continueWithGoogle(name)}>Create it with Google</button>
         </>
       ) : (
         // A named-home sign-in uses THIS home's own credential(s). Google is NOT shown — it
