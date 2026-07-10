@@ -12,8 +12,18 @@ import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 
-const asMsg = (x: unknown, fallback: string): string =>
-  typeof x === 'string' && x ? x : x instanceof Error ? x.message : fallback;
+// Coerce ANY thrown shape to a readable string — Error, a string, or a plain object with a `.message`
+// (MetaMask/RPC rejections are objects like `{ code: 4001, message: 'User rejected …' }`, NOT Error
+// instances, so `instanceof Error` alone silently dropped them to the fallback).
+const asMsg = (x: unknown, fallback: string): string => {
+  if (typeof x === 'string' && x) return x;
+  if (x && typeof x === 'object') {
+    const m = (x as { message?: unknown }).message;
+    if (typeof m === 'string' && m) return m;
+    try { const s = JSON.stringify(x); if (s && s !== '{}') return s; } catch { /* non-serializable */ }
+  }
+  return fallback;
+};
 
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -114,6 +124,17 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
               <button className="btn" disabled={busy} onClick={() => void accept()}>
                 {busy ? 'Signing…' : `Accept & join ${invite.orgName}`}
               </button>
+              {(() => {
+                const via = resolveVia(profile?.credential, session.via);
+                const label = via === 'wallet' ? 'your wallet — a signature request will appear'
+                  : via === 'passkey' ? 'your passkey'
+                  : 'your secured account (no prompt)';
+                return (
+                  <p style={{ fontSize: '.75rem', opacity: 0.55, marginTop: '.5rem' }}>
+                    Signs with {label}. <span style={{ opacity: 0.8 }}>(credential: {profile?.credential ?? '—'})</span>
+                  </p>
+                );
+              })()}
             </>
           ) : (
             <>
