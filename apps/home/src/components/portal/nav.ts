@@ -128,9 +128,9 @@ export function buildNav(
     { id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' },
   ];
 
-  // Manage (was "Account"): the settings sections as real left items — the /you tabs merged in here so
-  // there's ONE place for each. Profile = /you (personal + identity + attestations); Security/Connected/
-  // Activity are their own routes. No duplicate "My Profile page with its own tab strip".
+  // Manage (was "Account"): the /you tab content merged into real left items — Profile (personal +
+  // identity), Security (devices + delegations + vault key + sign-in), Connected (apps + how you're
+  // published). ONE place for each; no "My Profile page with its own tab strip".
   const manage: NavItem[] = [];
   if (person) {
     manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
@@ -141,13 +141,20 @@ export function buildNav(
   if (wl.services.connectedApps) {
     manage.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
   }
-  manage.push({ id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'live' });
+
+  // Activity: the record of what you've asserted + what your agents have done — attestations + the
+  // audit timeline. Its own major band (spec 315).
+  const activity: NavItem[] = [
+    { id: 'attestations', label: 'Attestations', href: '/attestations', Icon: AwardIcon, status: 'live' },
+    { id: 'activity', label: 'Activity', href: '/activity', Icon: HistoryIcon, status: 'live' },
+  ];
 
   return [
     { items: top },
     { heading: 'You steward', items: yourAgents },
     { heading: 'Discovery', items: discovery },
     { heading: 'Manage', items: manage },
+    { heading: 'Activity', items: activity },
   ].filter((g) => g.items.length > 0);
 }
 

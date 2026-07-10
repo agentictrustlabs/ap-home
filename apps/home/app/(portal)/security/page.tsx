@@ -19,6 +19,8 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { DeviceRow } from '../../../src/components/portal/DeviceRow';
 import { ApproveDevice } from '../../../src/components/device-link';
+import { DelegationsList } from '../../../src/components/portal/DelegationsList';
+import { GoogleSignInPanel } from '../../../src/components/portal/settings/GoogleSignInPanel';
 import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/components/shared/Icons';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -211,6 +213,18 @@ export default function SecurityPage() {
           body="Trustees and guardians who can help recover your portal if you lose access — without ever changing your identity."
         />
       </div>
+
+      {/* Moved here from the old /you Security tab (spec 315): vault key, delegations, Google rotation. */}
+      <div className="dash-section">
+        <h2>Vault &amp; delegations</h2>
+        <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .6rem' }}>
+          Your vault encryption key and the scoped, revocable delegations you&rsquo;ve granted.
+        </p>
+        <a className="btn-ghost" href="/vault-key" style={{ display: 'inline-block', marginBottom: '.6rem' }}>🔒 Manage vault key</a>
+        <DelegationsList token={session?.token ?? null} />
+      </div>
+
+      <GoogleSignInPanel />
     </SectionShell>
   );
 }

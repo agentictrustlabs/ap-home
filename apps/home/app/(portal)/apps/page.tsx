@@ -10,6 +10,8 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCard';
 import { YouVersionData } from '../../../src/components/portal/YouVersionData';
+import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
+import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
 import { LinkIcon } from '../../../src/components/shared/Icons';
 
 export default function AppsPage() {
@@ -41,6 +43,14 @@ export default function AppsPage() {
           </p>
         </>
       )}
+
+      {/* Moved here from the old /you Connected tab (spec 315): how other agents find + reach you. */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <HomeManifestCard />
+      </div>
+      <div style={{ marginTop: '1rem' }}>
+        <DirectoryListingCard />
+      </div>
     </SectionShell>
   );
 }
