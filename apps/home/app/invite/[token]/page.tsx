@@ -12,6 +12,7 @@ import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/con
 import { issueDirectoryListing } from '../../../src/home/directory';
 import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
+import { secureHomeNoName, activateVault } from '../../../src/home/onboarding';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -24,11 +25,12 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const router = useRouter();
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress, agentName, openSession } = useSession();
   const [invite, setInvite] = useState<{ org: string; orgName: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState('');
+  const [otpFallback, setOtpFallback] = useState(false);
 
   useEffect(() => {
     void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}`)
@@ -53,6 +55,41 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
+      router.push(orgHref(invite.org, 'channels'));
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+
+  // Magic-link accept (anonymous invitee, no prior home): clicking the emailed link proves inbox
+  // possession, so the server bootstraps a KMS-custodied home bound to the invited email — no OTP, no app.
+  // We then secure it on-chain, publish the invitee's self-signed join listing, and open the session. If
+  // the org kept no email hash for this token, the server returns `needs-otp` → fall back to the code card.
+  const redeemWithLink = async () => {
+    if (!invite) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch('/connect/org-invite/redeem', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: string };
+      if (r.ok && d.status === 'needs-otp') { setOtpFallback(true); return; }
+      if (!r.ok || !d.ok || !d.token) throw new Error(d.error ?? 'could not accept the invitation');
+      const res = await secureHomeNoName({ token: d.token });
+      if (!res.ok) throw new Error(res.error);
+      void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
+      const sign = googleSignHash(res.home.address, d.token); // KMS-custodied home signs server-side
+      const name = displayName.trim() || 'Member';
+      const listing = await issueDirectoryListing(res.home.address, sign, {
+        communityId: invite.org.toLowerCase(),
+        displayName: name,
+      });
+      const pub = await fetch('/connect/directory', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${d.token}` },
+        body: JSON.stringify({ action: 'publish', listing }),
+      });
+      const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!pub.ok || !pj.ok) throw new Error(pj.error ?? `join failed (${pub.status})`);
+      await openSession(d.token, 'email', false);
       router.push(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
@@ -84,17 +121,35 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
           ) : (
             <>
               <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
-                Accept with your email — we&rsquo;ll send a 6-digit code and set up your home automatically,
-                no app to install. Then you&rsquo;re a member (your keys stay yours; the org gets no custody).
+                You were invited by email — that&rsquo;s all we need. Accept and we&rsquo;ll set up your home
+                automatically, no app to install. Your keys stay yours; the org gets no custody.
               </p>
-              <div style={{ margin: '.9rem 0' }}>
-                {/* Anonymous verify → email-bootstrap: EmailAuthCard secures a KMS-custodied home, the session
-                    updates, and this page re-renders straight into "Accept & join". */}
-                <EmailAuthCard />
-              </div>
-              <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`}>
-                Already have a home? Use a passkey, wallet, or Google
-              </a>
+              <input
+                placeholder="Display name (how members see you)"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                style={{ width: '100%', padding: '.55rem .7rem', margin: '.6rem 0', borderRadius: 8, border: '1px solid #d1d5db' }}
+              />
+              {!otpFallback ? (
+                <>
+                  {/* One-click: the emailed link is the email-validation proof (magic link) → the server
+                      bootstraps a KMS home bound to the invited email and this handler joins the org. */}
+                  <button className="btn" disabled={busy} onClick={() => void redeemWithLink()}>
+                    {busy ? 'Setting up your home…' : `Accept & join ${invite.orgName}`}
+                  </button>
+                  <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`} style={{ display: 'block', marginTop: '.7rem' }}>
+                    Already have a home? Use a passkey, wallet, or Google
+                  </a>
+                </>
+              ) : (
+                <>
+                  {/* Fallback: no email hash stored for this token → verify by code, then Accept & join. */}
+                  <p style={{ fontSize: '.85rem', opacity: 0.7, marginBottom: '.5rem' }}>
+                    Verify your email to continue:
+                  </p>
+                  <EmailAuthCard />
+                </>
+              )}
             </>
           )}
         </>

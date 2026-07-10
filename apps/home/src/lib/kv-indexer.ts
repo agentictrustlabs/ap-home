@@ -101,6 +101,17 @@ export async function recordEmailFacet(kv: KvLike, email: string, agent: Canonic
   await appendLink(kv, emailFacetKey(await emailHash(email)), { agent, assurance: 'asserted', ref: 'kv-email' });
 }
 
+/** Hash-keyed variants for the invite magic-link path — the redeeming server holds only the invited
+ *  email's SHA-256 (blast-zone: the raw address was never stored), so it reads/writes the facet by hash.
+ *  Identical to `readEmailFacet`/`recordEmailFacet` otherwise (the hash IS the facet key). */
+export async function readEmailFacetByHash(kv: KvLike, hash: string): Promise<CanonicalAgentId | null> {
+  const links = await readLinks(kv, emailFacetKey(hash));
+  return links[0]?.agent ?? null;
+}
+export async function recordEmailFacetByHash(kv: KvLike, hash: string, agent: CanonicalAgentId): Promise<void> {
+  await appendLink(kv, emailFacetKey(hash), { agent, assurance: 'asserted', ref: 'kv-email-invite' });
+}
+
 /** Read the per-(iss,sub) Google × KMS custody rotation (spec 235 §5b). Default 0 — the first
  *  home. The custody gate derives `C_sub(iss,sub,rotation)`, so the broker + demo-a2a must agree. */
 export async function readRotation(kv: KvLike, iss: string, sub: string): Promise<number> {
