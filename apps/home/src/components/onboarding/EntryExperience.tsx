@@ -10,6 +10,7 @@ import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
+import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
 
@@ -429,6 +430,9 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
 }) {
   const [busy, setBusy] = useState<'passkey' | 'wallet' | null>(null);
   const [err, setErr] = useState('');
+  // Email sign-in / bootstrap: reveal an inline EmailAuthCard. It calls the SAME useSession().openSession
+  // this front door is mounted under (portal Gate), so a verified/bootstrapped email lands in the portal.
+  const [showEmail, setShowEmail] = useState(false);
   // Only offer the wallet button when an injected provider is actually present (client-only check,
   // set after mount to avoid an SSR/first-paint mismatch).
   const [walletAvail, setWalletAvail] = useState(false);
@@ -578,6 +582,18 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
             >
               {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
             </button>
+          )}
+          <button
+            className="btn-ghost onboarding-secondary"
+            onClick={() => setShowEmail((v) => !v)}
+            disabled={busy !== null}
+          >
+            Continue with email
+          </button>
+          {showEmail && (
+            // Verify a code (existing email home) OR bootstrap a KMS-custodied home (no home yet) — both
+            // open the session via useSession, so the Gate advances into the portal. No device gesture.
+            <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>
           )}
           <div className="method-or">or</div>
           <button className="btn-ghost onboarding-secondary" onClick={() => onUseName()}>

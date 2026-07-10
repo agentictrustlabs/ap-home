@@ -4,7 +4,6 @@
 // (ADR-0025 — they consent by signing; this makes them an authority-only member). Not signed in ⇒ prompt
 // to sign in first (any method, incl. email). One invitation, redeemed by joining.
 import { use, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
 import { issueDirectoryListing } from '../../../src/home/directory';
@@ -27,7 +26,6 @@ const asMsg = (x: unknown, fallback: string): string => {
 
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
-  const router = useRouter();
   const { session, profile, agentAddress, agentName, openSession } = useSession();
   const [invite, setInvite] = useState<{ org: string; orgName: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -61,7 +59,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
-      router.push(orgHref(invite.org, 'channels'));
+      window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
@@ -97,7 +95,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await openSession(d.token, 'email', false);
-      router.push(orgHref(invite.org, 'channels'));
+      window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
