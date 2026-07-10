@@ -18,9 +18,12 @@ export interface TwilioEnv {
   TWILIO_FROM_NUMBER?: string;
 }
 
-/** True once Twilio VERIFY (managed OTP) is configured — the caller uses Twilio's OTP. */
+/** True once Twilio VERIFY (managed OTP) is configured — the caller uses Twilio's OTP. Requires a
+ *  WELL-FORMED Verify service SID (`VA…`); a malformed/partial value (e.g. an `SK` pasted into that slot)
+ *  is treated as unconfigured so the flow drops to the dev-OTP path instead of a confusing Twilio 401. */
 export function smsVerifyEnabled(env: TwilioEnv): boolean {
-  return !!(env.TWILIO_API_KEY?.trim() && env.TWILIO_API_KEY_SECRET?.trim() && env.TWILIO_VERIFY_SERVICE_SID?.trim());
+  const svc = env.TWILIO_VERIFY_SERVICE_SID?.trim() ?? '';
+  return !!(env.TWILIO_API_KEY?.trim() && env.TWILIO_API_KEY_SECRET?.trim() && svc.startsWith('VA'));
 }
 
 /** True once Twilio Programmable MESSAGING is configured — the caller texts OUR OWN dev OTP (no Verify

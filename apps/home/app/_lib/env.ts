@@ -52,8 +52,10 @@ export function makeEnv(): Env {
     // Twilio Programmable Messaging (texts our own OTP — no Verify upgrade). Account SID + a From number.
     TWILIO_ACCOUNT_SID: t(process.env.TWILIO_ACCOUNT_SID),
     TWILIO_FROM_NUMBER: t(process.env.TWILIO_FROM_NUMBER),
-    // Testing only: echo the dev OTP in the response when a provider is unconfigured (never with a real provider).
-    DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO),
+    // Testing: echo the dev OTP in the response when a provider is UNCONFIGURED (a real SendGrid/Twilio
+    // NEVER echoes). Defaults ON (testnet demo) so email/phone sign-in works with no provider — the code
+    // shows in the card. Set DEV_OTP_ECHO=false to require reading it from server logs instead.
+    DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO) ?? 'true',
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
