@@ -36,7 +36,12 @@ export async function sendPhoneVerification(env: TwilioEnv, phoneE164: string): 
       headers: { authorization: authHeader(env), 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ To: phoneE164, Channel: 'sms' }).toString(),
     });
-    if (!res.ok) return { ok: false, error: `twilio verify ${res.status}` };
+    if (!res.ok) {
+      // Surface Twilio's own message (e.g. "Authentication Error - invalid username") — a 401 means the
+      // API key SID (SK…) / secret is wrong, or the Account SID was used where an API key is expected.
+      const detail = (await res.json().catch(() => null)) as { message?: string; code?: number } | null;
+      return { ok: false, error: `twilio verify ${res.status}${detail?.message ? `: ${detail.message}` : ''}` };
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'sms send failed' };
@@ -56,7 +61,10 @@ export async function checkPhoneVerification(
       body: new URLSearchParams({ To: phoneE164, Code: code }).toString(),
     });
     // A wrong/expired code returns 404 (no pending verification) or status !== 'approved'.
-    if (!res.ok) return { approved: false, error: `twilio check ${res.status}` };
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null)) as { message?: string } | null;
+      return { approved: false, error: `twilio check ${res.status}${detail?.message ? `: ${detail.message}` : ''}` };
+    }
     const body = (await res.json().catch(() => ({}))) as { status?: string };
     return { approved: body.status === 'approved' };
   } catch (e) {
