@@ -313,40 +313,84 @@ function MemberCard({ m }: { m: ReceivedDelegation }) {
   );
 }
 
-/** Members of the org = the agents that delegated TO it (the broker pool). Person-session
- *  authorized via /connect/received-delegations, filtered to this org. Each carries the
- *  member→org delegation, so we can read each member's details over it. */
+/** A spec-318 community member — someone whose CURRENT self-signed directory listing is in this
+ *  org's community (the source of truth for channel membership). Public consent artifacts
+ *  (ADR-0025-safe to show the steward); no delegation, so there is no vault to read. */
+interface CommunityMember {
+  agent: string;
+  label: string;
+  displayName: string;
+  roles: string[];
+  joinedAt: string | null;
+}
+
+/** Members of the org — BOTH membership relations (spec 318: they are different):
+ *   • Community members — current self-signed directory listings in this org's community
+ *     (how people join via channels). Authority-only: channels + visibility, no data access.
+ *   • Delegating members — agents that granted the org a scoped delegation
+ *     (/connect/received-delegations), so the steward can read their details over it. */
 export function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
-  const [members, setMembers] = useState<ReceivedDelegation[]>([]);
+  const [delegating, setDelegating] = useState<ReceivedDelegation[]>([]);
+  const [community, setCommunity] = useState<CommunityMember[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!token) { setLoaded(true); return; }
     let cancelled = false;
-    listMyReceivedDelegations(token)
-      .then((all) => {
-        if (cancelled) return;
-        setMembers(all.filter((r) => r.viaOrg.toLowerCase() === org.orgAgent.toLowerCase()));
-        setLoaded(true);
+    const orgLc = org.orgAgent.toLowerCase();
+    const viaDelegation = listMyReceivedDelegations(token)
+      .then((all) => all.filter((r) => r.viaOrg.toLowerCase() === orgLc))
+      .catch(() => [] as ReceivedDelegation[]);
+    const viaListing = fetch(`/connect/directory?communityId=${orgLc}`, { headers: { authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        if (!r.ok) return [] as CommunityMember[];
+        const out = (await r.json()) as { listings?: Array<{ listing: { subject: string; displayName?: string; roles?: string[]; publishedAt?: string }; label?: string }> };
+        return (out.listings ?? []).flatMap((l) => {
+          const agent = l.listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+          return agent ? [{ agent, label: l.label ?? '', displayName: l.listing.displayName ?? '', roles: l.listing.roles ?? [], joinedAt: l.listing.publishedAt ?? null }] : [];
+        });
       })
-      .catch(() => { if (!cancelled) setLoaded(true); });
+      .catch(() => [] as CommunityMember[]);
+    void Promise.all([viaDelegation, viaListing]).then(([dels, listings]) => {
+      if (cancelled) return;
+      setDelegating(dels);
+      // A member can hold both relations — show the delegation card (richer) and drop the duplicate listing row.
+      const delegators = new Set(dels.map((d) => d.orgAgent.toLowerCase()));
+      setCommunity(listings.filter((m) => !delegators.has(m.agent) && m.agent !== orgLc));
+      setLoaded(true);
+    });
     return () => { cancelled = true; };
   }, [token, org.orgAgent]);
 
+  const empty = delegating.length === 0 && community.length === 0;
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
       <h3 className="subhead">Members</h3>
       <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
-        Agents that delegated to <b>{org.orgName || 'this org'}</b> — its members. Each granted a scoped
-        delegation, so you can read their details over it (their data stays in their own vault).
+        Everyone in <b>{org.orgName || 'this org'}</b> — community members (they published a listing in its
+        directory; channels + visibility only) and delegating members (they granted a scoped delegation, so
+        you can read their details over it — their data stays in their own vault).
       </p>
       {!loaded ? (
         <p className="manage-card-blurb">Loading members…</p>
-      ) : members.length === 0 ? (
-        <p className="manage-card-blurb">No members yet — no agent has delegated to this organization.</p>
+      ) : empty ? (
+        <p className="manage-card-blurb">No members yet — no one has joined this organization&rsquo;s community or delegated to it.</p>
       ) : (
         <div className="manage-grid">
-          {members.map((m, i) => <MemberCard key={`${m.orgAgent}-${i}`} m={m} />)}
+          {delegating.map((m, i) => <MemberCard key={`${m.orgAgent}-${i}`} m={m} />)}
+          {community.map((m) => (
+            <div className="manage-card" key={m.agent}>
+              <div className="manage-card-head">
+                <span className="manage-card-label">{m.displayName || m.label || 'member'}</span>
+                <span className="manage-card-badge">Community member</span>
+              </div>
+              <div style={{ margin: '.45rem 0' }}><AddressChip address={m.agent as Address} size="sm" withName /></div>
+              {m.roles.length > 0 && <p className="manage-card-blurb" style={{ margin: '0 0 .3rem' }}>{m.roles.join(' · ')}</p>}
+              <p className="manage-card-blurb" style={{ margin: 0 }}>
+                Joined via directory listing{m.joinedAt ? ` · ${new Date(m.joinedAt).toLocaleDateString()}` : ''} — no data access granted.
+              </p>
+            </div>
+          ))}
         </div>
       )}
     </div>
