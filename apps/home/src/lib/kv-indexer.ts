@@ -76,6 +76,31 @@ export async function recordOidcFacet(
   await appendLink(kv, oidcKey(iss, sub), { agent, assurance: 'asserted', ref: 'kv-oidc' });
 }
 
+// ── Email login facet (login-grade, asserted — structurally identical to the OIDC facet) ──────────
+// Email proves inbox control, never on-chain custody. The KEY is SHA-256(normalized email) — the raw
+// address is NEVER stored (privacy; the facet is a login pointer, not PII). `enroll.ts` rejects a
+// `kind:'email'` facet the same way it rejects `oidc` (can't self-verify on-chain).
+async function emailHash(email: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.toLowerCase().trim()));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+const emailFacetKey = (hash: string): string => `facet:email:${hash}`;
+
+/** SHA-256(normalized email) — the facet key + the CredentialPrincipal.id. Exported so the verify
+ *  route + invite redemption use the identical hash (never the raw address). */
+export { emailHash };
+
+export async function readEmailFacet(kv: KvLike, email: string): Promise<CanonicalAgentId | null> {
+  const links = await readLinks(kv, emailFacetKey(await emailHash(email)));
+  return links[0]?.agent ?? null;
+}
+
+/** Record an email->agent login facet (login-grade). Only written when a custody-grade session of the
+ *  TARGET agent authorizes it (same security model as the Google link path). SEC-009: append-only. */
+export async function recordEmailFacet(kv: KvLike, email: string, agent: CanonicalAgentId): Promise<void> {
+  await appendLink(kv, emailFacetKey(await emailHash(email)), { agent, assurance: 'asserted', ref: 'kv-email' });
+}
+
 /** Read the per-(iss,sub) Google × KMS custody rotation (spec 235 §5b). Default 0 — the first
  *  home. The custody gate derives `C_sub(iss,sub,rotation)`, so the broker + demo-a2a must agree. */
 export async function readRotation(kv: KvLike, iss: string, sub: string): Promise<number> {
