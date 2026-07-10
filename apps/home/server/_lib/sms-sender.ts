@@ -20,6 +20,17 @@ export function smsVerifyEnabled(env: TwilioEnv): boolean {
 
 const authHeader = (env: TwilioEnv): string =>
   'Basic ' + btoa(`${env.TWILIO_API_KEY?.trim()}:${env.TWILIO_API_KEY_SECRET?.trim()}`);
+
+/** A safe, actionable hint for a 401 based on the credential TYPE prefix (never the value). Twilio Basic
+ *  auth wants either an API Key SID (`SK…`)+secret OR the Account SID (`AC…`)+Auth Token. */
+function credHint(env: TwilioEnv): string {
+  const key = (env.TWILIO_API_KEY ?? '').trim();
+  const svc = (env.TWILIO_VERIFY_SERVICE_SID ?? '').trim();
+  if (!svc.startsWith('VA')) return `TWILIO_VERIFY_SERVICE_SID should start with "VA" (got "${svc.slice(0, 2)}…")`;
+  if (key.startsWith('SK')) return 'TWILIO_API_KEY (SK…) is an API key — recheck TWILIO_API_KEY_SECRET (Twilio shows it once; create a new key if lost)';
+  if (key.startsWith('AC')) return 'TWILIO_API_KEY is your Account SID (AC…) — then TWILIO_API_KEY_SECRET must be your Auth Token (not an API-key secret)';
+  return `TWILIO_API_KEY must start with "SK" (API key) or "AC" (Account SID) — got "${key.slice(0, 2)}…"`;
+}
 const verifyBase = (env: TwilioEnv): string =>
   `https://verify.twilio.com/v2/Services/${env.TWILIO_VERIFY_SERVICE_SID?.trim()}`;
 
@@ -37,10 +48,12 @@ export async function sendPhoneVerification(env: TwilioEnv, phoneE164: string): 
       body: new URLSearchParams({ To: phoneE164, Channel: 'sms' }).toString(),
     });
     if (!res.ok) {
-      // Surface Twilio's own message (e.g. "Authentication Error - invalid username") — a 401 means the
-      // API key SID (SK…) / secret is wrong, or the Account SID was used where an API key is expected.
-      const detail = (await res.json().catch(() => null)) as { message?: string; code?: number } | null;
-      return { ok: false, error: `twilio verify ${res.status}${detail?.message ? `: ${detail.message}` : ''}` };
+      // Surface Twilio's own message (JSON body) or raw text, PLUS a credential-format hint — a 401 almost
+      // always means TWILIO_API_KEY holds the Account SID (AC…) instead of an API Key SID (SK…), or the
+      // secret is wrong. We only echo the 2-char credential TYPE prefix, never the value.
+      const detail = await res.text().catch(() => '');
+      const twMsg = (() => { try { return (JSON.parse(detail) as { message?: string }).message; } catch { return detail.slice(0, 120); } })();
+      return { ok: false, error: `twilio verify ${res.status}${twMsg ? `: ${twMsg}` : ''}${res.status === 401 ? ` — ${credHint(env)}` : ''}` };
     }
     return { ok: true };
   } catch (e) {
