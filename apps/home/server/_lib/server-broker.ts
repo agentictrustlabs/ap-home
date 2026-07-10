@@ -83,6 +83,12 @@ export interface Env {
    *  the client onboarding grant AND the server body-store. */
   DELIVERY_SERVICE_SA?: string;
 
+  // ─── Email auth + invites (SendGrid) ───────────────────────────────
+  /** SendGrid API key — its presence flips the email sender from log-only to live. Secret. */
+  SENDGRID_API_KEY?: string;
+  /** Verified SendGrid sender address (e.g. no-reply@impact-agent.me) — required to actually send. */
+  EMAIL_FROM?: string;
+
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
    *  When unset, defaults to the production patterns (impact-agent.me + its subdomains

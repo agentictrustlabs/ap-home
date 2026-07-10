@@ -42,6 +42,9 @@ export function makeEnv(): Env {
     DEMO_EDGE_URL: t(process.env.DEMO_EDGE_URL) ?? DEMO_EDGE_ORIGIN_DEFAULT,
     A2A_VAULT_URL: t(process.env.A2A_VAULT_URL),
     DELIVERY_SERVICE_SA: t(process.env.DELIVERY_SERVICE_SA) ?? t(process.env.NEXT_PUBLIC_DELIVERY_SERVICE_SA),
+    // Email auth + invites (SendGrid). Unset ⇒ the sender logs instead of sending (deploy-safe).
+    SENDGRID_API_KEY: t(process.env.SENDGRID_API_KEY),
+    EMAIL_FROM: t(process.env.EMAIL_FROM),
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
