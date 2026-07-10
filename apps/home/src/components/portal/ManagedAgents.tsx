@@ -13,6 +13,7 @@ import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, 
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../home/onboarding';
+import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
@@ -177,6 +178,18 @@ export function CreateAgentForm({
         if (!bound.ok) throw new Error(bound.error);
         const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
         if (!grant.ok) throw new Error(grant.error);
+        // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
+        // "About this organization" card + roster read) and a default #general channel, so a fresh
+        // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
+        setStep('Setting up the organization…');
+        if (res.result.stewardshipDelegation) {
+          await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org:profile', { v: 1, displayName: res.result.name || clean }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
+        }
+        await fetch('/connect/channels', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'create', communityId: res.result.agent.toLowerCase(), title: 'general' }),
+        }).catch((e) => console.warn('[org-create] default channel failed:', e));
       } catch (e) {
         console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
       }

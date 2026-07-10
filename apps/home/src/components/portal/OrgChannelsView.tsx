@@ -145,7 +145,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
       if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
       // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
       // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
-      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token);
+      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, joinName.trim());
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

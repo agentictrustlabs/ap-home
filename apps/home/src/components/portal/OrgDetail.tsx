@@ -279,7 +279,7 @@ function MemberCard({ m, onRemove, removing }: { m: ReceivedDelegation; onRemove
   return (
     <div className="manage-card">
       <div className="manage-card-head">
-        <span className="manage-card-label">{m.orgName || 'member'}</span>
+        <span className="manage-card-label">{m.displayName || m.orgName || 'member'}</span>
         <span className="manage-card-badge live">Member</span>
         {onRemove && (
           <button type="button" className="btn-ghost" style={{ fontSize: '.72rem', padding: '.15rem .5rem', marginLeft: 'auto' }} disabled={removing} onClick={onRemove}>

@@ -61,7 +61,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
-      await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token);
+      await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token, null, name);
       window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
@@ -97,7 +97,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
-      await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation); // KMS-signed — no device prompt
+      await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
       await openSession(d.token, 'email', false);
       window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }

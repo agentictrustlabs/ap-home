@@ -27,6 +27,7 @@ import {
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { vaultWriteWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import type { DemoPasskey } from '../lib/passkey';
 import { readSsoCookie } from '../lib/sso-cookie';
@@ -228,6 +229,19 @@ export async function createOrganization(
     if (!bound.ok) throw new Error(bound.error);
     const grant = await activateInboxDeliveryIfNeeded(x.childAgent, via, auth);
     if (!grant.ok) throw new Error(grant.error);
+    // spec 321 items 1+3 — seed the org profile record + a default channel (same as the
+    // Organizations-page create), so relying-flow orgs are usable without steward follow-up.
+    if (x.stewardshipDelegation) {
+      await vaultWriteWithDelegation(x.stewardshipDelegation, 'org:profile', { v: 1, displayName: x.childName }).catch((e: unknown) => console.warn('[org-create] org profile seed failed:', e));
+    }
+    const bearer = storedSessionToken(auth);
+    if (bearer) {
+      await fetch('/connect/channels', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+        body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
+      }).catch((e) => console.warn('[org-create] default channel failed:', e));
+    }
   } catch (e) {
     console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
   }

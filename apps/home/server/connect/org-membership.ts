@@ -34,6 +34,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         delegation?: { delegator?: string; delegate?: string; signature?: string };
         /** spec 321 W2 — the steward's pre-signed org→member grant, delivered at redeem. */
         memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
+        /** spec 321 item-2 — the member's chosen display name (shown on the steward's roster). */
+        displayName?: string;
       }
     | null;
   const org = (body?.org ?? '').toLowerCase();
@@ -96,10 +98,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // 2. Org-side inbound-grant index (what the steward's Members panel reads). `orgAgent` is the
   //    DELEGATOR of the grant (historical field name) — here, the member.
+  const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 80) : '';
   const dKey = `delegated-idx:${org}`;
-  const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; delegation: unknown }>;
+  const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; displayName?: string; delegation: unknown }>;
   if (!dIdx.some((x) => x.orgAgent.toLowerCase() === person)) {
-    dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', delegation: d });
+    dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', ...(displayName ? { displayName } : {}), delegation: d });
     await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
   }
   return json({ ok: true, memberAccess: madValid });

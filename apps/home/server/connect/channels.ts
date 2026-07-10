@@ -158,7 +158,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const communityId = (body?.communityId ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
 
-  const authorName = await memberName(env, communityId, person);
+  let authorName = await memberName(env, communityId, person);
+  if (!authorName && body?.action === 'create') {
+    // Steward bypass, CREATE only (spec 321 item-3): a steward administers the board without having
+    // published a listing — the org-create ceremony seeds a default channel before any join. POSTING
+    // stays listing-gated: a message author must hold the visibility consent a listing is.
+    const linkRaw = await env.AUTH_CODES.get(`related:${person}:${communityId}`);
+    const link = linkRaw ? (JSON.parse(linkRaw) as { relationship?: string }) : null;
+    if (link && link.relationship !== 'member') authorName = 'Steward';
+  }
   if (!authorName) {
     return jsonCors({ error: 'join this community first — publish a directory listing to enter its channels' }, request, 403);
   }

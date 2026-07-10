@@ -1131,6 +1131,9 @@ export interface CreateManagedAgentResult {
   name: string;
   kind: AgentKind;
   parent: Address;
+  /** The child→parent oversight grant (spec 246) — returned so create-time seeding (org:profile,
+   *  spec 321 item-1) can write the child's vault without re-fetching the link. */
+  stewardshipDelegation?: DelegationWire;
 }
 
 /** Deploy + claim the EXACT name (MAM-D4) + pre-approve the parent stewardship grant — ALL in
@@ -1278,7 +1281,7 @@ export async function createManagedAgent(
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, signHash, sessionToken);
   }
-  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
+  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent, stewardshipDelegation: toWire(stewardship.delegation) } };
 }
 
 /** spec 275 — claim an EXACT name for an already-deployed NAMELESS managed agent (name-later).
@@ -1400,7 +1403,7 @@ async function createManagedAgentSocial(
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, googleSignHash(input.person, sessionToken), sessionToken);
   }
-  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent } };
+  return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent, stewardshipDelegation: b.stewardshipDelegation } };
 }
 
 /** SOCIAL name-later (Google / YouVersion): the worker's C_sub signs register+setPrimary AS the agent. */
@@ -2137,6 +2140,8 @@ export interface ReceivedDelegation {
   viaOrgName: string;
   orgAgent: Address;
   orgName: string;
+  /** spec 321 item-2 — the display name the member chose at join (roster label). */
+  displayName?: string;
   /** The grantor→viaOrg delegation (delegator = the member org), so the governing person
    *  can read that member's vault over it (spec 247). */
   delegation?: DelegationWire;
