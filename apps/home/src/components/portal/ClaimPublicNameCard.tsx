@@ -21,7 +21,8 @@
 // fresh-Google member arrives nameless and hits the claim branch. Dismissible either way.
 import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { claimName } from '../../connect-client';
+import { claimName, fetchProfile } from '../../connect-client';
+import { notifyAgentsChanged } from './ManagedAgents';
 import { signHashFor } from '../../home/onboarding';
 import type { Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
@@ -99,7 +100,17 @@ export function ClaimPublicNameCard() {
       }
       setClaimedName(res.name);
       setPhase('done');
-      void refreshProfile();
+      // The reverse-resolve can lag the RPC read replica — poll until the name is visible, then
+      // commit + nudge every agents dropdown (same fix as the naming page's claim card).
+      void (async () => {
+        for (let i = 0; i < 10; i++) {
+          const p = await fetchProfile(session.token).catch(() => null);
+          if (p?.name) break;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        await refreshProfile();
+        notifyAgentsChanged();
+      })();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'could not claim that name');
       setPhase('error');

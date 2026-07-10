@@ -10,7 +10,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
-import { setConnectionInfo, resolveCredential, claimName } from '../../../src/connect-client';
+import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
+import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
 import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../src/lib/name-properties';
 import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding';
 import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
@@ -86,10 +87,47 @@ export default function NamingPage() {
             // an OPT-IN, owner-authorized, NEVER-automatic action. Claiming a name does NOT prompt it —
             // the freshly-named agent simply appears below with an OPTIONAL "Publish connection" button
             // the member can use later by choice.
-            void refreshProfile();
-            void load();
+            //
+            // The claim is MINED, but the server's reverse-resolve can lag the RPC read replica — a
+            // single immediate refresh raced it and lost (header stayed "Your portal" until a manual
+            // reload). Poll until the name resolves (bounded), then commit the profile + nudge every
+            // agents dropdown (topbar switcher included).
+            void (async () => {
+              for (let i = 0; i < 10; i++) {
+                const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null;
+                if (p?.name) break;
+                await new Promise((r) => setTimeout(r, 1500));
+              }
+              await refreshProfile();
+              await load();
+              notifyAgentsChanged();
+            })();
           }}
         />
+      )}
+
+      {/* Named state — say it loudly (the silent list read as "did the claim work?"). One card, with
+          direct paths to BOTH public-metadata surfaces: name properties (node-keyed records on the
+          naming service, spec 314) and the agent profile (SA-keyed, /profile). */}
+      {!isNameless && agentName && (
+        <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-sage-500, #059669)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.6rem', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '.7rem', letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--color-text-faint)' }}>✓ Your public name</div>
+              <strong style={{ fontSize: '1.05rem' }}>{agentName}</strong>
+              <div style={{ ...mono, fontSize: '.76rem', ...mutedText, marginTop: '.15rem' }}>
+                {nameLabel(agentName)}.{CONNECT_DOMAIN}{agentAddress ? ` · ${shortAddr(agentAddress)}` : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {(() => {
+                const own = rows?.find((r) => r.subjectAgent.toLowerCase() === (agentAddress ?? '').toLowerCase());
+                return own ? <button style={btnSty} onClick={() => setPropsFor(own)}>Name properties</button> : null;
+              })()}
+              <a href="/profile" style={{ fontSize: '.82rem' }}>Public profile →</a>
+            </div>
+          </div>
+        </div>
       )}
 
       <div style={{ ...infoBannerSty, marginBottom: '1.1rem', fontSize: '.82rem' }}>
@@ -332,6 +370,7 @@ function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Vi
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [claimed, setClaimed] = useState<string | null>(null);
   const label = nameLabel(value);
 
   const claim = async () => {
@@ -340,11 +379,28 @@ function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Vi
     try {
       const signHash = await signHashFor(via, agent, token ? { token } : undefined);
       const res = await claimName(agent, signHash, label, (s) => setStep(s));
-      if (res.ok) onNamed(res.name);
+      if (res.ok) { setClaimed(res.name); onNamed(res.name); }
       else setErr(res.error);
     } catch (e) { setErr(String((e as Error)?.message ?? e)); }
     finally { setBusy(false); }
   };
+
+  // Explicit success state: the claim is mined — say so IMMEDIATELY and loudly, even while the
+  // profile/header catch up to the chain read (the silent lag read as "nothing happened").
+  if (claimed) {
+    return (
+      <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-sage-500, #059669)' }}>
+        <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>✓ Name claimed</h3>
+        <p style={{ fontSize: '.9rem', margin: 0 }}>
+          You are now <strong style={mono as React.CSSProperties}>{claimed}</strong> — your home lives at{' '}
+          <strong style={mono as React.CSSProperties}>{nameLabel(claimed)}.{CONNECT_DOMAIN}</strong>.
+        </p>
+        <p style={{ fontSize: '.78rem', color: 'var(--color-text-faint)', marginTop: '.5rem' }}>
+          Updating the header and workspace menus… (a few seconds while the network read catches up)
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-amber-400)' }}>

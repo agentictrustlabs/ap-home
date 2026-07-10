@@ -30,11 +30,22 @@ const KIND_LABEL: Record<AgentKind, string> = {
   'org-treasury': 'Org treasury',
 };
 
+/** Cross-component refresh signal: EVERY `useManagedAgents` instance (topbar switcher, org lists,
+ *  workspace pages) reloads when this fires — dispatch after any mutation that changes an agent's
+ *  identity surface (naming, creating), so dropdowns update without a page refresh. */
+export const AGENTS_CHANGED_EVENT = 'ap:agents-changed';
+export const notifyAgentsChanged = (): void => { window.dispatchEvent(new Event(AGENTS_CHANGED_EVENT)); };
+
 /** Shared loader for the member's managed agents — one read path (MAM-D7). */
 export function useManagedAgents(token: string | null) {
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const bump = (): void => setReloadKey((k) => k + 1);
+    window.addEventListener(AGENTS_CHANGED_EVENT, bump);
+    return () => window.removeEventListener(AGENTS_CHANGED_EVENT, bump);
+  }, []);
   useEffect(() => {
     if (!token) { setLoaded(true); return; }
     let cancelled = false;
@@ -155,6 +166,7 @@ export function CreateAgentForm({
     // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
     void emitControlEvent(token, 'agent-added', []);
     setOpen(false); setLabel('');
+    notifyAgentsChanged(); // every dropdown/list instance (topbar switcher included) re-reads immediately
     onDone();
   }
 
@@ -217,6 +229,7 @@ export function NameAgentForm({
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
     setOpen(false); setLabel('');
+    notifyAgentsChanged(); // every dropdown/list instance (topbar switcher included) re-reads immediately
     onDone();
   }
 
