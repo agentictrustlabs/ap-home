@@ -241,6 +241,39 @@ export async function issueInboxDeliveryDelegation(
   return d;
 }
 
+/** The vault record holding a member's SHAREABLE profile card — what an org they joined may read
+ *  (spec 321): display info the member chose to share, never the whole vault. */
+export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
+
+/**
+ * spec 321 W1 — the membership delegation `member → org`, signed by the member's connection
+ * custodian at invite ACCEPT (spec 246's deferred person→org leg). Read-only over the member's
+ * shareable profile record (`vault:member.profile`) — the org can render its member roster from
+ * each member's own vault (spec 247: it holds a delegation, never a copy) and NOTHING else.
+ * Time-boxed, value 0, on-chain revocable.
+ */
+export async function issueMembershipDelegation(
+  member: Address,
+  orgSA: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [MEMBER_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: member, delegate: orgSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the member's connection custodian consents to org membership
+  return d;
+}
+
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────
 
 /** DelegationManager sentinel: delegate = 0xa11 ⇒ ANY redeemer may redeem (the PaymentEnforcer still

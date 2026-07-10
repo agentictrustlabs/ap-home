@@ -1,0 +1,85 @@
+// POST /connect/org-membership { org, delegation }  (Bearer person session) — spec 321 W1.
+//
+// Record the membership delegation (member → org) the invitee signed at invite accept:
+//   1. merge it into the member's private related link (`related:<person>:<org>` — ADR-0025, the
+//      person's own vault credential; created member-shaped if the listing projection hasn't run yet);
+//   2. append it to the org's inbound-grant index (`delegated-idx:<org>`) so the steward's Members
+//      panel shows a DELEGATING member whose record can be read over the grant (spec 247).
+//
+// Gates, fail-closed: the session must BE the delegator (the member consents for themselves only),
+// and the delegation's delegate must BE the org — a grant for anyone else is rejected, never fixed up.
+import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import type { Address } from '@agenticprimitives/types';
+import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+
+const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
+const json = (b: unknown, s = 200): Response =>
+  new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json', ...cors } });
+
+export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
+
+const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
+
+export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  const auth = request.headers.get('authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return json({ error: 'session required' }, 401);
+
+  const body = (await request.json().catch(() => null)) as
+    | { org?: string; delegation?: { delegator?: string; delegate?: string; signature?: string } }
+    | null;
+  const org = (body?.org ?? '').toLowerCase();
+  const d = body?.delegation;
+  if (!isAddress(org) || !d?.delegator || !d?.delegate || !d?.signature) {
+    return json({ error: 'org (SA) + signed delegation required' }, 400);
+  }
+
+  const { jwks } = await getServer(env);
+  const keys = await importJwks(jwks);
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  if (!v.ok) return json({ error: 'invalid session' }, 401);
+  const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  if (!person) return json({ error: 'no person address in token sub' }, 401);
+
+  // The member consents for THEMSELVES, to THIS org — anything else is rejected (fail-closed).
+  if (d.delegator.toLowerCase() !== person) return json({ error: 'delegation delegator must be your person agent' }, 403);
+  if (d.delegate.toLowerCase() !== org) return json({ error: 'delegation delegate must be the org' }, 403);
+
+  // 1. Member-side link: merge into the existing related link (steward links keep their relationship);
+  //    create a member-shaped one when the listing projection hasn't landed yet.
+  const linkKey = `related:${person}:${org}`;
+  const existing = await env.AUTH_CODES.get(linkKey);
+  const memberLabel = await new AgentNamingClient({
+    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+  }).reverseResolve(person as Address).catch(() => null);
+  if (existing) {
+    const link = JSON.parse(existing) as Record<string, unknown>;
+    await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, membershipDelegation: d }));
+  } else {
+    const orgName = await new AgentNamingClient({
+      rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+      registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+    }).reverseResolve(org as Address).catch(() => null);
+    await env.AUTH_CODES.put(linkKey, JSON.stringify({
+      orgAgent: org, orgName: orgName ?? org, purpose: 'org membership', requestedBy: 'home-invite',
+      siteDelegation: null, membershipDelegation: d, proofHash: null, createdAt: Date.now(),
+      kind: 'org', parent: person, relationship: 'member',
+    }));
+    const idxKey = `related-idx:${person}`;
+    const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
+    if (!idx.some((a) => a.toLowerCase() === org)) await env.AUTH_CODES.put(idxKey, JSON.stringify([...idx, org]));
+  }
+
+  // 2. Org-side inbound-grant index (what the steward's Members panel reads). `orgAgent` is the
+  //    DELEGATOR of the grant (historical field name) — here, the member.
+  const dKey = `delegated-idx:${org}`;
+  const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; delegation: unknown }>;
+  if (!dIdx.some((x) => x.orgAgent.toLowerCase() === person)) {
+    dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', delegation: d });
+    await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
+  }
+  return json({ ok: true });
+};

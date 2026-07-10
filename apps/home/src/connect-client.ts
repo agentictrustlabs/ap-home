@@ -621,6 +621,32 @@ export async function resolveGoogleCustodian(sessionToken: string): Promise<Addr
   return res.ok && b.ok && b.custodian ? b.custodian : null;
 }
 
+// ─── spec 321 W0 — connection-custodian cache (credential mirror for child agents) ────────────────
+// A KMS/social home's C_sub is only derivable while a CUSTODY session is live (demo-a2a gates the
+// derive on it), but the credential-mirror at org create must also work from a passkey session on the
+// same home (the org would otherwise be passkey-only and unstewaradable from phone/email sessions —
+// the 2026-07-10 sender_mismatch). So each custody session caches its C_sub per person (a PUBLIC
+// on-chain address — same locality as loadPasskey), and org create reads the cache.
+const CSUB_KEY = (person: Address): string => `ap-csub:${person.toLowerCase()}`;
+
+/** Best-effort: derive + cache the session's KMS custodian (no-op for wallet/passkey sessions). */
+export async function cacheConnectionCustodian(person: Address, via: string, token: string): Promise<void> {
+  const v = (via ?? '').toLowerCase();
+  if (!['google', 'youversion', 'email', 'phone'].includes(v)) return;
+  try {
+    const cSub = await resolveGoogleCustodian(token);
+    if (cSub) localStorage.setItem(CSUB_KEY(person), cSub);
+  } catch { /* cache is an optimization — the KMS org path still custodies by C_sub directly */ }
+}
+
+/** The cached KMS custodian for this person on this browser, if a custody session ever ran here. */
+export function cachedConnectionCustodian(person: Address): Address | null {
+  try {
+    const v = localStorage.getItem(CSUB_KEY(person));
+    return v && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v as Address) : null;
+  } catch { return null; }
+}
+
 /** Full resolution incl. social: passkey/wallet locally, Google/YouVersion via C_sub (needs the session
  *  token). Returns null when the viewer credential can't be determined (then the chain still gates). */
 export async function resolveCredential(via: string | undefined, name: string | null, token?: string | null): Promise<ConnectedCredential | null> {
@@ -984,8 +1010,20 @@ export async function createChildAgentForSite(
   const stewardship = buildApprovedSiteDelegation(childAgent, personAgent);
   approveCalls.push(buildApproveHashCall(stewardship.digest));
 
-  // deploy + claim name + approve every org grant — all in ONE atomic userOp.
-  const deployCallData = buildExecuteBatchCallData([...claim.calls, ...approveCalls]);
+  // spec 321 W0 — credential mirror: the contract FORBIDS an SA as custodian (custody is
+  // credential-shaped; agent→agent authority is delegation), so "the person stewards the org" must
+  // hold at the CREDENTIAL level. The KMS org path already deploys C_sub-custodied orgs; this path
+  // deploys passkey/EOA-custodied ones — ALSO install the person's cached KMS custodian (when their
+  // home has one) so every session credential that controls the person can steward the org
+  // (custodian-backs-all-authority). Batched into the same deploy userOp: `addCustodian` is
+  // onlySelf and the fresh org has no custody module yet, so the self-call is ungated.
+  const mirrorCSub = cachedConnectionCustodian(personAgent);
+  const mirrorCalls: ContractCall[] = mirrorCSub
+    ? [{ to: childAgent, value: 0n, data: encodeFunctionData({ abi: ADD_CUSTODIAN_ABI, functionName: 'addCustodian', args: [mirrorCSub] }) }]
+    : [];
+
+  // deploy + claim name + approve every org grant (+ credential mirror) — all in ONE atomic userOp.
+  const deployCallData = buildExecuteBatchCallData([...claim.calls, ...approveCalls, ...mirrorCalls]);
 
   onStep?.('Deploying your organization — name + all access grants…');
   // deploy + claim + approve all grants — ONE signature, on the member's resolved credential rail (the

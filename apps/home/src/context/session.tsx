@@ -5,7 +5,7 @@
 // every portal route shares one session via useSession().
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { AUD, fetchProfile, type BasicProfile } from '../connect-client';
+import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '../connect-client';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
@@ -110,6 +110,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const p = await fetchProfile(token);
     setProfile(p);
     setPhase('authed');
+    // spec 321 W0 — a KMS/social custody session caches its C_sub (public on-chain address) so a
+    // LATER passkey-session org create on this browser can mirror it onto the org. Fire-and-forget.
+    if (p?.agent) {
+      const addr = p.agent.split(':').pop() as Address;
+      void cacheConnectionCustodian(addr, via, token);
+    }
     return p;
   }, []);
 
@@ -277,6 +283,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // is invisible to FedCM and it shows the sign-in screen instead of the account chooser.
         setSsoCookie(token, via);
         setFedcmLoginStatus('logged-in');
+        // spec 321 W0 — restored custody sessions also cache their C_sub (see openSession).
+        if (p.agent) void cacheConnectionCustodian(p.agent.split(':').pop() as Address, via, token);
         if (fromCookie) {
           try {
             localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via })); // cache on this origin
