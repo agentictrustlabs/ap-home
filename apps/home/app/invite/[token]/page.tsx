@@ -7,25 +7,18 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
-import { connectWallet, personalSign } from '../../../src/lib/wallet';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/connect-client';
 import { issueDirectoryListing } from '../../../src/home/directory';
 import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
-import { secureHomeNoName, activateVault } from '../../../src/home/onboarding';
+import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') { const addr = await connectWallet(); return (h) => personalSign(addr, h); }
-  // KMS-custodied homes (Google / YouVersion / email-bootstrap) sign server-side via the session token.
-  if (v === 'google' || v === 'youversion' || v === 'email') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
+const asMsg = (x: unknown, fallback: string): string =>
+  typeof x === 'string' && x ? x : x instanceof Error ? x.message : fallback;
 
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const router = useRouter();
-  const { session, agentAddress, agentName, openSession } = useSession();
+  const { session, profile, agentAddress, agentName, openSession } = useSession();
   const [invite, setInvite] = useState<{ org: string; orgName: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +36,10 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     if (!session || !agentAddress || !invite) return;
     setBusy(true); setErr(null);
     try {
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      // Route by the home's ACTUAL on-chain credential, not the cookie `via` — a Google/KMS home has no
+      // wallet/passkey, and the naive cookie via would wrongly pop MetaMask (or a passkey prompt).
+      const via = resolveVia(profile?.credential, session.via);
+      const sign = await signHashFor(via, agentAddress as Address, { token: session.token });
       const name = displayName.trim() || (agentName ? agentName.split('.')[0]! : 'Member');
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId: invite.org.toLowerCase(),
@@ -53,10 +49,10 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
         body: JSON.stringify({ action: 'publish', listing }),
       });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
+      if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
       router.push(orgHref(invite.org, 'channels'));
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
   // Magic-link accept (anonymous invitee, no prior home): clicking the emailed link proves inbox
@@ -71,13 +67,14 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token }),
       });
-      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: string };
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown };
       if (r.ok && d.status === 'needs-otp') { setOtpFallback(true); return; }
-      if (!r.ok || !d.ok || !d.token) throw new Error(d.error ?? 'could not accept the invitation');
+      if (!r.ok || !d.ok || !d.token) throw new Error(asMsg(d.error, 'could not accept the invitation'));
       const res = await secureHomeNoName({ token: d.token });
       if (!res.ok) throw new Error(res.error);
       void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
-      const sign = googleSignHash(res.home.address, d.token); // KMS-custodied home signs server-side
+      // Fresh email-bootstrapped home → KMS via; signs server-side with the session token (no device prompt).
+      const sign = await signHashFor('email', res.home.address, { token: d.token });
       const name = displayName.trim() || 'Member';
       const listing = await issueDirectoryListing(res.home.address, sign, {
         communityId: invite.org.toLowerCase(),
@@ -87,11 +84,11 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${d.token}` },
         body: JSON.stringify({ action: 'publish', listing }),
       });
-      const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!pub.ok || !pj.ok) throw new Error(pj.error ?? `join failed (${pub.status})`);
+      const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
+      if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await openSession(d.token, 'email', false);
       router.push(orgHref(invite.org, 'channels'));
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
   return (
