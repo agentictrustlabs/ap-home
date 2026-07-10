@@ -5,18 +5,28 @@ import { useSession } from '../../src/context/session';
 import { whitelabel } from '../../src/whitelabel/config';
 import { stewardedThings } from '../../src/home/stewardship';
 import { AddressChip } from '../../src/components/shared/AddressChip';
-import { LockIcon } from '../../src/components/shared/Icons';
+import { LockIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, ExternalLinkIcon, ShieldIcon, CheckIcon } from '../../src/components/shared/Icons';
+import { Avatar } from '../../src/components/portal/chat/Avatar';
+import { personAvatarKey } from '../../src/lib/avatar-store';
+import { useAvatar } from '../../src/components/portal/chat/use-avatar';
 
-// Which dedicated page each stewarded area links to (live areas only; spec 275).
+// Which dedicated page each stewarded area links to (live areas only; spec 275), plus the icon
+// that gives the manage-card its identity at a glance (Discord/Telegram-style iconography).
 const STEWARD_HREF: Record<string, string | undefined> = {
   organization: '/organizations',
   treasury: '/treasuries',
   'data-source': '/data-sources',
 };
+const STEWARD_ICON: Record<string, typeof BuildingIcon> = {
+  organization: BuildingIcon,
+  treasury: LandmarkIcon,
+  'data-source': DatabaseIcon,
+};
 
 export default function HomeDashboard() {
   const { agentName, agentAddress, session } = useSession();
   const things = stewardedThings();
+  const avatarUrl = useAvatar(agentAddress ? personAvatarKey(agentAddress) : null);
 
   return (
     <div className="dashboard">
@@ -30,9 +40,16 @@ export default function HomeDashboard() {
       <section className="dash-section">
         <h2>You</h2>
         <div className="agent-identity-card hero">
-          <div className="agent-identity-name">{agentName ?? 'Your home'}</div>
+          <div className="agent-identity-card-top">
+            <Avatar name={agentName ?? 'You'} imageUrl={avatarUrl} size={52} />
+            <div>
+              <div className="agent-identity-name">{agentName ?? 'Your home'}</div>
+              <div className="agent-identity-sub" style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>
+                {whitelabel.copy.portalYouLabel} · Secured <CheckIcon size={13} style={{ color: 'var(--color-sage-600, #16a34a)' }} />
+              </div>
+            </div>
+          </div>
           {agentAddress && <AddressChip address={agentAddress} />}
-          <div className="agent-identity-sub">{whitelabel.copy.portalYouLabel} · Secured ✓</div>
           <a className="btn-ghost" href="/you">View your home →</a>
         </div>
       </section>
@@ -44,12 +61,14 @@ export default function HomeDashboard() {
         <div className="manage-grid">
           {things.map((t) => {
             const href = STEWARD_HREF[t.kind];
+            const Icon = STEWARD_ICON[t.kind] ?? BuildingIcon;
             const body = (
               <>
                 <div className="manage-card-head">
+                  <span className="manage-card-icon"><Icon size={17} /></span>
                   <span className="manage-card-label">{t.label}</span>
                   <span className={`manage-card-badge ${t.status}`}>
-                    {t.status === 'live' ? '✓ Live' : <><LockIcon size={12} /> Coming soon</>}
+                    {t.status === 'live' ? <><CheckIcon size={11} /> Live</> : <><LockIcon size={11} /> Coming soon</>}
                   </span>
                 </div>
                 <p className="manage-card-blurb">{t.blurb}</p>
@@ -70,13 +89,19 @@ export default function HomeDashboard() {
         <div className="manage-grid">
           {whitelabel.services.connectedApps && (
             <a className="manage-card link" href="/apps">
-              <div className="manage-card-label">Connected apps</div>
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><ExternalLinkIcon size={17} /></span>
+                <span className="manage-card-label">Connected apps</span>
+              </div>
               <p className="manage-card-blurb">Apps you&apos;ve given permission — see what each can do, revoke anytime.</p>
             </a>
           )}
           {whitelabel.services.devices && (
             <a className="manage-card link" href="/security">
-              <div className="manage-card-label">Security</div>
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><ShieldIcon size={17} /></span>
+                <span className="manage-card-label">Security</span>
+              </div>
               <p className="manage-card-blurb">How you keep your home secure — your sign-in and linked devices.</p>
             </a>
           )}

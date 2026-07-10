@@ -130,7 +130,8 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
           {orgs.map((o) => (
             <div className="manage-card" key={o.orgAgent}>
               <div className="manage-card-head">
-                <span className="manage-card-label"><BuildingIcon size={16} /> {o.orgName || '(unnamed org)'}</span>
+                <span className="manage-card-icon"><BuildingIcon size={17} /></span>
+                <span className="manage-card-label">{o.orgName || '(unnamed org)'}</span>
                 <span className="manage-card-badge live">{purposeLabel(o.purpose)}</span>
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={o.orgAgent} size="sm" /></div>

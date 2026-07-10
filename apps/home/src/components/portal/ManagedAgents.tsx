@@ -260,7 +260,8 @@ export function TreasuryCard({
   return (
     <div className="manage-card">
       <div className="manage-card-head">
-        <span className="manage-card-label"><LandmarkIcon size={16} /> {name || 'Unnamed treasury'}</span>
+        <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
+        <span className="manage-card-label">{name || 'Unnamed treasury'}</span>
         <span className="manage-card-badge live">{sublabel ?? KIND_LABEL['person-treasury']}</span>
       </div>
       <div style={{ margin: '.45rem 0' }}><AddressChip address={address as `0x${string}`} size="sm" /></div>
@@ -312,7 +313,8 @@ export function PersonalTreasurySection({ token, person, via }: { token: string 
         <div className="manage-grid">
           <div className="manage-card">
             <div className="manage-card-head">
-              <span className="manage-card-label"><LandmarkIcon size={16} /> Personal treasury</span>
+              <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
+              <span className="manage-card-label">Personal treasury</span>
               <span className="manage-card-badge">Not yet</span>
             </div>
             <p className="manage-card-blurb">Create your money agent — it can hold funds and pay on your behalf, while your identity stays separate.</p>
@@ -344,7 +346,8 @@ export function OrganizationsManager({
             return (
               <div className="manage-card" key={org.agent}>
                 <div className="manage-card-head">
-                  <span className="manage-card-label"><BuildingIcon size={16} /> {org.name || 'Unnamed organization'}</span>
+                  <span className="manage-card-icon"><BuildingIcon size={17} /></span>
+                  <span className="manage-card-label">{org.name || 'Unnamed organization'}</span>
                   <span className="manage-card-badge live">{KIND_LABEL.org}</span>
                 </div>
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
@@ -373,7 +376,8 @@ export function OrganizationsManager({
           {/* New organization */}
           <div className="manage-card">
             <div className="manage-card-head">
-              <span className="manage-card-label"><BuildingIcon size={16} /> New organization</span>
+              <span className="manage-card-icon"><BuildingIcon size={17} /></span>
+              <span className="manage-card-label">New organization</span>
               <span className="manage-card-badge">＋</span>
             </div>
             <p className="manage-card-blurb">An organization you control — its own Smart Agent and name. Add its treasury after.</p>
@@ -399,7 +403,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
         <p className="manage-card-blurb">Loading…</p>
       ) : (
         <>
-          <h2 style={{ fontSize: '1rem' }}>Personal</h2>
+          <h3 className="subhead">Personal</h3>
           <div className="manage-grid">
             {personal ? (
               <TreasuryCard name={personal.name} address={personal.agent}
@@ -408,7 +412,8 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
             ) : (
               <div className="manage-card">
                 <div className="manage-card-head">
-                  <span className="manage-card-label"><LandmarkIcon size={16} /> Personal treasury</span>
+                  <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
+                  <span className="manage-card-label">Personal treasury</span>
                   <span className="manage-card-badge">Not yet</span>
                 </div>
                 <p className="manage-card-blurb">Your own money agent — holds funds and pays on your behalf.</p>
@@ -417,7 +422,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
             )}
           </div>
 
-          <h2 style={{ fontSize: '1rem', marginTop: '1.5rem' }}>Organization treasuries</h2>
+          <h3 className="subhead" style={{ marginTop: '1.5rem' }}>Organization treasuries</h3>
           {orgTreasuries.length === 0 ? (
             <p className="manage-card-blurb">No org treasuries yet — create one from an organization in <a href="/organizations">Organizations</a>.</p>
           ) : (
