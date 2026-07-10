@@ -100,7 +100,7 @@ export function buildNav(
 
   const top: NavItem[] = [];
   if (person) {
-    top.push({ id: 'you', label: 'You', href: '/you', Icon: UserIcon, status: person.status });
+    top.push({ id: 'you', label: 'My Profile', href: '/you', Icon: UserIcon, status: person.status });
   }
 
   const yourAgents: NavItem[] = others.map((a) => ({

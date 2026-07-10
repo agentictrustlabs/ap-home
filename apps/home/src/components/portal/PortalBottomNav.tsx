@@ -19,6 +19,7 @@ export function PortalBottomNav({ groups, tabs }: { groups: NavGroup[]; tabs: Na
             <a key={item.id} href={item.href} className={`bottomnav-tab${active ? ' active' : ''}`} aria-current={active ? 'page' : undefined}>
               <item.Icon size={22} />
               <span>{item.label}</span>
+              {item.badge ? <span className="bottomnav-badge" aria-label={`${item.badge} unread`}>{item.badge}</span> : null}
             </a>
           );
         })}
@@ -47,6 +48,7 @@ export function PortalBottomNav({ groups, tabs }: { groups: NavGroup[]; tabs: Na
                 >
                   <item.Icon size={18} />
                   <span className="nav-item-label">{item.label}</span>
+                  {item.badge ? <span className="nav-item-badge" aria-label={`${item.badge} new`}>{item.badge}</span> : null}
                   {item.status === 'soon' && <span className="nav-item-soon">soon</span>}
                 </a>
               ))}

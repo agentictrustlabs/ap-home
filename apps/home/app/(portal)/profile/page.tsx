@@ -1,29 +1,15 @@
 'use client';
-// Profile editor at the member's Impact home. Two modes:
-//
-//   • Self-edit (no query params): browse from /you → "Edit profile". Standard CRUD.
-//
-//   • Relying-app handoff (`?app=&return=&state=&required=`): a community app (e.g.
-//     JP Adopt) detected missing fields it requires and sent the member here. The page
-//     pre-highlights the requested fields, shows a "JP Adopt is asking for these" banner,
-//     and on save redirects back with the profile fields as query params on `return`.
-//
-// Profile lives in the member's PER-PERSON ENCRYPTED vault at demo-mcp (spec 278 — the
-// `vault:impact-profile` record, sealed under the member's own GCP KMS KEK), read/written over
-// the same-origin `/mcp-bind` proxy. Community-wide, re-used across every relying app. No copy is
-// held at the home. Until the member activates their vault key (the /vault-key ceremony), the
-// vault is fail-closed and this page prompts them to do so. The "fields back via URL on return"
-// is a demo limitation; production uses a delegated server-to-server read.
-
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+// Profile editor — relying-app handoff (?app=&return=&state=&required=) or redirect to /you settings.
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession } from '../../../src/context/session';
-import {
-  loadImpactProfile, saveImpactProfile, PROFILE_FIELDS, VaultKeyUnauthorizedError,
-  type ImpactStoredProfile, type ImpactContactProfile, type ImpactProfileFieldKey,
-} from '../../../src/profile-store';
 import { relyingAllowed } from '../../../src/components/onboarding/useEnrollReq';
 import { whitelabel } from '../../../src/whitelabel/config';
-import { SectionShell } from '../../../src/components/portal/SectionShell';
+import type { ImpactProfileFieldKey, ImpactContactProfile } from '../../../src/profile-store';
+import { PROFILE_FIELDS } from '../../../src/profile-store';
+import { PersonalInfoPanel } from '../../../src/components/portal/settings/PersonalInfoPanel';
+import { SettingsLayout } from '../../../src/components/portal/settings/SettingsLayout';
+import { ProfileHeader } from '../../../src/components/portal/settings/ProfileHeader';
 import { UserIcon } from '../../../src/components/shared/Icons';
 
 interface RelyingRequest {
@@ -42,14 +28,10 @@ function parseRelyingRequest(): RelyingRequest | null {
   const state = u.searchParams.get('state');
   const required = u.searchParams.get('required');
   if (!app || !returnUrl || !state) return null;
-  // SECURITY: only allowlisted relying-app origins may receive a redirect back. The
-  // shared ALLOWED_RELYING_ORIGINS gate (audit F3) applies — same allowlist as the
-  // OIDC sign-in flow uses. A second exact-match against the app's registered
-  // redirect_uris is enforced below.
   if (!relyingAllowed(returnUrl)) return null;
   const appConfig = whitelabel.relyingApps.find((a) => a.client_id === app);
   if (!appConfig) return null;
-  if (!appConfig.redirect_uris.some((u) => sameOrigin(u, returnUrl))) return null;
+  if (!appConfig.redirect_uris.some((uri) => sameOrigin(uri, returnUrl))) return null;
   const requestedKeys = (required?.split(',') ?? [])
     .map((s) => s.trim())
     .filter((k): k is ImpactProfileFieldKey =>
@@ -67,251 +49,79 @@ function sameOrigin(a: string, b: string): boolean {
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
   const { agentAddress, agentName } = useSession();
   const [request, setRequest] = useState<RelyingRequest | null>(null);
-  const [stored, setStored] = useState<ImpactStoredProfile | null>(null);
-  const [contact, setContact] = useState<ImpactContactProfile>({});
-  const [savedNotice, setSavedNotice] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [needsVaultKey, setNeedsVaultKey] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Parse the relying-app handoff (if any) + load existing profile once we have the address.
-  useEffect(() => {
-    setRequest(parseRelyingRequest());
-  }, []);
 
   useEffect(() => {
-    if (!agentAddress) return;
-    let cancelled = false;
-    setLoading(true);
-    setNeedsVaultKey(false);
-    setLoadError(null);
-    loadImpactProfile(agentAddress)
-      .then((p) => {
-        if (cancelled) return;
-        setStored(p);
-        setContact(p.contact ?? {});
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof VaultKeyUnauthorizedError) setNeedsVaultKey(true);
-        else setLoadError('Could not load your profile from your encrypted vault. Try again.');
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [agentAddress]);
-
-  const requiredKeys = useMemo<Set<ImpactProfileFieldKey>>(() => new Set(request?.required ?? []), [request]);
-  const missingRequired = useMemo<ImpactProfileFieldKey[]>(
-    () => (request?.required ?? []).filter((k) => !(contact[k] ?? '').trim()),
-    [request, contact],
-  );
-
-  function handleChange(key: ImpactProfileFieldKey, v: string): void {
-    setContact((c) => ({ ...c, [key]: v }));
-    setSavedNotice(null);
-  }
-
-  async function handleSubmit(e: FormEvent): Promise<void> {
-    e.preventDefault();
-    if (!agentAddress) return;
-    if (missingRequired.length > 0) return;
-    setSubmitting(true);
-    setSavedNotice(null);
-    try {
-      // Preserve any attestations already on the stored profile (e.g. WEA) — only contact changes here.
-      const next: ImpactStoredProfile = { v: 1, contact, attestations: stored?.attestations };
-      try {
-        await saveImpactProfile(agentAddress, next);
-        setStored(next);
-      } catch (err) {
-        if (err instanceof VaultKeyUnauthorizedError) { setNeedsVaultKey(true); return; }
-        setSavedNotice(null);
-        setLoadError('Could not save to your encrypted vault. Try again.');
-        return;
-      }
-      if (request) {
-        // Hand the saved fields back to the relying app via query params on the registered
-        // redirect URI. Demo limitation — production uses a delegated read API (no PII in URLs).
-        const ret = new URL(request.returnUrl);
-        ret.searchParams.set('profile_state', request.state);
-        for (const k of request.required) {
-          const v = contact[k];
-          if (v && v.trim()) ret.searchParams.set(`profile_${k}`, v.trim());
-        }
-        window.location.href = ret.toString();
-        return;
-      }
-      setSavedNotice('Saved to your home');
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    const req = parseRelyingRequest();
+    if (req) setRequest(req);
+    else router.replace('/you?tab=personal');
+  }, [router]);
 
   const personLabel = agentName ?? 'your home';
 
+  if (!request) {
+    return (
+      <div className="settings-banner settings-banner--warn" style={{ margin: '2rem auto', maxWidth: 480 }}>
+        Redirecting to My Profile…
+      </div>
+    );
+  }
+
   return (
-    <SectionShell
+    <SettingsLayout
+      tabs={[{ id: 'edit', label: 'Edit profile' }]}
+      active="edit"
+      onSelect={() => {}}
       title="Your profile"
-      description={
-        request
-          ? `${request.appLabel} is asking for these fields so you can finish at their site. They live here at ${personLabel} — re-used across every community app.`
-          : `These details live in your ${whitelabel.brand.community} home — re-used across every app you trust. You decide which app sees what.`
+      description={`${request.appLabel} needs these fields — saved at ${personLabel}, then you return to their site.`}
+      header={
+        <ProfileHeader
+          name={agentName ?? 'Your profile'}
+          handle={agentName ? `@${agentName}` : undefined}
+          address={agentAddress ?? undefined}
+        />
       }
     >
-      {request && (
-        <div className="relying-banner" role="status" style={bannerStyle}>
-          <span style={bannerIconStyle} aria-hidden="true"><UserIcon size={18} /></span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, color: 'var(--c-g900, #0f172a)' }}>
-              {request.appLabel} needs {request.required.length} field{request.required.length === 1 ? '' : 's'} from your profile
-            </div>
-            <div style={{ fontSize: '.85rem', color: 'var(--c-g600, #475569)', marginTop: '.15rem' }}>
-              We&apos;ll save it here at your home (one place, every app), then send you back to {request.appLabel}.
-            </div>
-          </div>
+      <div className="settings-banner settings-banner--info" role="status">
+        <span aria-hidden><UserIcon size={18} /></span>
+        <div>
+          <strong>{request.appLabel} needs {request.required.length} field{request.required.length === 1 ? '' : 's'}</strong>
+          <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem' }}>
+            We&apos;ll save here at your home, then send you back to {request.appLabel}.
+          </p>
         </div>
-      )}
+      </div>
 
-      {loadError && (
-        <div role="alert" style={{ ...savedStyle, background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>{loadError}</div>
-      )}
-
-      {needsVaultKey && (
-        <div role="status" style={bannerStyle}>
-          <span style={bannerIconStyle} aria-hidden="true"><UserIcon size={18} /></span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, color: 'var(--c-g900, #0f172a)' }}>Activate your vault key first</div>
-            <div style={{ fontSize: '.85rem', color: 'var(--c-g600, #475569)', marginTop: '.15rem' }}>
-              Your profile is kept in your private, end-to-end encrypted vault — not in this browser. Activate your
-              vault key once and you can edit it here, sealed under your own key.
-            </div>
-            <a href="/vault-key" style={{ ...primaryBtn, display: 'inline-block', marginTop: '.7rem', textDecoration: 'none' }}>
-              Activate vault key →
-            </a>
-          </div>
-        </div>
-      )}
-
-      {loading && !needsVaultKey && (
-        <div style={helpStyle}>Loading your profile from your encrypted vault…</div>
-      )}
-
-      {!needsVaultKey && !loading && (
-      <form onSubmit={handleSubmit} className="profile-form" style={formStyle}>
-        {PROFILE_FIELDS.map((f) => {
-          const isRequired = requiredKeys.has(f.key);
-          const missing = isRequired && !(contact[f.key] ?? '').trim();
-          return (
-            <div key={f.key} style={fieldStyle(isRequired)}>
-              <label htmlFor={`profile-${f.key}`} style={labelStyle}>
-                {f.label}
-                {isRequired && <span style={requiredPill}>required by {request?.appLabel}</span>}
-              </label>
-              <input
-                id={`profile-${f.key}`}
-                type={f.type}
-                value={contact[f.key] ?? ''}
-                onChange={(e) => handleChange(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                autoComplete={autoCompleteFor(f.key)}
-                style={inputStyle(missing)}
-              />
-              <div style={helpStyle}>{f.help}</div>
-            </div>
-          );
-        })}
-
-        {savedNotice && <div role="status" style={savedStyle}>✓ {savedNotice}</div>}
-
-        <div style={footerStyle}>
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={submitting || missingRequired.length > 0}
-            style={primaryBtn}
-          >
-            {submitting
-              ? 'Saving…'
-              : request
-                ? `Save & return to ${request.appLabel} →`
-                : 'Save'}
-          </button>
-          {request && (
-            <a href={request.returnUrl} style={cancelLinkStyle}>
-              Cancel and return to {request.appLabel}
-            </a>
-          )}
-          {!request && (
-            <a href="/you" style={cancelLinkStyle}>Back</a>
-          )}
-        </div>
-      </form>
-      )}
-    </SectionShell>
+      <RelyingProfileForm request={request} agentAddress={agentAddress ?? null} />
+    </SettingsLayout>
   );
 }
 
-function autoCompleteFor(k: ImpactProfileFieldKey): string {
-  switch (k) {
-    case 'firstName': return 'given-name';
-    case 'lastName': return 'family-name';
-    case 'email': return 'email';
-    case 'phone': return 'tel';
-    case 'country': return 'country-name';
-    case 'city': return 'address-level2';
-    case 'organizationName': return 'organization';
-    case 'organizationCountry': return 'country-name';
-  }
-}
+function RelyingProfileForm({
+  request,
+  agentAddress,
+}: {
+  request: RelyingRequest;
+  agentAddress: `0x${string}` | null;
+}) {
+  const handleSaved = (contact: ImpactContactProfile) => {
+    const ret = new URL(request.returnUrl);
+    ret.searchParams.set('profile_state', request.state);
+    for (const k of request.required) {
+      const v = contact[k];
+      if (v?.trim()) ret.searchParams.set(`profile_${k}`, v.trim());
+    }
+    window.location.href = ret.toString();
+  };
 
-// Local inline styles — keeps the new page additive (no global CSS churn) while
-// matching the portal's visual language. Move to the portal's stylesheet later.
-const bannerStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'flex-start', gap: '.75rem',
-  background: 'var(--c-primary-subtle, #eef2ff)',
-  border: '1px solid var(--c-primary-border, #c7d2fe)',
-  borderRadius: 14, padding: '1rem 1.1rem', marginBottom: '1.25rem',
-};
-const bannerIconStyle: React.CSSProperties = {
-  width: 36, height: 36, borderRadius: 10, flex: '0 0 auto',
-  background: 'var(--c-primary, #4f46e5)', color: '#fff',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(15,23,42,.06)',
-};
-const formStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 680 };
-const fieldStyle = (req: boolean): React.CSSProperties => ({
-  background: req ? 'var(--c-primary-subtle, #eef2ff)' : 'var(--c-g50, #f8fafc)',
-  border: `1px solid ${req ? 'var(--c-primary-border, #c7d2fe)' : 'var(--c-g200, #e2e8f0)'}`,
-  borderRadius: 12, padding: '.85rem 1rem',
-});
-const labelStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: '.5rem', fontWeight: 700, fontSize: '.85rem',
-  color: 'var(--c-g800, #1e293b)', marginBottom: '.45rem',
-};
-const requiredPill: React.CSSProperties = {
-  fontSize: '.65rem', fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase',
-  padding: '.15rem .5rem', borderRadius: 999,
-  background: 'var(--c-primary, #4f46e5)', color: '#fff',
-};
-const inputStyle = (missing: boolean): React.CSSProperties => ({
-  width: '100%', padding: '.65rem .8rem', fontSize: '.95rem', borderRadius: 10,
-  border: `1.5px solid ${missing ? 'var(--c-danger, #dc2626)' : 'var(--c-g300, #cbd5e1)'}`,
-  background: '#fff', fontFamily: 'inherit',
-});
-const helpStyle: React.CSSProperties = { marginTop: '.4rem', fontSize: '.75rem', color: 'var(--c-g500, #64748b)' };
-const savedStyle: React.CSSProperties = {
-  padding: '.65rem .9rem', borderRadius: 10, background: '#dcfce7', color: '#166534',
-  border: '1px solid #86efac', fontSize: '.875rem', fontWeight: 600,
-};
-const footerStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginTop: '.5rem',
-};
-const primaryBtn: React.CSSProperties = {
-  background: 'var(--c-primary, #4f46e5)', color: '#fff', border: 'none',
-  padding: '.7rem 1.1rem', borderRadius: 999, fontWeight: 700, fontSize: '.92rem', cursor: 'pointer',
-};
-const cancelLinkStyle: React.CSSProperties = {
-  fontSize: '.85rem', color: 'var(--c-g500, #64748b)', textDecoration: 'underline',
-};
+  return (
+    <PersonalInfoPanel
+      agentAddress={agentAddress}
+      requiredKeys={request.required}
+      appLabel={request.appLabel}
+      onSaved={handleSaved}
+    />
+  );
+}

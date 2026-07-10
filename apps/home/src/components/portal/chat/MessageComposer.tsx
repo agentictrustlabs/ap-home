@@ -65,6 +65,15 @@ export function MessageComposer({
           disabled={disabled}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
+          onPaste={(e) => {
+            const item = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'));
+            if (!item) return;
+            const file = item.getAsFile();
+            if (file) {
+              e.preventDefault();
+              void attach(file);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();

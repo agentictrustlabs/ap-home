@@ -12,19 +12,22 @@ import { buildNav, bottomNav } from './nav';
 import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
+import { useInboxView } from '../../home/use-inbox';
 
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
   const pathname = usePathname();
   const active = parseWorkspacePath(pathname ?? '/');
-  // spec 318: the active org's relationship (steward = custody, member = authority-only) scopes the nav.
   const { session } = useSession();
   const { agents } = useManagedAgents(session?.token ?? null);
-  // Least-privilege default: an org NOT in the managed set (an invitee's guest visit, or the set still
-  // loading) renders the MEMBER nav — stewards are always in the set, so the safe flash is less→more.
+  const { view } = useInboxView(active.kind === 'person' ? session : null);
+  const inboxUnread = active.kind === 'person' ? (view?.summary.unreadTotal ?? 0) : 0;
   const rel = active.kind === 'org'
     ? (agents.find((a) => a.agent.toLowerCase() === active.org.toLowerCase())?.relationship ?? 'member')
     : 'steward';
-  const groups = buildNav(whitelabel, { apps: appsBadge }, active, rel);
+  const groups = buildNav(whitelabel, {
+    apps: appsBadge,
+    inbox: inboxUnread > 0 ? inboxUnread : undefined,
+  }, active, rel);
   const tabs = bottomNav(groups);
   return (
     <div className="portal-root">

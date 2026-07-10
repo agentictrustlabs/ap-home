@@ -230,11 +230,18 @@ export function OrgChannelsView({ org }: { org: Address }) {
     });
   };
 
+  /** Telegram pattern: tap avatar or name in channel → DM slide-over, stay in channel context. */
+  const openDm = (name: string, label?: string, subject?: string) => {
+    if (name === you || !label) {
+      openProfile(name, label, subject);
+      return;
+    }
+    setDm({ name, label, subject });
+  };
+
   const messageFromProfile = (t: ProfileTarget) => {
     setProfile(null);
-    if (t.label) {
-      setDm({ name: t.name, label: t.label, subject: t.subject });
-    }
+    if (t.label) openDm(t.name, t.label, t.subject);
   };
 
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
@@ -304,7 +311,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
               className={`channels-sidebar__item${c.descriptor.id === active ? ' channels-sidebar__item--active' : ''}`}
               onClick={() => setActive(c.descriptor.id)}
             >
-              <span># {c.title}</span>
+              <span>{c.title}</span>
               <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: '0.75rem' }}>{c.messages.length}</span>
             </button>
           ))}
@@ -356,8 +363,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
                         lastOfGroup ? (
                           <button
                             type="button"
-                            style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
-                            onClick={() => openProfile(m.authorName, l?.label, l?.listing.subject)}
+                            className="chat-poster-avatar-btn"
+                            title={`Message ${m.authorName}`}
+                            onClick={() => openDm(m.authorName, l?.label, l?.listing.subject)}
                           >
                             <PosterAvatar name={m.authorName} subject={l?.listing.subject} />
                           </button>
@@ -373,7 +381,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
                         showAuthor={!mine}
                         firstOfGroup={firstOfGroup}
                         lastOfGroup={lastOfGroup}
-                        onAuthorClick={() => openProfile(m.authorName, l?.label, l?.listing.subject)}
+                        onAuthorClick={() => openDm(m.authorName, l?.label, l?.listing.subject)}
                       />
                     </div>
                   );
@@ -426,20 +434,41 @@ export function OrgChannelsView({ org }: { org: Address }) {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
             {listings.map((l) => (
-              <button
-                key={l.listing.subject}
-                type="button"
-                className="channels-member-row"
-                onClick={() => openProfile(l.listing.displayName, l.label, l.listing.subject)}
-              >
-                <MemberAvatar listing={l} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {l.listing.displayName}{l.listing.displayName === you ? ' (you)' : ''}
+              <div key={l.listing.subject} className="channels-member-row">
+                <button
+                  type="button"
+                  className="channels-member-row__main"
+                  aria-label={
+                    l.listing.displayName === you
+                      ? 'Your profile'
+                      : `Message ${l.listing.displayName}`
+                  }
+                  onClick={() =>
+                    l.listing.displayName === you
+                      ? openProfile(l.listing.displayName, l.label, l.listing.subject)
+                      : openDm(l.listing.displayName, l.label, l.listing.subject)
+                  }
+                >
+                  <MemberAvatar listing={l} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {l.listing.displayName}{l.listing.displayName === you ? ' (you)' : ''}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', opacity: 0.55 }}>{l.label}</div>
                   </div>
-                  <div style={{ fontSize: '0.72rem', opacity: 0.55 }}>{l.label}</div>
-                </div>
-              </button>
+                  {l.listing.displayName !== you && (
+                    <span className="channels-member-row__hint" aria-hidden>✉</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="channels-member-row__info"
+                  title="View profile"
+                  onClick={() => openProfile(l.listing.displayName, l.label, l.listing.subject)}
+                >
+                  ⋯
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -453,6 +482,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
           recipientName={dm.name}
           recipientLabel={dm.label}
           recipientSubject={dm.subject}
+          channelContext={channel ? { channelTitle: channel.title } : undefined}
           onClose={() => setDm(null)}
         />
       )}

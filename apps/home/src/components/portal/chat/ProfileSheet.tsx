@@ -58,6 +58,9 @@ export function ProfileSheet({
           )}
           <button type="button" className="ghost" onClick={onClose}>Close</button>
         </div>
+        {!target.isYou && target.label && (
+          <p className="chat-profile-sheet__hint">Tip: tap a member&apos;s avatar in the channel to message instantly.</p>
+        )}
       </div>
     </>
   );

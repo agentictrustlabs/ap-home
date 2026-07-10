@@ -79,6 +79,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [vaultBodies, setVaultBodies] = useState<boolean | null>(null);
   const [vaultBusy, setVaultBusy] = useState(false);
   const [mobileThread, setMobileThread] = useState(false);
+  const [railFilter, setRailFilter] = useState('');
 
   useEffect(() => {
     if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
@@ -171,6 +172,16 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     },
     [view],
   );
+
+  const filteredConversations = useMemo(() => {
+    const q = railFilter.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      const title = titleFor(c.conversationId).toLowerCase();
+      const preview = previewFor(c.conversationId).toLowerCase();
+      return title.includes(q) || preview.includes(q);
+    });
+  }, [conversations, railFilter, titleFor, previewFor]);
 
   useEffect(() => {
     if (!view || !activeId) return;
@@ -386,10 +397,18 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         <div className={`chat-shell${mobileThread && activeId ? ' chat-shell--thread-open' : ''}`}>
           <div className="chat-rail">
             <div className="chat-rail-search">
-              <input placeholder="Filter conversations…" readOnly style={{ opacity: 0.5 }} title="Coming soon" />
+              <input
+                placeholder="Filter conversations…"
+                value={railFilter}
+                onChange={(e) => setRailFilter(e.target.value)}
+                aria-label="Filter conversations"
+              />
             </div>
             <div className="chat-rail-list">
-              {conversations.map((c) => {
+              {filteredConversations.length === 0 && railFilter.trim() ? (
+                <p className="chat-rail-empty">No matches for &ldquo;{railFilter.trim()}&rdquo;</p>
+              ) : null}
+              {filteredConversations.map((c) => {
                 const cCase = caseFor(c.conversationId);
                 const isPending = !!cCase && PENDING_STATES.includes(cCase.state);
                 const title = titleFor(c.conversationId);
@@ -421,7 +440,14 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
             {activeId ? (
               <>
                 <div className="chat-thread-header">
-                  <button type="button" className="chat-slide-back" style={{ display: 'none' }} aria-hidden />
+                  <button
+                    type="button"
+                    className="chat-slide-back chat-thread-back"
+                    onClick={() => setMobileThread(false)}
+                    aria-label="Back to conversations"
+                  >
+                    ←
+                  </button>
                   {view && <ConvAvatar conversationId={activeId} title={titleFor(activeId)} view={view} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="chat-thread-header__title">{titleFor(activeId)}</div>

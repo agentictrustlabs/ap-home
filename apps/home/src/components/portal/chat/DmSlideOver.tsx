@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInboxView, agentLabel } from '../../../home/use-inbox';
 import { searchAgentsKb } from '../../../lib/agent-search';
 import { AvatarUpload } from './AvatarUpload';
@@ -10,38 +10,102 @@ import { personAvatarKey } from '../../../lib/avatar-store';
 import { useAvatar } from './use-avatar';
 import { messagePreview } from './message-content';
 
+type Resolution = 'resolving' | 'resolved' | 'not-found';
+
 export function DmSlideOver({
   session,
   recipientName,
   recipientLabel,
   recipientSubject,
+  channelContext,
   onClose,
 }: {
   session: { token: string };
   recipientName: string;
   recipientLabel: string;
   recipientSubject?: string;
+  /** When opened from a channel, show breadcrumb so user stays oriented. */
+  channelContext?: { channelTitle: string };
   onClose: () => void;
 }) {
   const { view, refresh, post, busy } = useInboxView(session);
   const [draft, setDraft] = useState('');
   const [resolvedName, setResolvedName] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<Resolution>('resolving');
+  const historyPushed = useRef(false);
 
   const avatarKey = recipientSubject ? personAvatarKey(recipientSubject) : null;
   const imageUrl = useAvatar(avatarKey);
 
-  useEffect(() => {
-    void searchAgentsKb(recipientLabel).then((hits) => {
+  const resolveRecipient = useCallback(async () => {
+    setResolution('resolving');
+    setResolvedName(null);
+    try {
+      const hits = await searchAgentsKb(recipientLabel);
       const hit = hits.find((h) => h.label.toLowerCase() === recipientLabel.toLowerCase()) ?? hits[0];
-      if (hit) setResolvedName(hit.name);
-    });
+      if (hit) {
+        setResolvedName(hit.name);
+        setResolution('resolved');
+      } else {
+        setResolution('not-found');
+      }
+    } catch {
+      setResolution('not-found');
+    }
   }, [recipientLabel]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    let cancelled = false;
+    void (async () => {
+      setResolution('resolving');
+      setResolvedName(null);
+      try {
+        const hits = await searchAgentsKb(recipientLabel);
+        if (cancelled) return;
+        const hit = hits.find((h) => h.label.toLowerCase() === recipientLabel.toLowerCase()) ?? hits[0];
+        if (hit) {
+          setResolvedName(hit.name);
+          setResolution('resolved');
+        } else {
+          setResolution('not-found');
+        }
+      } catch {
+        if (!cancelled) setResolution('not-found');
+      }
+    })();
+    const fallback = window.setTimeout(() => {
+      setResolution((prev) => (prev === 'resolving' ? 'not-found' : prev));
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+    };
+  }, [recipientLabel]);
+
+  const close = useCallback(() => {
+    if (historyPushed.current) {
+      historyPushed.current = false;
+      history.back();
+      return;
+    }
+    onClose();
   }, [onClose]);
+
+  useEffect(() => {
+    history.pushState({ chatDm: true }, '');
+    historyPushed.current = true;
+    const onPop = () => {
+      historyPushed.current = false;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('popstate', onPop);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose, close]);
 
   const conversationId = useMemo(() => {
     if (!view) return null;
@@ -57,6 +121,8 @@ export function DmSlideOver({
     }
     return null;
   }, [view, recipientLabel, recipientName]);
+
+  const canSend = !!conversationId || resolution === 'resolved';
 
   const thread = useMemo(() => {
     if (!view || !conversationId) return [];
@@ -74,21 +140,48 @@ export function DmSlideOver({
     }
   }, [conversationId, resolvedName, post, refresh]);
 
+  const composerPlaceholder = useMemo(() => {
+    if (conversationId || resolution === 'resolved') return `Message ${recipientName}…`;
+    if (resolution === 'resolving') return `Finding ${recipientName}…`;
+    return `Can't message until ${recipientName} is found`;
+  }, [conversationId, resolution, recipientName]);
+
   return (
     <>
-      <div className="chat-slide-scrim" onClick={onClose} />
+      <div className="chat-slide-scrim" onClick={close} />
       <div className="chat-slide-panel" role="dialog" aria-label={`Message ${recipientName}`}>
         <div className="chat-slide-header">
-          <button type="button" className="chat-slide-back" onClick={onClose} aria-label="Close">←</button>
+          <button type="button" className="chat-slide-back" onClick={close} aria-label="Back to channel">←</button>
           <AvatarUpload name={recipientName} imageUrl={imageUrl} size={40} />
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div className="chat-thread-header__title">{recipientName}</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{recipientLabel}</div>
+            {channelContext && (
+              <div className="chat-dm-context">
+                From <span className="chat-dm-context__channel"># {channelContext.channelTitle}</span>
+              </div>
+            )}
           </div>
         </div>
 
+        {resolution === 'not-found' && !conversationId && (
+          <div className="chat-dm-resolution-banner" role="status">
+            <span>Couldn&apos;t find <b>{recipientName}</b> in the directory.</span>
+            <div className="chat-dm-resolution-banner__actions">
+              <button type="button" className="btn" onClick={() => void resolveRecipient()}>Try again</button>
+              <a href="/messages" className="ghost" style={{ fontSize: '0.82rem', textDecoration: 'none' }}>Search all people</a>
+            </div>
+          </div>
+        )}
+
+        {resolution === 'resolving' && !conversationId && (
+          <div className="chat-dm-resolution-banner chat-dm-resolution-banner--pending" role="status">
+            Finding {recipientName}…
+          </div>
+        )}
+
         <div className="chat-thread-body">
-          {thread.length === 0 && (
+          {thread.length === 0 && canSend && (
             <p style={{ textAlign: 'center', opacity: 0.6, margin: 'auto', fontSize: '0.85rem' }}>
               No messages yet — say hello to {recipientName}.
             </p>
@@ -119,8 +212,8 @@ export function DmSlideOver({
           onChange={setDraft}
           onSend={send}
           busy={busy !== null}
-          disabled={!resolvedName && !conversationId}
-          placeholder={resolvedName || conversationId ? `Message ${recipientName}…` : 'Resolving recipient…'}
+          disabled={!canSend}
+          placeholder={composerPlaceholder}
         />
       </div>
     </>

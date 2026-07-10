@@ -1,7 +1,7 @@
 # Messaging UX Redesign — Telegram / Discord / Slack / Outlook Patterns
 
 > **Scope:** `demo-sso-next` Messages + Org Channels surfaces  
-> **Status:** P0 implementation in progress (2026-07)  
+> **Status:** P0 complete; P1 polish in progress (2026-07-09)  
 > **References:** Telegram (DM + in-group profile flow), Discord (group avatars, topic channels)
 
 ---
@@ -72,23 +72,29 @@ CSS: `chat.css` — all chat surfaces use design tokens from `globals.css` (ambe
 
 ## D. Interaction flows
 
-### Channel → DM (Telegram pattern)
+### Channel → DM (Telegram pattern — refined)
+
+**Primary path (no workspace switcher):** tap avatar or author name in channel feed, or tap member row → DM slide-over opens in-place. Channel stays mounted behind scrim.
+
+**Secondary path:** tap `⋯` on member row → profile sheet (upload own photo, view handle) → Message.
 
 ```mermaid
 sequenceDiagram
   participant U as User
   participant CH as OrgChannelsView
-  participant PS as ProfileSheet
   participant DM as DmSlideOver
+  participant PS as ProfileSheet
   participant API as /connect/inbox
 
-  U->>CH: Tap member avatar/name
-  CH->>PS: Open profile sheet
-  U->>PS: Tap "Message"
-  PS->>DM: Open slide-over (recipient label)
-  DM->>API: GET inbox (person scope)
-  DM->>API: POST send/reply
-  Note over CH,DM: Channel feed stays mounted; no AgentSwitcher jump
+  U->>CH: Tap poster avatar or author name
+  CH->>DM: Open slide-over (recipient + channel breadcrumb)
+  DM->>API: GET inbox / POST send|reply
+  Note over CH,DM: No AgentSwitcher; no /messages navigation
+
+  U->>CH: Tap member ⋯ (optional)
+  CH->>PS: Profile sheet
+  U->>PS: Message
+  PS->>DM: Same slide-over
 ```
 
 ### Avatar upload
@@ -117,7 +123,7 @@ P1: persist `avatarDataUrl` in `ImpactStoredProfile` vault record.
 Uses existing portal tokens; chat-specific additions in `chat.css`:
 
 ```css
---chat-mine-bg: linear-gradient(135deg, #fbbf24, #d97706);
+--chat-mine-bg: var(--color-amber-100);
 --chat-theirs-bg: var(--color-surface-sunken);
 --chat-rail-active: var(--color-amber-50);
 --chat-rail-unread: var(--color-amber-600);
@@ -159,8 +165,9 @@ No inbox/channels API changes required for P0.
 - Vault-backed avatars in profile store
 - Optimistic send + scroll anchoring
 - Emoji categories + recent
-- Mobile single-pane navigation
-- Paste image from clipboard
+- [x] Mobile single-pane navigation (back chevron)
+- [x] Paste image from clipboard
+- [x] Nav unread badge on Messages link
 
 ### P2
 - WebSocket push (replace 5s poll)
@@ -185,4 +192,42 @@ Center column: channel header with `# topic` + member count + **editable group a
 Bottom sheet on mobile / centered card on desktop: large avatar (upload on own profile), name, handle, org subtitle. Primary button "Message" (amber). Secondary "Close".
 
 ### DM slide-over
-420px right panel, full height: header with back chevron + recipient avatar/name; thread scroll; composer at bottom. Scrim dims channel behind; Escape closes.
+420px right panel, full height: header with back chevron + recipient avatar/name + **"From #channel" breadcrumb** when opened from org channels; thread scroll; composer at bottom. Scrim dims channel behind; Escape closes.
+
+---
+
+## I. Anti-patterns (do not regress)
+
+| Anti-pattern | Why it fails | Replacement |
+|--------------|--------------|-------------|
+| AgentSwitcher / workspace jump to message someone | Breaks channel context; feels like leaving the room | In-context `DmSlideOver` |
+| Profile sheet as only path to DM | Extra tap; unlike Telegram in-group flow | Avatar/name tap → DM directly |
+| Read-only rail search | Dead affordance erodes trust | Local filter on title + preview |
+| Loud gradient bubbles | Reads as demo, not product | Subtle amber-100 mine + border |
+| `?to=` URL as primary compose | OK for deep links; not in-channel | Slide-over from channel member |
+
+---
+
+## J. UX audit findings (2026-07-09)
+
+Full analysis from UX designer review. **Channel→DM via AgentSwitcher is already fixed** — `DmSlideOver` replaced workspace jumps. Residual issues closed in this pass:
+
+| Leak | Fix |
+|------|-----|
+| Silent `"Resolving recipient…"` hang | `DmSlideOver` now shows resolving / resolved / not-found + retry + "Search all people" |
+| Dead `ProfilePopover.tsx` fork | Deleted — `ProfileSheet` is canonical |
+| Hover-only DM hint on member rows | `✉` opacity floor 0.6 + `aria-label` on tap target |
+| No nav unread badge | `PortalShell` polls inbox `unreadTotal` → Messages nav badge |
+| Mobile back only via in-panel `←` | `popstate` + `history.pushState` on slide-over open |
+| Bubble too wide on large screens | `max-width: min(75%, 480px)` |
+
+### Still P1 (next sprint)
+
+- Extract `ConversationPanel` to unify `/messages` "New message" card with channel `DmSlideOver`
+- Standardize avatar sizes to token scale (`--avatar-sm` … `--avatar-2xl`)
+- Vault-backed avatars (replace localStorage)
+- Optimistic send + scroll anchoring
+
+### Anti-patterns (guard in review)
+
+Never reintroduce AgentSwitcher/route jump for DMs. Never leave composer disabled without explanation. Never maintain two profile→message components.

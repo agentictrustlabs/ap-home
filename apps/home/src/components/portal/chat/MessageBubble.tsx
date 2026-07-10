@@ -39,7 +39,7 @@ export function MessageBubble({
   return (
     <div className={wrapClass}>
       {showAuthor && authorName && !mine && firstOfGroup && (
-        <button type="button" className="chat-bubble-author" onClick={onAuthorClick} style={{ border: 'none', background: 'transparent', padding: 0 }}>
+        <button type="button" className="chat-bubble-author" onClick={onAuthorClick}>
           {authorName}
         </button>
       )}
