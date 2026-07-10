@@ -318,6 +318,15 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="onboarding-screen"><div className="onboarding-card">{children}</div></div>;
 }
 
+/** Selected state for the email/phone method toggles — the open card's button reads as CHOSEN
+ *  (UX report 2026-07-10: clicking "Continue with phone" revealed the card but nothing marked the
+ *  option selected). Opening one method closes the other (mutually exclusive). */
+const SELECTED_METHOD_STY: React.CSSProperties = {
+  borderColor: 'var(--color-amber-500, #f59e0b)',
+  background: 'var(--color-amber-50, #fffbeb)',
+  fontWeight: 700,
+};
+
 // ── Self-serve: choose your name in the community ─────────────────────────────
 // `enrollApi` (relying-app enroll only): the "Continue with Google" button must STASH the enroll so
 // the post-redirect GoogleEnrollResume finishes the grant + delivers the code back to the app.
@@ -608,10 +617,12 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           )}
           <button
             className="btn-ghost onboarding-secondary"
-            onClick={() => setShowEmail((v) => !v)}
+            style={showEmail ? SELECTED_METHOD_STY : undefined}
+            aria-pressed={showEmail}
+            onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
             disabled={busy !== null}
           >
-            Continue with email
+            {showEmail ? '● Continue with email' : 'Continue with email'}
           </button>
           {showEmail && (
             // Verify a code (existing email home) OR bootstrap a KMS-custodied home (no home yet) — both
@@ -620,10 +631,12 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           )}
           <button
             className="btn-ghost onboarding-secondary"
-            onClick={() => setShowPhone((v) => !v)}
+            style={showPhone ? SELECTED_METHOD_STY : undefined}
+            aria-pressed={showPhone}
+            onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
             disabled={busy !== null}
           >
-            Continue with phone
+            {showPhone ? '● Continue with phone' : 'Continue with phone'}
           </button>
           {showPhone && (
             // Verify an SMS code (existing phone home) OR bootstrap a KMS-custodied home (no home yet). Same
@@ -844,12 +857,12 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
             </button>
           )}
           {/* Email/phone-custodied home: sign in with the code sent to the email/number that opens this home. */}
-          <button className="btn-ghost onboarding-secondary" onClick={() => setShowEmail((v) => !v)}>
-            Continue with email
+          <button className="btn-ghost onboarding-secondary" style={showEmail ? SELECTED_METHOD_STY : undefined} aria-pressed={showEmail} onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}>
+            {showEmail ? '● Continue with email' : 'Continue with email'}
           </button>
           {showEmail && <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>}
-          <button className="btn-ghost onboarding-secondary" onClick={() => setShowPhone((v) => !v)}>
-            Continue with phone
+          <button className="btn-ghost onboarding-secondary" style={showPhone ? SELECTED_METHOD_STY : undefined} aria-pressed={showPhone} onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}>
+            {showPhone ? '● Continue with phone' : 'Continue with phone'}
           </button>
           {showPhone && <div style={{ margin: '.4rem 0 .2rem' }}><PhoneAuthCard /></div>}
         </>
