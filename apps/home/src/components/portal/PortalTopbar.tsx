@@ -4,6 +4,7 @@
 import { BrandShield } from '../shared/BrandShield';
 import { IdentityChip } from './IdentityChip';
 import { AgentSwitcher } from './AgentSwitcher';
+import { WorkspaceAction } from './WorkspaceAction';
 
 export function PortalTopbar({ brandName }: { brandName: string }) {
   return (
@@ -14,6 +15,8 @@ export function PortalTopbar({ brandName }: { brandName: string }) {
           <span>{brandName}</span>
         </a>
         <AgentSwitcher />
+        {/* Primary action for the selected workspace: person → Add organization; org → Invite member. */}
+        <WorkspaceAction />
       </div>
       <IdentityChip />
     </header>
