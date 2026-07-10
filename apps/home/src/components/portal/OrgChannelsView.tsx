@@ -1,17 +1,7 @@
 'use client';
-// Org channels (spec 318 demo realization / spec 313 §3) — the Slack/Discord/Telegram-shaped surface
-// for TOPIC discussion inside ONE organization. The org's channels namespace is `communityId = the org
-// SA address`; membership is the spec-312 consent model (ADR-0025): you appear and may read/post ONLY
-// because you published a self-signed, revocable directory listing into the org's community — joining
-// the org's channels and being discoverable to the org are the same opt-in.
-//
-// Three columns, the familiar model:
-//   channels rail (create/join a topic) | topic feed + composer | members rail (who's here)
-// Every poster/member resolves to their agent NAME, and "Message" deep-links to the person's own
-// /messages composer (`?to=<label>`) — a channel post is a board fact; a DM is ordinary 1:1 mail on
-// the same substrate (spec 312), never a second messaging mechanism.
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useRouter } from 'next/navigation';
+// Org channels — Discord/Slack topic boards with Telegram-style member→DM slide-over,
+// group avatars, rich messages (emoji + images), amber design system.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
@@ -22,9 +12,17 @@ import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
-import { Avatar } from './chat/Avatar';
-import { EmojiButton } from './chat/EmojiButton';
-import { ProfilePopover, type ProfileTarget } from './chat/ProfilePopover';
+import {
+  communityAvatarKey,
+  personAvatarKey,
+  setCommunityAvatar,
+} from '../../lib/avatar-store';
+import { AvatarUpload } from './chat/AvatarUpload';
+import { MessageBubble } from './chat/MessageBubble';
+import { MessageComposer } from './chat/MessageComposer';
+import { DmSlideOver } from './chat/DmSlideOver';
+import { ProfileSheet, type ProfileTarget } from './chat/ProfileSheet';
+import { useAvatar } from './chat/use-avatar';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -36,8 +34,6 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
   return passkeySignHash;
 }
 
-// Server shapes (server/connect/channels.ts + directory.ts) — mirrored, not imported (server module
-// pulls server-only deps).
 interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string }
 interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[] }
 interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
@@ -48,39 +44,40 @@ const timeShort = (iso: string): string => {
   return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
+function MemberAvatar({ listing }: { listing: Listing }) {
+  const imageUrl = useAvatar(personAvatarKey(listing.listing.subject));
+  return <AvatarUpload name={listing.listing.displayName} imageUrl={imageUrl} size={34} />;
+}
+
+function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
+  const imageUrl = useAvatar(subject ? personAvatarKey(subject) : null);
+  return <AvatarUpload name={name} imageUrl={imageUrl} size={30} />;
+}
+
 export function OrgChannelsView({ org }: { org: Address }) {
-  const router = useRouter();
   const { session, agentAddress } = useSession();
   const communityId = org.toLowerCase();
+  const communityAvatar = useAvatar(communityAvatarKey(org));
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
-  // Post bodies of the ACTIVE channel, resolved server-side from the ORG's vault (spec 318 residency).
   const [bodies, setBodies] = useState<Record<string, string>>({});
-  // Has a steward signed the org's standing delivery grant? false ⇒ posting is blocked (fail-closed).
   const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [you, setYou] = useState<string | null>(null);
-  const [member, setMember] = useState<boolean | null>(null); // null = loading
+  const [member, setMember] = useState<boolean | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Join form
   const [joinName, setJoinName] = useState('');
-  // Create-channel form
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  // Composer
   const [draft, setDraft] = useState('');
-  // Invite (spec 318 §invite): find a Person in the KB (naming/knowledge-graph search, spec 314) and
-  // send them an ordinary inbox message carrying an `org-channels` context ref — the chip in THEIR
-  // /messages routes them to this join gate. The invite never enrolls anyone (ADR-0025): the invitee
-  // still signs their own listing to appear here.
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
   const [inviteHits, setInviteHits] = useState<AgentSearchHit[] | null>(null);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
-  // Channel→DM (Telegram flow): clicking a poster/member opens a profile popover anchored to the click.
   const [profile, setProfile] = useState<ProfileTarget | null>(null);
+  const [dm, setDm] = useState<{ name: string; label: string; subject?: string } | null>(null);
 
   const authed = useMemo(
     () => ({ 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` }),
@@ -111,7 +108,6 @@ export function OrgChannelsView({ org }: { org: Address }) {
   }, [session, communityId, authed, active]);
 
   useEffect(() => { void load(); }, [load]);
-  // Board polling — same cadence as the inbox (spec 313).
   useEffect(() => {
     const t = setInterval(() => void load(), 5000);
     return () => clearInterval(t);
@@ -156,22 +152,14 @@ export function OrgChannelsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [newTitle, communityId, authed, load]);
 
-  // Steward action (spec 318): the org's vault enablement is the SAME owner-generic ceremony pair a
-  // person runs — (1) the vault-KEY binding (spec 278: the org SA authorizes the host to wield the ORG's
-  // KEK; without it every org vault write is vault_key_unauthorized, VKB-D1) and (2) the standing
-  // delivery grant (delegator = the org SA). activateVaultIfNeeded(org) runs both, idempotently — the
-  // steward's credential signs; demo-mcp ERC-1271-verifies each against the ORG account at redemption.
-  // The person's own enablement can NEVER substitute: vault rows are keyed + encrypted per-owner.
   const enableOrgVault = useCallback(async () => {
     if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
     setBusy(true); setError(null);
     try {
       const via = session.via as Via;
       const auth = isKmsVia(via) ? { token: session.token } : undefined;
-      const bound = await activateVaultIfNeeded(org, via, auth); // org KEK binding (idempotent)
+      const bound = await activateVaultIfNeeded(org, via, auth);
       if (!bound.ok) throw new Error(bound.error);
-      // The grant half is fire-and-forget inside activateVaultIfNeeded — await it here (idempotent) so
-      // the gate flips on truth, not a race.
       const grant = await activateInboxDeliveryIfNeeded(org, via, auth);
       if (!grant.ok) throw new Error(grant.error);
       setOrgVault(true);
@@ -181,22 +169,22 @@ export function OrgChannelsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [session, agentAddress, org, load]);
 
-  const post = useCallback(async () => {
-    if (!active || !draft.trim()) return;
+  const postMessage = useCallback(async (body: string) => {
+    if (!active || !body.trim()) return;
     setBusy(true); setError(null);
     try {
       const res = await fetch('/connect/channels', {
         method: 'POST', headers: authed,
-        body: JSON.stringify({ action: 'post', communityId, channelId: active, bodyText: draft.trim() }),
+        body: JSON.stringify({ action: 'post', communityId, channelId: active, bodyText: body.trim() }),
       });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? `post failed (${res.status})`);
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !out.ok) throw new Error(out.error ?? `post failed (${res.status})`);
       setDraft('');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [active, draft, communityId, authed, load]);
+  }, [active, communityId, authed, load]);
 
   const searchInvitees = useCallback(async () => {
     if (!inviteQuery.trim()) return;
@@ -226,49 +214,40 @@ export function OrgChannelsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [authed, communityId]);
 
-  // Poster → member listing (CAIP subject match) so any author with a current listing gets a DM link.
   const listingBySubject = useMemo(() => {
     const m = new Map<string, Listing>();
     for (const l of listings) m.set(l.listing.subject.toLowerCase(), l);
     return m;
   }, [listings]);
 
-  const dmHref = (label: string): string => `/messages?to=${encodeURIComponent(label)}`;
-
-  // Open the profile popover anchored to the clicked avatar/name. `label` present ⇒ the person is a
-  // current member (has a listing) and can be DM'd.
-  const openProfile = (e: ReactMouseEvent, name: string, label?: string) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setProfile({ name, label, subtitle: label ? undefined : 'Not a current member', isYou: name === you, x: r.left, y: r.bottom });
+  const openProfile = (name: string, label?: string, subject?: string) => {
+    setProfile({
+      name,
+      label,
+      subject,
+      subtitle: label ? 'Member of this organization' : 'Not a current member',
+      isYou: name === you,
+    });
   };
-  // "Send message" → the person's own /messages with this recipient (correct scope for person↔person).
+
   const messageFromProfile = (t: ProfileTarget) => {
     setProfile(null);
-    if (t.label) router.push(dmHref(t.label));
+    if (t.label) {
+      setDm({ name: t.name, label: t.label, subject: t.subject });
+    }
   };
 
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
-  const posters = useMemo(() => {
-    if (!channel) return [];
-    const seen = new Map<string, { name: string; label?: string }>();
-    for (const m of channel.messages) {
-      const l = listingBySubject.get(m.envelope.from.toLowerCase());
-      seen.set(m.authorName, { name: m.authorName, label: l?.label });
-    }
-    return [...seen.values()];
-  }, [channel, listingBySubject]);
 
   if (!session || !agentAddress) return <SectionShell title="Channels"><p>Not signed in.</p></SectionShell>;
 
-  // ── Join gate (opt-in consent, ADR-0025) ──────────────────────────────────────────────────────
   if (member === false) {
     return (
       <SectionShell title="Channels" description="Topic discussion inside this organization">
         <div className="card" style={{ maxWidth: 460, padding: '1.25rem' }}>
           <h3 style={{ margin: '0 0 0.4rem' }}>Join this organization&rsquo;s channels</h3>
           <p style={{ fontSize: '0.85rem', opacity: 0.75, margin: '0 0 0.8rem' }}>
-            Joining publishes a listing you sign — people in this organization can then see you here and
-            message you directly. You can leave (revoke it) anytime.
+            Joining publishes a listing you sign — members can see you here and message you directly.
           </p>
           <input
             placeholder="Display name (how members see you)"
@@ -276,10 +255,10 @@ export function OrgChannelsView({ org }: { org: Address }) {
             onChange={(e) => setJoinName(e.target.value)}
             style={{ width: '100%', marginBottom: '0.6rem' }}
           />
-          <button className="btn" disabled={busy || !joinName.trim()} onClick={() => void join()}>
+          <button type="button" className="btn" disabled={busy || !joinName.trim()} onClick={() => void join()}>
             {busy ? 'Signing…' : 'Sign & join'}
           </button>
-          {error && <p style={{ color: '#b91c1c', fontSize: '0.8rem' }}>{error}</p>}
+          {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
         </div>
       </SectionShell>
     );
@@ -287,33 +266,27 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
   return (
     <SectionShell title="Channels" description="Topic discussion inside this organization">
-      {error && <p style={{ color: '#b91c1c', fontSize: '0.8rem' }}>{error}</p>}
-      {/* Top-level steward gate (spec 316 §11a): the channel board lives in the ORG's vault, so NOTHING —
-          create OR post — works until a steward re-signs the org's grant to cover `vault:channels.data`.
-          Shown regardless of whether a channel is selected, so a FRESH org (no channels yet) sees it BEFORE
-          hitting a raw record_scope_denied on create. */}
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+
       {orgVault === false && (
-        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid #fcd34d', background: '#fffbeb', color: '#92400e', borderRadius: 10, padding: '0.6rem 0.9rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+        <div className="chat-attention" style={{ marginBottom: '0.85rem' }}>
           <span style={{ fontSize: '0.85rem' }}>
-            <b>Channel storage isn&rsquo;t enabled for this organization yet.</b> A steward authorizes the
-            organization&rsquo;s vault (its own key + delivery grant) once — then channels + posts are stored
-            encrypted under the org&rsquo;s authority. Until then, creating a channel will fail.
+            <b>Channel storage isn&rsquo;t enabled yet.</b> A steward authorizes the org vault once — then channels + posts are encrypted under the org&rsquo;s authority.
           </span>
-          <button className="btn" disabled={busy} onClick={() => void enableOrgVault()}>
+          <button type="button" className="btn" disabled={busy} onClick={() => void enableOrgVault()} style={{ marginTop: '0.5rem' }}>
             {busy ? 'Signing…' : 'Enable (steward)'}
           </button>
         </div>
       )}
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', minHeight: 480 }}>
-        {/* ── Channels rail ── */}
-        <div style={{ width: 210, flex: 'none', borderRight: '1px solid #e5e7eb', paddingRight: '0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <strong style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>Channels</strong>
-            {/* Disabled until org vault storage is enabled — creating writes the board to the org vault. */}
-            <button className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title={orgVault === false ? 'Enable channel storage first' : 'New channel'}>＋</button>
+
+      <div className="channels-layout">
+        <div className="channels-sidebar">
+          <div className="channels-sidebar__title">
+            <span>Channels</span>
+            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title="New channel">＋</button>
           </div>
           {creating && orgVault !== false && (
-            <div style={{ marginBottom: '0.6rem' }}>
+            <div style={{ marginBottom: '0.6rem', padding: '0 0.4rem' }}>
               <input
                 placeholder="Topic, e.g. fundraising"
                 value={newTitle}
@@ -321,41 +294,45 @@ export function OrgChannelsView({ org }: { org: Address }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') void createChannel(); }}
                 style={{ width: '100%', marginBottom: '0.3rem' }}
               />
-              <button className="btn" disabled={busy || !newTitle.trim()} onClick={() => void createChannel()}>Create</button>
+              <button type="button" className="btn" disabled={busy || !newTitle.trim()} onClick={() => void createChannel()}>Create</button>
             </div>
           )}
           {(channels ?? []).map((c) => (
             <button
               key={c.descriptor.id}
+              type="button"
+              className={`channels-sidebar__item${c.descriptor.id === active ? ' channels-sidebar__item--active' : ''}`}
               onClick={() => setActive(c.descriptor.id)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer',
-                borderRadius: 8, padding: '0.4rem 0.55rem', marginBottom: 2, fontSize: '0.9rem',
-                background: c.descriptor.id === active ? '#eef2ff' : 'transparent',
-                color: c.descriptor.id === active ? '#4338ca' : 'inherit',
-                fontWeight: c.descriptor.id === active ? 600 : 400,
-              }}
             >
-              # {c.title}
-              <span style={{ float: 'right', opacity: 0.5, fontSize: '0.75rem' }}>{c.messages.length}</span>
+              <span># {c.title}</span>
+              <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: '0.75rem' }}>{c.messages.length}</span>
             </button>
           ))}
           {channels && channels.length === 0 && !creating && (
-            <p style={{ fontSize: '0.8rem', opacity: 0.6 }}>No channels yet — create the first topic.</p>
+            <p style={{ fontSize: '0.8rem', opacity: 0.6, padding: '0 0.4rem' }}>No channels yet.</p>
           )}
         </div>
 
-        {/* ── Topic feed + composer ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div className="channels-feed">
           {channel ? (
             <>
-              <div style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
-                <strong># {channel.title}</strong>
-                <span style={{ marginLeft: '0.75rem', fontSize: '0.78rem', opacity: 0.6 }}>
-                  {posters.length > 0 ? `posted by ${posters.map((p) => p.name).join(', ')}` : 'no posts yet'}
-                </span>
+              <div className="channels-feed-header">
+                <AvatarUpload
+                  name={channel.title}
+                  imageUrl={communityAvatar}
+                  size={44}
+                  editable
+                  onUpload={(url) => setCommunityAvatar(org, url)}
+                />
+                <div>
+                  <strong># {channel.title}</strong>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                    {listings.length} members · {channel.messages.length} messages
+                  </div>
+                </div>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.12rem', padding: '0.25rem 0.15rem' }}>
+
+              <div className="chat-thread-body" style={{ flex: 1 }}>
                 {channel.messages.map((m, idx) => {
                   const l = listingBySubject.get(m.envelope.from.toLowerCase());
                   const mine = m.authorName === you;
@@ -363,90 +340,74 @@ export function OrgChannelsView({ org }: { org: Address }) {
                   const next = channel.messages[idx + 1];
                   const firstOfGroup = !prev || prev.authorName !== m.authorName;
                   const lastOfGroup = !next || next.authorName !== m.authorName;
-                  const body = bodies[m.envelope.id];
+
                   return (
-                    <div key={m.envelope.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexDirection: mine ? 'row-reverse' : 'row', marginTop: firstOfGroup ? '0.5rem' : 0 }}>
-                      {/* Avatar only under others' messages, once per group (Telegram) */}
+                    <div
+                      key={m.envelope.id}
+                      style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        alignItems: 'flex-end',
+                        flexDirection: mine ? 'row-reverse' : 'row',
+                        marginTop: firstOfGroup ? '0.5rem' : 0,
+                      }}
+                    >
                       {!mine && (
-                        lastOfGroup
-                          ? <span style={{ cursor: 'pointer' }} onClick={(e) => openProfile(e, m.authorName, l?.label)}><Avatar name={m.authorName} size={30} /></span>
-                          : <span style={{ width: 30, flex: 'none' }} />
-                      )}
-                      <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                        {firstOfGroup && !mine && (
-                          <div
-                            onClick={(e) => openProfile(e, m.authorName, l?.label)}
-                            style={{ fontSize: '0.74rem', fontWeight: 600, color: `hsl(${[...m.authorName].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 55% 42%)`, margin: '0 0 0.1rem 0.15rem', cursor: 'pointer' }}
+                        lastOfGroup ? (
+                          <button
+                            type="button"
+                            style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
+                            onClick={() => openProfile(m.authorName, l?.label, l?.listing.subject)}
                           >
-                            {m.authorName}{l ? '' : ' ·'} <span style={{ opacity: 0.5, fontWeight: 400 }}>{l?.label}</span>
-                          </div>
-                        )}
-                        <div
-                          style={{
-                            background: mine ? 'linear-gradient(135deg,#6366f1,#4338ca)' : '#f1f5f9',
-                            color: mine ? '#fff' : '#111827',
-                            padding: '0.4rem 0.7rem 0.3rem', fontSize: '0.9rem', lineHeight: 1.35,
-                            whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-                            borderRadius: 16,
-                            borderBottomRightRadius: mine && lastOfGroup ? 4 : 16,
-                            borderBottomLeftRadius: !mine && lastOfGroup ? 4 : 16,
-                            opacity: body ? 1 : 0.5,
-                          }}
-                        >
-                          {body ?? <i style={{ opacity: 0.7 }}>content in vault…</i>}
-                          <span style={{ fontSize: '0.62rem', opacity: mine ? 0.7 : 0.45, marginLeft: '0.5rem', float: 'right', marginTop: '0.3rem' }}>
-                            {timeShort(m.envelope.createdAt)}
-                          </span>
-                        </div>
-                      </div>
+                            <PosterAvatar name={m.authorName} subject={l?.listing.subject} />
+                          </button>
+                        ) : (
+                          <span style={{ width: 30, flex: 'none' }} />
+                        )
+                      )}
+                      <MessageBubble
+                        mine={mine}
+                        body={bodies[m.envelope.id]}
+                        time={timeShort(m.envelope.createdAt)}
+                        authorName={m.authorName}
+                        showAuthor={!mine}
+                        firstOfGroup={firstOfGroup}
+                        lastOfGroup={lastOfGroup}
+                        onAuthorClick={() => openProfile(m.authorName, l?.label, l?.listing.subject)}
+                      />
                     </div>
                   );
                 })}
                 {channel.messages.length === 0 && (
-                  <p style={{ fontSize: '0.85rem', opacity: 0.6, margin: 'auto' }}>Start the discussion in <b># {channel.title}</b>.</p>
+                  <p style={{ fontSize: '0.85rem', opacity: 0.6, margin: 'auto', textAlign: 'center' }}>
+                    Start the discussion in <b># {channel.title}</b>.
+                  </p>
                 )}
               </div>
-              {/* The steward gate is now a top-level banner (shown even with no channels) — no per-feed copy. */}
-              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.6rem', alignItems: 'center', border: '1px solid #e5e7eb', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem', background: orgVault === false ? '#f8fafc' : '#fff' }}>
-                <input
-                  disabled={orgVault === false}
-                  placeholder={orgVault === false ? 'Enable channel storage to post' : `Message # ${channel.title}`}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) void post(); }}
-                  style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
-                />
-                <EmojiButton onPick={(em) => setDraft((d) => d + em)} />
-                <button
-                  className="btn"
-                  disabled={busy || !draft.trim()}
-                  onClick={() => void post()}
-                  title="Send"
-                  style={{ borderRadius: '50%', width: 36, height: 36, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  {busy ? '…' : '➤'}
-                </button>
-              </div>
+
+              <MessageComposer
+                value={draft}
+                onChange={setDraft}
+                onSend={postMessage}
+                disabled={orgVault === false}
+                busy={busy}
+                placeholder={orgVault === false ? 'Enable channel storage to post' : `Message # ${channel.title}`}
+              />
             </>
           ) : (
-            <p style={{ opacity: 0.6, margin: 'auto' }}>{channels === null ? 'Loading…' : 'Pick or create a channel.'}</p>
+            <p style={{ opacity: 0.6, margin: 'auto', padding: '2rem' }}>{channels === null ? 'Loading…' : 'Pick or create a channel.'}</p>
           )}
         </div>
 
-        {/* ── Members rail ── */}
-        <div style={{ width: 200, flex: 'none', borderLeft: '1px solid #e5e7eb', paddingLeft: '0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6 }}>
-              Members · {listings.length}
-            </strong>
-            <button className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite a person">
-              ＋
-            </button>
+        <div className="channels-members">
+          <div className="channels-sidebar__title">
+            <span>Members · {listings.length}</span>
+            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite">＋</button>
           </div>
           {inviteOpen && (
-            <div style={{ margin: '0.5rem 0 0.25rem' }}>
+            <div style={{ margin: '0.25rem 0 0.5rem', padding: '0 0.25rem' }}>
               <input
-                placeholder="Find a person by name…"
+                placeholder="Find a person…"
                 value={inviteQuery}
                 onChange={(e) => setInviteQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void searchInvitees(); }}
@@ -455,28 +416,23 @@ export function OrgChannelsView({ org }: { org: Address }) {
               {inviteHits?.map((h) => (
                 <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: 2 }}>
                   <div style={{ minWidth: 0, flex: 1, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <b>{h.displayName ?? h.label}</b> <span style={{ opacity: 0.55 }}>{h.name}</span>
+                    <b>{h.displayName ?? h.label}</b>
                   </div>
-                  <button className="btn" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>
-                    Invite
-                  </button>
+                  <button type="button" className="btn" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite</button>
                 </div>
               ))}
-              {inviteHits && inviteHits.length === 0 && <p style={{ fontSize: '0.75rem', opacity: 0.6 }}>No one found.</p>}
-              {inviteSent && <p style={{ fontSize: '0.75rem', color: '#047857' }}>Invitation sent to {inviteSent}.</p>}
+              {inviteSent && <p style={{ fontSize: '0.75rem', color: 'var(--color-sage-700)' }}>Invitation sent to {inviteSent}.</p>}
             </div>
           )}
-          <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
             {listings.map((l) => (
               <button
                 key={l.listing.subject}
-                onClick={(e) => openProfile(e, l.listing.displayName, l.label)}
-                title={l.listing.displayName === you ? 'You' : `View ${l.listing.displayName} · message`}
-                style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 10, padding: '0.35rem 0.4rem', minHeight: 0 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                type="button"
+                className="channels-member-row"
+                onClick={() => openProfile(l.listing.displayName, l.label, l.listing.subject)}
               >
-                <Avatar name={l.listing.displayName} size={34} />
+                <MemberAvatar listing={l} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {l.listing.displayName}{l.listing.displayName === you ? ' (you)' : ''}
@@ -485,11 +441,21 @@ export function OrgChannelsView({ org }: { org: Address }) {
                 </div>
               </button>
             ))}
-            {listings.length === 0 && <p style={{ fontSize: '0.78rem', opacity: 0.6 }}>No one has joined yet.</p>}
           </div>
         </div>
       </div>
-      <ProfilePopover target={profile} onClose={() => setProfile(null)} onMessage={messageFromProfile} />
+
+      <ProfileSheet target={profile} onClose={() => setProfile(null)} onMessage={messageFromProfile} />
+
+      {session && dm && (
+        <DmSlideOver
+          session={session}
+          recipientName={dm.name}
+          recipientLabel={dm.label}
+          recipientSubject={dm.subject}
+          onClose={() => setDm(null)}
+        />
+      )}
     </SectionShell>
   );
 }

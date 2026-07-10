@@ -1,10 +1,7 @@
 'use client';
-// A lightweight emoji picker — a 😊 button that opens a grid popover. Client-only, zero deps: emoji are
-// just Unicode, so picking one appends to the composer and it renders everywhere with no backend. Stays
-// open across picks (Telegram behavior); closes on outside-click / Escape.
+
 import { useEffect, useRef, useState } from 'react';
 
-// A curated, broadly-useful set (kept small so the picker is instant — a full set can come later).
 const EMOJI = [
   '😀', '😄', '😁', '😅', '😂', '🙂', '😉', '😊',
   '😍', '😘', '😎', '🤝', '🤔', '😐', '🙄', '😴',
@@ -15,9 +12,10 @@ const EMOJI = [
   '💰', '📈', '📉', '🗓️', '⏰', '🎯', '📎', '💬',
 ];
 
-export function EmojiButton({ onPick }: { onPick: (emoji: string) => void }) {
+export function EmojiButton({ onPick, disabled }: { onPick: (emoji: string) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -35,33 +33,20 @@ export function EmojiButton({ onPick }: { onPick: (emoji: string) => void }) {
         type="button"
         title="Emoji"
         aria-label="Insert emoji"
+        disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         style={{
-          border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1.25rem',
-          lineHeight: 1, padding: '0.2rem 0.35rem', opacity: open ? 1 : 0.7, borderRadius: 8, minHeight: 0,
+          border: 'none', background: 'transparent', cursor: disabled ? 'not-allowed' : 'pointer',
+          fontSize: '1.25rem', lineHeight: 1, padding: '0.2rem 0.35rem', opacity: open ? 1 : 0.7,
+          borderRadius: 8, minHeight: 0,
         }}
       >
         😊
       </button>
       {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 70, width: 272,
-            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
-            boxShadow: '0 12px 34px rgba(0,0,0,.16)', padding: '0.5rem',
-            display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 2,
-          }}
-        >
+        <div role="menu" className="chat-emoji-popover">
           {EMOJI.map((e, i) => (
-            <button
-              key={`${e}-${i}`}
-              type="button"
-              onClick={() => onPick(e)}
-              style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1.25rem', padding: '0.2rem', borderRadius: 8, minHeight: 0 }}
-              onMouseEnter={(ev) => (ev.currentTarget.style.background = '#f1f5f9')}
-              onMouseLeave={(ev) => (ev.currentTarget.style.background = 'transparent')}
-            >
+            <button key={`${e}-${i}`} type="button" className="chat-emoji-btn" onClick={() => onPick(e)}>
               {e}
             </button>
           ))}

@@ -1,11 +1,6 @@
 'use client';
-// Messages (spec 313 v2) — ONE surface for everything message-shaped, replacing
-// the separate Inbox / Chats / Find tabs (Telegram/Slack model): requests
-// pinned on top, every conversation in one rail, thread + reply on the right,
-// and compose/search built into the header. The chat/request distinction
-// stays MECHANICAL (a case attached or not) but is now presentation, not
-// navigation. Channels (communities) and Networks (org presence) remain
-// separate destinations — different objects, not 1:1 messaging.
+// Messages (spec 313 v2) — Telegram/Outlook-style unified inbox: requests pinned,
+// conversation rail + thread, rich compose (emoji + images), amber design system.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
@@ -18,8 +13,12 @@ import { activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/on
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
-import { Avatar } from './chat/Avatar';
-import { EmojiButton } from './chat/EmojiButton';
+import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
+import { AvatarUpload } from './chat/AvatarUpload';
+import { MessageBubble } from './chat/MessageBubble';
+import { MessageComposer } from './chat/MessageComposer';
+import { messagePreview } from './chat/message-content';
+import { useAvatar } from './chat/use-avatar';
 
 async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
   const v = via.toLowerCase();
@@ -31,18 +30,15 @@ async function signerFor(via: string, agent: Address, token: string): Promise<Si
   return passkeySignHash;
 }
 
-// 13→11 reconciliation: delivered/seen are inbox facts now, not case states; a request awaiting the
-// responder's decision is `submitted` (received) or `triaged` (being worked).
 const PENDING_STATES = ['submitted', 'triaged'];
 
 function ContextChip({ r }: { r: { kind: string; id: string; label?: string } }) {
-  // An org-channels invite (spec 318): the chip IS the accept action — it routes the invitee to the
-  // org's channels join gate, where they sign their own listing (ADR-0025 — the invite never enrolls).
   if (r.kind === 'org-channels') {
     return (
       <a
         href={`/org/${r.id}/channels`}
-        style={{ border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#047857', borderRadius: 999, padding: '0.05rem 0.55rem', fontSize: '0.7rem', textDecoration: 'none', fontWeight: 600 }}
+        className="badge"
+        style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', textDecoration: 'none', fontWeight: 600 }}
         title={`Organization ${r.id}`}
       >
         {r.label ?? 'Join the discussion'} →
@@ -50,42 +46,41 @@ function ContextChip({ r }: { r: { kind: string; id: string; label?: string } })
     );
   }
   return (
-    <span
-      style={{ border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca', borderRadius: 999, padding: '0.05rem 0.55rem', fontSize: '0.7rem' }}
-      title={`${r.kind}: ${r.id}`}
-    >
+    <span className="badge" style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', color: 'var(--color-amber-700)' }} title={`${r.kind}: ${r.id}`}>
       {r.label ?? `${r.kind}:${shortId(r.id)}`}
     </span>
   );
 }
 
-/**
- * The Interactions/Messages surface (spec 313). `targetAgent` scopes it to a managed org/service SA the
- * person controls (workspace-scoped Messages, spec 315) — the person sees messages sent to THAT agent;
- * omitted → the person's own inbox. The server re-verifies control on every read/action.
- */
+function ConvAvatar({ conversationId, title, view }: { conversationId: string; title: string; view: ReturnType<typeof useInboxView>['view'] }) {
+  const addr = useMemo(() => {
+    const d = view?.descriptors[conversationId];
+    const p = d?.participants.find((x) => {
+      const a = x.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+      return a && view?.names?.[a];
+    });
+    return p?.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
+  }, [conversationId, view]);
+  const imageUrl = useAvatar(addr ? personAvatarKey(addr) : null);
+  return <AvatarUpload name={title} imageUrl={imageUrl} size={48} />;
+}
+
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { session, agentAddress } = useSession();
   const { view, refresh, post, busy, error, setError } = useInboxView(session, targetAgent);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
-  // Composer: search → pick → write → send.
   const [composeOpen, setComposeOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<AgentSearchHit[] | null>(null);
   const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
   const [composeBody, setComposeBody] = useState('');
-
-  // Vault-storage upgrade (spec 317): existing members provision the standing inbox-delivery grant HERE,
-  // by explicit action — the grant is only auto-issued inside enroll flows, and a surprise signature at
-  // sign-in is not a consent step (feedback_value_steps_not_signatures). null = still checking / not
-  // applicable; false = offer the upgrade; true = vault path active for this member.
   const [vaultBodies, setVaultBodies] = useState<boolean | null>(null);
   const [vaultBusy, setVaultBusy] = useState(false);
+  const [mobileThread, setMobileThread] = useState(false);
+
   useEffect(() => {
-    // Person-scope only: the grant is the PERSON's (delegator = their SA); org/service inboxes are out of
-    // scope here. Hidden entirely until the delivery service is provisioned.
     if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
     let cancelled = false;
     void fetch(`/connect/inbox/delivery-grant?owner=${agentAddress}`, {
@@ -93,7 +88,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     })
       .then((r) => r.json())
       .then((d: { stored?: boolean }) => { if (!cancelled) setVaultBodies(d.stored === true); })
-      .catch(() => { /* leave null — no banner on a read hiccup */ });
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [session, agentAddress, targetAgent]);
 
@@ -108,9 +103,6 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     } finally { setVaultBusy(false); }
   }, [session, agentAddress, setError]);
 
-  // DM deep-link (`/messages?to=<label>`, e.g. from an org channel's "Message" button): resolve the
-  // label through the SAME KB search the composer uses (one mechanism, spec 314) and open compose
-  // with the recipient picked. window.location (not useSearchParams) — no Suspense boundary needed.
   useEffect(() => {
     const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
     if (!to) return;
@@ -120,7 +112,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       const hit = found.find((h) => h.label.toLowerCase() === to) ?? found[0]!;
       setRecipient(hit);
       setComposeOpen(true);
-    }).catch(() => { /* unresolved label → the user just gets the normal composer */ });
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -137,7 +129,6 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));
   }, [view, activeId]);
 
-  // Pending case attached to a conversation (what makes it a "request" thread).
   const caseFor = useCallback(
     (conversationId: string): InteractionCaseV1 | null => {
       if (!view) return null;
@@ -169,7 +160,18 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     [view],
   );
 
-  // Opening a thread reads it (Telegram behavior) — no explicit "mark read".
+  const previewFor = useCallback(
+    (conversationId: string): string => {
+      if (!view) return '';
+      const last = [...view.items]
+        .filter((i) => i.conversationId === conversationId && i.folder !== 'trash')
+        .sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt))[0];
+      if (!last) return '';
+      return messagePreview(view.bodies[last.messageId]) || 'New message';
+    },
+    [view],
+  );
+
   useEffect(() => {
     if (!view || !activeId) return;
     const unread = view.items.filter((i) => i.conversationId === activeId && i.unread && i.folder !== 'sent');
@@ -181,11 +183,12 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const canReply = !!activeDescriptor && activeDescriptor.participants.length === 2;
   const activeCase = activeId ? caseFor(activeId) : null;
   const activePending = !!activeCase && PENDING_STATES.includes(activeCase.state);
+  const selfAvatarKey = agentAddress ? personAvatarKey(agentAddress) : null;
+  const selfAvatar = useAvatar(selfAvatarKey);
 
-  const sendReply = async () => {
-    if (!activeId || !draft.trim()) return;
-    const ok = await post({ action: 'reply', conversationId: activeId, bodyText: draft }, `reply:${activeId}`);
-    if (ok) setDraft('');
+  const sendReply = async (body: string) => {
+    if (!activeId || !body.trim()) return;
+    await post({ action: 'reply', conversationId: activeId, bodyText: body }, `reply:${activeId}`);
   };
 
   const runSearch = useCallback(async () => {
@@ -199,9 +202,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     }
   }, [query, setError]);
 
-  const sendNew = async () => {
-    if (!recipient || !composeBody.trim()) return;
-    const ok = await post({ action: 'send', toName: recipient.name, bodyText: composeBody }, 'compose');
+  const sendNew = async (body: string) => {
+    if (!recipient || !body.trim()) return;
+    const ok = await post({ action: 'send', toName: recipient.name, bodyText: body }, 'compose');
     if (ok) {
       setComposeOpen(false);
       setRecipient(null);
@@ -251,7 +254,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       return (
         <button
           key={a.actionId}
-          style={a.style === 'destructive' ? { background: '#fee2e2', color: '#b91c1c' } : undefined}
+          className={a.style === 'destructive' ? 'btn danger' : 'btn'}
           disabled={anyBusy}
           title={issues ? 'Signs a scoped delegation + mandate' : undefined}
           onClick={() =>
@@ -266,18 +269,22 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     });
   };
 
-  return (
-    <SectionShell title="Messages">
-      {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
+  const selectConv = (id: string) => {
+    setOpen(id);
+    setMobileThread(true);
+  };
 
-      {/* ── Needs attention: pending requests pinned above the rail ── */}
+  return (
+    <SectionShell title="Messages" description="Direct messages and requests in one place">
+      {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
+
       {pendingCases.length > 0 && (
-        <div style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '0.9rem 1rem', marginBottom: '1rem' }}>
+        <div className="chat-attention">
           <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Needs attention · {pendingCases.length}</div>
           {pendingCases.map((c) => {
             const card = view?.cards[c.id];
             return (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.8rem', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: '0.4rem' }}>
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.8rem', background: '#fff', border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: '0.4rem' }}>
                 <div>
                   <b>{card?.title ?? c.subject}</b>
                   <div style={{ fontSize: '0.82rem', opacity: 0.75 }}>
@@ -287,7 +294,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   {caseActions(c)}
                   {convForCase(c) && (
-                    <button className="ghost" onClick={() => setOpen(convForCase(c))}>Open thread</button>
+                    <button type="button" className="ghost" onClick={() => selectConv(convForCase(c)!)}>Open thread</button>
                   )}
                 </div>
               </div>
@@ -296,145 +303,136 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         </div>
       )}
 
-      {/* ── Vault-storage upgrade (spec 317) — explicit consent, one signature, once ── */}
       {vaultBodies === false && (
-        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid #6ee7b7', background: '#ecfdf5', borderRadius: 10, padding: '0.5rem 0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.83rem', color: '#065f46' }}>
-            <b>Secure your message storage.</b> Store message contents encrypted in your personal vault instead
-            of app storage — you sign one standing authorization your Home can never widen.
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', borderRadius: 10, padding: '0.5rem 0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.83rem', color: 'var(--color-sage-700)' }}>
+            <b>Secure your message storage.</b> Store message contents encrypted in your personal vault.
           </span>
-          <button className="btn" disabled={vaultBusy} onClick={() => void enableVaultBodies()}>
+          <button type="button" className="btn" disabled={vaultBusy} onClick={() => void enableVaultBodies()}>
             {vaultBusy ? 'Signing…' : 'Enable vault storage'}
           </button>
         </div>
       )}
 
-      {/* ── Header: search + new message ── */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <AvatarUpload
+          name="You"
+          imageUrl={selfAvatar}
+          size={36}
+          editable={!!agentAddress}
+          onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
+        />
         <input
-          placeholder="Search people (any part of a name)…"
+          placeholder="Search people…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { setComposeOpen(true); void runSearch(); } }}
-          style={{ flex: 1, minWidth: 220, padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 999 }}
+          style={{ flex: 1, minWidth: 180, padding: '0.5rem 0.85rem', border: '1px solid var(--color-border)', borderRadius: 999 }}
         />
-        <button disabled={!query.trim()} onClick={() => { setComposeOpen(true); void runSearch(); }}>Search</button>
-        <button className="ghost" onClick={() => { setComposeOpen((v) => !v); setHits(null); }}>
+        <button type="button" className="btn" disabled={!query.trim()} onClick={() => { setComposeOpen(true); void runSearch(); }}>Search</button>
+        <button type="button" className="ghost" onClick={() => { setComposeOpen((v) => !v); setHits(null); }}>
           {composeOpen ? 'Close' : 'New message'}
         </button>
       </div>
 
-      {/* ── Composer (search → pick → write) ── */}
       {composeOpen && (
-        <div style={{ border: '1px solid #c7d2fe', background: '#eef2ff', borderRadius: 10, padding: '1rem', marginBottom: '1rem' }}>
+        <div style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
           {!recipient ? (
             <>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                To: search the knowledge base — matches names, display names, descriptions, skills.
-              </div>
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>To: pick a person from search results</div>
               {hits === null ? (
                 <div style={{ fontSize: '0.82rem', opacity: 0.65 }}>Type above and hit Search.</div>
               ) : hits.length === 0 ? (
-                <div style={{ fontSize: '0.82rem', opacity: 0.65 }}>No indexed agent matches “{query.trim()}”. Newly claimed names appear within a minute.</div>
+                <div style={{ fontSize: '0.82rem', opacity: 0.65 }}>No matches for “{query.trim()}”.</div>
               ) : (
                 hits.map((h) => (
-                  <div key={h.smartAgent} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid #e0e7ff', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    key={h.smartAgent}
+                    type="button"
+                    onClick={() => setRecipient(h)}
+                    style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '0.5rem 0', borderBottom: '1px solid var(--color-border)' }}
+                  >
+                    <AvatarUpload name={h.displayName ?? h.name} size={40} />
                     <div>
-                      <b>{h.displayName ?? h.name}</b> <span style={{ opacity: 0.6, fontSize: '0.82rem' }}>({h.name})</span>
-                      {(h.description || h.skills) && (
-                        <div style={{ fontSize: '0.76rem', opacity: 0.65 }}>{[h.description, h.skills].filter(Boolean).join(' · ')}</div>
-                      )}
+                      <b>{h.displayName ?? h.name}</b>
+                      <div style={{ fontSize: '0.76rem', opacity: 0.65 }}>{h.name}</div>
                     </div>
-                    <button onClick={() => setRecipient(h)}>Select</button>
-                  </div>
+                  </button>
                 ))
               )}
             </>
           ) : (
             <>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                To: <b>{recipient.displayName ?? recipient.name}</b>{' '}
-                <span style={{ opacity: 0.6 }}>({recipient.name})</span>{' '}
-                <button className="ghost" style={{ fontSize: '0.75rem', minHeight: 0, padding: '0.15rem 0.5rem' }} onClick={() => setRecipient(null)}>change</button>
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <AvatarUpload name={recipient.displayName ?? recipient.name} size={32} />
+                <span>To: <b>{recipient.displayName ?? recipient.name}</b></span>
+                <button type="button" className="ghost" style={{ fontSize: '0.75rem', minHeight: 0, padding: '0.15rem 0.5rem' }} onClick={() => setRecipient(null)}>change</button>
               </div>
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.3rem', border: '1px solid #d1d5db', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem', background: '#fff' }}>
-                  <input
-                    value={composeBody}
-                    onChange={(e) => setComposeBody(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void sendNew(); }}
-                    placeholder="Write your message…"
-                    autoFocus
-                    style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
-                  />
-                  <EmojiButton onPick={(em) => setComposeBody((d) => d + em)} />
-                </div>
-                <button
-                  disabled={anyBusy || !composeBody.trim()}
-                  onClick={() => void sendNew()}
-                  title="Send"
-                  style={{ borderRadius: '50%', width: 38, height: 38, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  {busy === 'compose' ? '…' : '➤'}
-                </button>
-              </div>
+              <MessageComposer
+                value={composeBody}
+                onChange={setComposeBody}
+                onSend={sendNew}
+                busy={busy === 'compose'}
+                placeholder="Write your message…"
+              />
             </>
           )}
         </div>
       )}
 
-      {/* ── Rail + thread ── */}
       {conversations.length === 0 ? (
-        <p style={{ opacity: 0.7 }}>No conversations yet — search a name above and send the first message.</p>
+        <p style={{ opacity: 0.7 }}>No conversations yet — search a name and send the first message.</p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(210px, 290px) 1fr', gap: '1rem', alignItems: 'start' }}>
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-            {conversations.map((c) => {
-              const cCase = caseFor(c.conversationId);
-              const isPending = !!cCase && PENDING_STATES.includes(cCase.state);
-              return (
-                <button
-                  key={c.conversationId}
-                  onClick={() => setOpen(c.conversationId)}
-                  style={{
-                    display: 'flex', gap: '0.6rem', alignItems: 'center', width: '100%', textAlign: 'left', padding: '0.6rem 0.8rem',
-                    border: 'none', borderRadius: 0, borderBottom: '1px solid #f1f5f9', minHeight: 0,
-                    background: c.conversationId === activeId ? '#eef2ff' : '#fff',
-                    color: '#111827', fontWeight: 400, cursor: 'pointer',
-                  }}
-                >
-                  <Avatar name={titleFor(c.conversationId)} size={42} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontWeight: c.unread > 0 ? 700 : 500 }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titleFor(c.conversationId)}</span>
-                      {c.unread > 0 && (
-                        <span style={{ background: '#4338ca', color: '#fff', borderRadius: 999, fontSize: '0.68rem', padding: '0.05rem 0.45rem', alignSelf: 'center' }}>
-                          {c.unread}
-                        </span>
-                      )}
+        <div className={`chat-shell${mobileThread && activeId ? ' chat-shell--thread-open' : ''}`}>
+          <div className="chat-rail">
+            <div className="chat-rail-search">
+              <input placeholder="Filter conversations…" readOnly style={{ opacity: 0.5 }} title="Coming soon" />
+            </div>
+            <div className="chat-rail-list">
+              {conversations.map((c) => {
+                const cCase = caseFor(c.conversationId);
+                const isPending = !!cCase && PENDING_STATES.includes(cCase.state);
+                const title = titleFor(c.conversationId);
+                return (
+                  <button
+                    key={c.conversationId}
+                    type="button"
+                    className={`chat-rail-item${c.conversationId === activeId ? ' chat-rail-item--active' : ''}`}
+                    onClick={() => selectConv(c.conversationId)}
+                  >
+                    {view && <ConvAvatar conversationId={c.conversationId} title={title} view={view} />}
+                    <div className="chat-rail-item__meta">
+                      <div className={`chat-rail-item__title${c.unread > 0 ? ' chat-rail-item__title--unread' : ''}`}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                        {c.unread > 0 && <span className="chat-unread-badge">{c.unread}</span>}
+                      </div>
+                      <div className="chat-rail-item__preview">
+                        {isPending && <span style={{ color: 'var(--color-amber-700)', fontWeight: 600 }}>● review · </span>}
+                        {previewFor(c.conversationId)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.72rem', opacity: 0.6, display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
-                      {isPending && <span style={{ color: '#b45309', fontWeight: 700 }}>● needs review</span>}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{new Date(c.lastEventAt).toLocaleString()}</span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', display: 'flex', flexDirection: 'column', minHeight: 420 }}>
+          <div className="chat-thread">
             {activeId ? (
               <>
-                <div style={{ fontWeight: 600, borderBottom: '1px solid #f1f5f9', paddingBottom: '0.5rem', display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <Avatar name={titleFor(activeId)} size={34} />
-                  <span>{titleFor(activeId)}</span>
-                  {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} />)}
+                <div className="chat-thread-header">
+                  <button type="button" className="chat-slide-back" style={{ display: 'none' }} aria-hidden />
+                  {view && <ConvAvatar conversationId={activeId} title={titleFor(activeId)} view={view} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="chat-thread-header__title">{titleFor(activeId)}</div>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
+                      {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} />)}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Request thread: the decision card lives IN the thread. */}
                 {activeCase && activePending && (
-                  <div style={{ margin: '0.75rem 0 0', padding: '0.75rem 0.9rem', border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 8 }}>
+                  <div className="chat-attention" style={{ margin: '0.75rem 1rem 0' }}>
                     <b>{view?.cards[activeCase.id]?.title ?? activeCase.subject}</b>
                     <div style={{ fontSize: '0.82rem', opacity: 0.75, margin: '0.2rem 0 0.5rem' }}>
                       {view?.cards[activeCase.id]?.summary ?? `${activeCase.kind} · from ${agentLabel(activeCase.requester, view?.names)}`}
@@ -442,14 +440,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>{caseActions(activeCase)}</div>
                   </div>
                 )}
-                {activeCase && !activePending && (
-                  <div style={{ margin: '0.75rem 0 0', fontSize: '0.78rem', color: '#475569' }}>
-                    Request state: <b>{activeCase.state}</b>
-                    {view?.mandates[activeCase.id] && <> · mandate issued (delegation <code>{view.mandates[activeCase.id]!.delegationHash.slice(0, 10)}…</code>)</>}
-                  </div>
-                )}
 
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.12rem', padding: '0.75rem 0.15rem', overflowY: 'auto' }}>
+                <div className="chat-thread-body">
                   {thread.map((i, idx) => {
                     const meta = view?.envelopeMeta[i.messageId];
                     const mine = i.folder === 'sent';
@@ -457,85 +449,52 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     const next = thread[idx + 1];
                     const firstOfGroup = !prev || (prev.folder === 'sent') !== mine;
                     const lastOfGroup = !next || (next.folder === 'sent') !== mine;
-                    const body = view?.bodies[i.messageId];
                     return (
-                      <div key={i.messageId} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '76%', marginTop: firstOfGroup ? '0.5rem' : 0 }}>
-                        <div
-                          style={{
-                            background: mine ? 'linear-gradient(135deg,#6366f1,#4338ca)' : '#f1f5f9',
-                            color: mine ? '#fff' : '#111827', fontSize: '0.9rem', lineHeight: 1.35,
-                            padding: '0.42rem 0.75rem 0.34rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-                            borderRadius: 16,
-                            borderBottomRightRadius: mine && lastOfGroup ? 4 : 16,
-                            borderBottomLeftRadius: !mine && lastOfGroup ? 4 : 16,
-                            opacity: body ? 1 : 0.6,
-                          }}
-                        >
-                          {body ?? <i style={{ opacity: 0.7 }}>content in vault…</i>}
-                          <span style={{ fontSize: '0.62rem', opacity: mine ? 0.7 : 0.45, marginLeft: '0.5rem', float: 'right', marginTop: '0.3rem' }}>
-                            {new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            {meta?.signatureSigner ? ' ✓' : ''}
-                          </span>
-                        </div>
-                      </div>
+                      <MessageBubble
+                        key={i.messageId}
+                        mine={mine}
+                        body={view?.bodies[i.messageId]}
+                        time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        verified={!!meta?.signatureSigner}
+                        firstOfGroup={firstOfGroup}
+                        lastOfGroup={lastOfGroup}
+                      />
                     );
                   })}
                 </div>
 
                 {canReply ? (
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '0.75rem' }}>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.3rem', border: '1px solid #d1d5db', borderRadius: 22, padding: '0.15rem 0.15rem 0.15rem 0.9rem' }}>
-                      <input
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void sendReply(); }}
-                        placeholder="Message…"
-                        style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.92rem' }}
-                      />
-                      <EmojiButton onPick={(em) => setDraft((d) => d + em)} />
-                    </div>
-                    <button
-                      disabled={anyBusy || !draft.trim()}
-                      onClick={() => void sendReply()}
-                      title="Send"
-                      style={{ borderRadius: '50%', width: 38, height: 38, padding: 0, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      {busy === `reply:${activeId}` ? '…' : '➤'}
-                    </button>
-                  </div>
+                  <MessageComposer value={draft} onChange={setDraft} onSend={sendReply} busy={busy === `reply:${activeId}`} />
                 ) : (
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '0.6rem', fontSize: '0.75rem', opacity: 0.6 }}>
+                  <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', opacity: 0.6, borderTop: '1px solid var(--color-border)' }}>
                     {activeCase ? 'Respond with the request actions above.' : 'Replies open once the conversation has a two-party descriptor.'}
                   </div>
                 )}
               </>
             ) : (
-              <p style={{ opacity: 0.7 }}>Select a conversation.</p>
+              <p style={{ opacity: 0.7, margin: 'auto', padding: '2rem' }}>Select a conversation.</p>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Issued mandates ── */}
       {view && Object.keys(view.mandates).length > 0 && (
-        <div style={{ marginTop: '1.25rem' }}>
-          <h2 style={{ fontSize: '0.85rem' }}>Issued mandates</h2>
+        <details style={{ marginTop: '1.25rem' }}>
+          <summary style={{ fontSize: '0.85rem', cursor: 'pointer' }}>Issued mandates ({Object.keys(view.mandates).length})</summary>
           {Object.entries(view.mandates).map(([intId, m]) => {
             const c = view.cases.find((x) => x.id === intId);
             return (
-              <div key={m.mandateId} style={{ padding: '0.5rem 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.82rem' }}>
+              <div key={m.mandateId} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--color-border)', fontSize: '0.82rem' }}>
                 <b>{c?.subject ?? intId}</b>
                 <div style={{ opacity: 0.7 }}>
                   {m.allowedActions.join(', ')} · {m.resourceScope.resource}
-                  {m.constraints.expiresAt ? ` · until ${new Date(m.constraints.expiresAt).toLocaleDateString()}` : ''}
                   {' · delegation '}<code>{m.delegationHash.slice(0, 10)}…</code>
                 </div>
               </div>
             );
           })}
-        </div>
+        </details>
       )}
     </SectionShell>
   );
 }
-
