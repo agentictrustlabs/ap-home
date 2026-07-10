@@ -12,10 +12,10 @@ import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/goog
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
 import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
-import { signBridgeCall } from '../../_lib/bridge-hmac';
+import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
-import { getServer, json, resolveOrigin, type Env, type FnContext } from '../../_lib/server-broker';
+import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
 
 /**
  * App-layer (ADR-0021) return-URL policy: in addition to the exact-match
@@ -50,41 +50,8 @@ function isOwnPortalReturn(rpRedirect: string): boolean {
   }
 }
 
-/**
- * Ask demo-a2a (the master holder) for this Google subject's KMS-custodied SA
- * (spec 235 §5). Derive-only, server-to-server, bridge-secret authenticated.
- * Returns the CAIP-10 agent id. The broker can't derive it itself (no master).
- */
-async function resolveKmsAgent(
-  env: Env,
-  oidcIss: string,
-  oidcSub: string,
-  rotation: number,
-): Promise<{ ok: true; agentId: CanonicalAgentId } | { ok: false; reason: string }> {
-  if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
-    return { ok: false, reason: 'custody not configured' };
-  }
-  try {
-    // SEC-010: per-call HMAC envelope replaces the bearer secret. A compromise of the
-    // shared key now yields short-window replay only — bounded by BRIDGE_FRESHNESS_MS
-    // at the receiver, with single-use nonces preventing intra-window replay.
-    const envelope = await signBridgeCall({
-      secret: env.A2A_CUSTODY_BRIDGE_SECRET,
-      audience: 'custody.google.resolve',
-      payload: { iss: oidcIss, sub: oidcSub, rotation },
-    });
-    const res = await fetch(`${env.A2A_CUSTODY_URL.replace(/\/$/, '')}/custody/oidc/resolve`, {
-      method: 'POST',
-      headers: envelope.headers,
-      body: envelope.body,
-    });
-    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agentId?: string; error?: string };
-    if (!res.ok || !body.ok || !body.agentId) return { ok: false, reason: body.error ?? `resolve HTTP ${res.status}` };
-    return { ok: true, agentId: body.agentId as CanonicalAgentId };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : 'resolve failed' };
-  }
-}
+// The KMS-custody resolve bridge (Google subject → per-subject KMS SA, spec 235 §5) is the shared
+// `resolveKmsAgent` in `../../_lib/kms-resolve` — the email-bootstrap path (iss='email') reuses it verbatim.
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {

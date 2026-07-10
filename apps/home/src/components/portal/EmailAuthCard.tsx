@@ -4,6 +4,7 @@
 // anonymous ⇒ ISSUE a login-grade session (or BOOTSTRAP if there's no home for that email yet).
 import { useState } from 'react';
 import { useSession } from '../../context/session';
+import { secureHomeNoName, activateVault } from '../../home/onboarding';
 
 export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
   const { session, openSession } = useSession();
@@ -38,15 +39,24 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
         headers: { 'content-type': 'application/json', ...(session ? { authorization: `Bearer ${session.token}` } : {}) },
         body: JSON.stringify({ email: email.trim().toLowerCase(), otp: otp.trim() }),
       });
-      const d = (await r.json().catch(() => ({}))) as { status?: string; token?: string; error?: string };
+      const d = (await r.json().catch(() => ({}))) as { status?: string; token?: string; custody?: boolean; error?: string };
       if (!r.ok) throw new Error(d.error ?? 'verification failed');
       if (d.status === 'linked') {
         setStep('email'); setEmail(''); setOtp(''); setNote('Email added as a sign-in method.');
         onLinked?.();
       } else if (d.status === 'issued' && d.token) {
+        if (d.custody) {
+          // Email-bootstrap: this email owns a KMS-custodied home. Secure it on-chain FIRST (demo-a2a
+          // derives + holds the per-subject key — no device gesture), then open the session so the portal
+          // loads a deployed, resolvable home.
+          setNote('Securing your home…');
+          const res = await secureHomeNoName({ token: d.token });
+          if (!res.ok) throw new Error(res.error);
+          void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
+        }
         await openSession(d.token, 'email', false);
       } else if (d.status === 'bootstrap') {
-        setErr('No home exists for this email yet — sign up with a passkey or Google first, then add email.');
+        setErr('We couldn’t set up a home for this email automatically — sign up with a passkey or Google, then add email.');
       }
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };

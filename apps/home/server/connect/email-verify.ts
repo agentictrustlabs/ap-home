@@ -6,8 +6,17 @@
 // The OTP record is keyed by SHA-256(email); the code is checked with bounded attempts (anti-brute-force).
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { readEmailFacet, recordEmailFacet, emailHash } from '../../src/lib/kv-indexer';
+import { readEmailFacet, recordEmailFacet, emailHash, readRotation } from '../../src/lib/kv-indexer';
+import { resolveKmsAgent } from '../_lib/kms-resolve';
+import { isSocialCustodyAud } from '../../src/lib/oidc-clients';
+import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import type { CredentialPrincipal, CanonicalAgentId } from '@agenticprimitives/types';
+
+// The (iss, sub) namespace for email-subject KMS custody. Email has no OIDC provider, so WE are the
+// issuer authority: `iss = 'email'`, `sub = SHA-256(email)`. demo-a2a derives the per-subject custodian
+// C_sub from exactly this pair (spec 235 §5, provider-neutral OIDC-subject custody) — the SAME mechanism
+// Google uses, so the custody session is minted OIDC-shaped (`kind:'oidc'`, `id = 'email#<hash>'`).
+const EMAIL_ISS = 'email';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -59,16 +68,65 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ status: 'linked', via: 'email' });
   }
 
-  // ISSUE or BOOTSTRAP.
-  const agent = await readEmailFacet(env.AUTH_CODES, email);
-  if (!agent) return json({ status: 'bootstrap', via: 'email', email });
-
+  // ── ANONYMOUS: ISSUE (known home) or BOOTSTRAP (create a KMS-custodied home). ──
+  // Email is a login-grade credential, but — exactly like Google × KMS on the Personal Home (spec 235) — an
+  // email with no home of its OWN gets a per-subject KMS-custodied home (iss='email', sub=SHA-256(email)).
+  // The OTP we just verified is the authn; demo-a2a derives + holds C_sub (G-1, testnet-acceptable custody).
+  // The email FACET stays login-grade/asserted (enroll still rejects `kind:'email'`); it's the KMS custodian
+  // C_sub — not the email — that confers on-chain authority, so this is not "email as a custodian".
   const iss = resolveOrigin(request, env);
   const { signer } = await getServer(env);
-  const principal: CredentialPrincipal = { kind: 'email', id: hash, assurance: 'asserted', role: 'login-grade' };
+  const custodyAud = env.DEMO_SSO_AUD ?? 'demo-sso';
+
+  const facet = await readEmailFacet(env.AUTH_CODES, email); // a prior email-home OR a linked device home
+  // KMS custody is offered for the Personal-Home aud (+ socialCustody clients, spec 294); other auds stay
+  // login-grade — their members onboard through the Personal Home.
+  const custodyEligible = isSocialCustodyAud(rec.aud, custodyAud);
+  const rotation = await readRotation(env.AUTH_CODES, EMAIL_ISS, hash);
+  const kms = custodyEligible
+    ? await resolveKmsAgent(env, EMAIL_ISS, hash, rotation)
+    : ({ ok: false } as const);
+
+  let agent: CanonicalAgentId;
+  let custodyGrade: boolean;
+  if (kms.ok && (!facet || facet.toLowerCase() === kms.agentId.toLowerCase())) {
+    // The email's OWN KMS home — a fresh bootstrap OR a returning visit (the SA is deterministic; the client
+    // deploys it on-chain via secureHomeNoName if it isn't yet). Refresh the facet (idempotent; tracks
+    // rotation). Custody-grade: C_sub is a real on-chain custodian, re-verified by demo-a2a's gate.
+    await recordEmailFacet(env.AUTH_CODES, email, kms.agentId);
+    agent = kms.agentId;
+    custodyGrade = true;
+  } else if (facet) {
+    // Email was LINKED to another home (e.g. a passkey home, via the Security card). Respect the link:
+    // issue a login-grade session — email never confers custody OVER a device-secured home (ADR-0011).
+    agent = facet;
+    custodyGrade = false;
+  } else {
+    // No home + custody ineligible/unreachable → the client onboards with a passkey/Google first.
+    return json({ status: 'bootstrap', via: 'email', email });
+  }
+
+  const sessionPrincipal: CredentialPrincipal = custodyGrade
+    // Custody sessions are OIDC-subject-shaped (`kind:'oidc'`, id='email#<hash>') so demo-a2a's provider-
+    // neutral custody gate re-derives C_sub — the email origin stays visible in the subject `iss`.
+    ? { kind: 'oidc', id: oidcFacetId(EMAIL_ISS, hash), assurance: 'onchain-confirmed', role: 'custody-grade' }
+    : { kind: 'email', id: hash, assurance: 'asserted', role: 'login-grade' };
   const token = await mintAgentSession(
-    { sub: agent, principal, assurance: 'asserted', aud: rec.aud, iss, ttlSeconds: 3600 },
+    {
+      sub: agent,
+      principal: sessionPrincipal,
+      // Custody-grade = home-level authority → the home/custody aud demo-a2a's `/custody` gate verifies,
+      // carrying the rotation so it derives the matching per-subject key (spec 235 §5b). Login-grade stays
+      // bound to the requesting aud.
+      assurance: custodyGrade ? 'onchain-confirmed' : 'asserted',
+      aud: custodyGrade ? custodyAud : rec.aud,
+      iss,
+      ttlSeconds: 3600,
+      ...(custodyGrade ? { rotation } : {}),
+    },
     signer,
   );
-  return json({ status: 'issued', token, via: 'email' });
+  // `custody:true` tells the client to secure the home on-chain (secureHomeNoName) before proceeding — a
+  // fresh KMS home isn't deployed until then. For a linked device home it's already secured.
+  return json({ status: 'issued', token, via: 'email', custody: custodyGrade });
 };
