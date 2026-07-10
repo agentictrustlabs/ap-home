@@ -245,6 +245,40 @@ export async function issueInboxDeliveryDelegation(
  *  (spec 321): display info the member chose to share, never the whole vault. */
 export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
 
+/** The org's managed profile record (`org:profile` — what OrgDetail's steward edits): the org
+ *  information a MEMBER may read over their member-access grant (spec 321 W2). */
+export const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org:profile' as const;
+
+/**
+ * spec 321 W2 — the member-access delegation `org → member`, signed by the ORG's custody (the
+ * steward's credential) at INVITE time. The delegate is the invitee's person SA — their actual SA
+ * for an in-network invite, or the COUNTERFACTUAL email-bootstrap home address for an email invite
+ * (the same derivation redeem performs, so the grant activates only if that exact home deploys;
+ * against any other account it is inert — fail-closed, no re-targeting). Read-only over the org's
+ * shareable profile record; time-boxed; on-chain revocable.
+ */
+export async function issueMemberAccessDelegation(
+  orgSA: Address,
+  member: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [ORG_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate: member, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the org's custody (the steward's credential) grants member access
+  return d;
+}
+
 /**
  * spec 321 W1 — the membership delegation `member → org`, signed by the member's connection
  * custodian at invite ACCEPT (spec 246's deferred person→org leg). Read-only over the member's

@@ -28,7 +28,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!token) return json({ error: 'session required' }, 401);
 
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; delegation?: { delegator?: string; delegate?: string; signature?: string } }
+    | {
+        org?: string;
+        delegation?: { delegator?: string; delegate?: string; signature?: string };
+        /** spec 321 W2 — the steward's pre-signed org→member grant, delivered at redeem. */
+        memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
+      }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const d = body?.delegation;
@@ -46,6 +51,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The member consents for THEMSELVES, to THIS org — anything else is rejected (fail-closed).
   if (d.delegator.toLowerCase() !== person) return json({ error: 'delegation delegator must be your person agent' }, 403);
   if (d.delegate.toLowerCase() !== org) return json({ error: 'delegation delegate must be the org' }, 403);
+  // W2 mismatch gate: a member-access grant is stored ONLY when it is org→THIS person. A grant to a
+  // different (counterfactual) address is inert — dropped here, never re-targeted (ADR-0013).
+  const mad = body?.memberAccessDelegation;
+  const madValid = !!mad && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === person && !!mad.signature;
 
   // 1. Member-side link: merge into the existing related link (steward links keep their relationship);
   //    create a member-shaped one when the listing projection hasn't landed yet.
@@ -57,7 +66,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }).reverseResolve(person as Address).catch(() => null);
   if (existing) {
     const link = JSON.parse(existing) as Record<string, unknown>;
-    await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, membershipDelegation: d }));
+    await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}) }));
   } else {
     const orgName = await new AgentNamingClient({
       rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
@@ -65,7 +74,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     }).reverseResolve(org as Address).catch(() => null);
     await env.AUTH_CODES.put(linkKey, JSON.stringify({
       orgAgent: org, orgName: orgName ?? org, purpose: 'org membership', requestedBy: 'home-invite',
-      siteDelegation: null, membershipDelegation: d, proofHash: null, createdAt: Date.now(),
+      siteDelegation: null, membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}),
+      proofHash: null, createdAt: Date.now(),
       kind: 'org', parent: person, relationship: 'member',
     }));
     const idxKey = `related-idx:${person}`;
@@ -81,5 +91,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', delegation: d });
     await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
   }
-  return json({ ok: true });
+  return json({ ok: true, memberAccess: madValid });
 };

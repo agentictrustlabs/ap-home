@@ -10,10 +10,13 @@ import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
 import { searchAgentsKb, type AgentSearchHit } from '../../../../../src/lib/agent-search';
 import { Avatar } from '../../../../../src/components/portal/chat/Avatar';
+import { signHashFor, resolveVia } from '../../../../../src/home/onboarding';
+import { issueMemberAccessDelegation, toWire, type DelegationWire } from '../../../../../src/lib/delegation';
+import { MCP_SERVER_ID } from '../../../../../src/lib/inbox-delivery';
 
 export default function OrgInvitePage({ params }: { params: Promise<{ org: string }> }) {
   const { org } = use(params);
-  const { session } = useSession();
+  const { session, profile } = useSession();
   const communityId = org.toLowerCase();
   const authed = { 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` };
 
@@ -50,21 +53,40 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
   }, [authed, communityId]);
 
   const inviteEmail = useCallback(async () => {
-    if (!email.trim()) return;
+    if (!email.trim() || !session) return;
     setBusy(true); setErr(null); setNote(null);
     try {
+      const addr = email.trim().toLowerCase();
+      // spec 321 W2 — pre-sign the org→invitee member-access grant against the invitee's
+      // COUNTERFACTUAL home address (the email-bootstrap derivation redeem will repeat). The ORG is
+      // the delegator, so the signer is the steward's credential that custodies the org (sign-by-
+      // credential); best-effort — a failed predict/sign still sends a valid (grant-less) invite.
+      let memberAccessDelegation: DelegationWire | undefined;
+      let grantNote = '';
+      try {
+        const pr = await fetch('/connect/org-invite/predict', {
+          method: 'POST', headers: authed, body: JSON.stringify({ org: communityId, email: addr }),
+        });
+        const pb = (await pr.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; error?: string };
+        if (!pr.ok || !pb.ok || !pb.agent) throw new Error(pb.error ?? `predict failed (${pr.status})`);
+        const via = resolveVia(profile?.credential, session.via);
+        const sign = await signHashFor(via, communityId as Address, { token: session.token });
+        memberAccessDelegation = toWire(await issueMemberAccessDelegation(communityId as Address, pb.agent, MCP_SERVER_ID, sign));
+      } catch (e) {
+        grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
+      }
       const res = await fetch('/connect/org-invite/email', {
         method: 'POST', headers: authed,
-        body: JSON.stringify({ org: communityId, email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ org: communityId, email: addr, ...(memberAccessDelegation ? { memberAccessDelegation } : {}) }),
       });
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string };
       if (!res.ok || !b.ok) throw new Error(b.error ?? `invite failed (${res.status})`);
-      setNote(b.delivery === 'logged'
+      setNote((b.delivery === 'logged'
         ? `Email sending isn't configured yet — the invite link was logged server-side (dev).`
-        : `Invitation emailed to ${email.trim()}.`);
+        : `Invitation emailed to ${email.trim()}.`) + grantNote);
       setEmail('');
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  }, [authed, communityId, email]);
+  }, [authed, communityId, email, profile?.credential, session?.via, session?.token]);
 
   return (
     <SectionShell title="Invite a member">

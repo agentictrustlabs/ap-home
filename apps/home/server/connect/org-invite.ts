@@ -28,7 +28,7 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 /** Steward-control gate (same as the inbox `?agent` scope): the org is in the person's managed set. */
-async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
+export async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return false;
@@ -47,11 +47,17 @@ async function controlsOrg(env: FnContext['env'], request: Request, org: string)
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { org?: string; email?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { org?: string; email?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string } }
+    | null;
   const org = (body?.org ?? '').toLowerCase();
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!isAddress(org) || !EMAIL_RE.test(email)) return json({ error: 'org (SA) + valid email required' }, 400);
   if (!(await controlsOrg(env, request, org))) return json({ error: 'you must steward this organization to invite' }, 403);
+  // spec 321 W2 — optional pre-signed member-access grant (org → the invitee's counterfactual home,
+  // from /org-invite/predict). Reject a grant whose delegator isn't THIS org — never fix up authority.
+  const mad = body?.memberAccessDelegation;
+  if (mad && (mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
 
   const orgName = await new AgentNamingClient({
     rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
@@ -66,7 +72,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // the org's own "who did I invite" tracking, kept OUT of KV so an infra leak exposes no invitee data.
   try {
     const vault = await orgVault(env, org);
-    if (vault) await vault.set(`org.invite:${token}`, { emailHash: await emailHash(email), createdAt: Date.now(), status: 'pending' });
+    if (vault) await vault.set(`org.invite:${token}`, { emailHash: await emailHash(email), createdAt: Date.now(), status: 'pending', ...(mad ? { memberAccessDelegation: mad } : {}) });
   } catch { /* tracking is best-effort; the invite remains valid via the KV pointer */ }
 
   const joinUrl = `${resolveOrigin(request, env)}/invite/${token}`;

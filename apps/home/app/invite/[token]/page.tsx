@@ -22,13 +22,17 @@ async function grantMembership(
   org: string,
   sign: (h: `0x${string}`) => Promise<`0x${string}`>,
   bearer: string,
+  // spec 321 W2 — the steward's pre-signed org→invitee grant delivered at redeem. Forwarded only when
+  // its delegate IS this member (the counterfactual matched); otherwise it is inert and dropped.
+  memberAccess?: { delegate?: string } | null,
 ): Promise<void> {
   try {
     const d = await issueMembershipDelegation(member, org as Address, MCP_SERVER_ID, sign);
+    const madMatches = !!memberAccess && (memberAccess.delegate ?? '').toLowerCase() === member.toLowerCase();
     await fetch('/connect/org-membership', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
-      body: JSON.stringify({ org, delegation: toWire(d) }),
+      body: JSON.stringify({ org, delegation: toWire(d), ...(madMatches ? { memberAccessDelegation: memberAccess } : {}) }),
     });
   } catch (e) {
     console.warn('[invite] membership delegation not recorded (join still succeeded):', e);
@@ -100,7 +104,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token }),
       });
-      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown };
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown; memberAccessDelegation?: { delegate?: string } | null };
       if (r.ok && d.status === 'needs-otp') { setOtpFallback(true); return; }
       if (!r.ok || !d.ok || !d.token) throw new Error(asMsg(d.error, 'could not accept the invitation'));
       const res = await secureHomeNoName({ token: d.token });
@@ -119,7 +123,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
-      await grantMembership(res.home.address, invite.org.toLowerCase(), sign, d.token); // KMS-signed — no device prompt
+      await grantMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation); // KMS-signed — no device prompt
       await openSession(d.token, 'email', false);
       window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }

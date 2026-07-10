@@ -39,11 +39,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The invited email's hash lives in the ORG vault (delegation-gated, encrypted) — never in KV. Without it
   // we can't bind the bootstrap to the invited address, so the invitee verifies via the OTP card instead.
   let emailHash: string | null = null;
+  let memberAccessDelegation: unknown = null; // spec 321 W2 — the steward's pre-signed org→invitee grant
   try {
     const vault = await orgVault(env, org);
     if (vault) {
-      const rec = (await vault.get(`org.invite:${token}`)) as { emailHash?: string; status?: string } | null;
+      const rec = (await vault.get(`org.invite:${token}`)) as { emailHash?: string; status?: string; memberAccessDelegation?: unknown } | null;
       emailHash = rec?.emailHash ?? null;
+      memberAccessDelegation = rec?.memberAccessDelegation ?? null;
     }
   } catch { /* vault unreachable — fall through to needs-otp */ }
   if (!emailHash) return json({ status: 'needs-otp', org });
@@ -82,5 +84,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (vault) await vault.set(`org.invite:${token}`, { emailHash, status: 'redeemed', agent: kms.agentId, redeemedAt: Date.now() });
   } catch { /* tracking is best-effort */ }
 
-  return json({ ok: true, status: 'issued', token: sessionToken, org });
+  // spec 321 W2: hand the invitee the steward's pre-signed member-access grant. Counterfactual by
+  // construction — its delegate is the address derived from this SAME (iss='email', sub) pair, so it
+  // matches the home just resolved; the client still checks delegate == its person before recording.
+  return json({ ok: true, status: 'issued', token: sessionToken, org, memberAccessDelegation });
 };
