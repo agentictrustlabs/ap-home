@@ -10,21 +10,10 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
-import { connectWallet, personalSign } from '../../../src/lib/wallet';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../../src/connect-client';
 import { issueDirectoryListing } from '../../../src/home/directory';
+import { signHashFor, type Via } from '../../../src/home/onboarding';
 
 const NETWORKS_INDEX = 'networks';
-
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
 
 interface Listing { label: string; listing: { displayName: string; roles?: string[]; subject: string } }
 
@@ -67,7 +56,7 @@ export default function NetworksPage() {
     setError(null);
     setNote(null);
     try {
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId: NETWORKS_INDEX,
         displayName: org.name.split('.')[0] ?? org.name,

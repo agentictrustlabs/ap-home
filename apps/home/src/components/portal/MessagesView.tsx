@@ -6,10 +6,8 @@ import type { Address } from '@agenticprimitives/types';
 import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
 import { SectionShell } from '../../components/portal/SectionShell';
-import { connectWallet, personalSign } from '../../lib/wallet';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueMandateForCase } from '../../home/mandate';
-import { activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { activateInboxDeliveryIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
@@ -20,15 +18,6 @@ import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
 
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
 
 const PENDING_STATES = ['submitted', 'triaged'];
 
@@ -232,7 +221,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       setLocalBusy(true);
       setError(null);
       try {
-        const sign = await signerFor(session.via, agentAddress as Address, session.token);
+        const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
         const { mandate } = await issueMandateForCase(c, agentAddress as Address, sign);
         await post({ action: 'transition', transition: 'approve', interactionId: c.id, mandate }, c.id);
       } catch (e) {

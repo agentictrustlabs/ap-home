@@ -7,26 +7,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address, Hex } from '@agenticprimitives/types';
 import type { HomeManifestV1 } from '@agenticprimitives/home';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
-import { connectWallet, personalSign } from '../../lib/wallet';
 import { nameLabel } from '../../lib/domain';
 import { useSession } from '../../context/session';
+import { signHashFor, type Via } from '../../home/onboarding';
 import {
   buildHomeManifestDraft,
   finalizeHomeManifest,
   homeCaip10,
   homeManifestDigest,
 } from '../../home/manifest';
-
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
 
 export function HomeManifestCard() {
   const { session, agentAddress, agentName } = useSession();
@@ -57,7 +46,7 @@ export function HomeManifestCard() {
     try {
       const draft = buildHomeManifestDraft({ label, owner: agentAddress as Address, nowMs: Date.now() });
       const digest = homeManifestDigest(draft);
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
       const signature = (await sign(digest)) as Hex;
       const manifest = finalizeHomeManifest(draft, {
         signer: homeCaip10(agentAddress as Address),

@@ -4,21 +4,10 @@
 // published this self-signed, revocable listing. Your ROOT credential signs it.
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
-import { connectWallet, personalSign } from '../../lib/wallet';
 import { nameLabel } from '../../lib/domain';
 import { useSession } from '../../context/session';
 import { issueDirectoryListing } from '../../home/directory';
-
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
+import { signHashFor, type Via } from '../../home/onboarding';
 
 export function DirectoryListingCard() {
   const { session, agentAddress, agentName } = useSession();
@@ -32,7 +21,7 @@ export function DirectoryListingCard() {
     setBusy(true);
     setMsg(null);
     try {
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId: communityId.trim().toLowerCase(),
         displayName: displayName.trim(),

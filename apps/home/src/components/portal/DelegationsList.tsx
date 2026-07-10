@@ -12,30 +12,15 @@ import {
   listMyOrgs,
   listMyReceivedDelegations,
   revokeGrantedDelegation,
-  passkeySignHash,
-  googleSignHash,
   type MyOrg,
   type ReceivedDelegation,
-  type SignHash,
 } from '../../connect-client';
 import type { DelegationWire } from '../../lib/delegation';
 import { emitControlEvent, toConnectedAppGrant } from '../../home/control-plane';
-import { connectWallet, personalSign } from '../../lib/wallet';
+import { signHashFor, type Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
 import { AddressChip } from '../shared/AddressChip';
 import { LinkIcon } from '../shared/Icons';
-
-/** The signer for a revoke userOp, chosen by the session credential (mirrors onboarding's
- *  signHashFor). `delegator` is the SA whose ERC-1271 must validate (person SA or its org). */
-async function signerFor(via: string, delegator: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(delegator, token);
-  return passkeySignHash;
-}
 
 type GrantKind = 'site' | 'membership' | 'stewardship';
 interface GrantItem {
@@ -110,7 +95,7 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
     setError(null);
     setRevoking(it.key);
     try {
-      const signHash = await signerFor(session?.via ?? 'passkey', it.delegation.delegator, token);
+      const signHash = await signHashFor((session?.via ?? 'passkey').toLowerCase() as Via, it.delegation.delegator, { token });
       const r = await revokeGrantedDelegation(it.delegation, signHash);
       if (r.ok) {
         setRevoked((s) => new Set(s).add(it.key));

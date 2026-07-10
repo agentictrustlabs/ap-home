@@ -6,10 +6,8 @@ import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
-import { connectWallet, personalSign } from '../../lib/wallet';
-import { passkeySignHash, googleSignHash, type SignHash } from '../../connect-client';
 import { issueDirectoryListing } from '../../home/directory';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import {
@@ -23,16 +21,6 @@ import { MessageComposer } from './chat/MessageComposer';
 import { DmSlideOver } from './chat/DmSlideOver';
 import { ProfileSheet, type ProfileTarget } from './chat/ProfileSheet';
 import { useAvatar } from './chat/use-avatar';
-
-async function signerFor(via: string, agent: Address, token: string): Promise<SignHash> {
-  const v = via.toLowerCase();
-  if (v === 'wallet') {
-    const addr = await connectWallet();
-    return (h) => personalSign(addr, h);
-  }
-  if (v === 'google') return googleSignHash(agent, token);
-  return passkeySignHash;
-}
 
 interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string }
 interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[] }
@@ -117,7 +105,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
     if (!session || !agentAddress || !joinName.trim()) return;
     setBusy(true); setError(null);
     try {
-      const sign = await signerFor(session.via, agentAddress as Address, session.token);
+      const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId,
         displayName: joinName.trim(),
