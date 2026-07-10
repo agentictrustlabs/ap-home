@@ -134,6 +134,8 @@ export function buildNav(
   const manage: NavItem[] = [];
   if (person) {
     manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
+    // Unified metadata editor (docs/architecture/agent-metadata-tiers.md): all three tiers, one page.
+    manage.push({ id: 'metadata', label: 'Metadata', href: '/metadata', Icon: TagIcon, status: 'live' });
   }
   if (wl.services.devices) {
     manage.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });

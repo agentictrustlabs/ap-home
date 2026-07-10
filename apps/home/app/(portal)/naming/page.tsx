@@ -124,7 +124,7 @@ export default function NamingPage() {
                 const own = rows?.find((r) => r.subjectAgent.toLowerCase() === (agentAddress ?? '').toLowerCase());
                 return own ? <button style={btnSty} onClick={() => setPropsFor(own)}>Name properties</button> : null;
               })()}
-              <a href="/profile" style={{ fontSize: '.82rem' }}>Private profile (vault) →</a>
+              <a href="/metadata" style={{ fontSize: '.82rem' }}>All metadata →</a>
             </div>
           </div>
           {/* Metadata tiers (docs/architecture/agent-metadata-tiers.md): say plainly what lives where. */}
