@@ -4,10 +4,12 @@
 //   • Stewardship (org→you)   → read the ORG's vault (its records).
 //   • Membership  (you→org)   → read YOUR member record the org is entitled to see.
 // All MCP access goes through demo-a2a; no data is copied into the home.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { decodeAbiParameters } from 'viem';
 import type { Address } from '@agenticprimitives/types';
-import { listMyReceivedDelegations, type MyOrg, type ReceivedDelegation } from '../../connect-client';
+import { listMyReceivedDelegations, revokeGrantedDelegation, type MyOrg, type ReceivedDelegation } from '../../connect-client';
+import { useSession } from '../../context/session';
+import { resolveVia, signHashFor } from '../../home/onboarding';
 import type { DelegationWire } from '../../lib/delegation';
 import { CONTRACTS } from '../../lib/chain';
 import { vaultListWithDelegation, vaultReadWithDelegation, vaultWriteWithDelegation, type VaultRecordRef } from '../../lib/vault-client';
@@ -245,9 +247,9 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
   );
 }
 
-/** One member of the org — an agent that delegated to it (org→org broker grant). The
- *  delegation's delegator IS the member, so we read the member's vault over it. */
-function MemberCard({ m }: { m: ReceivedDelegation }) {
+/** One member of the org — an agent that delegated to it. The delegation's delegator IS the
+ *  member, so we read the member's vault over it. `onRemove` = the steward's W3 removal. */
+function MemberCard({ m, onRemove, removing }: { m: ReceivedDelegation; onRemove?: () => void; removing?: boolean }) {
   const d = m.delegation;
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<OrgProfile | null>(null);
@@ -279,6 +281,11 @@ function MemberCard({ m }: { m: ReceivedDelegation }) {
       <div className="manage-card-head">
         <span className="manage-card-label">{m.orgName || 'member'}</span>
         <span className="manage-card-badge live">Member</span>
+        {onRemove && (
+          <button type="button" className="btn-ghost" style={{ fontSize: '.72rem', padding: '.15rem .5rem', marginLeft: 'auto' }} disabled={removing} onClick={onRemove}>
+            {removing ? 'Removing…' : 'Remove'}
+          </button>
+        )}
       </div>
       <div style={{ margin: '.45rem 0' }}><AddressChip address={m.orgAgent} size="sm" withName /></div>
       {!d ? (
@@ -313,83 +320,75 @@ function MemberCard({ m }: { m: ReceivedDelegation }) {
   );
 }
 
-/** A spec-318 community member — someone whose CURRENT self-signed directory listing is in this
- *  org's community (the source of truth for channel membership). Public consent artifacts
- *  (ADR-0025-safe to show the steward); no delegation, so there is no vault to read. */
-interface CommunityMember {
-  agent: string;
-  label: string;
-  displayName: string;
-  roles: string[];
-  joinedAt: string | null;
-}
-
-/** Members of the org — BOTH membership relations (spec 318: they are different):
- *   • Community members — current self-signed directory listings in this org's community
- *     (how people join via channels). Authority-only: channels + visibility, no data access.
- *   • Delegating members — agents that granted the org a scoped delegation
- *     (/connect/received-delegations), so the steward can read their details over it. */
+/** Members of the org = agents holding a MEMBERSHIP DELEGATION to it (spec 321 — every join path
+ *  mints one, and invited members may also hold the org's member-access grant). Channel/directory
+ *  listings are a channels-surface concern and are deliberately NOT shown here (product decision
+ *  2026-07-10). The steward can read each member's details over their delegation (spec 247) and
+ *  remove a member (W3: listing + link + grant index removed; the org's member-access grant is
+ *  revoked ON-CHAIN with the steward's credential). */
 export function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
-  const [delegating, setDelegating] = useState<ReceivedDelegation[]>([]);
-  const [community, setCommunity] = useState<CommunityMember[]>([]);
+  const { session, profile } = useSession();
+  const [members, setMembers] = useState<ReceivedDelegation[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (!token) { setLoaded(true); return; }
-    let cancelled = false;
-    const orgLc = org.orgAgent.toLowerCase();
-    const viaDelegation = listMyReceivedDelegations(token)
-      .then((all) => all.filter((r) => r.viaOrg.toLowerCase() === orgLc))
-      .catch(() => [] as ReceivedDelegation[]);
-    const viaListing = fetch(`/connect/directory?communityId=${orgLc}`, { headers: { authorization: `Bearer ${token}` } })
-      .then(async (r) => {
-        if (!r.ok) return [] as CommunityMember[];
-        const out = (await r.json()) as { listings?: Array<{ listing: { subject: string; displayName?: string; roles?: string[]; publishedAt?: string }; label?: string }> };
-        return (out.listings ?? []).flatMap((l) => {
-          const agent = l.listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-          return agent ? [{ agent, label: l.label ?? '', displayName: l.listing.displayName ?? '', roles: l.listing.roles ?? [], joinedAt: l.listing.publishedAt ?? null }] : [];
-        });
-      })
-      .catch(() => [] as CommunityMember[]);
-    void Promise.all([viaDelegation, viaListing]).then(([dels, listings]) => {
-      if (cancelled) return;
-      setDelegating(dels);
-      // A member can hold both relations — show the delegation card (richer) and drop the duplicate listing row.
-      const delegators = new Set(dels.map((d) => d.orgAgent.toLowerCase()));
-      setCommunity(listings.filter((m) => !delegators.has(m.agent) && m.agent !== orgLc));
-      setLoaded(true);
-    });
-    return () => { cancelled = true; };
+    void listMyReceivedDelegations(token)
+      .then((all) => setMembers(all.filter((r) => r.viaOrg.toLowerCase() === org.orgAgent.toLowerCase())))
+      .catch(() => undefined)
+      .then(() => setLoaded(true));
   }, [token, org.orgAgent]);
+  useEffect(() => { reload(); }, [reload]);
 
-  const empty = delegating.length === 0 && community.length === 0;
+  const remove = useCallback(async (member: string) => {
+    if (!token || !session) return;
+    if (!window.confirm('Remove this member? Their channel listing and membership records are removed, and the access grant the organization signed for them is revoked on-chain.')) return;
+    setRemoving(member); setErr(null);
+    try {
+      const res = await fetch('/connect/org-member-remove', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ org: org.orgAgent.toLowerCase(), member: member.toLowerCase() }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; memberAccessDelegation?: DelegationWire | null };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `remove failed (${res.status})`);
+      // W3 — on-chain revoke of the org→member access grant, signed as the ORG by the steward's
+      // resolved credential. Best-effort: the app-level removal already stands; a failed revoke is
+      // surfaced so the steward can retry.
+      if (b.memberAccessDelegation) {
+        const sign = await signHashFor(resolveVia(profile?.credential, session.via), org.orgAgent as Address, { token: session.token });
+        const rev = await revokeGrantedDelegation(b.memberAccessDelegation, sign);
+        if (!rev.ok) setErr(`member removed, but the on-chain grant revoke failed: ${rev.error}`);
+      }
+      reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setRemoving(null); }
+  }, [token, session, profile?.credential, org.orgAgent, reload]);
+
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
       <h3 className="subhead">Members</h3>
       <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
-        Everyone in <b>{org.orgName || 'this org'}</b> — community members (they published a listing in its
-        directory; channels + visibility only) and delegating members (they granted a scoped delegation, so
-        you can read their details over it — their data stays in their own vault).
+        Agents holding a membership delegation to <b>{org.orgName || 'this org'}</b> — you can read their
+        details over it (their data stays in their own vault).
       </p>
+      {err && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>{err}</p>}
       {!loaded ? (
         <p className="manage-card-blurb">Loading members…</p>
-      ) : empty ? (
-        <p className="manage-card-blurb">No members yet — no one has joined this organization&rsquo;s community or delegated to it.</p>
+      ) : members.length === 0 ? (
+        <p className="manage-card-blurb">No members yet — members are added when they accept an invitation (or join the channels) and grant their membership delegation.</p>
       ) : (
         <div className="manage-grid">
-          {delegating.map((m, i) => <MemberCard key={`${m.orgAgent}-${i}`} m={m} />)}
-          {community.map((m) => (
-            <div className="manage-card" key={m.agent}>
-              <div className="manage-card-head">
-                <span className="manage-card-label">{m.displayName || m.label || 'member'}</span>
-                <span className="manage-card-badge">Community member</span>
-              </div>
-              <div style={{ margin: '.45rem 0' }}><AddressChip address={m.agent as Address} size="sm" withName /></div>
-              {m.roles.length > 0 && <p className="manage-card-blurb" style={{ margin: '0 0 .3rem' }}>{m.roles.join(' · ')}</p>}
-              <p className="manage-card-blurb" style={{ margin: 0 }}>
-                Joined via directory listing{m.joinedAt ? ` · ${new Date(m.joinedAt).toLocaleDateString()}` : ''} — no data access granted.
-              </p>
-            </div>
+          {members.map((m, i) => (
+            <MemberCard
+              key={`${m.orgAgent}-${i}`}
+              m={m}
+              onRemove={() => void remove(m.orgAgent)}
+              removing={removing === m.orgAgent}
+            />
           ))}
         </div>
       )}

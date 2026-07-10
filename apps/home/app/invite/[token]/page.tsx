@@ -10,34 +10,7 @@ import { issueDirectoryListing } from '../../../src/home/directory';
 import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
-import { issueMembershipDelegation, toWire } from '../../../src/lib/delegation';
-import { MCP_SERVER_ID } from '../../../src/lib/inbox-delivery';
-
-// spec 321 W1 — the membership delegation (member → org): signed with the SAME resolved credential as
-// the listing, recorded on both sides (the member's related link + the org's inbound-grant index) so
-// the steward's Members panel gets a DELEGATING member (spec 247). Best-effort: the listing already
-// made them a member; a failed grant mint must not strand the join (they can re-mint later).
-async function grantMembership(
-  member: Address,
-  org: string,
-  sign: (h: `0x${string}`) => Promise<`0x${string}`>,
-  bearer: string,
-  // spec 321 W2 — the steward's pre-signed org→invitee grant delivered at redeem. Forwarded only when
-  // its delegate IS this member (the counterfactual matched); otherwise it is inert and dropped.
-  memberAccess?: { delegate?: string } | null,
-): Promise<void> {
-  try {
-    const d = await issueMembershipDelegation(member, org as Address, MCP_SERVER_ID, sign);
-    const madMatches = !!memberAccess && (memberAccess.delegate ?? '').toLowerCase() === member.toLowerCase();
-    await fetch('/connect/org-membership', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
-      body: JSON.stringify({ org, delegation: toWire(d), ...(madMatches ? { memberAccessDelegation: memberAccess } : {}) }),
-    });
-  } catch (e) {
-    console.warn('[invite] membership delegation not recorded (join still succeeded):', e);
-  }
-}
+import { recordOrgMembership } from '../../../src/lib/org-membership';
 
 // Coerce ANY thrown shape to a readable string — Error, a string, or a plain object with a `.message`
 // (MetaMask/RPC rejections are objects like `{ code: 4001, message: 'User rejected …' }`, NOT Error
@@ -87,7 +60,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
-      await grantMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token);
+      await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token);
       window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
@@ -123,7 +96,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
-      await grantMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation); // KMS-signed — no device prompt
+      await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation); // KMS-signed — no device prompt
       await openSession(d.token, 'email', false);
       window.location.assign(orgHref(invite.org, 'channels'));
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }

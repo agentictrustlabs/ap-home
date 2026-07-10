@@ -7,7 +7,10 @@ import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
+import { recordOrgMembership } from '../../lib/org-membership';
+import { vaultReadWithDelegation } from '../../lib/vault-client';
+import type { DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import {
@@ -43,7 +46,7 @@ function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
 }
 
 export function OrgChannelsView({ org }: { org: Address }) {
-  const { session, agentAddress } = useSession();
+  const { session, profile: homeProfile, agentAddress } = useSession();
   const communityId = org.toLowerCase();
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
@@ -53,6 +56,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
+  // spec 321 W2b — the org info a MEMBER may read over their member-access grant (org→member,
+  // vault:org:profile). Steward-independent: read from the ORG's vault via the delegation itself.
+  const [orgAbout, setOrgAbout] = useState<{ displayName?: string; description?: string; website?: string } | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,11 +107,30 @@ export function OrgChannelsView({ org }: { org: Address }) {
     return () => clearInterval(t);
   }, [load]);
 
+  // spec 321 W2b — if this viewer holds a member-access grant for the org, read its shareable
+  // profile over it (one mechanism: the delegation; no steward session involved).
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${session.token}` } });
+        const b = (await r.json().catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; memberAccessDelegation?: DelegationWire | null }> };
+        const mad = (b.orgs ?? []).find((o) => (o.orgAgent ?? '').toLowerCase() === communityId)?.memberAccessDelegation;
+        if (!mad || cancelled) return;
+        const about = await vaultReadWithDelegation<{ displayName?: string; description?: string; website?: string }>(mad, 'org:profile');
+        if (!cancelled && about) setOrgAbout(about);
+      } catch { /* no grant / no profile — the card just doesn't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [session, communityId]);
+
   const join = useCallback(async () => {
     if (!session || !agentAddress || !joinName.trim()) return;
     setBusy(true); setError(null);
     try {
-      const sign = await signHashFor(session.via.toLowerCase() as Via, agentAddress as Address, { token: session.token });
+      // Route the signer by the home's ACTUAL credential (a KMS home must not pop a passkey/wallet).
+      const sign = await signHashFor(resolveVia(homeProfile?.credential, session.via), agentAddress as Address, { token: session.token });
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId,
         displayName: joinName.trim(),
@@ -116,11 +141,14 @@ export function OrgChannelsView({ org }: { org: Address }) {
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
+      // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
+      // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
+      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [session, agentAddress, joinName, communityId, authed, load]);
+  }, [session, homeProfile?.credential, agentAddress, joinName, communityId, authed, load]);
 
   const createChannel = useCallback(async () => {
     if (!newTitle.trim()) return;
@@ -262,6 +290,19 @@ export function OrgChannelsView({ org }: { org: Address }) {
   return (
     <SectionShell title="Channels" description="Topic discussion inside this organization">
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+
+      {orgAbout && (orgAbout.displayName || orgAbout.description) && (
+        <div className="manage-card" style={{ marginBottom: '0.85rem', padding: '0.7rem 0.9rem' }}>
+          <div style={{ fontSize: '0.85rem' }}>
+            <b>{orgAbout.displayName ?? 'About this organization'}</b>
+            {orgAbout.description && <span style={{ opacity: 0.75 }}> — {orgAbout.description}</span>}
+            {orgAbout.website && <span style={{ opacity: 0.6 }}> · {orgAbout.website}</span>}
+          </div>
+          <p className="manage-card-blurb" style={{ margin: '0.2rem 0 0', fontSize: '0.72rem' }}>
+            Read from the organization&rsquo;s vault over your member-access grant.
+          </p>
+        </div>
+      )}
 
       {orgVault === false && (
         <div className="chat-attention" style={{ marginBottom: '0.85rem' }}>

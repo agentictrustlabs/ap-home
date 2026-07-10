@@ -35,8 +35,26 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
   }, [query]);
 
   const inviteAgent = useCallback(async (hit: AgentSearchHit) => {
+    if (!session) return;
     setBusy(true); setErr(null); setNote(null);
+    let grantNote = '';
     try {
+      // spec 321 W2b — the invitee's SA is KNOWN: pre-sign the org→invitee member-access grant and
+      // store it in the org vault; /connect/org-membership picks it up when they join. Best-effort —
+      // a failed sign/store still sends a valid (grant-less) invitation.
+      try {
+        const via = resolveVia(profile?.credential, session.via);
+        const sign = await signHashFor(via, communityId as Address, { token: session.token });
+        const mad = toWire(await issueMemberAccessDelegation(communityId as Address, hit.smartAgent as Address, MCP_SERVER_ID, sign));
+        const gr = await fetch('/connect/org-invite/agent', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),
+        });
+        const gb = (await gr.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!gr.ok || !gb.ok) throw new Error(gb.error ?? `grant store failed (${gr.status})`);
+      } catch (e) {
+        grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
+      }
       const res = await fetch('/connect/inbox', {
         method: 'POST', headers: authed,
         body: JSON.stringify({
@@ -47,10 +65,10 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
       });
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || b.ok === false) throw new Error(b.error ?? `invite failed (${res.status})`);
-      setNote(`Invitation sent to ${hit.displayName ?? hit.name}.`);
+      setNote(`Invitation sent to ${hit.displayName ?? hit.name}.` + grantNote);
       setQuery(''); setHits(null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  }, [authed, communityId]);
+  }, [authed, communityId, profile?.credential, session]);
 
   const inviteEmail = useCallback(async () => {
     if (!email.trim() || !session) return;

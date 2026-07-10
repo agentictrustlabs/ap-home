@@ -13,6 +13,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { orgVault } from '../lib/org-vault';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -53,7 +54,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (d.delegate.toLowerCase() !== org) return json({ error: 'delegation delegate must be the org' }, 403);
   // W2 mismatch gate: a member-access grant is stored ONLY when it is org→THIS person. A grant to a
   // different (counterfactual) address is inert — dropped here, never re-targeted (ADR-0013).
-  const mad = body?.memberAccessDelegation;
+  // Two delivery channels for the SAME steward-signed artifact, gated identically: the email path
+  // POSTs it (redeem handed it to the invitee); the in-app path stored it in the org vault at invite
+  // time (`org.invite:agent:<sa>`, spec 321 W2b) — looked up here when none was posted.
+  let mad = body?.memberAccessDelegation;
+  if (!mad) {
+    try {
+      const vault = await orgVault(env, org);
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string } | null) : null;
+      if (rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
+    } catch { /* vault unreachable — membership still records; the grant can be re-looked-up later */ }
+  }
   const madValid = !!mad && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === person && !!mad.signature;
 
   // 1. Member-side link: merge into the existing related link (steward links keep their relationship);
