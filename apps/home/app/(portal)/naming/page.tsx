@@ -124,9 +124,16 @@ export default function NamingPage() {
                 const own = rows?.find((r) => r.subjectAgent.toLowerCase() === (agentAddress ?? '').toLowerCase());
                 return own ? <button style={btnSty} onClick={() => setPropsFor(own)}>Name properties</button> : null;
               })()}
-              <a href="/profile" style={{ fontSize: '.82rem' }}>Public profile →</a>
+              <a href="/profile" style={{ fontSize: '.82rem' }}>Private profile (vault) →</a>
             </div>
           </div>
+          {/* Metadata tiers (docs/architecture/agent-metadata-tiers.md): say plainly what lives where. */}
+          <p style={{ fontSize: '.74rem', color: 'var(--color-text-faint)', margin: '.55rem 0 0' }}>
+            <strong>Name properties</strong> are public under this name — anyone can read them. Your personal
+            details stay <strong>private in your vault</strong> and are shared only via delegations you grant.
+            (A third tier — raw on-chain ERC-4337 account metadata — is public and system-managed; the home
+            rarely touches it.)
+          </p>
         </div>
       )}
 
@@ -242,9 +249,10 @@ function PropertiesPanel({ row, via: viaStr, token, onClose }: {
       <div style={{ ...cardSty, maxWidth: 600, width: '100%', padding: '1.5rem', boxShadow: 'var(--shadow-modal)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Properties of {row.name}</h3>
         <p style={{ fontSize: '.82rem', color: 'var(--color-text-body)', marginTop: 0 }}>
-          These are the SHACL-registered records on the naming service — every write is validated against
-          the on-chain ontology and indexed into the knowledge base, so search and discovery see it within
-          seconds. Public by nature.
+          <strong>Public under this name — anyone can read these.</strong> They are the SHACL-registered
+          records on the naming service (validated against the on-chain ontology, indexed into the knowledge
+          base within seconds): what you choose to publish about yourself in the context of {row.name}. Your
+          personal details are a different tier — they stay private in your vault.
         </p>
         {done ? (
           <>
