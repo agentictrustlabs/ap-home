@@ -166,3 +166,11 @@ export async function recordCredentialFacet(
 ): Promise<void> {
   await appendLink(kv, credKey(p.kind, p.id), { agent, assurance: 'asserted', ref: 'kv-cred' });
 }
+
+/** Standalone read of a credential->agent facet. Needed for passkey login to resolve a passkey that is a
+ *  SECONDARY custodian of a KMS/social home (phone/email/google) — whose SA is NOT derived from the passkey,
+ *  so derivation alone lands on the wrong (passkey-direct) address. Returns the first linked agent or null. */
+export async function readCredentialFacet(kv: KvLike, kind: string, id: string): Promise<CanonicalAgentId | null> {
+  const links = await readLinks(kv, credKey(kind, id));
+  return links[0]?.agent ?? null;
+}

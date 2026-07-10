@@ -2,7 +2,7 @@
 // Security & Recovery — sign-in methods, linked devices, recovery. Reuses the existing
 // add-credential + cross-device-link primitives. Recovery (trustees/guardians) is coming soon.
 import { useEffect, useState } from 'react';
-import type { Address } from '@agenticprimitives/types';
+import type { Address, Hex } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
 import { whitelabel } from '../../../src/whitelabel/config';
 import {
@@ -26,6 +26,30 @@ import { PhoneAuthCard } from '../../../src/components/portal/PhoneAuthCard';
 import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/components/shared/Icons';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+// Label the CURRENT sign-in method by its credential. A KMS/social home (phone/email/google) has an
+// EOA-shaped C_sub custodian on-chain, so the raw custodian count reads as "wallets" — but the method the
+// member actually used is their phone/email/etc. Show that, not "Wallet".
+const CRED_LABEL: Record<string, string> = { passkey: 'Passkey', wallet: 'Wallet', phone: 'Phone (SMS)', email: 'Email', google: 'Google', youversion: 'YouVersion' };
+const credLabel = (via: string): string => CRED_LABEL[via.toLowerCase()] ?? 'Sign-in key';
+const isKmsLabel = (via: string): boolean => ['phone', 'email', 'google', 'youversion'].includes(via.toLowerCase());
+
+// Index the passkey → home mapping so passkey sign-in resolves THIS home (a KMS/social home's SA is not
+// derived from the passkey). Best-effort with a short retry: the add userOp just mined, but the link route
+// re-reads `hasPasskey` on-chain and 409s until the RPC sees it.
+async function linkPasskeyToHome(agent: Address, credentialIdDigest: Hex, token: string): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    try {
+      const r = await fetch('/connect/passkey/link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ credentialIdDigest, agent }),
+      });
+      if (r.ok || r.status !== 409) return; // 409 = not mined yet → retry; anything else is terminal
+    } catch { /* network hiccup — retry */ }
+    await new Promise((res) => setTimeout(res, 2500));
+  }
+}
 
 export default function SecurityPage() {
   const { session, profile, agentAddress, openSession } = useSession();
@@ -93,7 +117,13 @@ export default function SecurityPage() {
         setAdd(r.ok ? { done: `Wallet ${shortAddr(r.added)} added` } : { error: r.error });
       } else {
         const r = await addPasskeyCredential(personAgent, authorizer, onStep);
-        setAdd(r.ok ? { done: 'Passkey added' } : { error: r.error });
+        if (r.ok) {
+          // Index passkey → home so signing in with it later resolves THIS (KMS/social) home, not the
+          // passkey-derived address (otherwise the recovery passkey opens the wrong/no home).
+          onStep('Linking the passkey to your home…');
+          await linkPasskeyToHome(personAgent, r.credentialIdDigest, session.token);
+          setAdd({ done: 'Passkey added' });
+        } else setAdd({ error: r.error });
       }
     } catch (e) {
       setAdd({ error: e instanceof Error ? e.message : 'add failed' });
@@ -139,14 +169,15 @@ export default function SecurityPage() {
         <h2>Sign-in methods</h2>
         <DeviceRow
           icon={<FingerprintIcon size={20} />}
-          name={via === 'passkey' ? 'Passkey' : 'Wallet'}
-          sub={via === 'passkey' ? 'This device' : 'Connected wallet'}
+          name={credLabel(via)}
+          sub={via === 'passkey' ? 'This device' : isKmsLabel(via) ? 'Verified sign-in (server-secured key)' : 'Connected wallet'}
           isThisDevice={via === 'passkey'}
         />
         {total != null && (
           <p className="muted" style={{ marginTop: '.4rem', fontSize: '.85rem' }}>
             {total} {total === 1 ? 'method' : 'methods'} open this home
-            {counts ? ` — ${counts.passkeys} passkey${counts.passkeys === 1 ? '' : 's'}, ${counts.custodians} wallet${counts.custodians === 1 ? '' : 's'}` : ''}.
+            {counts ? ` — ${counts.passkeys} passkey${counts.passkeys === 1 ? '' : 's'}, ${counts.custodians} custodian key${counts.custodians === 1 ? '' : 's'}` : ''}.
+            {isKmsLabel(via) && ' Your phone/email sign-in is one of the custodian keys (a server-held key, not a wallet).'}
             {total === 1 && ' Add another so you’re never locked out.'}
           </p>
         )}

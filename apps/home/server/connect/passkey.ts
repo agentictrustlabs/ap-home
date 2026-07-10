@@ -14,7 +14,7 @@ import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
-import { recordCredentialFacet } from '../../src/lib/kv-indexer';
+import { recordCredentialFacet, readCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 /** Poll isDeployed a few times to ride out Base Sepolia's post-deploy RPC lag. */
@@ -56,17 +56,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     factory: CONTRACTS.agentAccountFactory,
   });
 
-  // Derive the deterministic passkey SA (mode 0, no custodians, passkey set, salt 0).
+  // Resolve the home this passkey opens. Two cases:
+  //   (a) passkey-DIRECT home — SA = f(passkey pubkey) (ADR-0010), self-indexing → derive.
+  //   (b) SECONDARY passkey — added as a custodian to a KMS/social home (phone/email/google) whose SA is
+  //       NOT derived from the passkey. That mapping lives in the credential facet (recorded on add via
+  //       /connect/passkey/link). Check it FIRST; only derive when there's no facet.
+  // The facet is only a CANDIDATE — the on-chain `hasPasskey` + ERC-1271 proof-of-possession below are the
+  // real gate (a wrong/forged facet fails `hasPasskey` → bootstrap), so this is not a weaker-mechanism
+  // fallback (ADR-0013): authority is always the on-chain check, regardless of how `sa` was found.
   let sa: Address;
-  try {
-    sa = await accounts.getAddressForAgentAccount({
-      mode: 0,
-      custodians: [],
-      passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x: BigInt(body.pubKeyX), y: BigInt(body.pubKeyY) },
-      salt: 0n,
-    });
-  } catch (e) {
-    return json({ error: 'SA address derivation failed', detail: String(e) }, 502);
+  const linked = await readCredentialFacet(env.AUTH_CODES, 'passkey', body.credentialIdDigest);
+  if (linked) {
+    sa = (linked.split(':').pop() ?? '') as Address; // CAIP-10 tail
+  } else {
+    try {
+      sa = await accounts.getAddressForAgentAccount({
+        mode: 0,
+        custodians: [],
+        passkey: { credentialIdDigest: body.credentialIdDigest as Hex, x: BigInt(body.pubKeyX), y: BigInt(body.pubKeyY) },
+        salt: 0n,
+      });
+    } catch (e) {
+      return json({ error: 'SA address derivation failed', detail: String(e) }, 502);
+    }
   }
 
   if (!(await isDeployedSoon(accounts, sa))) return json({ status: 'bootstrap' });
