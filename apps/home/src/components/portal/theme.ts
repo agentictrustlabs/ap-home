@@ -1,0 +1,105 @@
+// Shared inline-style tokens for portal pages that pre-date the `manage-card`/`btn-*` CSS classes
+// (Registry, Naming, Skills — spec 279/280/282). These once hardcoded an indigo palette independent
+// of the app's amber design tokens (`app/globals.css`); this module is the single source so all three
+// pages render as ONE visual language, using the same CSS variables as every other portal surface.
+// New self-contained-inline portal pages should import from here rather than re-declaring locally.
+import type { CSSProperties } from 'react';
+
+export const cardSty: CSSProperties = {
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-12)',
+  boxShadow: 'var(--shadow-card)',
+  padding: '1rem 1.1rem',
+};
+
+export const btnSty: CSSProperties = {
+  padding: '.5rem .9rem',
+  borderRadius: 'var(--radius-8)',
+  fontWeight: 700,
+  fontSize: '.85rem',
+  cursor: 'pointer',
+  border: '1.5px solid var(--color-border-strong)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-body)',
+  font: 'inherit',
+};
+
+export const btnPrimarySty: CSSProperties = {
+  ...btnSty,
+  background: 'var(--color-amber-500)',
+  color: 'var(--color-action-fg)',
+  border: '1.5px solid var(--color-amber-500)',
+};
+
+export const mono: CSSProperties = { fontFamily: 'var(--font-mono)' };
+
+export const mutedText: CSSProperties = { color: 'var(--color-text-muted)' };
+export const errorText: CSSProperties = { color: 'var(--color-danger)' };
+
+export const inputSty: CSSProperties = {
+  padding: '.6rem .8rem',
+  borderRadius: 'var(--radius-8)',
+  border: '1.5px solid var(--color-border-strong)',
+  font: 'inherit',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-primary)',
+};
+
+export type BadgeKind = 'ok' | 'warn' | 'err' | 'neutral';
+
+export const BADGE_STY: Record<BadgeKind, CSSProperties> = {
+  ok: { color: 'var(--color-sage-700)', background: 'var(--color-sage-50)', borderColor: 'var(--color-sage-500)' },
+  warn: { color: 'var(--color-amber-700)', background: 'var(--color-amber-50)', borderColor: 'var(--color-amber-400)' },
+  err: { color: '#991b1b', background: 'var(--color-danger-subtle)', borderColor: '#fecaca' },
+  neutral: { color: 'var(--color-text-muted)', background: 'var(--color-surface-sunken)', borderColor: 'var(--color-border)' },
+};
+
+export function badgeStyle(kind: BadgeKind): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '.3rem',
+    fontSize: '.72rem',
+    fontWeight: 800,
+    padding: '.2rem .55rem',
+    borderRadius: 999,
+    border: '1px solid',
+    whiteSpace: 'nowrap',
+    ...BADGE_STY[kind],
+  };
+}
+
+/** Toggle "pill" used by Skills (asserted/private) — same visual language as `badgeStyle`. */
+export function pillStyle(on: boolean): CSSProperties {
+  return {
+    fontSize: '.72rem',
+    fontWeight: 800,
+    padding: '.2rem .55rem',
+    borderRadius: 999,
+    border: '1px solid',
+    cursor: 'pointer',
+    ...(on ? BADGE_STY.ok : BADGE_STY.neutral),
+  };
+}
+
+/** Amber info banner — matches `.settings-banner--info` / `chat-dm-resolution-banner` elsewhere. */
+export const infoBannerSty: CSSProperties = {
+  ...cardSty,
+  background: 'var(--color-amber-50)',
+  borderColor: 'var(--color-amber-400)',
+  color: 'var(--color-amber-900, #78350f)',
+};
+
+export const modalOverlaySty: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(28, 25, 23, 0.5)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 1000,
+  padding: '1rem',
+};
+
+export const shortAddr = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;

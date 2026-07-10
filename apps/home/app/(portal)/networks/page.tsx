@@ -133,14 +133,14 @@ export default function NetworksPage() {
   const myOrgAddrs = new Set(orgs.map((o) => o.agent.toLowerCase()));
 
   return (
-    <SectionShell title="Networks">
-      {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
-      {note && <p style={{ color: '#15803d' }}>{note}</p>}
+    <SectionShell title="Networks" description="Your named organizations, published for discovery — other orgs can find them and reach their inbox.">
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '.85rem' }}>{error}</p>}
+      {note && <p style={{ color: 'var(--color-sage-700)', fontSize: '.85rem' }}>{note}</p>}
 
       <div className="dash-section">
         <h2>Publish your organization</h2>
         {orgs.length === 0 ? (
-          <p style={{ opacity: 0.75 }}>
+          <p className="manage-card-blurb">
             You don&apos;t steward a named organization yet. <Link href="/organizations">Create one</Link> — every
             org is named (that&apos;s what makes it reachable), then publish it here.
           </p>
@@ -149,7 +149,7 @@ export default function NetworksPage() {
             <select
               value={selectedOrg}
               onChange={(e) => setSelectedOrg(e.target.value)}
-              style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
+              style={{ padding: '0.5rem 0.7rem', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', font: 'inherit', background: 'var(--color-surface)' }}
             >
               <option value="">Choose an organization…</option>
               {orgs.map((o) => (
@@ -160,10 +160,10 @@ export default function NetworksPage() {
               placeholder="What does it do? (one line, shows on the listing)"
               value={pitch}
               onChange={(e) => setPitch(e.target.value)}
-              style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
+              style={{ padding: '0.5rem 0.7rem', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', font: 'inherit' }}
             />
             <div>
-              <button className="btn" disabled={busy || !selectedOrg} onClick={() => void publishOrg()}>
+              <button className="btn-primary" style={{ width: 'auto' }} disabled={busy || !selectedOrg} onClick={() => void publishOrg()}>
                 {busy ? 'Signing…' : 'Publish to Networks'}
               </button>
             </div>
@@ -171,24 +171,24 @@ export default function NetworksPage() {
         )}
       </div>
 
-      <div className="dash-section" style={{ marginTop: '1rem' }}>
+      <div className="dash-section" style={{ marginTop: '1.5rem' }}>
         <h2>Organizations ({listings.length})</h2>
         {listings.length === 0 ? (
-          <p style={{ opacity: 0.7 }}>No organizations have published yet — yours could be first.</p>
+          <p className="manage-card-blurb">No organizations have published yet — yours could be first.</p>
         ) : (
           listings.map((l) => {
             const mine = myOrgAddrs.has((l.listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase());
             return (
-              <div key={l.listing.subject} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.7rem 0', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div key={l.listing.subject} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.7rem 0', borderBottom: '1px solid var(--color-border)', flexWrap: 'wrap', alignItems: 'center' }}>
                 <div>
-                  <b>{l.listing.displayName}</b> <span style={{ opacity: 0.6, fontSize: '0.85rem' }}>({l.label})</span>
-                  {mine && <span style={{ marginLeft: '0.5rem', fontSize: '0.72rem', color: '#15803d' }}>yours</span>}
+                  <b>{l.listing.displayName}</b> <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>({l.label})</span>
+                  {mine && <span className="manage-card-badge live" style={{ marginLeft: '0.5rem' }}>yours</span>}
                   {(l.listing.roles ?? []).length > 0 && (
-                    <div style={{ fontSize: '0.82rem', opacity: 0.7 }}>{(l.listing.roles ?? []).join(' · ')}</div>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>{(l.listing.roles ?? []).join(' · ')}</div>
                   )}
                 </div>
                 {!mine && (
-                  <button className="btn" onClick={() => setContactOrg(l)}>Contact</button>
+                  <button className="btn-ghost" style={{ width: 'auto' }} onClick={() => setContactOrg(l)}>Contact</button>
                 )}
               </div>
             );
@@ -197,21 +197,21 @@ export default function NetworksPage() {
       </div>
 
       {contactOrg && (
-        <div className="dash-section" style={{ border: '1px solid #c7d2fe', background: '#eef2ff', borderRadius: 8, padding: '1rem', marginTop: '0.75rem' }}>
+        <div className="dash-section chat-attention" style={{ marginTop: '0.75rem' }}>
           <b>Contact {contactOrg.listing.displayName}</b>
-          <p style={{ fontSize: '0.82rem', opacity: 0.75, margin: '0.25rem 0 0.5rem' }}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0.5rem' }}>
             Delivered to the organization&apos;s own inbox through the audited pipeline — signed shape, on-chain name check.
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void contact(); }}
               placeholder="Introduce your org and what you'd like to explore together…"
-              style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 8 }}
+              style={{ flex: 1, minWidth: 200, padding: '0.55rem 0.8rem', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', font: 'inherit' }}
             />
-            <button className="btn" disabled={busy || !draft.trim()} onClick={() => void contact()}>Send</button>
-            <button className="btn" onClick={() => setContactOrg(null)}>Cancel</button>
+            <button className="btn-primary" style={{ width: 'auto' }} disabled={busy || !draft.trim()} onClick={() => void contact()}>Send</button>
+            <button className="btn-ghost" style={{ width: 'auto' }} onClick={() => setContactOrg(null)}>Cancel</button>
           </div>
         </div>
       )}

@@ -120,8 +120,8 @@ function VaultReader({ title, hint, delegation }: { title: string; hint: string;
 
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-      <h3 style={{ fontSize: '.95rem', margin: '0 0 .2rem' }}>{title}</h3>
-      <p style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)', margin: '0 0 .6rem' }}>{hint}</p>
+      <h3 className="subhead">{title}</h3>
+      <p className="manage-card-blurb" style={{ margin: '0 0 .6rem' }}>{hint}</p>
       {busy ? (
         <p className="manage-card-blurb">Reading over the delegation…</p>
       ) : err ? (
@@ -203,8 +203,8 @@ function OrgProfileManager({ delegation }: { delegation: DelegationWire }) {
 
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-      <h3 style={{ fontSize: '.95rem', margin: '0 0 .2rem' }}>Manage organization details</h3>
-      <p style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)', margin: '0 0 .7rem' }}>
+      <h3 className="subhead">Manage organization details</h3>
+      <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
         You have <b>stewardship</b> of this org, so you can edit its details. Changes are written to the
         <b> organization’s own vault</b> over your stewardship delegation — never copied into your home.
       </p>
@@ -335,8 +335,8 @@ function OrgMembers({ org, token }: { org: MyOrg; token: string | null }) {
 
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-      <h3 style={{ fontSize: '.95rem', margin: '0 0 .2rem' }}>Members</h3>
-      <p style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)', margin: '0 0 .7rem' }}>
+      <h3 className="subhead">Members</h3>
+      <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
         Agents that delegated to <b>{org.orgName || 'this org'}</b> — its members. Each granted a scoped
         delegation, so you can read their details over it (their data stays in their own vault).
       </p>
@@ -378,7 +378,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
 
       {/* Delegations */}
       <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-        <h3 style={{ fontSize: '.95rem', margin: '0 0 .6rem' }}><LinkIcon size={14} /> Delegations</h3>
+        <h3 className="subhead" style={{ display: 'flex', alignItems: 'center', gap: '.35rem', marginBottom: '.6rem' }}><LinkIcon size={14} /> Delegations</h3>
         <div className="manage-grid">
           {org.delegation && <DelegationCard kind="App access" d={org.delegation} />}
           {org.membershipDelegation && <DelegationCard kind="Membership" d={org.membershipDelegation} />}
@@ -401,7 +401,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
         </>
       ) : (
         <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-          <h3 style={{ fontSize: '.95rem', margin: 0 }}>Organization data</h3>
+          <h3 className="subhead" style={{ margin: 0 }}>Organization data</h3>
           <p className="manage-card-blurb">No stewardship delegation on this org — can&rsquo;t read or manage its vault.</p>
         </div>
       )}
@@ -415,7 +415,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
         />
       ) : (
         <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-          <h3 style={{ fontSize: '.95rem', margin: 0 }}>Your member record</h3>
+          <h3 className="subhead" style={{ margin: 0 }}>Your member record</h3>
           <p className="manage-card-blurb">No membership delegation on this org — nothing to read.</p>
         </div>
       )}

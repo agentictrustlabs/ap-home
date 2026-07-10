@@ -251,9 +251,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
   if (member === false) {
     return (
       <SectionShell title="Channels" description="Topic discussion inside this organization">
-        <div className="card" style={{ maxWidth: 460, padding: '1.25rem' }}>
-          <h3 style={{ margin: '0 0 0.4rem' }}>Join this organization&rsquo;s channels</h3>
-          <p style={{ fontSize: '0.85rem', opacity: 0.75, margin: '0 0 0.8rem' }}>
+        <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem' }}>
+          <h3 className="subhead">Join this organization&rsquo;s channels</h3>
+          <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
             Joining publishes a listing you sign — members can see you here and message you directly.
           </p>
           <input
@@ -262,7 +262,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
             onChange={(e) => setJoinName(e.target.value)}
             style={{ width: '100%', marginBottom: '0.6rem' }}
           />
-          <button type="button" className="btn" disabled={busy || !joinName.trim()} onClick={() => void join()}>
+          <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
             {busy ? 'Signing…' : 'Sign & join'}
           </button>
           {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
@@ -403,7 +403,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
               />
             </>
           ) : (
-            <p style={{ opacity: 0.6, margin: 'auto', padding: '2rem' }}>{channels === null ? 'Loading…' : 'Pick or create a channel.'}</p>
+            <p className="manage-card-blurb" style={{ margin: 'auto', padding: '2rem', textAlign: 'center' }}>{channels === null ? 'Loading…' : 'Pick or create a channel.'}</p>
           )}
         </div>
 

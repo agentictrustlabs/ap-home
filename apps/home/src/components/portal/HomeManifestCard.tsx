@@ -113,7 +113,7 @@ export function HomeManifestCard() {
       ) : (
         <p>Not published yet.</p>
       )}
-      <button className="btn" onClick={() => void publish()} disabled={busy}>
+      <button className="btn-primary" style={{ width: 'auto' }} onClick={() => void publish()} disabled={busy}>
         {busy ? 'Signing…' : current ? 'Re-publish (re-sign)' : 'Publish Home manifest'}
       </button>
       {msg && <p style={{ marginTop: '0.5rem' }}>{msg}</p>}

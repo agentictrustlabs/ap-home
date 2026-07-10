@@ -4,8 +4,9 @@
 // device can discover how to connect to your Smart Agent by name. Publishing is always an explicit action
 // here (never automatic); the address toggle is clearly labeled "public" because the bootstrap read is a
 // public directory lookup by necessity (ADR-0040 amendment). Owner-signed, gasless — one custody prompt.
-// Self-contained inline styles (the app's class system has no card/btn/badge classes).
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+// Styling uses the shared inline theme (src/components/portal/theme.ts) — same amber tokens as the
+// rest of the portal.
+import { useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
@@ -15,14 +16,10 @@ import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding'
 import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
+import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, infoBannerSty, badgeStyle, modalOverlaySty, shortAddr } from '../../../src/components/portal/theme';
 
-const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const cardSty: CSSProperties = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 1px 3px rgba(15,23,42,.07)', padding: '1rem 1.1rem' };
-const btnSty: CSSProperties = { padding: '.5rem .9rem', borderRadius: 10, fontWeight: 700, fontSize: '.85rem', cursor: 'pointer', border: '1.5px solid #c7d2fe', background: '#fff', color: '#4f46e5', font: 'inherit' };
-const btnPrimarySty: CSSProperties = { ...btnSty, background: '#4f46e5', color: '#fff', border: '1.5px solid #4f46e5' };
-const mono: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' };
-const BADGE: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.72rem', fontWeight: 800, padding: '.2rem .55rem', borderRadius: 999, border: '1px solid', color: '#047857', background: '#ecfdf5', borderColor: '#6ee7b7' };
-const NEUTRAL: CSSProperties = { ...BADGE, color: '#475569', background: '#f1f5f9', borderColor: '#e2e8f0' };
+const BADGE = badgeStyle('ok');
+const NEUTRAL = badgeStyle('neutral');
 
 const KINDS: ConnectionKind[] = ['wallet', 'google', 'youversion', 'passkey', 'multi'];
 const viaToKind = (via: string | undefined): ConnectionKind => {
@@ -93,16 +90,16 @@ export default function NamingPage() {
         />
       )}
 
-      <div style={{ ...cardSty, background: '#fffbeb', borderColor: '#fcd34d', marginBottom: '1.1rem', fontSize: '.82rem', color: '#92400e' }}>
+      <div style={{ ...infoBannerSty, marginBottom: '1.1rem', fontSize: '.82rem' }}>
         <strong>Connection records are public.</strong> They live on the public naming service so a returning person can
         discover how to connect — there is no private way to do this (you have no credential yet at that point). Publishing
         the <strong>kind</strong> (wallet / passkey / Google / YouVersion) is enough to connect; publishing your
         <strong> address</strong> is an optional convenience that pre-selects your wallet account and is visible to anyone.
       </div>
 
-      {err ? <div style={cardSty}><b style={{ color: '#b91c1c' }}>Error</b> <span style={{ color: '#64748b' }}>{err}</span></div>
-        : !rows ? <p style={{ color: '#64748b' }}>Loading the names you steward…</p>
-        : rows.length === 0 ? <p style={{ color: '#64748b' }}>No named agents under your stewardship yet.</p>
+      {err ? <div style={cardSty}><b style={errorText}>Error</b> <span style={mutedText}>{err}</span></div>
+        : !rows ? <p style={mutedText}>Loading the names you steward…</p>
+        : rows.length === 0 ? <p style={mutedText}>No named agents under your stewardship yet.</p>
         : (
           <div style={{ display: 'grid', gap: '.7rem' }}>
             {rows.map((r) => (
@@ -110,7 +107,7 @@ export default function NamingPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>
                   <div>
                     <strong>{r.name}</strong>
-                    <div style={{ ...mono, fontSize: '.74rem', color: '#64748b', marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
+                    <div style={{ ...mono, fontSize: '.74rem', ...mutedText, marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
                   </div>
                   <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
                     {r.connectionKind
@@ -200,44 +197,44 @@ function PropertiesPanel({ row, via: viaStr, token, onClose }: {
   };
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }} onClick={busy ? undefined : onClose}>
-      <div style={{ ...cardSty, maxWidth: 600, width: '100%', padding: '1.5rem', boxShadow: '0 24px 60px rgba(15,23,42,.35)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+    <div role="dialog" aria-modal="true" style={modalOverlaySty} onClick={busy ? undefined : onClose}>
+      <div style={{ ...cardSty, maxWidth: 600, width: '100%', padding: '1.5rem', boxShadow: 'var(--shadow-modal)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Properties of {row.name}</h3>
-        <p style={{ fontSize: '.82rem', color: '#475569', marginTop: 0 }}>
+        <p style={{ fontSize: '.82rem', color: 'var(--color-text-body)', marginTop: 0 }}>
           These are the SHACL-registered records on the naming service — every write is validated against
           the on-chain ontology and indexed into the knowledge base, so search and discovery see it within
           seconds. Public by nature.
         </p>
         {done ? (
           <>
-            <p style={{ fontSize: '.9rem', color: '#047857' }}><strong>Saved ✓</strong> — the knowledge base is re-indexing {row.name}.</p>
+            <p style={{ fontSize: '.9rem', color: 'var(--color-sage-700)' }}><strong>Saved ✓</strong> — the knowledge base is re-indexing {row.name}.</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}><button style={btnPrimarySty} onClick={onClose}>Done</button></div>
           </>
         ) : !current && !error ? (
-          <p style={{ color: '#64748b' }}>Reading current records…</p>
+          <p style={mutedText}>Reading current records…</p>
         ) : (
           <>
             {current && (
               <div style={{ display: 'grid', gap: '.7rem', margin: '.8rem 0' }}>
                 {EDITABLE_PROPS.map(({ key, label, hint }) => (
-                  <label key={key} style={{ display: 'grid', gap: '.2rem', fontSize: '.82rem', color: '#334155' }}>
+                  <label key={key} style={{ display: 'grid', gap: '.2rem', fontSize: '.82rem', color: 'var(--color-text-body)' }}>
                     <span style={{ fontWeight: 700 }}>{label}</span>
                     <input
                       value={draft[key] ?? ''}
                       onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
                       placeholder={hint}
-                      style={{ padding: '.5rem .7rem', borderRadius: 8, border: '1.5px solid #cbd5e1', font: 'inherit' }}
+                      style={inputSty}
                     />
                   </label>
                 ))}
-                <div style={{ fontSize: '.76rem', color: '#64748b' }}>
+                <div style={{ fontSize: '.76rem', ...mutedText }}>
                   System records (managed by their own ceremonies):{' '}
                   <span style={mono}>addr {system.addr ? shortAddr(system.addr) : '—'}</span>
                   {' · '}<span style={mono}>agentKind {system.agentKind ?? '—'}</span>
                 </div>
               </div>
             )}
-            {error && <p style={{ fontSize: '.82rem', color: '#b91c1c' }}>{error}</p>}
+            {error && <p style={{ fontSize: '.82rem', ...errorText }}>{error}</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
               <button style={btnSty} onClick={onClose} disabled={busy}>Cancel</button>
               <button style={btnPrimarySty} onClick={save} disabled={busy || !dirty || !current}>
@@ -283,17 +280,17 @@ function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
   };
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }} onClick={busy ? undefined : onClose}>
-      <div style={{ ...cardSty, maxWidth: 540, width: '100%', padding: '1.5rem', boxShadow: '0 24px 60px rgba(15,23,42,.35)' }} onClick={(e) => e.stopPropagation()}>
+    <div role="dialog" aria-modal="true" style={modalOverlaySty} onClick={busy ? undefined : onClose}>
+      <div style={{ ...cardSty, maxWidth: 540, width: '100%', padding: '1.5rem', boxShadow: 'var(--shadow-modal)' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0, marginBottom: '.6rem' }}>Publish connection for {row.name}</h3>
         {done ? (
           <>
-            <p style={{ fontSize: '.9rem', color: '#047857' }}><strong>Published ✓</strong> — {row.name} now advertises how to connect.</p>
+            <p style={{ fontSize: '.9rem', color: 'var(--color-sage-700)' }}><strong>Published ✓</strong> — {row.name} now advertises how to connect.</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}><button style={btnPrimarySty} onClick={onDone}>Done</button></div>
           </>
         ) : (
           <>
-            <p style={{ fontSize: '.86rem', color: '#475569', marginTop: 0 }}>
+            <p style={{ fontSize: '.86rem', color: 'var(--color-text-body)', marginTop: 0 }}>
               Choose the credential a returning person uses to connect to <strong>{row.name}</strong>. This is published
               publicly on the naming service.
             </p>
@@ -303,15 +300,15 @@ function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
               ))}
             </div>
             {addressKind && (
-              <label style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', fontSize: '.82rem', color: '#475569', margin: '.6rem 0' }}>
+              <label style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', fontSize: '.82rem', color: 'var(--color-text-body)', margin: '.6rem 0' }}>
                 <input type="checkbox" checked={publishAddr} onChange={(e) => setPublishAddr(e.target.checked)} style={{ marginTop: '.2rem' }} />
-                <span>Also publish my connection <strong>address</strong> to pre-select my account — <strong style={{ color: '#b45309' }}>this is public</strong> (the address is already on-chain; this makes it discoverable by name).</span>
+                <span>Also publish my connection <strong>address</strong> to pre-select my account — <strong style={{ color: 'var(--color-amber-700)' }}>this is public</strong> (the address is already on-chain; this makes it discoverable by name).</span>
               </label>
             )}
-            <p style={{ fontSize: '.8rem', color: '#64748b' }}>
+            <p style={{ fontSize: '.8rem', ...mutedText }}>
               Your agent writes its own naming record — <code style={mono}>msg.sender == owner</code> — signed by your {via} credential, sponsored. One prompt.
             </p>
-            {error && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.6rem' }}>{error}</p>}
+            {error && <p style={{ fontSize: '.82rem', ...errorText, marginTop: '.6rem' }}>{error}</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
               <button style={btnSty} onClick={onClose} disabled={busy}>Cancel</button>
               <button style={btnPrimarySty} onClick={run} disabled={busy}>{busy ? 'Publishing…' : 'Sign & publish'}</button>
@@ -346,14 +343,14 @@ function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Vi
   };
 
   return (
-    <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: '#c7d2fe' }}>
+    <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-amber-400)' }}>
       <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Give your home a public name</h3>
-      <p style={{ fontSize: '.85rem', color: '#475569', marginTop: 0 }}>
+      <p style={{ fontSize: '.85rem', color: 'var(--color-text-body)', marginTop: 0 }}>
         Your agent is deployed but <strong>unnamed</strong>. Claim a name so others can find it — and so you can
         re-connect by name on a new device. Your Smart Agent address doesn’t change; the name is a facet pointing at it.
       </p>
       {busy ? (
-        <p style={{ color: '#64748b' }}>{step || 'Claiming your name…'}</p>
+        <p style={mutedText}>{step || 'Claiming your name…'}</p>
       ) : (
         <>
           <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -361,13 +358,13 @@ function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Vi
               value={value}
               onChange={(e) => setValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
               placeholder="e.g. rich-pedersen" autoCapitalize="none" spellCheck={false} aria-label="Your public name"
-              style={{ flex: 1, minWidth: 180, padding: '.6rem .8rem', borderRadius: 10, border: '1.5px solid #cbd5e1', font: 'inherit' }}
+              style={{ ...inputSty, flex: 1, minWidth: 180 }}
             />
             <button style={btnPrimarySty} onClick={claim} disabled={!label}>Claim name</button>
           </div>
-          {label && <p style={{ ...mono, fontSize: '.78rem', color: '#64748b', marginTop: '.4rem' }}>→ {label}.{CONNECT_DOMAIN}</p>}
-          {err && <p style={{ fontSize: '.82rem', color: '#b91c1c', marginTop: '.4rem' }}>{err}</p>}
-          <p style={{ fontSize: '.78rem', color: '#94a3b8', marginTop: '.5rem' }}>After naming, you can publish an opt-in connection record so you can sign back in by name.</p>
+          {label && <p style={{ ...mono, fontSize: '.78rem', ...mutedText, marginTop: '.4rem' }}>→ {label}.{CONNECT_DOMAIN}</p>}
+          {err && <p style={{ fontSize: '.82rem', ...errorText, marginTop: '.4rem' }}>{err}</p>}
+          <p style={{ fontSize: '.78rem', color: 'var(--color-text-faint)', marginTop: '.5rem' }}>After naming, you can publish an opt-in connection record so you can sign back in by name.</p>
         </>
       )}
     </div>

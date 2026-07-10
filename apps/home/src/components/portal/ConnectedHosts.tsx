@@ -35,13 +35,13 @@ function useHostBindings(name: string): { a2a: string; mcp: string; loaded: bool
 interface CardSkill { id: string; name?: string; effect?: string }
 const hostLabel = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 
-const wrap: CSSProperties = { marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--c-g100, #eef2f7)' };
-const node: CSSProperties = { fontSize: '.78rem', fontWeight: 700, color: '#0f172a', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '.3rem .5rem', display: 'inline-block' };
+const wrap: CSSProperties = { marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--color-border)' };
+const node: CSSProperties = { fontSize: '.78rem', fontWeight: 700, color: 'var(--color-text-primary)', background: 'var(--color-surface-sunken)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-8)', padding: '.3rem .5rem', display: 'inline-block' };
 const hostRow: CSSProperties = { display: 'flex', alignItems: 'center', gap: '.4rem', margin: '.35rem 0 0', fontSize: '.78rem', flexWrap: 'wrap' };
-const tag: CSSProperties = { fontWeight: 700, color: '#4f46e5', fontSize: '.7rem', letterSpacing: '.02em' };
-const linkBtn: CSSProperties = { background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, font: 'inherit', fontSize: '.76rem', textDecoration: 'underline' };
-const muted: CSSProperties = { color: 'var(--c-g500, #64748b)' };
-const drawer: CSSProperties = { marginTop: '.4rem', padding: '.5rem .6rem', background: '#fbfdff', border: '1px solid #e8eef6', borderRadius: 8, fontSize: '.76rem' };
+const tag: CSSProperties = { fontWeight: 700, color: 'var(--color-amber-700)', fontSize: '.7rem', letterSpacing: '.02em' };
+const linkBtn: CSSProperties = { background: 'none', border: 'none', color: 'var(--color-amber-700)', cursor: 'pointer', padding: 0, font: 'inherit', fontSize: '.76rem', textDecoration: 'underline' };
+const muted: CSSProperties = { color: 'var(--color-text-muted)' };
+const drawer: CSSProperties = { marginTop: '.4rem', padding: '.5rem .6rem', background: 'var(--color-surface-raised)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-8)', fontSize: '.76rem' };
 
 /** The relationship picture + the two drill-downs. Renders only once at least one endpoint is bound. */
 export function ConnectedHosts({ name, address }: { name: string; address: string }) {
@@ -53,7 +53,7 @@ export function ConnectedHosts({ name, address }: { name: string; address: strin
   return (
     <div style={wrap}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '.72rem', fontWeight: 700, color: '#475569', letterSpacing: '.04em', textTransform: 'uppercase' }}>Connected hosts</span>
+        <span style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--color-text-body)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Connected hosts</span>
         <span style={{ fontSize: '.7rem', ...muted }}>on-chain · spec 280</span>
       </div>
       <p style={{ margin: '.3rem 0 .5rem', ...muted, fontSize: '.76rem' }}>
@@ -110,11 +110,11 @@ function A2aSkills({ endpoint }: { endpoint: string }) {
     <div style={drawer}>
       <b>Skills this agent advertises</b>
       {!skills && !err && <span style={{ ...muted }}> · loading…</span>}
-      {err && <span style={{ color: '#b91c1c' }}> · couldn’t reach the card ({err})</span>}
+      {err && <span style={{ color: 'var(--color-danger)' }}> · couldn’t reach the card ({err})</span>}
       {skills && skills.length > 0 && (
         <div style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', marginTop: '.35rem' }}>
           {skills.map((s) => (
-            <span key={s.id} style={{ background: '#eef2ff', color: '#3730a3', borderRadius: 6, padding: '.12rem .4rem', fontSize: '.72rem' }}>
+            <span key={s.id} style={{ background: 'var(--color-amber-50)', color: 'var(--color-amber-700)', borderRadius: 'var(--radius-4)', padding: '.12rem .4rem', fontSize: '.72rem' }}>
               {s.name ?? s.id}{s.effect ? ` · ${s.effect}` : ''}
             </span>
           ))}

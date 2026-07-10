@@ -106,7 +106,7 @@ export function PersonalInfoPanel({
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem' }}>
             Contact details live in your private vault — activate your key once to view and edit them.
           </p>
-          <a href="/vault-key" className="btn" style={{ display: 'inline-block', marginTop: '0.65rem', textDecoration: 'none' }}>
+          <a href="/vault-key" className="btn-primary" style={{ display: 'inline-flex', width: 'auto', marginTop: '0.65rem', textDecoration: 'none' }}>
             Activate vault key →
           </a>
         </div>
@@ -147,7 +147,7 @@ export function PersonalInfoPanel({
       })}
 
       <div className="settings-form-footer">
-        <button type="submit" className="btn" disabled={submitting || missingRequired.length > 0}>
+        <button type="submit" className="btn-primary" style={{ width: 'auto' }} disabled={submitting || missingRequired.length > 0}>
           {submitting ? 'Saving…' : 'Save'}
         </button>
       </div>

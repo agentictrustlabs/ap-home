@@ -169,7 +169,7 @@ export function DmSlideOver({
             <span>Couldn&apos;t find <b>{recipientName}</b> in the directory.</span>
             <div className="chat-dm-resolution-banner__actions">
               <button type="button" className="btn" onClick={() => void resolveRecipient()}>Try again</button>
-              <a href="/messages" className="ghost" style={{ fontSize: '0.82rem', textDecoration: 'none' }}>Search all people</a>
+              <a href="/messages" className="btn-ghost" style={{ fontSize: '0.82rem' }}>Search all people</a>
             </div>
           </div>
         )}

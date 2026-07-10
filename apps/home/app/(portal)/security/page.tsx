@@ -191,7 +191,7 @@ export default function SecurityPage() {
         {remove.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{remove.error}</p>}
       </div>
 
-      <div className="dash-section" style={{ marginTop: '1.5rem' }}>
+      <div className="dash-section">
         <h2>Linked devices</h2>
         <DeviceRow icon={<MonitorIcon size={20} />} name="This device" sub="Signed in here" isThisDevice />
         {showApprove ? (
@@ -203,7 +203,7 @@ export default function SecurityPage() {
         )}
       </div>
 
-      <div className="dash-section" style={{ marginTop: '1.5rem' }}>
+      <div className="dash-section">
         <h2>Recovery</h2>
         <ComingSoonState
           icon={<ShieldIcon size={40} />}

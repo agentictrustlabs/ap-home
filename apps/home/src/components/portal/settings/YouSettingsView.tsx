@@ -239,7 +239,7 @@ function GoogleSignInPanel() {
           <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.8rem' }}>
             This home opens with Google. Add a passkey on Security to reduce reliance on Google alone.
           </p>
-          <button type="button" className="ghost" disabled={busy} onClick={() => void newHome()}>
+          <button type="button" className="btn-ghost" disabled={busy} onClick={() => void newHome()}>
             {busy ? 'Starting…' : 'Use Google for a new home'}
           </button>
           {err && <p style={{ color: 'var(--color-danger)', fontSize: '0.78rem', margin: '0.35rem 0 0' }}>{err}</p>}

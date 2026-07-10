@@ -98,19 +98,19 @@ export function DirectoryListingCard() {
           placeholder="Community id (agree on one with your community, e.g. grace-chapel)"
           value={communityId}
           onChange={(e) => setCommunityId(e.target.value)}
-          style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
+          style={{ padding: '0.5rem 0.7rem', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', font: 'inherit' }}
         />
         <input
           placeholder={`Display name (e.g. ${nameLabel(agentName)})`}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6 }}
+          style={{ padding: '0.5rem 0.7rem', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', font: 'inherit' }}
         />
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn" disabled={busy || !communityId.trim() || !displayName.trim()} onClick={() => void publish()}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button className="btn-primary" style={{ width: 'auto' }} disabled={busy || !communityId.trim() || !displayName.trim()} onClick={() => void publish()}>
             {busy ? 'Signing…' : 'Publish listing'}
           </button>
-          <button className="btn" disabled={busy || !communityId.trim()} onClick={() => void revoke()}>
+          <button className="btn-ghost" disabled={busy || !communityId.trim()} onClick={() => void revoke()}>
             Remove listing
           </button>
         </div>

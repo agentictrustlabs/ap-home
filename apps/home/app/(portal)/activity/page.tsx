@@ -58,9 +58,9 @@ export default function ActivityPage() {
           </p>
         ) : (
           events.map((e) => (
-            <div key={e.auditRef} style={{ padding: '0.6rem 0', borderBottom: '1px solid #f1f5f9' }}>
+            <div key={e.auditRef} style={{ padding: '0.6rem 0', borderBottom: '1px solid var(--color-border)' }}>
               <b>{EVENT_COPY[e.eventType]}</b>
-              <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
                 {new Date(e.at).toLocaleString()} · audit <code>{e.auditRef.slice(0, 8)}</code>
                 {e.refs.length > 0 && (
                   <>
@@ -87,9 +87,9 @@ export default function ActivityPage() {
           {entries.map((m) => {
             const address = m.agent.match(/0x[0-9a-fA-F]{40}$/)?.[0] as `0x${string}` | undefined;
             return (
-              <div key={m.agent} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
+              <div key={m.agent} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid var(--color-border)', flexWrap: 'wrap' }}>
                 {address && <AddressChip address={address} size="sm" />}
-                <span style={{ fontSize: '0.82rem' }}>
+                <span style={{ fontSize: '0.82rem', color: 'var(--color-text-body)' }}>
                   {m.agentType} · {m.relationship.replaceAll('_', ' ')} · control: <b>{m.controlGrade}</b> · {m.status}
                 </span>
               </div>

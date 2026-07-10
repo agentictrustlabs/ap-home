@@ -265,7 +265,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       return (
         <button
           key={a.actionId}
-          className={a.style === 'destructive' ? 'btn danger' : 'btn'}
+          className={a.style === 'destructive' ? 'btn-danger' : 'btn-primary'}
+          style={{ width: 'auto' }}
           disabled={anyBusy}
           title={issues ? 'Signs a scoped delegation + mandate' : undefined}
           onClick={() =>

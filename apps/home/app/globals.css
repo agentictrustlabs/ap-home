@@ -148,6 +148,7 @@
         padding: .75rem .875rem; background: #fff;
       }
       .manage-card.soon { background: var(--c-g50, #fafafa); border-style: dashed; }
+      .dash-section + .dash-section { margin-top: 1.5rem; }
       .manage-card-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .25rem; }
       .manage-card-label { font-size: .875rem; font-weight: 700; color: var(--c-g900); word-break: break-word; }
       .manage-card-badge {
@@ -157,6 +158,14 @@
       .manage-card-badge.live { background: var(--c-success-bg, #e8f6ee); color: var(--c-success); }
       .manage-card-badge.soon { background: var(--c-g100, #eee); color: var(--c-g400); }
       .manage-card-blurb { font-size: .78rem; color: var(--c-g500); margin: 0; line-height: 1.45; }
+
+      /* ── Card-level subheading ──────────────────────────────────────── */
+      /* Plain <h3> is reserved for the uppercase eyebrow label below; use this class for a
+         normal-case sub-section title INSIDE a card/panel (e.g. OrgDetail groups, join prompts). */
+      .subhead {
+        font-size: .92rem; font-weight: 700; color: var(--c-g900);
+        letter-spacing: -.01em; margin: 0 0 .35rem; line-height: 1.3;
+      }
 
       /* ── Standalone two-column grid ─────────────────────────────────── */
       .standalone-grid {
