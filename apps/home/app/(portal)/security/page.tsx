@@ -21,6 +21,7 @@ import { DeviceRow } from '../../../src/components/portal/DeviceRow';
 import { ApproveDevice } from '../../../src/components/device-link';
 import { DelegationsList } from '../../../src/components/portal/DelegationsList';
 import { GoogleSignInPanel } from '../../../src/components/portal/settings/GoogleSignInPanel';
+import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/components/shared/Icons';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -225,6 +226,17 @@ export default function SecurityPage() {
       </div>
 
       <GoogleSignInPanel />
+
+      {/* Email as an added login method (email-auth Phase 1b). Login-grade only — you verify a code sent
+          to your inbox; it never confers custody. */}
+      <div className="dash-section">
+        <h2>Email sign-in</h2>
+        <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .7rem' }}>
+          Add your email as a sign-in method — you&rsquo;ll verify a 6-digit code we send you. Login-grade
+          (like Google); it never controls your keys.
+        </p>
+        <EmailAuthCard />
+      </div>
     </SectionShell>
   );
 }
