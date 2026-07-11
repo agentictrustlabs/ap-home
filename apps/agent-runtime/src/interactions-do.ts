@@ -43,7 +43,9 @@ const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutabili
 const ERC1271_MAGIC = '0x1626ba7e';
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
-const CHANNELS_RESOURCE = (principal: string): string => `channels:${principal.toLowerCase()}`; // vault doc key (pre-W3 name)
+// The vault RECORD is 'channels.data' (spec 316 §11a / 322 §1) — `channels:<sa>` is only the Home's
+// KV routing key (makeVaultDocKv), never the record name.
+const CHANNELS_RESOURCE = (_principal: string): string => 'channels.data';
 const DIRECTORY_RESOURCE = 'directory.data';
 
 interface IndexedListing { listing: DirectoryListingV1; label: string }
@@ -141,6 +143,14 @@ export class InteractionsDO {
     if (op === 'grant' && request.method === 'POST') {
       const wire = body.delegation as IncomingDelegation | undefined;
       if (!wire?.signature || wire.delegator.toLowerCase() !== principal) return json({ error: 'delegation with delegator = principal required' }, 400);
+      // Verify the wire IS the principal's before storing (junk-overwrite DoS guard): ERC-1271 over
+      // the delegation digest against the delegator (approved-hash 0x03 wires validate through the
+      // SA's approved-hash branch). Fail-closed: an unverifiable grant is never stored.
+      const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
+        return json({ error: 'grant signature failed verification against the delegator' }, 403);
+      }
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       st.grant = wire;
       await this.state.storage.put('state', st);
