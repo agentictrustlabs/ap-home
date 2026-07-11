@@ -4089,8 +4089,13 @@ function resolveProfilePrincipal(
     }
     return { ok: true, value: authed };
   }
-  if (c.env.DEMO_ALLOW_SERVER_MINT === 'true' && bodyPrincipal) return { ok: true, value: bodyPrincipal };
-  return { ok: false, error: 'unauthorized: session required (APP-PROFILE-1)', status: 401 };
+  // V-1 mitigation (2026-07-10 custody-vs-delegation audit): the body-principal escape hatch is
+  // CLOSED even under DEMO_ALLOW_SERVER_MINT. The original KC-1-class acceptance assumed this record
+  // held deterministic MOCK data — the email/phone bootstrap now seeds REAL OTP-verified contact PII
+  // into vault:impact-profile, so an unauthenticated principal param was a one-request cross-principal
+  // PII read on the live worker. The session (proof of control) is the ONLY path; the durable fix
+  // (delegation-authorized owner-own access via the person's InteractionsDO) is spec 323 W2.
+  return { ok: false, error: 'unauthorized: session required (APP-PROFILE-1/V-1)', status: 401 };
 }
 
 app.post('/mcp/profile/get', async (c) => {
