@@ -65,7 +65,9 @@ const DM_BODY_PREFIX = 'message.body:dm:';
 const RELATIONSHIPS_RESOURCE = 'relationships.data';
 const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.toLowerCase()}`;
 
-interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; delegationHash?: string; updatedAt: string }
+// spec 323 §3: wires whose DELEGATE is this person (stewardship, member-access) are the person's
+// own private credentials — they ride the entry so any Home can act from the vault (ADR-0025).
+interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; delegationHash?: string; delegations?: IncomingDelegation[]; updatedAt: string }
 interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
 /** Grants LEDGER row (spec 322 W3e §2): hash + metadata ONLY — the wire itself is a bearer secret. */
 interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]; storedAt: string }
@@ -418,7 +420,21 @@ export class InteractionsDO {
           if (!/^0x[0-9a-fA-F]{40}$/.test(org)) return json({ error: 'entry.org (address) required' }, 400);
           const doc = await this.readDoc<RelationshipsDocV1>(grant, RELATIONSHIPS_RESOURCE, { orgs: {} });
           if (body.remove === true) delete doc.orgs[org];
-          else doc.orgs[org] = { org, relationship: entry?.relationship === 'steward' ? 'steward' : 'member', ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}), ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}), updatedAt: new Date().toISOString() };
+          else {
+            const prev = doc.orgs[org];
+            doc.orgs[org] = {
+              org,
+              relationship: entry?.relationship === 'steward' ? 'steward' : 'member',
+              ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
+              ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}),
+              // Wires accumulate (a member-access grant may arrive after the membership entry);
+              // self-gated op — only the person can place credentials in their own doc.
+              ...(Array.isArray(entry?.delegations) || prev?.delegations
+                ? { delegations: [...(prev?.delegations ?? []), ...((entry?.delegations as IncomingDelegation[] | undefined) ?? [])].slice(-8) }
+                : {}),
+              updatedAt: new Date().toISOString(),
+            };
+          }
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.relationships.merge', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'org-link', id: org } });
           await this.writeDoc(grant, RELATIONSHIPS_RESOURCE, doc);
           return json({ ok: true });

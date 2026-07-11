@@ -270,6 +270,26 @@ export async function createOrganization(
         headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
         body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
       }).catch((e) => console.warn('[org-create] default channel failed:', e));
+      // spec 323 W1 — the STEWARD entry in the creator's authoritative relationships doc (person
+      // DO, self-gated), carrying the stewardship wire: a second Home discovers "orgs you steward"
+      // from the person's vault, never from this app's KV (which stays a projection/cache). The
+      // creator needs their own interactions plane — enable it first (zero-prompt on KMS; this
+      // whole block is best-effort like the rest of the ceremony).
+      const ixp = await activateInteractionsIfNeeded(home.address, via, auth);
+      if (!ixp.ok) console.warn('[org-create] creator interactions plane not enabled:', ixp.error);
+      await fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          session: bearer,
+          entry: {
+            org: x.childAgent.toLowerCase(),
+            relationship: 'steward',
+            orgName: x.childName,
+            ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
+          },
+        }),
+      }).catch((e) => console.warn('[org-create] steward relationship write failed:', e));
     }
   } catch (e) {
     console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
