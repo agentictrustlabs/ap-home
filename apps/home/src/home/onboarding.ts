@@ -147,6 +147,26 @@ export function continueWithYouVersion(preferredName?: string, enrollStashJson?:
  *   wallet  → deploy (EOA-custodied) + claim signed by the EOA (signupWithName).
  *   google  → handled by the server (the per-subject KMS custodian signs) — wired in spec 235.
  */
+/**
+ * spec 323 — front-load EVERY person-plane capability at home creation, so the member never meets a
+ * cold "activate your vault key / enable storage" prompt later (profile save, inbox, channels all
+ * need these). Vault-key bind + inbox-delivery + interactions plane, in order. KMS family
+ * (google/email/phone) = ZERO device prompts (server-signed); passkey/wallet = the vault-key bind is
+ * ONE signature at creation (better than a surprise prompt on first profile save — value steps ≠
+ * signatures, but this IS the value step). All idempotent + best-effort: a failure never blocks the
+ * home from coming up (the per-surface Enable paths remain the recovery).
+ */
+async function activatePersonPlanes(owner: Address, via: Via, auth?: Auth): Promise<void> {
+  try {
+    const bound = await activateVaultIfNeeded(owner, via, auth); // also fires inbox-delivery
+    if (!bound.ok) { console.warn('[home-create] vault key not activated (activate it later from Security):', bound.error); return; }
+    const ix = await activateInteractionsIfNeeded(owner, via, auth);
+    if (!ix.ok) console.warn('[home-create] interactions plane not enabled (enable later):', ix.error);
+  } catch (e) {
+    console.warn('[home-create] person-plane activation deferred:', e);
+  }
+}
+
 export async function secureHome(
   key: DemoPasskey | null,
   name: string,
@@ -157,15 +177,21 @@ export async function secureHome(
     // Server custody: demo-a2a derives C_sub + deploys + claims, gated by the custody session.
     if (!auth?.token) return { ok: false, error: 'no custody session' };
     const out = await secureHomeWithGoogle(auth.token, homeLabel(name));
-    return out.ok ? { ok: true, home: { address: out.agent, name: out.name } } : { ok: false, error: out.error };
+    if (!out.ok) return { ok: false, error: out.error };
+    await activatePersonPlanes(out.agent, via, auth);
+    return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (via === 'wallet') {
     const out = await signupWithName(homeLabel(name), 'wallet', undefined, false);
-    return out.ok ? { ok: true, home: { address: out.agent, name: out.name } } : { ok: false, error: out.error };
+    if (!out.ok) return { ok: false, error: out.error };
+    await activatePersonPlanes(out.agent, via, auth);
+    return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (!key) return { ok: false, error: 'no key for this device' };
   const res = await deployAndClaimAgent(key, homeLabel(name));
-  return res.ok ? { ok: true, home: { address: res.agent, name: res.name } } : { ok: false, error: res.error };
+  if (!res.ok) return { ok: false, error: res.error };
+  await activatePersonPlanes(res.agent, via, auth);
+  return { ok: true, home: { address: res.agent, name: res.name } };
 }
 
 /**
@@ -200,6 +226,7 @@ export async function secureHomeNoName(auth?: Auth, opts: { claimPendingNameVia?
       console.warn('[secure-home] chosen name not claimed (claim it from the Naming page):', e);
     }
   }
+  await activatePersonPlanes(out.agent, opts.claimPendingNameVia ?? 'google', auth);
   return { ok: true, home: { address: out.agent, name: claimed } };
 }
 

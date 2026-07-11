@@ -114,6 +114,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   if (!ok) return jsonCors({ error: 'manifest proof failed ERC-1271 verification' }, request, 403);
 
+  // spec 323 W2.2 — the AUTHORITATIVE master is the person's vault `home.manifest` (their
+  // InteractionsDO), so any Home the person uses reads/updates the same signed manifest. The
+  // label-keyed KV is a PUBLIC SERVE cache for /.well-known/agentic-home; the eventual portable
+  // public serve is an opt-in projection to the discovery read-tier (ADR-0040 amendment §"Home
+  // manifest projection" + the external indexer). Master write is best-effort (409 = the person's
+  // interactions plane isn't enabled yet — the KV serve copy still works meanwhile).
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  const { writeCapabilityRecord } = await import('../lib/capability-record');
+  await writeCapabilityRecord(env, person, bearer, 'home.manifest', manifest);
   await env.AUTH_CODES.put(KEY(label), JSON.stringify(manifest));
   // Manifest (re)publication is a Home lifecycle fact on the control-plane
   // timeline (spec 310 W4).
