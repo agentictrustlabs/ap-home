@@ -144,6 +144,12 @@ export function OrgChannelsView({ org }: { org: Address }) {
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
+      // spec 322 W3d — enable the MEMBER's own interactions plane when it costs no extra device
+      // prompt (KMS homes sign server-side), so the write-through below lands in their vault.
+      // Prompt-requiring credentials skip here (value steps ≠ signatures) — their doc catches up
+      // at their own enable ceremony.
+      const joinVia = resolveVia(homeProfile?.credential, session.via);
+      if (isKmsVia(joinVia)) await activateInteractionsIfNeeded(agentAddress as Address, joinVia, { token: session.token }).catch(() => null);
       // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
       // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
       await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, joinName.trim());

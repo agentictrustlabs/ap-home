@@ -33,6 +33,22 @@ export async function recordOrgMembership(
         ...(displayName?.trim() ? { displayName: displayName.trim().slice(0, 80) } : {}),
       }),
     });
+    // spec 322 W3d — AUTHORITATIVE person-plane write-through via the member's own InteractionsDO:
+    // their relationships doc + the per-org profile card (the server's `related:*` KV is a
+    // projection/cache of this). A 409 here (person hasn't enabled interactions yet) is expected —
+    // the doc catches up at their enable ceremony; the KV projection covers display meanwhile.
+    const doBase = `/a2a/interactions/${member.toLowerCase()}`;
+    const hdrs = { 'content-type': 'application/json' };
+    await fetch(`${doBase}/relationships.merge`, {
+      method: 'POST', headers: hdrs,
+      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member' } }),
+    }).catch(() => null);
+    if (displayName?.trim()) {
+      await fetch(`${doBase}/member.profile.put`, {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify({ session: bearer, org: org.toLowerCase(), profile: { displayName: displayName.trim().slice(0, 80) } }),
+      }).catch(() => null);
+    }
   } catch (e) {
     console.warn('[org-membership] membership delegation not recorded (join still succeeded):', e);
   }

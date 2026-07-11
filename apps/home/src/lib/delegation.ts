@@ -186,10 +186,6 @@ export const INBOX_DELIVERY_RESOURCE_SCOPE = 'vault:message.body:*' as const;
  *  grant. demo-mcp record-scope-gates it exactly as it does the body records. */
 export const INBOX_DATA_RESOURCE_SCOPE = 'vault:inbox.data' as const;
 
-/** The vault record that holds an ORG's community channel board (`channels.data`). spec 318 + 316 §11a: the
- *  channel board joins the personal inbox in the owner's vault, so a steward-signed org grant must authorize
- *  read+write of it too. Harmless on a person's grant (they own no board). */
-export const CHANNELS_DATA_RESOURCE_SCOPE = 'vault:channels.data' as const;
 
 /** The vault record family that holds an ORG's invite tracking (`org.invite:<token>` — invitee email
  *  hash + status). Blast-zone (spec 315): invitee PII lives ENCRYPTED in the org vault, not KV; KV holds
@@ -255,6 +251,10 @@ export const BOARD_CHANNEL_RESOURCE_SCOPE = 'vault:board.channel:*' as const;
 export const CHANNEL_BODIES_RESOURCE_SCOPE = 'vault:message.body:channel:*' as const;
 /** 1-1 (DM) bodies — the DELIVERY plane's namespace; disjoint from channel bodies (FAB-SSO-2). */
 export const DM_BODIES_RESOURCE_SCOPE = 'vault:message.body:dm:*' as const;
+/** The person's AUTHORITATIVE org-relationship doc (spec 322 W3d) — Home `related:*` KV is a cache. */
+export const RELATIONSHIPS_DATA_RESOURCE_SCOPE = 'vault:relationships.data' as const;
+/** All per-org member profiles (`member.profile:<orgSA>`) — the person DO writes them per org. */
+export const MEMBER_PROFILE_WILDCARD_SCOPE = 'vault:member.profile:*' as const;
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
@@ -276,7 +276,7 @@ export async function issueInteractionsDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
@@ -339,7 +339,8 @@ export async function issueMembershipDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [MEMBER_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
+    // Per-org record (spec 322 W3d): the org reads ONLY the profile card the member keyed to IT.
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [`${MEMBER_PROFILE_RESOURCE_SCOPE}:${orgSA.toLowerCase()}`], ops: ['read'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];

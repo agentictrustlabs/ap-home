@@ -14,7 +14,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { VAULT_RECORD_SCOPE_ENFORCER, decodeVaultRecordScopeTerms } from '@agenticprimitives/delegation';
-import { INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE } from '../../src/lib/delegation';
+import { INBOX_DATA_RESOURCE_SCOPE } from '../../src/lib/delegation';
 
 /** KV key for a recipient's stored inbox-delivery grant (the signed delegation wire). */
 const GRANT_KEY = (owner: string): string => `inbox-delivery-grant:${owner.toLowerCase()}`;

@@ -52,11 +52,23 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data'] as const;
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*'] as const;
+
+// Person-plane records (spec 322 W3d): the person's authoritative org-relationship doc and their
+// per-org shareable profile cards. Self-gated ops only — the session SA must BE the principal.
+const RELATIONSHIPS_RESOURCE = 'relationships.data';
+const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.toLowerCase()}`;
+
+interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; delegationHash?: string; updatedAt: string }
+interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
+/** Grants LEDGER row (spec 322 W3e §2): hash + metadata ONLY — the wire itself is a bearer secret. */
+interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]; storedAt: string }
 
 interface IndexedListing { listing: DirectoryListingV1; label: string }
 interface StoredState {
   grant?: IncomingDelegation;
+  /** Issuance ledger (spec 322 W3e): every grant ever custodied here, hash/metadata only. */
+  ledger?: GrantLedgerRowV1[];
   /** subject(lowercase caip10) → highest publishedAt accepted (replay guard) + tombstone flag. */
   subjects?: Record<string, { publishedAt: string; tombstoned?: boolean }>;
 }
@@ -170,6 +182,13 @@ export class InteractionsDO {
       }
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       st.grant = wire;
+      // Ledger row (W3e): hash + delegate + decoded resources — never the wire (bearer secret).
+      let resources: string[] = [];
+      try {
+        const cav = wire.caveats.find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+        if (cav?.terms) resources = decodeVaultRecordScopeTerms(cav.terms as Hex).flatMap((g) => g.resources);
+      } catch { /* undecodable scopes → empty resources row; the currency gate handles enforcement */ }
+      st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: wire.delegate.toLowerCase(), resources, storedAt: new Date().toISOString() }].slice(-50);
       await this.state.storage.put('state', st);
       return json({ ok: true });
     }
@@ -307,6 +326,40 @@ export class InteractionsDO {
         await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
         await this.writeDoc(grant, CHANNEL_RESOURCE(channelId), composed[0]!.messages);
         return json({ ok: true, messageId: r.envelope.id });
+      }
+
+      if (op === 'grants.list') {
+        // Steward-or-self visibility into the issuance ledger (spec 322 W3e).
+        const self = sessionSa.toLowerCase() === principal;
+        const steward = self ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!self && !steward) return json({ error: 'stewardship proof required' }, 403);
+        return json({ ok: true, grants: st.ledger ?? [] });
+      }
+
+      // ── Person-plane ops (spec 322 W3d) — STRICTLY self: the session SA must BE the principal. ──
+      if (op === 'relationships.get' || op === 'relationships.merge' || op === 'member.profile.put') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'this record belongs to the principal — self access only' }, 403);
+        if (op === 'relationships.get') {
+          const doc = await this.readDoc<RelationshipsDocV1>(grant, RELATIONSHIPS_RESOURCE, { orgs: {} });
+          return json({ ok: true, relationships: doc });
+        }
+        if (op === 'relationships.merge') {
+          const entry = body.entry as Partial<RelationshipEntryV1> | undefined;
+          const org = String(entry?.org ?? '').toLowerCase();
+          if (!/^0x[0-9a-fA-F]{40}$/.test(org)) return json({ error: 'entry.org (address) required' }, 400);
+          const doc = await this.readDoc<RelationshipsDocV1>(grant, RELATIONSHIPS_RESOURCE, { orgs: {} });
+          if (body.remove === true) delete doc.orgs[org];
+          else doc.orgs[org] = { org, relationship: entry?.relationship === 'steward' ? 'steward' : 'member', ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}), ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}), updatedAt: new Date().toISOString() };
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.relationships.merge', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'org-link', id: org } });
+          await this.writeDoc(grant, RELATIONSHIPS_RESOURCE, doc);
+          return json({ ok: true });
+        }
+        const org = String(body.org ?? '').toLowerCase();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(org)) return json({ error: 'org (address) required' }, 400);
+        const profile = (body.profile ?? {}) as Record<string, unknown>;
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.member-profile.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'member-profile', id: org } });
+        await this.writeDoc(grant, MEMBER_PROFILE_RESOURCE(org), profile);
+        return json({ ok: true });
       }
 
       return json({ error: `unknown op: ${op}` }, 400);
