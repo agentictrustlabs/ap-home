@@ -245,6 +245,39 @@ export async function issueInboxDeliveryDelegation(
  *  (spec 321): display info the member chose to share, never the whole vault. */
 export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
 
+/** The membership directory record (spec 322 W2/W3 — the DO-managed vault residency). */
+export const DIRECTORY_DATA_RESOURCE_SCOPE = 'vault:directory.data' as const;
+
+/**
+ * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
+ * by the steward's credential AS the principal at the enable ceremony. Exercised only by the
+ * principal's InteractionsDO (the serialized execution point); scoped to the interaction records
+ * (board + bodies + inbox + directory), read+write. The wire lives WITH its delegate service (the
+ * DO's storage) — never in app KV, never readable by member/app scopes (a stored wire is a bearer
+ * secret under server-mint; spec 322 §2).
+ */
+export async function issueInteractionsDelegation(
+  principal: Address,
+  interactionsServiceSA: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [CHANNELS_DATA_RESOURCE_SCOPE, INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: principal, delegate: interactionsServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the steward's credential authorizes the execution point
+  return d;
+}
+
 /** The org's managed profile record (`org:profile` — what OrgDetail's steward edits): the org
  *  information a MEMBER may read over their member-access grant (spec 321 W2). */
 export const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org:profile' as const;

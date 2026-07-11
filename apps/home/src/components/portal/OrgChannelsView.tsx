@@ -7,7 +7,7 @@ import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
@@ -184,6 +184,10 @@ export function OrgChannelsView({ org }: { org: Address }) {
       if (!bound.ok) throw new Error(bound.error);
       const grant = await activateInboxDeliveryIfNeeded(org, via, auth);
       if (!grant.ok) throw new Error(grant.error);
+      // spec 322 W2.2 — the interactions grant (plane B) rides the same enable ceremony; inert
+      // until INTERACTIONS_SERVICE_SA is provisioned.
+      const ix = await activateInteractionsIfNeeded(org, via, auth);
+      if (!ix.ok) console.warn('[channels] interactions grant not provisioned:', ix.error);
       setOrgVault(true);
       await load();
     } catch (e) {

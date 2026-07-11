@@ -28,9 +28,10 @@ import {
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
-import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation } from '../lib/vault-client';
-import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
+import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
+import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
 import { readSsoCookie } from '../lib/sso-cookie';
 import { SESSION_KEY } from '../context/session';
@@ -254,6 +255,9 @@ export async function createOrganization(
     if (!bound.ok) throw new Error(bound.error);
     const grant = await activateInboxDeliveryIfNeeded(x.childAgent, via, auth);
     if (!grant.ok) throw new Error(grant.error);
+    // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
+    const ix = await activateInteractionsIfNeeded(x.childAgent, via, auth);
+    if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
     // spec 321 items 1+3 — seed the org profile record + a default channel (same as the
     // Organizations-page create), so relying-flow orgs are usable without steward follow-up.
     if (x.stewardshipDelegation) {
@@ -664,5 +668,41 @@ export async function activateInboxDeliveryIfNeeded(
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'inbox-delivery activation failed' };
+  }
+}
+
+/**
+ * spec 322 W2.2 — provision the principal's INTERACTIONS grant (plane B): issue
+ * `principal → INTERACTIONS_SERVICE_SA` (steward-signed, interaction-record scopes) and hand the
+ * wire to the principal's InteractionsDO (/a2a/interactions/<sa>/grant — the operational wire lives
+ * WITH its delegate service, spec 322 §2; the DO self-verifies before storing). Inert until the
+ * service SA is provisioned; skips when the DO already holds a grant. The issuance LEDGER row
+ * (hash/metadata in the principal's vault) lands at W3 with the residency wave.
+ */
+export async function activateInteractionsIfNeeded(
+  principal: Address,
+  via: Via = 'passkey',
+  auth?: Auth,
+): Promise<Result<{ skipped?: boolean }>> {
+  if (!INTERACTIONS_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
+  try {
+    const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean };
+    if (st?.granted) return { ok: true, skipped: true };
+  } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
+  try {
+    const signHash = await signHashFor(via, principal, auth);
+    const delegation = await issueInteractionsDelegation(principal, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID, signHash);
+    await ensureCsrfToken();
+    const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/grant`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeaders() },
+      body: JSON.stringify({ delegation: toWire(delegation) }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `interactions grant store failed (HTTP ${res.status})` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'interactions activation failed' };
   }
 }

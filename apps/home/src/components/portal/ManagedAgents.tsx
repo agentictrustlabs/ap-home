@@ -12,7 +12,7 @@ import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
@@ -178,6 +178,9 @@ export function CreateAgentForm({
         if (!bound.ok) throw new Error(bound.error);
         const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
         if (!grant.ok) throw new Error(grant.error);
+        // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
+        const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token });
+        if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
         // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
         // "About this organization" card + roster read) and a default #general channel, so a fresh
         // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
