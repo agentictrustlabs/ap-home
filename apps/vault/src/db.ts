@@ -253,9 +253,7 @@ export async function putVaultObjectRow(
   row: Pick<VaultObjectRow, 'owner_address' | 'resource' | 'classification' | 'ciphertext_b64' | 'wrapped_dek_b64' | 'crypto_meta'>,
   expectedRev?: number,
 ): Promise<void> {
-  const res = await db
-    .prepare(
-      `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, rev)
+  const UPSERT = `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, rev)
        VALUES (?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(owner_address, resource) DO UPDATE SET
          classification = excluded.classification,
@@ -264,22 +262,22 @@ export async function putVaultObjectRow(
          crypto_meta = excluded.crypto_meta,
          updated_at = CURRENT_TIMESTAMP,
          deleted_at = NULL,
-         rev = vault_objects.rev + 1
-       WHERE ? IS NULL OR vault_objects.rev = ?`,
-    )
-    .bind(
-      row.owner_address.toLowerCase(),
-      row.resource,
-      row.classification,
-      row.ciphertext_b64,
-      row.wrapped_dek_b64,
-      row.crypto_meta,
-      expectedRev ?? null,
-      expectedRev ?? null,
-    )
+         rev = vault_objects.rev + 1`;
+  const owner = row.owner_address.toLowerCase();
+  // No expected rev → an UNCONDITIONAL upsert (the common path — CAS is opt-in and currently unwired).
+  // A `WHERE ? IS NULL OR rev = ?` conditional on every write is pure downside: if that predicate ever
+  // fails to match (a null-binding / evaluation quirk), the DO UPDATE writes NOTHING yet `changes`
+  // is not checked when expectedRev is undefined — a silent write-that-doesn't-stick (2026-07-11).
+  if (expectedRev === undefined) {
+    await db.prepare(UPSERT).bind(owner, row.resource, row.classification, row.ciphertext_b64, row.wrapped_dek_b64, row.crypto_meta).run();
+    return;
+  }
+  // Explicit CAS: the conditional DO UPDATE writes only when the stored rev matches; changes=0 ⇒ conflict.
+  const res = await db
+    .prepare(`${UPSERT}\n       WHERE vault_objects.rev = ?`)
+    .bind(owner, row.resource, row.classification, row.ciphertext_b64, row.wrapped_dek_b64, row.crypto_meta, expectedRev)
     .run();
-  // CAS miss: the row existed but its rev didn't match — the conditional DO UPDATE wrote nothing.
-  if (expectedRev !== undefined && (res.meta?.changes ?? 1) === 0) {
+  if ((res.meta?.changes ?? 1) === 0) {
     throw new VaultRevConflictError(row.resource);
   }
 }
