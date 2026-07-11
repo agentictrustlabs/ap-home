@@ -327,6 +327,16 @@ const SELECTED_METHOD_STY: React.CSSProperties = {
   fontWeight: 700,
 };
 
+// Yield one frame so a just-set busy state actually PAINTS before a blocking credential call. Wallet
+// (`window.ethereum.request`) and passkey (`navigator.credentials.get`) trigger a native prompt
+// within the click task's synchronous prefix — without this yield React commits the busy UI but the
+// browser never repaints it first, so the click looks dead until MetaMask/the passkey dialog appears.
+const paintYield = (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+
 // ── Self-serve: choose your name in the community ─────────────────────────────
 // `enrollApi` (relying-app enroll only): the "Continue with Google" button must STASH the enroll so
 // the post-redirect GoogleEnrollResume finishes the grant + delivers the code back to the app.
@@ -501,6 +511,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   async function withPasskey() {
     setBusy('passkey');
     setErr('');
+    await paintYield(); // paint "Checking your device…" before the passkey dialog blocks
     try {
       // registerIfMissing=false: never silently mint a key here — a fresh user takes the named/
       // bootstrap path. A discoverable assertion that resolves an existing home → straight in.
@@ -534,6 +545,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   async function withWallet() {
     setBusy('wallet');
     setErr('');
+    await paintYield(); // paint "Confirm in your wallet…" before MetaMask blocks
     try {
       const out = await siweLogin();
       if (out.status === 'issued' && out.token) {
@@ -657,6 +669,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
 // ── Returning member sign-in ──────────────────────────────────────────────────
 function SignInView({ name, onSession, onCreate }: { name: string; onSession: (token: string, via: string) => Promise<void>; onCreate?: (name: string) => void }) {
   const [busy, setBusy] = useState(false);
+  const [busyMsg, setBusyMsg] = useState('Confirming…');
   const [err, setErr] = useState('');
   const [info, setInfo] = useState<NameInfo | null>(null);
   // An email/phone-custodied home signs in via the code, not a device credential — its KMS custodian looks
@@ -691,8 +704,10 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
 
   async function go(via: 'passkey' | 'wallet', passkeyMode: 'local' | 'discoverable' = 'local') {
     if (via === 'passkey' && redirectForPasskey('signin', name)) return;
+    setBusyMsg(via === 'wallet' ? 'Connect your wallet…' : 'Checking your passkey…');
     setBusy(true);
     setErr('');
+    await paintYield(); // show the busy state BEFORE MetaMask / the passkey dialog blocks
     try {
       const out = await openHome(name, via, { passkeyMode });
       if (out.ok) await onSession(out.token, via);
@@ -774,6 +789,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
             <button
               className="btn-primary"
               onClick={async () => {
+                setBusyMsg('Signing you in…');
                 setBusy(true);
                 setErr('');
                 try {
@@ -806,7 +822,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
         // (showPasskey=true) flash "Continue with passkey" as the primary even for a WALLET-only home,
         // so the member is taken to passkey when they should get wallet. Show only this home's ACTUAL
         // credential(s) once resolved.
-        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{busy ? 'Confirming…' : 'Opening your home…'}</p></div>
+        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{busy ? busyMsg : 'Opening your home…'}</p></div>
       ) : notFound ? (
         <>
           <p className="onboarding-hint taken">No home named <strong>{nameLabel(name)}</strong> yet.</p>
