@@ -53,7 +53,7 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest'] as const;
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -69,7 +69,9 @@ const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.t
 // self (session SA === principal) over the interactions grant. This is the delegation-authorized,
 // KEK-encrypted replacement for the bearer/service-MAC `impact-profile` path (V-1 remediation) and
 // the app-local `skills`/`home-manifest` KV. NOT append logs (control-events needs its own op).
-const CAPABILITY_RECORDS = new Set(['impact-profile', 'skills.data', 'home.manifest']);
+const CAPABILITY_RECORDS = new Set(['impact-profile', 'skills.data', 'home.manifest', 'control-events.data']);
+const CONTROL_EVENTS_RESOURCE = 'control-events.data';
+const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timeline is a recent-window projection.
 
 // spec 323 §3: wires whose DELEGATE is this person (stewardship, member-access) are the person's
 // own private credentials — they ride the entry so any Home can act from the vault (ADR-0025).
@@ -227,7 +229,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'controlevents.append') {
       if (op !== 'internal.deliver') {
         const bg = await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
@@ -253,6 +255,17 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        if (op === 'controlevents.append') {
+          // spec 323 W2.3 — the person's portable control-plane timeline (`control-events.data`),
+          // append-only under the single writer. Server flows (inbox decisions, manifest publish)
+          // append via the SEC-010 bridge; the person READS their own via record.get (session-gated).
+          const event = body.event;
+          if (event === undefined || event === null) return json({ error: 'event required' }, 400);
+          const rows = await this.readDoc<unknown[]>(g, CONTROL_EVENTS_RESOURCE, []);
+          rows.push(event);
+          await this.writeDoc(g, CONTROL_EVENTS_RESOURCE, rows.slice(-CONTROL_EVENTS_CAP));
+          return json({ ok: true });
         }
         // internal.deliver — append-only merge of a validated envelope (the skill already verified
         // addressing + bodyHash and persisted the body under the delivery grant).

@@ -36,7 +36,8 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
   const [otpFallback, setOtpFallback] = useState(false);
 
   useEffect(() => {
-    void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}`)
+    const org = new URLSearchParams(window.location.search).get('o') ?? '';
+    void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}&o=${encodeURIComponent(org)}`)
       .then((r) => r.json())
       .then((d) => { if (d.ok) setInvite({ org: d.org, orgName: d.orgName }); else setErr(d.error ?? 'invalid invitation'); })
       .catch(() => setErr('could not load this invitation'));
@@ -76,7 +77,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     try {
       const r = await fetch('/connect/org-invite/redeem', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, org: invite?.org }),
       });
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown; memberAccessDelegation?: { delegate?: string } | null };
       if (r.ok && d.status === 'needs-otp') { setOtpFallback(true); return; }

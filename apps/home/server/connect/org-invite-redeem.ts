@@ -28,25 +28,24 @@ const json = (b: unknown, s = 200): Response =>
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { token?: string } | null;
+  const body = (await request.json().catch(() => null)) as { token?: string; org?: string } | null;
   const token = (body?.token ?? '').trim();
+  const org = (body?.org ?? '').trim().toLowerCase();
   if (!/^[a-f0-9]{40,80}$/.test(token)) return json({ error: 'invalid token' }, 400);
+  if (!/^0x[0-9a-f]{40}$/.test(org)) return json({ error: 'invite link missing its organization' }, 400);
 
-  const raw = await env.AUTH_CODES.get(`orginvite:${token}`);
-  if (!raw) return json({ error: 'this invitation has expired or was already used' }, 404);
-  const { org } = JSON.parse(raw) as { org: string };
-
-  // The invited email's hash lives in the ORG vault (delegation-gated, encrypted) — never in KV. Without it
-  // we can't bind the bootstrap to the invited address, so the invitee verifies via the OTP card instead.
+  // spec 323 W2.3 — the single invite record lives in the ORG VAULT (delegation-gated, KEK-encrypted);
+  // the org rides the self-describing link. No demo-sso-next KV pointer. The invited email's hash binds
+  // the bootstrap to the invited address; without it (or if unreachable) the invitee verifies via OTP.
   let emailHash: string | null = null;
   let memberAccessDelegation: unknown = null; // spec 321 W2 — the steward's pre-signed org→invitee grant
   try {
     const vault = await orgVault(env, org);
-    if (vault) {
-      const rec = (await vault.get(`org.invite:${token}`)) as { emailHash?: string; status?: string; memberAccessDelegation?: unknown } | null;
-      emailHash = rec?.emailHash ?? null;
-      memberAccessDelegation = rec?.memberAccessDelegation ?? null;
-    }
+    const rec = vault ? ((await vault.get(`org.invite:${token}`)) as { emailHash?: string; expiresAt?: number; status?: string; memberAccessDelegation?: unknown } | null) : null;
+    if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
+    if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
+    emailHash = rec.emailHash ?? null;
+    memberAccessDelegation = rec.memberAccessDelegation ?? null;
   } catch { /* vault unreachable — fall through to needs-otp */ }
   if (!emailHash) return json({ status: 'needs-otp', org });
 

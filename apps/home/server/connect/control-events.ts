@@ -77,15 +77,31 @@ export async function appendControlEvent(
     refs,
     auditRef: auditId,
   };
+  // spec 323 W2.3 — the AUTHORITATIVE timeline is the person's vault `control-events.data` (their
+  // InteractionsDO). Server flows have no person bearer, so the append rides the SEC-010 bridge
+  // (audience interactions.controlevents.append), same rationale as the W3f inbox ops. The KV copy
+  // is a rebuildable cache. Best-effort: a person whose interactions plane isn't enabled keeps the
+  // KV copy until their ceremony re-syncs.
+  const { bridgeInteractions } = await import('../lib/interactions-bridge');
+  await bridgeInteractions(env, person, 'controlevents.append', { event: row }).catch(() => null);
   const raw = await env.AUTH_CODES.get(KEY(person));
   const rows = raw ? (JSON.parse(raw) as HomeControlEventV1[]) : [];
   rows.push(row);
-  await env.AUTH_CODES.put(KEY(person), JSON.stringify(rows));
+  await env.AUTH_CODES.put(KEY(person), JSON.stringify(rows.slice(-200)));
 }
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  // Authoritative read from the person's vault (session-gated record.get); reconcile the KV cache.
+  // Empty/plane-not-enabled falls to the cache (an answer, ADR-0013 — not a second mechanism).
+  const { readCapabilityRecord } = await import('../lib/capability-record');
+  const authoritative = await readCapabilityRecord<HomeControlEventV1[]>(env, person, bearer, 'control-events.data');
+  if (Array.isArray(authoritative)) {
+    await env.AUTH_CODES.put(KEY(person), JSON.stringify(authoritative));
+    return jsonCors({ events: [...authoritative].reverse() }, request);
+  }
   const raw = await env.AUTH_CODES.get(KEY(person));
   const events = raw ? (JSON.parse(raw) as HomeControlEventV1[]) : [];
   return jsonCors({ events: events.reverse() }, request);
