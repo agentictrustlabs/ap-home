@@ -83,6 +83,10 @@ interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]
 interface IndexedListing { listing: DirectoryListingV1; label: string }
 interface StoredState {
   grant?: IncomingDelegation;
+  /** spec 323 W3 — the WRITE-ONLY delivery wire (owner → DELIVERY_SERVICE_SA), custodied HERE (a
+   *  stored wire is a bearer secret; the DO is the delegate-service side, spec 322 §2). The DO is
+   *  now the sole holder+wielder for dm-body writes — no app (not even the Home) keeps it. */
+  deliveryGrant?: IncomingDelegation;
   /** Issuance ledger (spec 322 W3e): every grant ever custodied here, hash/metadata only. */
   ledger?: GrantLedgerRowV1[];
   /** subject(lowercase caip10) → highest publishedAt accepted (replay guard) + tombstone flag. */
@@ -219,9 +223,23 @@ export class InteractionsDO {
       await this.state.storage.put('state', st);
       return json({ ok: true });
     }
+    // spec 323 W3 — custody the write-only DELIVERY wire in the DO (verified like /grant). Same
+    // ERC-1271-against-delegator junk-guard; the wire never returns to any app.
+    if (op === 'grant.delivery.put' && request.method === 'POST') {
+      const wire = body.delegation as IncomingDelegation | undefined;
+      if (!wire?.signature || wire.delegator.toLowerCase() !== principal) return json({ error: 'delivery delegation with delegator = principal required' }, 400);
+      const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return json({ error: 'delivery grant signature failed verification against the delegator' }, 403);
+      const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      st.deliveryGrant = wire;
+      st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: wire.delegate.toLowerCase(), resources: ['(delivery:write-only)'], storedAt: new Date().toISOString() }].slice(-50);
+      await this.state.storage.put('state', st);
+      return json({ ok: true });
+    }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant) });
+      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant });
     }
 
     // ── 1-1 inbox residency (spec 322 W3f) — the Home-server channel + in-Worker delivery. ──
@@ -229,8 +247,8 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'controlevents.append') {
-      if (op !== 'internal.deliver') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put') {
+      if (op !== 'internal.deliver' && op !== 'internal.dm.body.put') {
         const bg = await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
       }
@@ -255,6 +273,19 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        if (op === 'dm.body.put' || op === 'internal.dm.body.put') {
+          // spec 323 W3 — dm body WRITE via the DO-held DELIVERY wire (the only wire scoped to write
+          // dm bodies). `dm.body.put` = the Home's split-plane writer over the bridge; the in-Worker
+          // `internal.dm.body.put` is the a2a deliver skill. dm-namespace pinned (belt to the wire's
+          // own write-only record scope).
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — enable inbox delivery for this agent first' }, 409);
+          const resource = String(body.resource ?? '');
+          if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
+          if (body.data === undefined) return json({ error: 'data required' }, 400);
+          await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
+          return json({ ok: true });
         }
         if (op === 'controlevents.append') {
           // spec 323 W2.3 — the person's portable control-plane timeline (`control-events.data`),

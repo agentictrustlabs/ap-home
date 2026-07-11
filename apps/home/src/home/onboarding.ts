@@ -720,6 +720,16 @@ export async function activateInboxDeliveryIfNeeded(
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `inbox-delivery store failed (HTTP ${res.status})` };
+    // spec 323 W3 — ALSO custody the write-only delivery wire in the recipient's InteractionsDO, so
+    // the person's 1-1 body WRITER runs through the DO (no app holds the wire). The DO self-verifies
+    // (ERC-1271) before storing. Dual-store during the transition: the KV copy still backs the ORG
+    // plane's orgVault (spec 323 W3.2 relocates that + deletes the KV wire). Best-effort — the DO
+    // write-path degrades to the KV writer if this doesn't land.
+    await fetch(`/a2a/interactions/${recipient.toLowerCase()}/grant.delivery.put`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ delegation: toWire(delegation) }),
+    }).catch(() => null);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'inbox-delivery activation failed' };

@@ -20,7 +20,7 @@ export function interactionsBridgeConfigured(env: InteractionsBridgeEnv): boolea
 export async function bridgeInteractions<T = Record<string, unknown>>(
   env: InteractionsBridgeEnv,
   owner: string,
-  op: 'inbox.get' | 'inbox.put' | 'inbox.body.get' | 'controlevents.append',
+  op: 'inbox.get' | 'inbox.put' | 'inbox.body.get' | 'controlevents.append' | 'dm.body.put',
   payload: unknown,
 ): Promise<{ ok: boolean; status: number; body: T & { error?: string } }> {
   if (!interactionsBridgeConfigured(env)) {
