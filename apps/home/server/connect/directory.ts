@@ -18,7 +18,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
-import { isListingCurrent, validateDirectoryListing, type DirectoryListingV1 } from '@agenticprimitives/home';
+import { isListingCurrent, validateDirectoryListing, type DirectoryListingV1 } from '@agenticprimitives/fabric/messaging';
 import { ensureOrgMemberLink, removeOrgMemberLink } from './membership';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';

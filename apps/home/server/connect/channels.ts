@@ -21,15 +21,12 @@
 //      (ADR-0013). The KV channel doc keeps only envelopes + author names (the projection).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import {
-  generateConversationId,
-  generateMessageId,
-  sha256Hex32,
-  validateConversationDescriptor,
-  validateMessageEnvelope,
+  createBoardChannel,
+  appendBoardPost,
+  isListingCurrent,
   type ConversationDescriptorV1,
   type MessageEnvelopeV1,
 } from '@agenticprimitives/fabric/messaging';
-import { isListingCurrent } from '@agenticprimitives/home';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -176,8 +173,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   try {
     if (body?.action === 'create') {
-      const title = (body.title ?? '').trim();
-      if (!title || title.length > 80) return jsonCors({ error: 'title required (≤ 80 chars)' }, request, 400);
       // Scope gate BEFORE the vault write (spec 316 §11a): creating a channel writes the board doc to the
       // org's vault (`channels.data`). A stale org grant (no `channels.data` scope) would otherwise surface
       // the raw `record_scope_denied` from demo-mcp; instead fail with the actionable steward prompt — the
@@ -185,81 +180,45 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!grantCoversCurrentScope(await loadInboxDeliveryGrant(env, communityId))) {
         return jsonCors({ error: "org vault grant missing — a steward must enable vault storage for this organization's channels" }, request, 409);
       }
-      const descriptor: ConversationDescriptorV1 = {
-        version: 'ap.conversation.v1',
-        id: generateConversationId(),
-        owner: me,
-        title,
-        participants: [me],
-        contextRefs: [{ kind: 'community', id: communityId }],
-        participantPolicy: 'open-to-context',
-        createdAt: new Date().toISOString(),
-      };
-      const errors = validateConversationDescriptor(descriptor);
-      if (errors.length > 0) return jsonCors({ error: `invalid channel: ${errors.join(', ')}` }, request, 400);
+      // spec 322 W1 — the board mutation is fabric's (shape + validation + title uniqueness); this
+      // route keeps only the gates and the persistence.
       const channels = await readChannels(channelsKv, communityId);
-      if (channels.some((c) => c.title.toLowerCase() === title.toLowerCase())) {
-        return jsonCors({ error: 'a channel with this title already exists' }, request, 409);
-      }
-      channels.push({ descriptor, title, createdBy: authorName, messages: [] });
+      const r = createBoardChannel(channels, { contextId: communityId, owner: me, title: body.title ?? '', createdBy: authorName });
+      if (!r.ok) return jsonCors({ error: r.error }, request, r.error.includes('already exists') ? 409 : 400);
       await channelsKv.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
-      return jsonCors({ ok: true, channelId: descriptor.id }, request);
+      return jsonCors({ ok: true, channelId: r.channel.descriptor.id }, request);
     }
 
     if (body?.action === 'post') {
-      const bodyText = (body.bodyText ?? '').trim();
-      if (!body.channelId || !bodyText) return jsonCors({ error: 'channelId + bodyText required' }, request, 400);
-      const channels = await readChannels(channelsKv, communityId);
-      const channel = channels.find((c) => c.descriptor.id === body.channelId);
-      if (!channel) return jsonCors({ error: 'unknown channel' }, request, 404);
-
       // Body residency gate FIRST (spec 318): the org's vault store must exist before anything commits.
       const orgStore = await makeBodyStoreFactory(env)(communityId);
       if (!orgStore) {
         return jsonCors({ error: "org vault grant missing — a steward must enable vault storage for this organization's channels" }, request, 409);
       }
-      const now = new Date().toISOString();
-      const generatedId = generateMessageId();
-      const envelope: MessageEnvelopeV1 = {
-        version: 'ap.message.v1',
-        id: generatedId,
-        conversationId: channel.descriptor.id,
-        kind: 'plain',
-        from: me,
-        // Shared-board addressing: the channel descriptor's owner stands for
-        // the board; per-member fan-out is a W4 concern (spec 313 §6).
-        to: [channel.descriptor.owner],
-        createdAt: now,
-        classification: 'internal',
-        body: { resource: messageBodyResource(generatedId), classification: 'internal', updatedAt: now },
-        bodyHash: await sha256Hex32(new TextEncoder().encode(bodyText)),
-        bodyContentType: 'text/plain',
-        contextRefs: channel.descriptor.contextRefs,
-      };
-      const errors = validateMessageEnvelope(envelope);
-      if (errors.length > 0) return jsonCors({ error: `invalid post: ${errors.join(', ')}` }, request, 400);
+      // spec 322 W1 — the post mutation (envelope build, hash binding, validation, bounded history)
+      // is fabric's; the route keeps the gates, the audit-before-commit, and the residency writes.
+      const channels = await readChannels(channelsKv, communityId);
+      const r = await appendBoardPost(channels, { channelId: body.channelId ?? '', from: me, authorName, bodyText: body.bodyText ?? '' });
+      if (!r.ok) return jsonCors({ error: r.error }, request, r.error === 'unknown channel' ? 404 : 400);
 
       // Audit-before-commit to the community's audit log (spec 291 discipline).
       await homeAuditSink(env.AUTH_CODES, `community:${communityId}`).write({
         id: globalThis.crypto.randomUUID(),
-        timestamp: now,
+        timestamp: r.envelope.createdAt,
         action: 'messaging.deliver.accept',
         outcome: 'success',
         actor: { type: 'user', id: person },
-        subject: { type: 'channel-post', id: envelope.id },
+        subject: { type: 'channel-post', id: r.envelope.id },
       });
       // The body goes to the ORG's vault (hash-bound to the envelope); the KV doc keeps only the projection.
       await orgStore.putBody({
-        messageId: envelope.id,
-        bytes: new TextEncoder().encode(bodyText),
+        messageId: r.envelope.id,
+        bytes: new TextEncoder().encode((body.bodyText ?? '').trim()),
         contentType: 'text/plain',
         classification: 'internal',
       });
-      channel.messages.push({ envelope, authorName });
-      // Bounded history for the demo store (KV doc, newest kept).
-      if (channel.messages.length > 200) channel.messages.splice(0, channel.messages.length - 200);
       await channelsKv.put(CHANNELS_KEY(communityId), JSON.stringify(channels));
-      return jsonCors({ ok: true, messageId: envelope.id }, request);
+      return jsonCors({ ok: true, messageId: r.envelope.id }, request);
     }
 
     return jsonCors({ error: 'unknown action' }, request, 400);

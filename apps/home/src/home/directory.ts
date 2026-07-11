@@ -3,7 +3,7 @@
 // context (ADR-0025: membership is never inferred; only listings are shown).
 // The digest is recomputed server-side before ERC-1271 verification — a
 // client-supplied digest is never trusted.
-import type { DirectoryListingV1 } from '@agenticprimitives/home';
+import type { DirectoryListingV1 } from '@agenticprimitives/fabric/messaging';
 import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/fabric/messaging';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { homeCaip10 } from './manifest';

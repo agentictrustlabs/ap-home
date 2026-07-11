@@ -37,6 +37,9 @@ import {
   type InteractionTransitionType,
 } from '@agenticprimitives/fabric/interactions';
 import { projectHomeInboxSummary, type HomeInboxSummaryV1 } from '@agenticprimitives/home';
+// spec 322 W1 — the inbox DOC shape + pure operations are substrate (fabric); this module keeps only
+// the app's storage adapter (KV/vault routing, audit sink) and the Home-specific compositions.
+import { emptyInboxData, parseInboxData, hydrateInboxStores, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
 import type { AuditEvent, AuditSink } from '@agenticprimitives/audit';
 import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
 import { homeCaip10 } from './manifest';
@@ -50,39 +53,11 @@ interface KV {
 const DATA_KEY = (person: string): string => `inbox-data:${person.toLowerCase()}`;
 const AUDIT_KEY = (person: string): string => `inbox-audit:${person.toLowerCase()}`;
 
-export interface InboxDataV1 {
-  version: 1;
-  envelopes: MessageEnvelopeV1[];
-  events: MessageEventV1[];
-  /** Cases as they entered (draft) — current state is replayed from caseEvents. */
-  draftCases: InteractionCaseV1[];
-  caseEvents: InteractionTransitionEventV1[];
-  /** interactionId → sender-proposed transport card (render half is ours). */
-  cards: Record<string, ActionCardV1>;
-  /** interactionId → the signed mandate the owner issued on approve (W5). */
-  mandates?: Record<string, InteractionMandateV1>;
-  /** Owner-side conversation descriptors (spec 312) — this side's copies. */
-  conversations?: ConversationDescriptorV1[];
-  // NOTE (spec 317 cutover): the `bodies` KV map is GONE — message bodies live only in the owner's
-  // vault (resolved at render into InboxView.bodies). Legacy docs may still carry a `bodies` key on
-  // disk; it is ignored on load and dropped on the next save.
-}
-
-const EMPTY: InboxDataV1 = {
-  version: 1,
-  envelopes: [],
-  events: [],
-  draftCases: [],
-  caseEvents: [],
-  cards: {},
-};
-
+// InboxDataV1 moved to @agenticprimitives/fabric (spec 322 W1); re-exported for app importers.
+export type { InboxDataV1 };
 export async function loadInboxData(kv: KV, person: string): Promise<InboxDataV1> {
   const raw = await kv.get(DATA_KEY(person));
-  if (!raw) return { ...EMPTY, cards: {}, envelopes: [], events: [], draftCases: [], caseEvents: [] };
-  // Drop any legacy `bodies` key from a pre-cutover doc (dead storage; never re-read).
-  const { bodies: _legacyBodies, ...doc } = JSON.parse(raw) as InboxDataV1 & { bodies?: unknown };
-  return doc as InboxDataV1;
+  return raw ? parseInboxData(raw) : emptyInboxData();
 }
 
 async function saveInboxData(kv: KV, person: string, doc: InboxDataV1): Promise<void> {
@@ -108,21 +83,10 @@ export async function loadInboxAudit(kv: KV, person: string): Promise<AuditEvent
   return raw ? (JSON.parse(raw) as AuditEvent[]) : [];
 }
 
-/** Rebuild the in-memory stores by replay — same events, same projection. */
+/** Rebuild the in-memory stores by replay — same events, same projection (fabric, spec 322 W1). */
 function hydrate(person: string, doc: InboxDataV1): { projector: InboxProjector; interactions: InteractionStore } {
-  const projector = createInMemoryInboxProjector({ streamId: `home:${person.toLowerCase()}` });
-  for (const envelope of doc.envelopes) projector.putMessage(envelope);
-  for (const event of doc.events) projector.appendEvent(event);
-
-  const interactions = createInMemoryInteractionStore();
-  for (const c of doc.draftCases) interactions.putCase(c);
-  for (const e of doc.caseEvents) {
-    const r = interactions.applyEvent(e);
-    if (!r.ok) throw new Error(`inbox replay diverged for ${e.interactionId}: ${r.reason}`);
-  }
-  return { projector, interactions };
+  return hydrateInboxStores(`home:${person.toLowerCase()}`, doc);
 }
-
 export interface InboxView {
   items: InboxItemV1[];
   folders: FolderSummaryV1[];
@@ -319,18 +283,9 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
     const mine: ConversationDescriptorV1 = { ...payload.conversation, owner: recipient };
     const errors = validateConversationDescriptor(mine);
     if (errors.length > 0) throw new Error(`invalid conversation descriptor: ${errors.join(', ')}`);
-    const existing = doc.conversations ?? [];
     // First descriptor wins for this owner; later proposals never overwrite — EXCEPT contextRefs,
-    // which UNION (by kind:id): a second invite into the same thread carries a DIFFERENT org context,
-    // and the conversation-level chips must show both (the stale-chip bug: rich-phone5-org's invite
-    // rendered the old rich-phone-organization Join chip, 2026-07-10).
-    const prior = existing.find((d) => d.id === mine.id);
-    if (!prior) doc.conversations = [...existing, mine];
-    else if (mine.contextRefs?.length) {
-      const seen = new Set((prior.contextRefs ?? []).map((r) => `${r.kind}:${r.id}`));
-      const fresh = mine.contextRefs.filter((r) => !seen.has(`${r.kind}:${r.id}`));
-      if (fresh.length) prior.contextRefs = [...(prior.contextRefs ?? []), ...fresh];
-    }
+    // which UNION by kind:id (fabric upsertConversation, spec 322 W1 — the stale-Join-chip fix).
+    upsertConversation(doc, mine);
   }
 
   doc.envelopes.push(envelope);
@@ -437,15 +392,9 @@ export async function sendFromInbox(
   // spec 317 W4 — the sender's own copy → the sender's vault when supplied, else the KV map.
   await persistBody(doc, envelope, opts.bodyText, senderStore);
   const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
-  const priorMine = (doc.conversations ?? []).find((d) => d.id === conversationId);
-  if (!priorMine) {
-    doc.conversations = [...(doc.conversations ?? []), mine];
-  } else if (opts.contextRefs?.length) {
-    // Same union-by-kind:id as the recipient side — the sender's copy of the thread shows the new chip too.
-    const seen = new Set((priorMine.contextRefs ?? []).map((r) => `${r.kind}:${r.id}`));
-    const fresh = opts.contextRefs.filter((r) => !seen.has(`${r.kind}:${r.id}`));
-    if (fresh.length) priorMine.contextRefs = [...(priorMine.contextRefs ?? []), ...fresh];
-  }
+  // Same union-by-kind:id as the recipient side (fabric upsertConversation) — the sender's copy of
+  // the thread shows the new chip too.
+  upsertConversation(doc, mine);
   await saveInboxData(senderKv, person, doc);
   return { messageId: envelope.id, conversationId };
 }
