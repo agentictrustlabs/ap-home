@@ -596,6 +596,12 @@ app.use('*', async (c, next) => {
   // double-submit CSRF adds nothing — same rationale as /api/a2a. This is what lets the Home's server-to-server
   // body-store call through (no browser origin/cookie); the delegation + assertion remain the gates.
   if (c.req.path.startsWith('/mcp/vault/')) return next();
+  // /interactions/* (spec 322 W2.3b) — authorization is ENTIRELY body-carried: a broker-verified
+  // Home session token + (for steward/grant ops) delegator-signed wires, all re-verified inside the
+  // per-principal DO (ERC-1271 / broker JWKS / on-chain revocation). No ambient cookie authority to
+  // forge ⇒ double-submit CSRF adds nothing — same rationale as /mcp/vault/*. This is what lets the
+  // Home's server-side proxy through.
+  if (c.req.path.startsWith('/interactions/')) return next();
   // /custody/google/resolve + /custody/google/sign-site-delegation are server-to-server calls from the
   // Connect broker (no browser cookie). They're authenticated by the bridge HMAC envelope, not CSRF.
   // (bootstrap-and-claim + the browser /custody/google/sign ARE browser-facing and KEEP CSRF.)
