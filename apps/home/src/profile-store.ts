@@ -121,6 +121,21 @@ export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProf
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
   const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
+  // Read-back VERIFY (no false "✓ Saved"): re-read the record and confirm the vault retained the
+  // contact we just wrote. If the write returned ok but the value didn't persist (a silent
+  // write-that-doesn't-stick), fail LOUD with what came back instead of the value we sent.
+  try {
+    const back = await postProfile('get', addr);
+    const saved = (back.record as ImpactStoredProfile | null)?.contact ?? {};
+    const sent = profile.contact ?? {};
+    const mismatch = (Object.keys(sent) as (keyof typeof sent)[]).filter((k) => (saved[k] ?? '') !== (sent[k] ?? ''));
+    if (mismatch.length > 0) {
+      throw new Error(`the vault did not retain the save — these fields read back different: ${mismatch.join(', ')}. The write returned ok but the value didn't persist.`);
+    }
+  } catch (e) {
+    if (e instanceof VaultKeyUnauthorizedError) return; // read-back gate flaked; the write itself returned ok
+    throw e;
+  }
 }
 
 /** Seed vault-profile fields from a CONNECTION (metadata-tiers doctrine: a verified contact point is

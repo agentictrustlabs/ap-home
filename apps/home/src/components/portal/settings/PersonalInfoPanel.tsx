@@ -87,7 +87,9 @@ export function PersonalInfoPanel({
         setNeedsVaultKey(true);
         onNeedsVaultKey?.();
       } else {
-        setLoadError('Could not save to your encrypted vault.');
+        // Surface the REAL reason (incl. the read-back-verify failure) instead of a generic line, so
+        // a save that silently didn't persist says exactly what happened.
+        setLoadError(err instanceof Error ? err.message : 'Could not save to your encrypted vault.');
       }
     } finally {
       setSubmitting(false);
