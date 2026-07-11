@@ -247,7 +247,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put') {
       if (op !== 'internal.deliver' && op !== 'internal.dm.body.put') {
         const bg = await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
@@ -273,6 +273,22 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        if (op === 'invite.get' || op === 'invite.put') {
+          // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
+          // delivery wire (its r+w scope covers org.invite); replaces orgVault's KV-wire transport so
+          // the Home stores no org wire either. Namespace-pinned belt to the wire's own record scope.
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — enable storage for this org first' }, 409);
+          const resource = String(body.resource ?? '');
+          if (!resource.startsWith('org.invite:')) return json({ error: 'org.invite resources only' }, 400);
+          if (op === 'invite.get') {
+            const r = await this.vaultFor(dg).read<unknown>({ owner: '', resource });
+            return json({ ok: true, record: r?.data ?? null });
+          }
+          if (body.data === undefined) return json({ error: 'data required' }, 400);
+          await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
+          return json({ ok: true });
         }
         if (op === 'dm.body.put' || op === 'internal.dm.body.put') {
           // spec 323 W3 — dm body WRITE via the DO-held DELIVERY wire (the only wire scoped to write

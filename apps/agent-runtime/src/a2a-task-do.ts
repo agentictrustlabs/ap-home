@@ -247,13 +247,19 @@ export class A2aTaskDO {
       // agent's DO (this IS its inbox gateway).
       // spec 322 W3f: the inbox.data merge rides the recipient's InteractionsDO (in-Worker
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA, async (recipient, envelope) => {
+      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+        // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
+        // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
-        const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/internal.deliver`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ envelope }),
-        }));
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!resp.ok || !out.ok) throw new Error(out.error ?? `inbox merge failed (${resp.status})`);
+        const call = async (op: string, payload: unknown): Promise<void> => {
+          const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+          }));
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+        };
+        await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
+        await call('internal.deliver', { envelope });
       })], vault, mcp, hashBody, budget,
       // spec 303 W3 — mint verification receipts at the message/send +
       // resubmit terminals; the accept receipt rides the send result so the

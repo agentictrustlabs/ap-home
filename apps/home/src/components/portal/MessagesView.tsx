@@ -76,11 +76,10 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   useEffect(() => {
     if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
     let cancelled = false;
-    void fetch(`/connect/inbox/delivery-grant?owner=${agentAddress}`, {
-      headers: { authorization: `Bearer ${session.token}` },
-    })
+    // spec 323 W3.2 — delivery-wire residency is the InteractionsDO; read its open status.
+    void fetch(`/a2a/interactions/${agentAddress.toLowerCase()}/status`)
       .then((r) => r.json())
-      .then((d: { stored?: boolean }) => { if (!cancelled) setVaultBodies(d.stored === true); })
+      .then((d: { deliveryGranted?: boolean }) => { if (!cancelled) setVaultBodies(d.deliveryGranted === true); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [session, agentAddress, targetAgent]);

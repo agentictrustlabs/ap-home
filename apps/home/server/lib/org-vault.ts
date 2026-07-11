@@ -1,31 +1,33 @@
-// Generic ORG-vault access over the org's standing steward-signed grant (the SAME grant messaging uses,
-// widened to vault:org.invite:*). Blast-zone (spec 315): org-owned invite records — invitee email hash +
-// status — live ENCRYPTED in the org vault, delegation-gated; KV holds only a random-token→public-org
-// pointer. Returns null when the org hasn't enabled vault storage (no grant / no transport base) — the
-// caller decides whether that's fatal (invites) or best-effort (tracking).
-import { createServerVaultTransport } from './vault-transport';
+// spec 323 W3.2 — generic ORG-vault access is now FULLY DO-mediated: the org's invite records
+// (`org.invite:*`) read/written through the org's InteractionsDO (`invite.get`/`invite.put`, which
+// wield the DO-held write-only delivery wire). The Home holds NO org wire. Returns null when the org
+// hasn't enabled storage (its DO has no delivery grant — `status.deliveryGranted` is false); callers
+// decide whether that's fatal (invites) or best-effort (tracking). Blast-zone unchanged (spec 315):
+// invitee email hash + status live encrypted in the org vault, never in KV.
 import type { ServerVaultTransport } from './delegated-vault';
-import { loadInboxDeliveryGrant } from '../connect/inbox-delivery-grant';
-import type { DelegationWire } from '../../src/lib/delegation';
+import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from './interactions-bridge';
 
-interface OrgVaultEnv {
-  AUTH_CODES: { get(k: string): Promise<string | null> };
-  DEMO_EDGE_URL?: string;
-  A2A_VAULT_URL?: string;
-  A2A_CUSTODY_URL?: string;
-  DELIVERY_SERVICE_SA?: string;
-}
+type OrgVaultEnv = InteractionsBridgeEnv;
 
-const nonEmpty = (s?: string): boolean => !!(s && s.trim());
-const baseUrl = (env: OrgVaultEnv): string | undefined =>
-  [env.DEMO_EDGE_URL, env.A2A_VAULT_URL, env.A2A_CUSTODY_URL].find(nonEmpty);
-
-/** A vault transport bound to the ORG (delegator = org SA) over its standing grant, or null if the org
- *  hasn't enabled vault storage (no delivery-service SA / no transport base / no stored grant). */
+/** A vault transport bound to the ORG over its DO-held delivery wire, or null when the org hasn't
+ *  enabled storage. The transport's get/set bridge to the org's InteractionsDO invite ops. */
 export async function orgVault(env: OrgVaultEnv, orgSA: string): Promise<ServerVaultTransport | null> {
-  const base = baseUrl(env);
-  if (!nonEmpty(env.DELIVERY_SERVICE_SA) || !base) return null;
-  const grant = await loadInboxDeliveryGrant(env, orgSA);
-  if (!grant?.delegator || !grant.signature || grant.signature === '0x') return null;
-  return createServerVaultTransport({ baseUrl: base, delegation: grant as DelegationWire });
+  if (!interactionsBridgeConfigured(env)) return null;
+  // Probe the DO: no delivery grant ⇒ storage not enabled ⇒ null (status is an open read).
+  try {
+    const st = await fetch(`${env.A2A_CUSTODY_URL!.replace(/\/$/, '')}/interactions/${orgSA.toLowerCase()}/status`).then((r) => r.json()) as { deliveryGranted?: boolean };
+    if (!st?.deliveryGranted) return null;
+  } catch {
+    return null;
+  }
+  return {
+    async get(recordType: string) {
+      const r = await bridgeInteractions<{ record?: unknown }>(env, orgSA, 'invite.get', { resource: recordType });
+      return r.ok ? (r.body.record ?? null) : null;
+    },
+    async set(recordType: string, data: unknown) {
+      const r = await bridgeInteractions(env, orgSA, 'invite.put', { resource: recordType, data });
+      if (!r.ok) throw new Error(r.body.error ?? `org.invite write via InteractionsDO failed (${r.status})`);
+    },
+  } as ServerVaultTransport;
 }

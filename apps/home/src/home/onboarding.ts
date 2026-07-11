@@ -39,7 +39,7 @@ import type { Home } from './types';
 import { homeLabel } from './types';
 
 /** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
- *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the inbox-delivery-grant store)
+ *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the naming + membership stores)
  *  reject without it, and NOT every caller threads `auth` (passkey flows pass none). */
 function storedSessionToken(auth?: Auth): string | null {
   if (auth?.token) return auth.token;
@@ -698,38 +698,26 @@ export async function activateInboxDeliveryIfNeeded(
   auth?: Auth,
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!DELIVERY_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
-  // The grant store is SESSION-gated (owner must equal the session principal — the anti-DoS rule in
-  // inbox-delivery-grant.ts). Without the Bearer both calls 401 and, being best-effort, that failure was
-  // SILENT — the reason no grant ever stored from onboarding.
-  const bearer = homeBearerToken(auth);
-  if (!bearer) return { ok: false, error: 'no home session — sign in before enabling inbox delivery' };
-  const authed = { authorization: `Bearer ${bearer}` };
+  // spec 323 W3.2 — the delivery wire is custodied ONLY in the recipient's InteractionsDO now; the
+  // Home stores no wire. Skip when the DO already holds it (`status.deliveryGranted` — an open read).
   try {
-    const st = (await fetch(`/connect/inbox/delivery-grant?owner=${recipient}`, { headers: authed }).then((r) => r.json())) as { stored?: boolean };
-    if (st?.stored) return { ok: true, skipped: true };
+    const st = (await fetch(`/a2a/interactions/${recipient.toLowerCase()}/status`).then((r) => r.json())) as { deliveryGranted?: boolean };
+    if (st?.deliveryGranted) return { ok: true, skipped: true };
   } catch {
     /* fall through to (re)issue — a read hiccup never blocks provisioning the grant */
   }
   try {
     const signHash = await signHashFor(via, recipient, auth);
     const delegation = await issueInboxDeliveryDelegation(recipient, DELIVERY_SERVICE_SA, MCP_SERVER_ID, signHash);
-    const res = await fetch('/connect/inbox/delivery-grant', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authed },
-      body: JSON.stringify({ owner: recipient, delegation: toWire(delegation) }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `inbox-delivery store failed (HTTP ${res.status})` };
-    // spec 323 W3 — ALSO custody the write-only delivery wire in the recipient's InteractionsDO, so
-    // the person's 1-1 body WRITER runs through the DO (no app holds the wire). The DO self-verifies
-    // (ERC-1271) before storing. Dual-store during the transition: the KV copy still backs the ORG
-    // plane's orgVault (spec 323 W3.2 relocates that + deletes the KV wire). Best-effort — the DO
-    // write-path degrades to the KV writer if this doesn't land.
-    await fetch(`/a2a/interactions/${recipient.toLowerCase()}/grant.delivery.put`, {
+    // Hand the write-only wire to the recipient's InteractionsDO (self-verifies ERC-1271 before
+    // storing). This is the ONLY residency now — no KV store.
+    const res = await fetch(`/a2a/interactions/${recipient.toLowerCase()}/grant.delivery.put`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ delegation: toWire(delegation) }),
-    }).catch(() => null);
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `delivery-grant store failed (HTTP ${res.status})` };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'inbox-delivery activation failed' };
