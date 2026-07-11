@@ -532,12 +532,14 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
-        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
-        const r = createBoardChannel(index, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
-        if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
-        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
-        await this.writeDoc(grant, BOARD_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
-        return json({ ok: true, channelId: r.channel.descriptor.id });
+        return this.serialize(async () => { // ARCH-H1 — the board.index RMW is a shared-doc write; serialize it too
+          const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+          const r = createBoardChannel(index, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
+          if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
+          await this.writeDoc(grant, BOARD_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
+          return json({ ok: true, channelId: r.channel.descriptor.id });
+        });
       }
 
       if (op === 'channels.post') {

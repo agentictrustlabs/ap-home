@@ -91,9 +91,19 @@ export function OrgChannelsView({ org }: { org: Address }) {
       const d = (await dirRes.json()) as { listings?: Listing[] };
       setListings(d.listings ?? []);
     }
-    if (chRes.status === 403) { setMember(false); setChannels(null); return; }
-    if (!chRes.ok) { setError(`channels read failed (${chRes.status})`); return; }
-    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean; membership?: string; steward?: boolean };
+    if (chRes.status === 403) {
+      // Surface WHY (no more silent "not a member"): the DO's gate message says whether to join, etc.
+      const b = (await chRes.json().catch(() => ({}))) as { error?: string };
+      setMember(false); setChannels(null); setError(b.error ?? 'you are not a member of this community'); return;
+    }
+    if (!chRes.ok) {
+      const b = (await chRes.json().catch(() => ({}))) as { error?: string };
+      setError(b.error ?? `channels read failed (${chRes.status})`); return;
+    }
+    const c = (await chRes.json()) as { channels: Channel[]; bodies?: Record<string, string>; you: string; orgVaultEnabled?: boolean; needsReEnable?: boolean; reason?: string; membership?: string; steward?: boolean };
+    // Storage not usable → say WHY. A STALE grant (a wave widened the interactions scope) is distinct
+    // from never-enabled: the steward must RE-Enable to re-sign, and the banner now explains it.
+    if (c.orgVaultEnabled === false && c.reason) setError(c.needsReEnable ? `storage was upgraded — a steward must re-enable to continue (${c.reason})` : c.reason);
     if (c.membership && c.membership !== 'linked') setError(`membership link: ${c.membership}`);
     setMember(true);
     setSteward(c.steward === true);

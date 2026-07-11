@@ -100,8 +100,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     ...(stewardship ? { stewardship } : {}),
   });
   if (r.status === 409) {
-    // No interactions grant yet → the UI's steward "Enable" banner path (orgVaultEnabled=false).
-    return jsonCors({ channels: [], bodies: {}, you: '', orgVaultEnabled: false, membership: 'linked', steward: !!stewardship }, request);
+    // 409 has TWO meanings and the UI must tell them apart (no more silent "empty" — the storage is
+    // not simply "off"): (a) NO grant yet → first-time Enable; (b) grant STALE because a wave widened
+    // the interactions scope → the steward must RE-Enable to re-sign. Both route to the Enable banner,
+    // but a stale grant surfaces its reason so the steward knows why an org that "worked" needs it.
+    const reason = String((r.body as { error?: string }).error ?? '');
+    const stale = /stale/i.test(reason);
+    return jsonCors({ channels: [], bodies: {}, you: '', orgVaultEnabled: false, needsReEnable: stale, reason, membership: 'linked', steward: !!stewardship }, request);
   }
   if (r.status !== 200) return jsonCors(r.body, request, r.status);
 
