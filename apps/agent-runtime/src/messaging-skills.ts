@@ -37,6 +37,10 @@ interface InboxDoc {
 const EMPTY_DOC = (): InboxDoc => ({ version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} });
 const INBOX_DATA_RECORD = 'inbox.data';
 
+/** Merges a validated envelope into the recipient's `inbox.data` via their InteractionsDO
+ *  (spec 322 W3f — the serialized single writer; throws when the recipient hasn't enabled it). */
+export type DeliverDocFn = (recipient: string, envelope: MessageEnvelopeV1) => Promise<void>;
+
 interface MessagingDeliverInput {
   envelope: MessageEnvelopeV1;
   bodyText: string;
@@ -72,7 +76,7 @@ function vaultOverContext(ctx: SkillContext, owner: string): Vault {
 /** Shared handler for the three messaging skills — they differ only in the receipt-artifact kind (and which
  *  optional facets the sender carries). `recipientSA` is the SA this DO shard hosts (the addressee
  *  `allowedTargets` named), NOT the delegation delegator. */
-function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: string): SkillHandler {
+function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: string, deliverDoc: DeliverDocFn): SkillHandler {
   const recipient = recipientSA.toLowerCase();
   return {
     skill,
@@ -100,16 +104,11 @@ function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: str
         contentType: envelope.bodyContentType ?? 'text/plain',
         classification: 'internal',
       });
-      // 2) Envelope + a `delivered` event → the recipient's `inbox.data` (read-modify-write; the Home's
-      //    projector replays events at render time — the skill only appends facts).
-      const existing = (await vault.read<InboxDoc>({ owner: recipient, resource: INBOX_DATA_RECORD }))?.data;
-      const doc: InboxDoc = existing ?? EMPTY_DOC();
-      doc.envelopes = [...(doc.envelopes ?? []), envelope];
-      doc.events = [
-        ...(doc.events ?? []),
-        { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'delivered', at: new Date().toISOString() },
-      ];
-      await vault.write({ owner: recipient, resource: INBOX_DATA_RECORD, data: doc });
+      // 2) Envelope + a `delivered` event merge via the recipient's InteractionsDO (spec 322 W3f):
+      //    the delivery grant is WRITE-ONLY, so the read-modify-write of `inbox.data` moved to the
+      //    single serialized writer. Fail-closed: a recipient who hasn't enabled interactions cannot
+      //    receive (the sender sees the error) — never a weaker direct-write path (ADR-0013).
+      await deliverDoc(recipient, envelope);
 
       const receiptId = await ctx.emitArtifact({
         artifactKind: receiptKind,
@@ -122,10 +121,10 @@ function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: str
 
 /** The three A2A messaging skill handlers (spec 309 §7). Registered in the recipient's `A2aTaskDO` alongside
  *  `echo` + `orchestrate`. `recipientSA` is the SA this DO hosts. */
-export function makeMessagingSkills(recipientSA: string): SkillHandler[] {
+export function makeMessagingSkills(recipientSA: string, deliverDoc: DeliverDocFn): SkillHandler[] {
   return [
-    makeDeliverHandler(recipientSA, 'messaging.deliver', 'messaging.delivery.receipt'),
-    makeDeliverHandler(recipientSA, 'interactions.respond', 'interactions.response.receipt'),
-    makeDeliverHandler(recipientSA, 'interactions.deliverCredential', 'interactions.credential.receipt'),
+    makeDeliverHandler(recipientSA, 'messaging.deliver', 'messaging.delivery.receipt', deliverDoc),
+    makeDeliverHandler(recipientSA, 'interactions.respond', 'interactions.response.receipt', deliverDoc),
+    makeDeliverHandler(recipientSA, 'interactions.deliverCredential', 'interactions.credential.receipt', deliverDoc),
   ];
 }

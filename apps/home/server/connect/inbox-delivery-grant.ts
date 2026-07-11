@@ -26,13 +26,11 @@ interface DelegationWireLike {
   signature?: string;
 }
 
-/** spec 316 §11a — a grant is "current" only when its record-scope covers BOTH vault-resident documents:
- *  the personal inbox (`vault:inbox.data`) AND the org channel board (`vault:channels.data`), not just the
- *  message-body records. A grant signed before the cutover (message.body:* only), or after only the first
- *  cutover step (inbox.data but no channels.data), is STALE: `stored`/`orgVaultEnabled` report false so
- *  onboarding re-issues + the Home/channels UI prompts re-enable, and the owner re-signs the FULL widened
- *  grant. Requiring both keeps the person "enable" banner and the org "enable vault storage" prompt consistent
- *  with what a write actually needs — without it, a stale grant is kept and the doc write is record-scope-denied. */
+/** spec 322 W3 — a DELIVERY grant is "current" when its record-scope covers the inbox doc
+ *  (`vault:inbox.data`; the dm-body namespace rides the same caveat). Channels left this plane
+ *  (they ride the interactions grant through the DO), and reads left it too (W3f: the delivery
+ *  plane is write-only; mail reads go through the owner's InteractionsDO). A pre-cutover grant
+ *  missing the inbox doc reports `stored:false` so onboarding re-issues and the owner re-signs. */
 export function grantCoversCurrentScope(d: DelegationWireLike | null): boolean {
   if (!d?.signature || d.signature === '0x') return false;
   const cav = (d.caveats ?? []).find(
@@ -99,9 +97,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!owner || !(await controlsOwner(env, person, owner))) {
     return json({ error: 'owner must be the session principal or a managed agent' }, 403);
   }
-  // "stored" ⇒ a CURRENT grant (covers `vault:inbox.data` + `vault:channels.data`, spec 316 §11a). A grant
-  // missing either reports false so onboarding re-issues + the Home/channels UI prompts re-enable — the owner
-  // re-signs the full widened scope.
+  // "stored" ⇒ a CURRENT delivery grant (covers `vault:inbox.data`, spec 322 W3). A stale grant
+  // reports false so onboarding re-issues and the owner re-signs.
   return json({ stored: grantCoversCurrentScope(await loadInboxDeliveryGrant(env, owner)) });
 };
 

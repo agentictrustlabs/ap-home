@@ -35,6 +35,7 @@ import {
 import type { Vault } from '@agenticprimitives/vault';
 
 import { verifyHomeSession } from './custody-oidc.js';
+import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolViaDelegation, type Env, type IncomingDelegation } from './index.js';
 
@@ -52,7 +53,12 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*'] as const;
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*'] as const;
+
+// 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
+// dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
+const INBOX_RESOURCE = 'inbox.data';
+const DM_BODY_PREFIX = 'message.body:dm:';
 
 // Person-plane records (spec 322 W3d): the person's authoritative org-relationship doc and their
 // per-org shareable profile cards. Self-gated ops only — the session SA must BE the principal.
@@ -160,13 +166,24 @@ export class InteractionsDO {
     } catch { return false; }
   }
 
+  /** Bridge-HMAC gate for the Home-server channel (SEC-010 envelope; audience pins the op). */
+  private async bridgeGate(request: Request, rawBody: string, op: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    const kv = this.env.BRIDGE_NONCES;
+    if (!secret || !kv) return { ok: false, reason: 'bridge not configured' };
+    const nonces: NonceStore = nonceStoreFromKv(kv);
+    return verifyBridgeCall({ request, rawBody, secret, expectedAudience: `interactions.${op}`, nonces });
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
     const principal = (parts[1] ?? '').toLowerCase();
     const op = parts[2] ?? '';
     if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return json({ error: 'bad principal' }, 400);
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const rawBody = await request.text();
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(rawBody) as Record<string, unknown>; } catch { /* empty body ok */ }
 
     // ── Grant custody (plane B): the Worker pre-verifies the steward session + delegator match. ──
     if (op === 'grant' && request.method === 'POST') {
@@ -195,6 +212,58 @@ export class InteractionsDO {
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant) });
+    }
+
+    // ── 1-1 inbox residency (spec 322 W3f) — the Home-server channel + in-Worker delivery. ──
+    // The Home reaches this principal's mail ONLY here (bridge-HMAC-authenticated, the same SEC-010
+    // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
+    // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
+    // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver') {
+      if (op !== 'internal.deliver') {
+        const bg = await this.bridgeGate(request, rawBody, op);
+        if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
+      }
+      const st0 = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      const g = st0.grant;
+      if (!g) return json({ error: 'no interactions grant — enable interactions for this agent first' }, 409);
+      if (!this.grantIsCurrent(g)) return json({ error: 'interactions grant is stale — re-enable (scope widened this wave)' }, 409);
+      try {
+        if (op === 'inbox.get') {
+          const doc = await this.readDoc<unknown>(g, INBOX_RESOURCE, null);
+          return json({ ok: true, doc });
+        }
+        if (op === 'inbox.put') {
+          if (body.doc === undefined) return json({ error: 'doc required' }, 400);
+          await this.writeDoc(g, INBOX_RESOURCE, body.doc);
+          return json({ ok: true });
+        }
+        if (op === 'inbox.body.get') {
+          // dm-namespace ONLY — the bridge cannot be aimed at arbitrary vault records (the grant's
+          // record scope enforces the same bound at the vault; this is the belt to that suspender).
+          const resource = String(body.resource ?? '');
+          if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
+          const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
+          return json({ ok: true, record: r?.data ?? null });
+        }
+        // internal.deliver — append-only merge of a validated envelope (the skill already verified
+        // addressing + bodyHash and persisted the body under the delivery grant).
+        const envelope = body.envelope as MessageEnvelopeV1 | undefined;
+        if (!envelope?.id) return json({ error: 'envelope required' }, 400);
+        const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
+        const envs = (doc.envelopes as MessageEnvelopeV1[] | undefined) ?? [];
+        if (!envs.some((e) => e.id === envelope.id)) {
+          doc.envelopes = [...envs, envelope];
+          doc.events = [
+            ...((doc.events as unknown[] | undefined) ?? []),
+            { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'delivered', at: new Date().toISOString() },
+          ];
+          await this.writeDoc(g, INBOX_RESOURCE, doc);
+        }
+        return json({ ok: true, messageId: envelope.id });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 409);
+      }
     }
 
     // ── Skills — caller = broker-verified Home session (any principal kind). ──

@@ -245,7 +245,16 @@ export class A2aTaskDO {
       // interactions.deliverCredential): delivery rides standard `message/send`, authorized by the delegation
       // gate, then admitted DIRECTLY into the recipient's vault inbox (no Home callback). Registered on EVERY
       // agent's DO (this IS its inbox gateway).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA)], vault, mcp, hashBody, budget,
+      // spec 322 W3f: the inbox.data merge rides the recipient's InteractionsDO (in-Worker
+      // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
+      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA, async (recipient, envelope) => {
+        const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
+        const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/internal.deliver`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ envelope }),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!resp.ok || !out.ok) throw new Error(out.error ?? `inbox merge failed (${resp.status})`);
+      })], vault, mcp, hashBody, budget,
       // spec 303 W3 — mint verification receipts at the message/send +
       // resubmit terminals; the accept receipt rides the send result so the
       // SENDER retains it, and rows persist to D1 (migration 0002).

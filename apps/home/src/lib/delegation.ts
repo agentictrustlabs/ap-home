@@ -222,14 +222,15 @@ export async function issueInboxDeliveryDelegation(
   const caveats: Caveat[] = [
     // TESTNET POSTURE (spec 317 §5.1): read+write. The audit's write-only ideal (F1) requires a SEPARATE
     // owner read-delegation for `readInboxView` (the owner reading their OWN bodies); until that is provisioned,
-    // the standing grant carries read+write so one grant serves deliver/send (write) AND read. Documented
-    // relaxation — the delivery service can read the owner's message bodies (an accepted testnet hole).
-    // spec 316 §11a cutover: the grant covers the message-body records AND the vault-resident documents —
-    // the personal inbox (`inbox.data`) and the org channel board (`channels.data`) — read+write, so delivery
-    // (a2a skill append) + render/mutate (owner Home) + channel post/read run on ONE grant.
-    // spec 322 W3: channels moved to the INTERACTIONS plane; NEW delivery grants narrow to the DM
-    // body namespace + inbox doc + invite tracking. Old broad grants keep working until re-signed.
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    // spec 322 W3f — the delivery plane is WRITE-ONLY on the mail records: it can append a body and
+    // the a2a skill can hand the envelope to the recipient's InteractionsDO, but it can NO LONGER
+    // read anyone's inbox or dm bodies (closes the "delivery service reads your mail" testnet hole).
+    // Reads ride the interactions grant through the DO. Invite tracking keeps read+write (the org's
+    // steward surfaces look invites up by record).
+    buildVaultRecordScopeCaveat([
+      { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE], ops: ['write'] },
+      { server: mcpServerId, resources: [ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] },
+    ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
@@ -276,7 +277,12 @@ export async function issueInteractionsDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE], ops: ['read', 'write'] }]),
+    buildVaultRecordScopeCaveat([
+      { server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE], ops: ['read', 'write'] },
+      // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
+      // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
+      { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
+    ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];

@@ -19,12 +19,13 @@
 // → demo-a2a server-mint. No first-party edge-admit rule is required; no proof-of-possession, no Origin
 // rejection (Origin only shapes CORS response headers, which this server-side caller ignores). The edge
 // signs the GatewayAssertion; demo-a2a verifies it + mints the `sub=owner` token.
-import type { MessageBodyStore } from '@agenticprimitives/fabric/messaging';
+import { sha256Hex32, type MessageBodyStore, type MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { createOwnerMessageBodyStore } from '../lib/vault-transport';
 import { loadInboxDeliveryGrant } from './inbox-delivery-grant';
+import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from '../lib/interactions-bridge';
 import type { DelegationWire } from '../../src/lib/delegation';
 
-interface BodyStoreEnv {
+interface BodyStoreEnv extends InteractionsBridgeEnv {
   AUTH_CODES: { get(k: string): Promise<string | null> };
   /** The Agentic Edge origin (assertion signer) — PREFERRED base; the server routes `/mcp/vault/*` through it. */
   DEMO_EDGE_URL?: string;
@@ -61,9 +62,25 @@ export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Prom
     if (!grant?.delegator || !grant.signature || grant.signature === '0x') return undefined; // no grant ⇒ fail-closed (no bodies until provisioned; NOT KV)
     // Routing through the edge means the edge signs the GatewayAssertion — no header minted here (the Home is
     // not the signer; there is no buildGatewayAssertion). For an edge-less base the a2a call is direct.
-    return createOwnerMessageBodyStore({
+    const writer = createOwnerMessageBodyStore({
       baseUrl: vaultBaseUrl(env)!,
       delegation: grant as DelegationWire,
     });
+    if (!interactionsBridgeConfigured(env)) return undefined; // reads impossible ⇒ the store is unusable (fail-closed)
+    // spec 322 W3f — SPLIT-PLANE store: writes ride the (write-only) delivery grant; reads ride the
+    // owner's InteractionsDO over the bridge (dm namespace only). Same fabric record format + the
+    // same bodyHash verification loadBody always performed.
+    return {
+      putBody: (i) => writer.putBody(i),
+      async loadBody(envelope: MessageEnvelopeV1): Promise<Uint8Array> {
+        const r = await bridgeInteractions<{ record?: { b64?: string } | null }>(env, owner, 'inbox.body.get', { resource: envelope.body.resource });
+        if (!r.ok || !r.body.record?.b64) throw new Error(r.body.error ?? `message body ${envelope.body.resource} not readable via InteractionsDO`);
+        const bin = atob(r.body.record.b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        if ((await sha256Hex32(bytes)) !== envelope.bodyHash) throw new Error(`message body ${envelope.id} does not match envelope bodyHash`);
+        return bytes;
+      },
+    } satisfies MessageBodyStore;
   };
 }

@@ -2997,11 +2997,16 @@ app.post('/custody/oidc/sign-site-delegation', async (c) => {
 app.all('/interactions/:principal/:op', async (c) => {
   const principal = (c.req.param('principal') ?? '').toLowerCase();
   if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return c.json({ ok: false, error: 'bad principal' }, 400);
+  const op = c.req.param('op') ?? '';
+  // `internal.*` ops are the in-Worker delivery channel (spec 322 W3f) — never routable from outside.
+  if (op.startsWith('internal.')) return c.json({ ok: false, error: 'internal op' }, 403);
   const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(principal));
-  return stub.fetch(new Request(`https://do/interactions/${principal}/${c.req.param('op')}`, {
+  // RAW body passthrough — the bridge-HMAC ops hash the exact received bytes (SEC-010); any
+  // re-serialization here would invalidate every Home-server signature.
+  return stub.fetch(new Request(`https://do/interactions/${principal}/${op}`, {
     method: c.req.method,
-    headers: { 'content-type': 'application/json' },
-    body: c.req.method === 'POST' ? JSON.stringify(await c.req.json().catch(() => ({}))) : undefined,
+    headers: c.req.raw.headers,
+    body: c.req.method === 'POST' ? await c.req.text() : undefined,
   }));
 });
 
