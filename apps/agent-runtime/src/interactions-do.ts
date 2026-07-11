@@ -637,8 +637,15 @@ export class InteractionsDO {
         const recordType = String(body.recordType ?? '');
         if (!CAPABILITY_RECORDS.has(recordType)) return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
         if (op === 'record.get') {
-          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
-          return json({ ok: true, record: r?.data ?? null });
+          // DIAGNOSTIC (2026-07-11) — the SEPARATE load path (the one that "reads back empty"). Call
+          // get_vault_record directly so we can log the OWNER the mint recovered vs the grant delegator
+          // vs the URL principal. If readOwner !== grantDelegator (or hasData=false while the row exists
+          // for grantDelegator), the read is resolving a different principal than the write.
+          const rResp = await callMcpToolViaDelegation({ env: this.env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType } });
+          const rOut = (await rResp.json().catch(() => ({}))) as { ok?: boolean; owner?: string; error?: string; data?: unknown; hasData?: boolean };
+          console.warn(`[record.get] rt=${recordType} principal=${principal} sessionSa=${sessionSa.toLowerCase()} grantDelegator=${String(grant.delegator).toLowerCase()} grantDelegate=${String(grant.delegate).toLowerCase()} readOwner=${rOut.owner ?? 'null'} hasData=${rOut.hasData === true} ok=${rOut.ok} err=${rOut.error ?? ''}`);
+          const record = rOut.ok === false ? null : (rOut.data ?? null);
+          return json({ ok: true, record, _diag: { principal, sessionSa: sessionSa.toLowerCase(), grantDelegator: String(grant.delegator).toLowerCase(), readOwner: rOut.owner ?? null, hasData: rOut.hasData === true, err: rOut.error ?? null } });
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
