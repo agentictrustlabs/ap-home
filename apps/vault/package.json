@@ -10,7 +10,8 @@
     "deploy": "wrangler deploy",
     "d1:migrate:local": "wrangler d1 migrations apply demo-mcp --local --persist-to ../../.wrangler/state-mcp",
     "d1:migrate:remote": "wrangler d1 migrations apply demo-mcp --remote",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agenticprimitives/agent-naming": "workspace:*",
