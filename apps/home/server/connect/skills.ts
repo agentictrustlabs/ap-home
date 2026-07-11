@@ -38,6 +38,16 @@ interface SkillRecord { label: string; skillId?: string; relation?: string; prof
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  // spec 323 W2 — the person's vault `skills.data` (their InteractionsDO) is AUTHORITATIVE; KV is a
+  // rebuildable cache. Read the DO first and reconcile the cache; fall to the cache only when the
+  // plane isn't enabled (empty is an answer, ADR-0013 — not a second mechanism).
+  const { readCapabilityRecord } = await import('../lib/capability-record');
+  const authoritative = await readCapabilityRecord<SkillRecord[]>(env, person, bearer, 'skills.data');
+  if (Array.isArray(authoritative)) {
+    await env.AUTH_CODES.put(`skills:${person}`, JSON.stringify(authoritative));
+    return jsonCors({ skills: authoritative }, request);
+  }
   const skills = JSON.parse((await env.AUTH_CODES.get(`skills:${person}`)) ?? '[]') as SkillRecord[];
   return jsonCors({ skills }, request);
 };
@@ -61,5 +71,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
     }));
   await env.AUTH_CODES.put(`skills:${person}`, JSON.stringify(clean));
+  // spec 323 W2 — mirror into the authoritative vault record (best-effort; a person whose
+  // interactions plane isn't enabled keeps the KV copy until their ceremony re-syncs it).
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  const { writeCapabilityRecord } = await import('../lib/capability-record');
+  await writeCapabilityRecord(env, person, bearer, 'skills.data', clean);
   return jsonCors({ ok: true, count: clean.length }, request);
 };

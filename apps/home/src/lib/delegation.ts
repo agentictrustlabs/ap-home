@@ -256,6 +256,12 @@ export const DM_BODIES_RESOURCE_SCOPE = 'vault:message.body:dm:*' as const;
 export const RELATIONSHIPS_DATA_RESOURCE_SCOPE = 'vault:relationships.data' as const;
 /** All per-org member profiles (`member.profile:<orgSA>`) — the person DO writes them per org. */
 export const MEMBER_PROFILE_WILDCARD_SCOPE = 'vault:member.profile:*' as const;
+/** spec 323 W2 — owner-own capability records reached self-only over the interactions grant: the
+ *  person's community profile (V-1 remediation — delegation-authorized, replaces the bearer path),
+ *  their private skills tier, and their home manifest master. */
+export const IMPACT_PROFILE_RESOURCE_SCOPE = 'vault:impact-profile' as const;
+export const SKILLS_DATA_RESOURCE_SCOPE = 'vault:skills.data' as const;
+export const HOME_MANIFEST_RESOURCE_SCOPE = 'vault:home.manifest' as const;
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
@@ -278,7 +284,7 @@ export async function issueInteractionsDelegation(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },

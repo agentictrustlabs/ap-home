@@ -11,6 +11,18 @@
 
 import type { Address } from '@agenticprimitives/types';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
+import { SESSION_KEY } from './context/session';
+import { readSsoCookie } from './lib/sso-cookie';
+
+/** The broker home-session token the InteractionsDO verifies (self-gated record ops). */
+function homeBearer(): string {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    const t = raw ? (JSON.parse(raw) as { token?: string }).token : undefined;
+    if (t) return t;
+  } catch { /* fall through */ }
+  return readSsoCookie()?.token ?? '';
+}
 
 export interface ImpactContactProfile {
   /** Display name — first/last let community apps render a friendly header like
@@ -67,20 +79,29 @@ export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 
   { key: 'organizationCountry', label: 'Organization country',  type: 'text',  placeholder: 'United States',            help: 'Where your organization is based.' },
 ];
 
-// ─── demo-mcp profile access THROUGH a2a (same-origin /a2a/mcp/profile/* → demo-a2a → demo-mcp) ──────
+// ─── Owner-own profile via the person's InteractionsDO (spec 323 W2 / V-1 remediation) ──────────────
 // Owner-own: demo-a2a asserts the member's principal over service-MAC to demo-mcp, which gates every op on
 // the per-person vault-key authorization (read/write). CSRF-protected like every other /a2a/* mutating call.
 
+// spec 323 W2 (V-1 remediation): owner-own profile is now a DELEGATION-authorized, self-gated
+// record on the person's InteractionsDO (`record.get`/`record.put`, recordType `impact-profile`),
+// KEK-encrypted at demo-mcp exactly as before — but no longer a bearer/service-MAC path any caller
+// could aim at another principal. The DO verifies the broker home session and that its SA IS the
+// principal; the interactions grant's `vault:impact-profile` scope + the vault-key gate bound it.
 async function postProfile(path: 'get' | 'set', principal: Address, data?: ImpactStoredProfile): Promise<Record<string, unknown>> {
   await ensureCsrfToken();
-  const res = await fetch(`/a2a/mcp/profile/${path}`, {
+  const session = homeBearer();
+  if (!session) throw new Error(`profile ${path} failed: no home session`);
+  const op = path === 'get' ? 'record.get' : 'record.put';
+  const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/${op}`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ principal, ...(data !== undefined ? { data } : {}) }),
+    body: JSON.stringify({ session, recordType: 'impact-profile', ...(data !== undefined ? { record: data } : {}) }),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (res.status === 409) throw new VaultKeyUnauthorizedError(); // interactions plane not enabled yet — same "run the ceremony" UX
   if (!res.ok) throw new Error(`profile ${path} failed: ${String(body.error ?? res.status)}`);
   return body;
 }

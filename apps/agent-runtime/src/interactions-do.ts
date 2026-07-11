@@ -53,7 +53,7 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*'] as const;
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -64,6 +64,12 @@ const DM_BODY_PREFIX = 'message.body:dm:';
 // per-org shareable profile cards. Self-gated ops only — the session SA must BE the principal.
 const RELATIONSHIPS_RESOURCE = 'relationships.data';
 const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.toLowerCase()}`;
+
+// spec 323 W2 — owner-own capability DOCUMENTS (last-writer-wins whole-doc records), reachable ONLY
+// self (session SA === principal) over the interactions grant. This is the delegation-authorized,
+// KEK-encrypted replacement for the bearer/service-MAC `impact-profile` path (V-1 remediation) and
+// the app-local `skills`/`home-manifest` KV. NOT append logs (control-events needs its own op).
+const CAPABILITY_RECORDS = new Set(['impact-profile', 'skills.data', 'home.manifest']);
 
 // spec 323 §3: wires whose DELEGATE is this person (stewardship, member-access) are the person's
 // own private credentials — they ride the entry so any Home can act from the vault (ADR-0025).
@@ -444,6 +450,25 @@ export class InteractionsDO {
         const profile = (body.profile ?? {}) as Record<string, unknown>;
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.member-profile.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'member-profile', id: org } });
         await this.writeDoc(grant, MEMBER_PROFILE_RESOURCE(org), profile);
+        return json({ ok: true });
+      }
+
+      // ── Owner-own capability records (spec 323 W2) — STRICTLY self; whitelisted recordType. ──
+      // `record.get`/`record.put { record }`: the delegation-authorized, KEK-encrypted home for the
+      // person's own profile/skills/manifest, replacing the V-1 bearer path + app-local KV. The
+      // interactions grant's record scope + the vault's KEK gate BOTH bound this at demo-mcp; the
+      // self-check + whitelist here are the belt to those suspenders.
+      if (op === 'record.get' || op === 'record.put') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'this record belongs to the principal — self access only' }, 403);
+        const recordType = String(body.recordType ?? '');
+        if (!CAPABILITY_RECORDS.has(recordType)) return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
+        if (op === 'record.get') {
+          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
+          return json({ ok: true, record: r?.data ?? null });
+        }
+        if (body.record === undefined) return json({ error: 'record required' }, 400);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
+        await this.writeDoc(grant, recordType, body.record);
         return json({ ok: true });
       }
 
