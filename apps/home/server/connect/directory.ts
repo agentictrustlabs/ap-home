@@ -18,7 +18,7 @@ import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
-import { callInteractions, stewardWireFor } from './channels';
+import { callInteractions, stewardWireFor, memberAccessWireFor } from './channels';
 import { removeOrgMemberLink } from './membership';
 import { appendControlEvent } from './control-events';
 
@@ -99,11 +99,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (!name) return jsonCors({ error: 'claim a public name before joining — listings are name-addressed' }, request, 409);
     // spec 313 §4 — a steward publishing an ORG's listing attaches the SUBJECT's stewardship wire.
     const subjectStewardship = subjectAddr !== who.person ? await stewardWireFor(env, who.person, subjectAddr) : null;
+    // SEC-H1 — a SELF-join must carry the org's authorization: the org→you member-access grant (from
+    // an invite) OR your stewardship wire (steward self-card). The DO requires one; it re-verifies
+    // both on-chain, so these are just artifact lookups.
+    const selfMemberAccess = subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person) : null;
+    const selfStewardship = subjectAddr === who.person ? await stewardWireFor(env, who.person, communityId) : null;
     const r = await callInteractions(env, communityId, 'directory.publish', {
       session: who.token,
       listing: body.listing,
       label: nameLabel(name),
       ...(subjectStewardship ? { subjectStewardship } : {}),
+      ...(selfMemberAccess ? { memberAccess: selfMemberAccess } : {}),
+      ...(selfStewardship ? { stewardship: selfStewardship } : {}),
     });
     if (r.status === 200) {
       await appendControlEvent(env, who.person as Address, 'grant-issued').catch(() => undefined); // listing = the membership consent (closed event union)

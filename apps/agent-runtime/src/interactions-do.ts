@@ -101,6 +101,18 @@ const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), 
 export class InteractionsDO {
   constructor(private state: DurableObjectState, private env: Env) {}
 
+  /** ARCH-H1 — a per-instance RMW mutex. A Durable Object serves concurrent requests that interleave
+   *  across the MCP round-trip, so two appends to the SAME doc both read rev N and one silently
+   *  overwrites the other (lost update). This serializes read→modify→write for the ops that share a
+   *  doc across DISTINCT writers — channel posts (many members), deliveries (many senders), timeline
+   *  appends (many server flows). Reads never take it; self-only single-writer ops don't need it. */
+  private mutating: Promise<unknown> = Promise.resolve();
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutating.then(fn, fn);
+    this.mutating = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
 
   private pub() {
     return createPublicClient({ chain: baseSepolia, transport: http(this.env.RPC_URL) });
@@ -158,11 +170,50 @@ export class InteractionsDO {
     return mine.listing.displayName;
   }
 
-  /** Steward proof: a presented org→person stewardship wire, org-verified + unrevoked on-chain. */
+  /** Does the wire carry the STEWARDSHIP shape, not a data grant? (SEC-C1). A stewardship/site
+   *  delegation (`buildApprovedSiteDelegation`) carries an `allowedTargetsEnforcer` caveat (governance
+   *  targets: agent-relationship / naming / registry) and NEVER a vault-record-scope caveat. Every
+   *  org→person DATA grant — member-access, membership, delivery, interactions — instead carries a
+   *  VAULT_RECORD_SCOPE_ENFORCER caveat. Requiring the governance caveat AND rejecting the scope
+   *  caveat separates a steward from a member: without this, a member's own org→member member-access
+   *  delegation (same delegator=org, delegate=member, org-signed, unrevoked) passed as a steward
+   *  proof → member→steward escalation (kick members, dump the ledger, act as steward). */
+  private hasStewardshipShape(wire: IncomingDelegation): boolean {
+    const caveats = wire.caveats ?? [];
+    const enforcer = (c: { enforcer?: string }): string => (c.enforcer ?? '').toLowerCase();
+    const hasGovernanceTargets = caveats.some((c) => enforcer(c) === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
+    const hasRecordScope = caveats.some((c) => enforcer(c) === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+    return hasGovernanceTargets && !hasRecordScope;
+  }
+
+  /** Member-access proof (SEC-H1): a presented org→member member-access wire — the ORG's
+   *  authorization that this person may join (minted at invite time, `issueMemberAccessDelegation`).
+   *  delegator = the org (this principal), delegate = the caller, org-signed + unrevoked, AND
+   *  carrying the DATA-grant shape (a vault-record-scope caveat) so a governance/stewardship wire
+   *  can't be replayed here. Without it a self-signed listing alone made anyone a member of any org
+   *  (self-join → read its private channels). */
+  private async hasMemberAccess(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
+    if (!wire) return false;
+    if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return false;
+    if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return false;
+    const hasRecordScope = (wire.caveats ?? []).some((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+    if (!hasRecordScope) return false; // a stewardship/governance wire is not member-access
+    const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+    const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+    if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return false;
+    try {
+      const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+      return !revoked;
+    } catch { return false; }
+  }
+
+  /** Steward proof: a presented org→person stewardship wire, org-verified + unrevoked on-chain, AND
+   *  carrying the stewardship caveat shape (SEC-C1 — never a data grant). */
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
     if (!wire) return false;
     if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return false;
     if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return false;
+    if (!this.hasStewardshipShape(wire)) return false; // SEC-C1: a member-access grant is NOT stewardship
     const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
     const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
     if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return false;
@@ -272,7 +323,13 @@ export class InteractionsDO {
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill) → no external gate.
       const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
-      if (op !== 'internal.deliver' && op !== 'internal.dm.body.put') {
+      if (op === 'internal.deliver' || op === 'internal.dm.body.put') {
+        // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
+        // Require an internal marker only in-Worker callers can supply (the bridge secret, shared by
+        // co-resident DOs in this Worker). Any other path reaching internal.* fails closed.
+        const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+        if (!secret || request.headers.get('x-ap-internal') !== secret) return json({ error: 'internal op — not authorized' }, 403);
+      } else {
         const bg = OWNER_FACING
           ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''))
           : await this.bridgeGate(request, rawBody, op);
@@ -335,26 +392,30 @@ export class InteractionsDO {
           // append via the SEC-010 bridge; the person READS their own via record.get (session-gated).
           const event = body.event;
           if (event === undefined || event === null) return json({ error: 'event required' }, 400);
-          const rows = await this.readDoc<unknown[]>(g, CONTROL_EVENTS_RESOURCE, []);
-          rows.push(event);
-          await this.writeDoc(g, CONTROL_EVENTS_RESOURCE, rows.slice(-CONTROL_EVENTS_CAP));
-          return json({ ok: true });
+          return this.serialize(async () => { // ARCH-H1 — serialize the timeline append (many server flows)
+            const rows = await this.readDoc<unknown[]>(g, CONTROL_EVENTS_RESOURCE, []);
+            rows.push(event);
+            await this.writeDoc(g, CONTROL_EVENTS_RESOURCE, rows.slice(-CONTROL_EVENTS_CAP));
+            return json({ ok: true });
+          });
         }
         // internal.deliver — append-only merge of a validated envelope (the skill already verified
         // addressing + bodyHash and persisted the body under the delivery grant).
         const envelope = body.envelope as MessageEnvelopeV1 | undefined;
         if (!envelope?.id) return json({ error: 'envelope required' }, 400);
-        const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
-        const envs = (doc.envelopes as MessageEnvelopeV1[] | undefined) ?? [];
-        if (!envs.some((e) => e.id === envelope.id)) {
-          doc.envelopes = [...envs, envelope];
-          doc.events = [
-            ...((doc.events as unknown[] | undefined) ?? []),
-            { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'delivered', at: new Date().toISOString() },
-          ];
-          await this.writeDoc(g, INBOX_RESOURCE, doc);
-        }
-        return json({ ok: true, messageId: envelope.id });
+        return this.serialize(async () => { // ARCH-H1 — serialize the inbox merge (many senders → one inbox)
+          const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
+          const envs = (doc.envelopes as MessageEnvelopeV1[] | undefined) ?? [];
+          if (!envs.some((e) => e.id === envelope.id)) {
+            doc.envelopes = [...envs, envelope];
+            doc.events = [
+              ...((doc.events as unknown[] | undefined) ?? []),
+              { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'delivered', at: new Date().toISOString() },
+            ];
+            await this.writeDoc(g, INBOX_RESOURCE, doc);
+          }
+          return json({ ok: true, messageId: envelope.id });
+        });
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 409);
       }
@@ -378,13 +439,21 @@ export class InteractionsDO {
         if (!listing) return json({ error: 'listing required' }, 400);
         const errors = validateDirectoryListing(listing);
         if (errors.length > 0) return json({ error: `invalid listing: ${errors.join(', ')}` }, 400);
-        // Self-publish, OR a steward publishing an ORG's listing (spec 313 §4 Networks): the
-        // presented stewardship wire must be delegated BY the listing subject to the session SA.
         if (listing.subject.toLowerCase() !== sessionCaip.toLowerCase()) {
+          // A steward publishing ANOTHER subject's ORG listing (spec 313 §4 Networks): the presented
+          // stewardship wire must be delegated BY the listing subject to the session SA.
           const subjAddr = listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0];
           const w = body.subjectStewardship as IncomingDelegation | undefined;
           const ok = !!subjAddr && (await this.isSteward(subjAddr, sessionSa, w));
           if (!ok) return json({ error: 'listing subject must be the session principal (or present its stewardship wire)' }, 403);
+        } else {
+          // SELF-publish (join / update own listing). SEC-H1: a self-signed listing is NOT enough —
+          // the ORG must have authorized this member. Require the org→you member-access grant (from an
+          // invite), OR prove you steward this org (the creator's / steward's own self-card).
+          const authorized =
+            (await this.hasMemberAccess(principal, sessionSa, body.memberAccess as IncomingDelegation | undefined)) ||
+            (await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined));
+          if (!authorized) return json({ error: 'this organization has not authorized you to join — an invite (member-access grant) or stewardship is required' }, 403);
         }
         const { proof, ...draft } = listing;
         const digest = await sha256Hex32(canonicalizeMessage(draft));
@@ -476,19 +545,21 @@ export class InteractionsDO {
         if (!name) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403); // posting = listing members ONLY
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
-        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
-        const entry = index.find((c) => c.descriptor.id === channelId);
-        if (!entry) return json({ error: 'unknown channel' }, 404);
-        const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(channelId), []);
-        const composed: ChannelV1[] = [{ ...entry, messages }];
-        const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
-        if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
-        await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
-        const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
-        // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
-        await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
-        await this.writeDoc(grant, CHANNEL_RESOURCE(channelId), composed[0]!.messages);
-        return json({ ok: true, messageId: r.envelope.id });
+        return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
+          const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+          const entry = index.find((c) => c.descriptor.id === channelId);
+          if (!entry) return json({ error: 'unknown channel' }, 404);
+          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(channelId), []);
+          const composed: ChannelV1[] = [{ ...entry, messages }];
+          const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
+          if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
+          await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
+          const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
+          // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
+          await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
+          await this.writeDoc(grant, CHANNEL_RESOURCE(channelId), composed[0]!.messages);
+          return json({ ok: true, messageId: r.envelope.id });
+        });
       }
 
       if (op === 'grants.list') {

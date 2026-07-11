@@ -253,7 +253,8 @@ export class A2aTaskDO {
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
         const call = async (op: string, payload: unknown): Promise<void> => {
           const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
-            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+            // ARCH-H2 — the in-Worker internal marker the InteractionsDO requires for internal.* ops.
+            method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '' }, body: JSON.stringify(payload),
           }));
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);

@@ -9,6 +9,8 @@
 // gated SendGrid sender (log-only until configured).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { verifyStewardship } from '../_lib/verify-stewardship';
+import type { IncomingDelegation } from '../_lib/verify-delegation';
 import { sendEmail, inviteEmail, emailSendingEnabled } from '../_lib/email-sender';
 import { emailHash } from '../../src/lib/kv-indexer';
 import { orgVault } from '../lib/org-vault';
@@ -38,12 +40,14 @@ export async function controlsOrg(env: FnContext['env'], request: Request, org: 
   if (!v.ok) return false;
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   if (!person) return false;
-  const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
-  if (!idx.some((a) => a.toLowerCase() === org.toLowerCase())) return false;
-  // authority-only members can't invite (custody-shaped action); only stewards.
+  // SEC-H2 — authority comes from an ON-CHAIN stewardship delegation, NOT the self-writable KV
+  // `relationship` field. The stewardship wire lives in the related link (a cache reconciled from
+  // the person's vault relationships.data); we re-verify it against the chain (ERC-1271 by the org +
+  // unrevoked + stewardship caveat shape), so a fabricated link can't confer control. A member (who
+  // only holds a member-access grant, no stewardship wire) fails closed.
   const raw = await env.AUTH_CODES.get(`related:${person}:${org.toLowerCase()}`);
-  const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
-  return link?.relationship !== 'member';
+  const link = raw ? (JSON.parse(raw) as { stewardshipDelegation?: IncomingDelegation }) : null;
+  return verifyStewardship(env, org.toLowerCase(), person, link?.stewardshipDelegation);
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {

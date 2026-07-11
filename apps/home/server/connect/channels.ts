@@ -14,6 +14,7 @@ import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/ser
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { ensureOrgMemberLink } from './membership';
+import { orgVault } from '../lib/org-vault';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -47,6 +48,22 @@ export async function stewardWireFor(env: FnContext['env'], person: string, org:
   const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
   const link = raw ? (JSON.parse(raw) as { relationship?: string; stewardshipDelegation?: unknown }) : null;
   return link && link.relationship !== 'member' ? (link.stewardshipDelegation ?? null) : null;
+}
+
+/** The org→person MEMBER-ACCESS wire (SEC-H1) — the ORG's authorization that `person` may join,
+ *  minted by the steward at invite time and stored in the org vault at `org.invite:agent:<person>`.
+ *  The DO re-verifies it on-chain (ERC-1271 by the org + unrevoked + data-grant scope), so the
+ *  SOURCE is untrusted — this only has to FIND the artifact. Falls back to the member's own KV link
+ *  (populated after the first join) when the org vault isn't reachable. */
+export async function memberAccessWireFor(env: FnContext['env'], org: string, person: string): Promise<unknown | null> {
+  try {
+    const vault = await orgVault(env, org);
+    const rec = vault ? ((await vault.get(`org.invite:agent:${person.toLowerCase()}`)) as { delegation?: unknown; status?: string } | null) : null;
+    if (rec?.delegation && rec.status !== 'removed') return rec.delegation;
+  } catch { /* vault unreachable — fall to the cached link */ }
+  const raw = await env.AUTH_CODES.get(`related:${person.toLowerCase()}:${org.toLowerCase()}`);
+  const link = raw ? (JSON.parse(raw) as { memberAccessDelegation?: unknown }) : null;
+  return link?.memberAccessDelegation ?? null;
 }
 
 /** Forward one op to the org's InteractionsDO (fail-closed: no base ⇒ 503, never a local fallback). */
