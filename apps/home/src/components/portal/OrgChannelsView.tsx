@@ -9,6 +9,7 @@ import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
 import { recordOrgMembership } from '../../lib/org-membership';
+import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
 import type { DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
@@ -147,6 +148,9 @@ export function OrgChannelsView({ org }: { org: Address }) {
       // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
       await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, joinName.trim());
       await load();
+      // The join added this org to the member's tree — reload every dropdown/list instance NOW (the
+      // triggered related-orgs read also runs the org-name self-heal, so it arrives named, not 0x…).
+      notifyAgentsChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
