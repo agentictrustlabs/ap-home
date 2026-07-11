@@ -22,6 +22,7 @@ local_protocol = "http"
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
+  { name = "INTERACTIONS", class_name = "InteractionsDO" },
 ]
 
 [[migrations]]
@@ -171,6 +172,7 @@ UNIVERSAL_SIGNATURE_VALIDATOR = ""
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
+  { name = "INTERACTIONS", class_name = "InteractionsDO" },
   # spec 290 §8/§9 — CROSS-SCRIPT binding to demo-mcp's SmartAgentBudgetDO so the A2A + MCP paths share
   # ONE hard-budget authority per Smart Agent. demo-mcp owns the class + migration; demo-a2a only binds.
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-production" },
@@ -197,3 +199,7 @@ id = "e050ce20dd6e4a88b568e2f5ed1b47a0"
 [[env.production.services]]
 binding = "MCP"
 service = "demo-mcp-production"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["InteractionsDO"]

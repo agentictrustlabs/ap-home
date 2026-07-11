@@ -142,7 +142,7 @@ function getInMemoryNonceStore(): NonceStore {
  * critical events should be emitted through a composeFailHardSinks wrapper at
  * their call site, as on the MCP key-release path.
  */
-function buildAuditSink(env: Env): AuditSink {
+export function buildAuditSink(env: Env): AuditSink {
   const console = createConsoleAuditSink({ prefix: '[AUDIT a2a]' });
   if (env.DB) {
     return composeSinks(console, createPiiGuardrailSink(createD1AuditSink(env.DB), { mode: 'redact' }));
@@ -152,6 +152,7 @@ function buildAuditSink(env: Env): AuditSink {
 
 export { SessionStoreDO };
 export { A2aTaskDO } from './a2a-task-do.js';
+export { InteractionsDO } from './interactions-do.js';
 
 export interface Env {
   // Durable, queryable audit destination (spec 291 §6c). Optional: when unbound
@@ -162,6 +163,7 @@ export interface Env {
   SESSIONS: DurableObjectNamespace;
   // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
   A2A_TASKS: DurableObjectNamespace;
+  INTERACTIONS: DurableObjectNamespace;
   // Spec 290 §8 — the per-SA hard-budget store, bound CROSS-SCRIPT to demo-mcp's SmartAgentBudgetDO so the
   // A2A + MCP paths share ONE budget authority per SA (§9). Optional: when unbound, the A2A runtime skips
   // the Stage-3 budget (authority + single-use message-id still apply).
@@ -2983,6 +2985,20 @@ app.post('/custody/oidc/sign-site-delegation', async (c) => {
  * bound). The vault-key endpoints carry no ambient authority (signature-gated), reached over the MCP service
  * binding (not the gateway-gated `/mcp` ingress).
  */
+// ── Interactions substrate (spec 322 W2) — forward to the principal's serialized DO. ──
+// ALL board/directory operations for a principal flow through ONE DO instance (single-writer,
+// spec 322 §5). CSRF applies like every /a2a mutating call; the DO does the authority gating.
+app.all('/interactions/:principal/:op', async (c) => {
+  const principal = (c.req.param('principal') ?? '').toLowerCase();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return c.json({ ok: false, error: 'bad principal' }, 400);
+  const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(principal));
+  return stub.fetch(new Request(`https://do/interactions/${principal}/${c.req.param('op')}`, {
+    method: c.req.method,
+    headers: { 'content-type': 'application/json' },
+    body: c.req.method === 'POST' ? JSON.stringify(await c.req.json().catch(() => ({}))) : undefined,
+  }));
+});
+
 app.post('/custody/oidc/activate-vault', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);

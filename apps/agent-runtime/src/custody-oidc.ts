@@ -163,3 +163,33 @@ export async function deriveSubjectCustodian(
     sign: async (digest) => (await acct.signMessage({ message: { raw: digest } })) as Hex,
   };
 }
+
+/** GENERAL Home-session verification (spec 322 W2 — the interaction skills' caller gate): any
+ *  principal kind (passkey / oidc / wallet), broker-JWKS-verified. Returns the session's SA.
+ *  Distinct from verifyCustodySession, which additionally enforces the custody-grade OIDC gate. */
+export async function verifyHomeSession(
+  token: string,
+  env: { BROKER_JWKS_URL?: string; BROKER_ISS?: string; DEMO_SSO_AUD?: string },
+): Promise<{ ok: true; sa: Address; caip: string } | { ok: false; status: number; error: string }> {
+  if (!env.BROKER_JWKS_URL || !env.BROKER_ISS || !env.DEMO_SSO_AUD) return { ok: false, status: 503, error: 'broker gate not configured' };
+  if (!token) return { ok: false, status: 401, error: 'missing session' };
+  let keys: VerifyKey[];
+  try {
+    keys = await brokerKeys(env.BROKER_JWKS_URL);
+  } catch {
+    return { ok: false, status: 503, error: 'broker JWKS unavailable (fail-closed)' };
+  }
+  const iss = env.BROKER_ISS.replace(/\/$/, '');
+  const base = iss.replace(/^https?:\/\//, '').toLowerCase();
+  const issOk = (v: string): boolean => {
+    try {
+      const h = new URL(v).hostname.toLowerCase();
+      return h === base || (h.endsWith('.' + base) && /^[a-z0-9-]+$/.test(h.slice(0, -(base.length + 1))));
+    } catch { return false; }
+  };
+  const v = await verifyAgentSession(token, { keys, expectedIss: issOk, expectedAud: env.DEMO_SSO_AUD });
+  if (!v.ok) return { ok: false, status: 401, error: `invalid session: ${v.reason}` };
+  const sa = v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
+  if (!sa) return { ok: false, status: 400, error: 'no SA in session sub' };
+  return { ok: true, sa, caip: v.session.sub };
+}
