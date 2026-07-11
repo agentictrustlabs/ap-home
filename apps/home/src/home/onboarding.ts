@@ -43,12 +43,20 @@ import { homeLabel } from './types';
  *  reject without it, and NOT every caller threads `auth` (passkey flows pass none). */
 function storedSessionToken(auth?: Auth): string | null {
   if (auth?.token) return auth.token;
+  return homeBearerToken();
+}
+
+/** The BROKER home-session token (localStorage/cookie) — what `/connect/*` and the InteractionsDO
+ *  session gate verify. NEVER the custody-session `auth.token`: for the phone/email family that is
+ *  a demo-a2a custody token with a different audience, and home-gated endpoints 401 on it (the
+ *  org-create #general + relationships writes failed exactly this way for phone homes). */
+function homeBearerToken(auth?: Auth): string | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     const t = raw ? (JSON.parse(raw) as { token?: string }).token : undefined;
     if (t) return t;
   } catch { /* fall through */ }
-  return readSsoCookie()?.token ?? null;
+  return readSsoCookie()?.token ?? auth?.token ?? null;
 }
 
 export type Via = 'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone';
@@ -263,7 +271,7 @@ export async function createOrganization(
     if (x.stewardshipDelegation) {
       await vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: x.childName }).catch((e: unknown) => console.warn('[org-create] org profile seed failed:', e));
     }
-    const bearer = storedSessionToken(auth);
+    const bearer = homeBearerToken(auth);
     if (bearer) {
       await fetch('/connect/channels', {
         method: 'POST',
@@ -666,7 +674,7 @@ export async function activateInboxDeliveryIfNeeded(
   // The grant store is SESSION-gated (owner must equal the session principal — the anti-DoS rule in
   // inbox-delivery-grant.ts). Without the Bearer both calls 401 and, being best-effort, that failure was
   // SILENT — the reason no grant ever stored from onboarding.
-  const bearer = storedSessionToken(auth);
+  const bearer = homeBearerToken(auth);
   if (!bearer) return { ok: false, error: 'no home session — sign in before enabling inbox delivery' };
   const authed = { authorization: `Bearer ${bearer}` };
   try {

@@ -30,4 +30,6 @@ export const INTERACTIONS_SERVICE_SA: Address | undefined =
     // Provisioned 2026-07-10 (spec 322 W2.3): a dedicated mode-0 SA minted by the platform deployer
     // (factory tx 0xd732ee88…). A PUBLIC address — deployment-specific app config, committed by the
     // same doctrine as DEMO_EDGE_ORIGIN_DEFAULT (ADR-0021: deployment specifics live in apps).
-    '0x39508624387FEd3b9D6dD15Ba86D3ACE8a3F0a6A') as Address | undefined;
+    // All-lowercase ON PURPOSE: viem checksum-validates mixed-case addresses, and a mis-cased
+    // literal here broke every interactions activation ("Address … invalid" at org-create).
+    '0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a').toLowerCase() as Address | undefined;
