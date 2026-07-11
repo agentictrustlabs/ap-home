@@ -209,17 +209,6 @@ export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB'>, 
  * the person SA actually SIGNED the authorization via ERC-1271 (UniversalSignatureValidator).
  * No stub: a forged/unsigned authorization fails the on-chain signature check.
  */
-// Positive-verdict cache for the vault-key authorization ERC-1271 check. The verdict is DETERMINISTIC
-// per (delegator, authorization digest, signature) — the person signed the authorization once — so an
-// on-chain `isValidSig` RPC on EVERY vault op was both wasteful and the ROOT of the read-after-write
-// flakiness (rapid successive ops rate-limited the free RPC → a valid signature intermittently
-// verified false → `vault_key_unauthorized` → a just-written value "read back empty"). We cache ONLY
-// the TRUE verdict (a valid, stable authorization) with a TTL; a false/negative is never cached (it
-// re-verifies, so a genuine bad sig stays rejected and a transient RPC error is not memoized). A
-// re-bind changes the digest → new key → re-verify. Per-isolate; a cold isolate just re-checks once.
-const VAULT_KEY_VERDICT_TTL_MS = 10 * 60 * 1000;
-const vaultKeyVerdictCache = new Map<string, number>(); // key → expiresAt(ms)
-
 export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVerifier {
   return createVaultKeyAuthorizationVerifier({
     verifyAuthorization: async ({ authorization, binding }) => {
@@ -238,21 +227,26 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
       if (grant.noSubdelegation !== true) return false;
       if (del.delegator.toLowerCase() !== binding.ownerPersonSA.toLowerCase()) return false;
 
-      // The person SA must have SIGNED the authorization — ERC-1271 via the USV. Fail-closed
-      // on a missing validator (we will not accept a vault-key authorization we can't verify).
+      // DURABLE, CROSS-ISOLATE SHORT-CIRCUIT (2026-07-11 hardening) — the ROOT of the read flakiness
+      // was an on-chain isValidSig RPC on EVERY vault op; under load the free RPC rate-limited and a
+      // valid authorization intermittently verified false. But the binding is PERSISTED only after a
+      // bind-time ERC-1271 verify (verifyAndStoreBinding), and `authorizationHash` pins the exact
+      // authorization that was verified. If the presented authorization hashes to that pin, its
+      // signature was already proven at bind time — no per-op chain read. The pin lives in D1 (the
+      // binding row every op already reads), so this is consistent across ALL isolates, not a warm-
+      // isolate memo. This also aligns with ADR-0011 (a signed delegation stays valid after the
+      // signer rotates credentials — re-verifying live could wrongly reject it). A HASH MISMATCH (a
+      // different/tampered authorization than the one bound) falls through to the real on-chain check.
+      const presentedHash = (await sha256Hex(canonicalize(delegationToWire(del)))) as Sha256;
+      if (presentedHash === binding.authorizationHash) return true;
+
+      // Fallback: the presented authorization is NOT the pinned one — verify it on-chain. Fail-closed
+      // on a missing validator (we will not accept an authorization we can't verify).
       const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
       if (!usv) {
         throw new Error('buildVaultKeyVerifier: UNIVERSAL_SIGNATURE_VALIDATOR is required to verify the vault-key authorization signature (fail-closed).');
       }
       const digest = hashDelegation(del, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
-      // Cache-first: a prior TRUE verdict for this exact (delegator, digest, signature) short-circuits
-      // the RPC — the check can't have changed. Never caches a negative.
-      const cacheKey = `${del.delegator.toLowerCase()}:${digest}:${del.signature}`;
-      const cachedExp = vaultKeyVerdictCache.get(cacheKey);
-      if (cachedExp !== undefined) {
-        if (cachedExp > Date.now()) return true;
-        vaultKeyVerdictCache.delete(cacheKey);
-      }
       const client = createPublicClient({ transport: http(env.RPC_URL) });
       const ok = (await client.readContract({
         address: usv as Address,
@@ -260,7 +254,6 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
         functionName: 'isValidSig',
         args: [del.delegator as Address, digest, del.signature],
       })) as boolean;
-      if (ok === true) vaultKeyVerdictCache.set(cacheKey, Date.now() + VAULT_KEY_VERDICT_TTL_MS);
       return ok === true;
     },
   });
