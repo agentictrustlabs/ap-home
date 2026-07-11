@@ -4076,7 +4076,7 @@ async function forwardMcpServiceMac(
   return new Response(await mcpRes.text(), { status: mcpRes.status, headers: { 'Content-Type': 'application/json' } });
 }
 
-// spec 323 W2 (V-1 remediation): the owner-own `/mcp/profile/{get,set}` routes are DELETED. Owner-own
+// APP-PROFILE-1 / spec 323 W2 (V-1 remediation): the owner-own `/mcp/profile/{get,set}` routes are DELETED. Owner-own
 // community-profile read/write is now a DELEGATION-authorized, self-gated record on the person's
 // InteractionsDO (`/interactions/<sa>/record.{get,put}`, recordType `impact-profile`), the same
 // `vault:impact-profile` resource, KEK-encrypted at demo-mcp — no bearer/service-MAC path a caller
