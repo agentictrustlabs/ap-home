@@ -75,7 +75,10 @@ const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timelin
 
 // spec 323 §3: wires whose DELEGATE is this person (stewardship, member-access) are the person's
 // own private credentials — they ride the entry so any Home can act from the vault (ADR-0025).
-interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; delegationHash?: string; delegations?: IncomingDelegation[]; updatedAt: string }
+// spec 323 W1-tail — kind/parent capture the managed-tree SHAPE (org / org-treasury / person-treasury
+// and where it hangs), so a second Home reconstructs the FULL tree + inbox-control from the vault, not
+// just member/steward org links.
+interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; updatedAt: string }
 interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
 /** Grants LEDGER row (spec 322 W3e §2): hash + metadata ONLY — the wire itself is a bearer secret. */
 interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]; storedAt: string }
@@ -515,6 +518,8 @@ export class InteractionsDO {
               org,
               relationship: entry?.relationship === 'steward' ? 'steward' : 'member',
               ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
+              ...(entry?.kind ? { kind: String(entry.kind) } : prev?.kind ? { kind: prev.kind } : {}),
+              ...(entry?.parent ? { parent: String(entry.parent).toLowerCase() } : prev?.parent ? { parent: prev.parent } : {}),
               ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}),
               // Wires accumulate (a member-access grant may arrive after the membership entry);
               // self-gated op — only the person can place credentials in their own doc.

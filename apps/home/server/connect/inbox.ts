@@ -91,14 +91,21 @@ async function resolveInboxOwner(
   env: FnContext['env'],
   person: string,
   requested: string | null | undefined,
+  bearer: string,
 ): Promise<string | null> {
   if (!requested) return person;
   const target = requested.toLowerCase();
   if (target === person.toLowerCase()) return person;
+  // spec 323 W1-tail — AUTHORITATIVE: the person's vault relationships.data. A steward/managed
+  // (non-'member') entry confers inbox control; a 'member' link is authority-only (channels +
+  // switcher, ADR-0025) and never does. Fall to the KV projection only when the doc isn't reachable
+  // (pre-enable / transient) — cache-first, not a second mechanism (ADR-0013).
+  const { readRelationshipsDoc } = await import('../lib/relationships-doc');
+  const doc = await readRelationshipsDoc(env, person, bearer);
+  const entry = doc?.orgs?.[target];
+  if (entry) return entry.relationship === 'member' ? null : target;
   const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
   if (!idx.some((a) => a.toLowerCase() === target)) return null;
-  // spec 318: a relationship:'member' link is AUTHORITY-ONLY (channels + switcher) — it never
-  // confers control of the agent's inbox. Legacy/steward links keep control.
   const raw = await env.AUTH_CODES.get(`related:${person}:${target}`);
   const link = raw ? (JSON.parse(raw) as { relationship?: string }) : null;
   return link?.relationship === 'member' ? null : target;
@@ -109,7 +116,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
   const url = new URL(request.url);
   // `?agent=<sa>` scopes the read to a managed org/service inbox the person controls (else 403).
-  const owner = await resolveInboxOwner(env, person, url.searchParams.get('agent'));
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  const owner = await resolveInboxOwner(env, person, url.searchParams.get('agent'), bearer);
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
   // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
   // the same projection the inbox renders, filtered; never a second index.
@@ -173,7 +181,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     | null;
 
   // Scope the action to the person's own inbox, or a managed org/service inbox they control.
-  const owner = await resolveInboxOwner(env, person, body?.agent);
+  const bearerP = (request.headers.get('authorization') ?? '').slice(7);
+  const owner = await resolveInboxOwner(env, person, body?.agent, bearerP);
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
 
   // The inbox is vault-resident (spec 316 §11a): each owner's `inbox.data` lives in their MCP vault.

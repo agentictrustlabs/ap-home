@@ -7,6 +7,10 @@ export interface RelationshipEntryV1 {
   org: string;
   relationship: 'member' | 'steward';
   orgName?: string;
+  /** spec 323 W1-tail — the managed-tree shape (spec 275): kind ∈ {org,org-treasury,person-treasury}
+   *  and the parent this agent hangs under. Lets a second Home rebuild the whole tree from the vault. */
+  kind?: string;
+  parent?: string;
   delegationHash?: string;
   delegations?: unknown[];
   updatedAt: string;

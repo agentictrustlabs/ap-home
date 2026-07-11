@@ -74,8 +74,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
         proofHash: null,
         ...(entry.relationship === 'steward' && wire ? { stewardshipDelegation: wire } : {}),
         ...(entry.relationship === 'member' && wire ? { memberAccessDelegation: wire } : {}),
-        kind: 'org',
-        parent: person,
+        // spec 323 W1-tail — faithful tree shape from the vault (kind/parent), not a flattened default.
+        kind: entry.kind ?? 'org',
+        parent: entry.parent ?? person,
         relationship: entry.relationship,
         createdAt: Date.parse(entry.updatedAt) || Date.now(),
       }));
@@ -295,6 +296,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       org,
       relationship: stewardish ? 'steward' : 'member',
       ...(link.orgName ? { orgName: String(link.orgName) } : {}),
+      ...(link.kind ? { kind: String(link.kind) } : {}),
+      ...(link.parent ? { parent: String(link.parent) } : {}),
       ...(link.stewardshipDelegation ? { delegations: [link.stewardshipDelegation] } : {}),
     });
   }

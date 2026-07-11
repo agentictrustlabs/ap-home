@@ -42,18 +42,31 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   if (!person) return jsonCors({ error: 'no person address in token sub' }, request, 401);
 
-  // The orgs the person STEWARDS (custody) → their inbound grants. spec 318: `related-idx` now also holds
-  // authority-only `relationship:'member'` links (channel membership, ADR-0025) — a member has NO custody
-  // and MUST NOT see the org's private inbound-delegation graph. Fail-closed: read each link and skip
-  // members (same exclusion as inbox.ts resolveInboxOwner + inbox-delivery-grant.ts controlsOwner).
-  const orgIdx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+  // spec 323 W1-tail — the orgs the person STEWARDS come from the AUTHORITATIVE vault
+  // relationships.data (non-'member' entries confer custody; a 'member' link is authority-only and
+  // never exposes the org's grant graph — ADR-0025). The KV related-idx is the fallback cache when
+  // the doc isn't reachable. The per-org inbound member grants (`delegated-idx`) are a cache whose
+  // authoritative source is the org's own directory.data roster (portable; a second Home renders it
+  // from there). Reconcile-from-source, not a second mechanism (ADR-0013).
+  const { readRelationshipsDoc } = await import('../lib/relationships-doc');
+  const doc = await readRelationshipsDoc(env, person, token);
+  const stewardOrgs: Array<{ org: string; orgName: string }> = [];
+  if (doc?.orgs) {
+    for (const [org, e] of Object.entries(doc.orgs)) {
+      if (e.relationship !== 'member') stewardOrgs.push({ org, orgName: e.orgName ?? '' });
+    }
+  } else {
+    const orgIdx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+    for (const org of orgIdx) {
+      const linkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const link = linkRaw ? (JSON.parse(linkRaw) as { orgName?: string; relationship?: string }) : null;
+      if (link?.relationship !== 'member') stewardOrgs.push({ org, orgName: link?.orgName ?? '' });
+    }
+  }
   const received: Array<Record<string, unknown>> = [];
-  for (const org of orgIdx) {
-    const linkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
-    const link = linkRaw ? (JSON.parse(linkRaw) as { orgName?: string; relationship?: string }) : null;
-    if (link?.relationship === 'member') continue; // authority-only — never the org's grant graph
+  for (const { org, orgName } of stewardOrgs) {
     const grants = JSON.parse((await env.AUTH_CODES.get(`delegated-idx:${org}`)) ?? '[]') as Array<Record<string, unknown>>;
-    for (const g of grants) received.push({ viaOrg: org, viaOrgName: link?.orgName ?? '', ...g });
+    for (const g of grants) received.push({ viaOrg: org, viaOrgName: orgName, ...g });
   }
   return jsonCors({ received }, request);
 };
