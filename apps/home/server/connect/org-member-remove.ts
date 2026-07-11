@@ -10,6 +10,7 @@
 import type { FnContext } from '../_lib/server-broker';
 import { orgVault } from '../lib/org-vault';
 import { controlsOrg } from './org-invite';
+import { callInteractions, stewardWireFor } from './channels';
 import { removeOrgMemberLink } from './membership';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
@@ -19,7 +20,6 @@ const json = (b: unknown, s = 200): Response =>
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
 
 const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
-const DIR_KEY = (communityId: string): string => `directory:${communityId.toLowerCase()}`; // MUST match directory.ts
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as { org?: string; member?: string } | null;
@@ -28,13 +28,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!isAddress(org) || !isAddress(member)) return json({ error: 'org + member (SAs) required' }, 400);
   if (!(await controlsOrg(env, request, org))) return json({ error: 'you must steward this organization to remove members' }, 403);
 
-  // 1. Directory listing (channel membership) — drop every listing whose subject is the member.
-  const dirRaw = await env.AUTH_CODES.get(DIR_KEY(org));
-  if (dirRaw) {
-    const rows = (JSON.parse(dirRaw) as Array<{ listing: { subject: string } }>).filter(
-      (l) => !(l.listing.subject.toLowerCase().endsWith(member)),
-    );
-    await env.AUTH_CODES.put(DIR_KEY(org), JSON.stringify(rows));
+  // 1. Directory listing (channel membership) — steward removal through the community's
+  //    InteractionsDO (spec 322 W2.3b: listings live in the org vault's directory.data; the DO
+  //    tombstones the subject so a replayed listing cannot re-enter). Requires the caller's
+  //    stewardship wire + session token.
+  const auth = request.headers.get('authorization') ?? '';
+  const callerToken = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const { getServer: gs, ownIssuer: oi } = await import('../_lib/server-broker');
+  const { importJwks: ij, verifyAgentSession: vas } = await import('@agenticprimitives/connect');
+  const { jwks } = await gs(env);
+  const vv = await vas(callerToken, { keys: await ij(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: oi(request, env) });
+  const caller = vv.ok ? ((vv.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase()) : '';
+  if (caller) {
+    const stewardship = await stewardWireFor(env, caller, org);
+    const r = await callInteractions(env, org, 'directory.remove', {
+      session: callerToken, subject: member, ...(stewardship ? { stewardship } : {}),
+    });
+    if (r.status !== 200 && r.status !== 409) {
+      return json({ error: `listing removal failed: ${String(r.body.error ?? r.status)}` }, 502);
+    }
   }
 
   // 2. The authority-only member link (projection) — never a steward link (removeOrgMemberLink guards).

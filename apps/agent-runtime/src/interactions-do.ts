@@ -178,10 +178,18 @@ export class InteractionsDO {
         if (!listing) return json({ error: 'listing required' }, 400);
         const errors = validateDirectoryListing(listing);
         if (errors.length > 0) return json({ error: `invalid listing: ${errors.join(', ')}` }, 400);
-        if (listing.subject.toLowerCase() !== sessionCaip.toLowerCase()) return json({ error: 'listing subject must be the session principal' }, 403);
+        // Self-publish, OR a steward publishing an ORG's listing (spec 313 §4 Networks): the
+        // presented stewardship wire must be delegated BY the listing subject to the session SA.
+        if (listing.subject.toLowerCase() !== sessionCaip.toLowerCase()) {
+          const subjAddr = listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0];
+          const w = body.subjectStewardship as IncomingDelegation | undefined;
+          const ok = !!subjAddr && (await this.isSteward(subjAddr, sessionSa, w));
+          if (!ok) return json({ error: 'listing subject must be the session principal (or present its stewardship wire)' }, 403);
+        }
         const { proof, ...draft } = listing;
         const digest = await sha256Hex32(canonicalizeMessage(draft));
-        if (!(await this.erc1271(sessionSa, digest as Hex, proof.signature as Hex))) return json({ error: 'listing signature failed ERC-1271 verification' }, 403);
+        const proofSubject = (listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? sessionSa) as Address;
+        if (!(await this.erc1271(proofSubject, digest as Hex, proof.signature as Hex))) return json({ error: 'listing signature failed ERC-1271 verification' }, 403);
         // Replay guard: monotonic publishedAt per subject; publishing clears any tombstone (rejoin).
         const me = sessionCaip.toLowerCase();
         const prev = st.subjects?.[me]?.publishedAt;
@@ -201,6 +209,23 @@ export class InteractionsDO {
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.directory.revoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'listing', id: me } });
         await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
         st.subjects = { ...(st.subjects ?? {}), [me]: { publishedAt: st.subjects?.[me]?.publishedAt ?? new Date().toISOString(), tombstoned: true } };
+        await this.state.storage.put('state', st);
+        return json({ ok: true });
+      }
+
+      if (op === 'directory.remove') {
+        // STEWARD removal of another member's listing (spec 321 W3 continuity under the DO): the
+        // caller presents the stewardship wire; the subject's listing is dropped + tombstoned so a
+        // replayed old listing cannot re-enter (spec 322 §4).
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'stewardship proof required' }, 403);
+        const subject = String(body.subject ?? '').toLowerCase();
+        if (!subject) return json({ error: 'subject required' }, 400);
+        const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => !l.listing.subject.toLowerCase().endsWith(subject));
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.directory.remove', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'listing', id: subject } });
+        await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
+        const key = Object.keys(st.subjects ?? {}).find((k) => k.endsWith(subject)) ?? subject;
+        st.subjects = { ...(st.subjects ?? {}), [key]: { publishedAt: st.subjects?.[key]?.publishedAt ?? new Date().toISOString(), tombstoned: true } };
         await this.state.storage.put('state', st);
         return json({ ok: true });
       }
