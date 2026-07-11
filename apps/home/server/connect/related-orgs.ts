@@ -53,6 +53,39 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!person) return jsonCors({ error: 'no person address in token sub' }, request, 401);
 
   const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+
+  // spec 323 W1 — the vault doc (`relationships.data`, via the person's DO) is AUTHORITATIVE; this
+  // KV is its projection. On the person's OWN home view (bearer aud = home), reconcile the
+  // projection from the source: any org present in the vault doc but missing here gets a KV link
+  // synthesized (self-heal — a second app's writes surface everywhere). Reconciling a projection
+  // from its source is not a fallback mechanism (ADR-0013).
+  if (!clientId) {
+    const { readRelationshipsDoc } = await import('../lib/relationships-doc');
+    const doc = await readRelationshipsDoc(env, person, token);
+    for (const [org, entry] of Object.entries(doc?.orgs ?? {})) {
+      if (idx.some((a) => a.toLowerCase() === org.toLowerCase())) continue;
+      const wire = Array.isArray(entry.delegations) ? entry.delegations[0] ?? null : null;
+      await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({
+        orgAgent: org,
+        orgName: entry.orgName ?? org,
+        purpose: 'vault relationships.data reconcile',
+        requestedBy: 'home-reconcile',
+        siteDelegation: null,
+        proofHash: null,
+        ...(entry.relationship === 'steward' && wire ? { stewardshipDelegation: wire } : {}),
+        ...(entry.relationship === 'member' && wire ? { memberAccessDelegation: wire } : {}),
+        kind: 'org',
+        parent: person,
+        relationship: entry.relationship,
+        createdAt: Date.parse(entry.updatedAt) || Date.now(),
+      }));
+      idx.push(org);
+    }
+    if (Object.keys(doc?.orgs ?? {}).length > 0) {
+      await env.AUTH_CODES.put(`related-idx:${person}`, JSON.stringify(idx));
+    }
+  }
+
   const orgs: Array<Record<string, unknown>> = [];
   for (const org of idx) {
     const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
@@ -251,6 +284,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!idx.includes(org)) {
     idx.push(org);
     await env.AUTH_CODES.put(`related-idx:${person}`, JSON.stringify(idx));
+  }
+  // spec 323 W1 — mirror into the person's AUTHORITATIVE vault doc when this write rides their own
+  // home session (the DO op is self-gated; the external-custodian sig path has no person session,
+  // so its links surface in the doc at the person's next reconcile-capable ceremony).
+  if (bearer) {
+    const { mergeRelationshipEntry } = await import('../lib/relationships-doc');
+    const stewardish = (existing.relationship as string | undefined) !== 'member';
+    await mergeRelationshipEntry(env, person, bearer, {
+      org,
+      relationship: stewardish ? 'steward' : 'member',
+      ...(link.orgName ? { orgName: String(link.orgName) } : {}),
+      ...(link.stewardshipDelegation ? { delegations: [link.stewardshipDelegation] } : {}),
+    });
   }
   return jsonCors({ ok: true }, request);
 };
