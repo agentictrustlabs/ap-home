@@ -121,12 +121,12 @@ export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProf
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
   const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
-  // The WRITE is authoritative — set_vault_record only returns ok after the KEK-encrypted write
-  // commits (confirmed against production D1: writes persist + increment rev). Reads self-heal via a
-  // bounded retry in the DO now, so the save no longer FAILS on a flaky read-back. Keep a best-effort
-  // confirmation as a warning only (never blocks the save).
-  if (out.verified === false && typeof console !== 'undefined') {
-    console.warn('[profile] save persisted but the server read-back differed once — the DO retries reads; reload will reflect the save.');
+  // DIAGNOSTIC: the write and read use the SAME grant. If the server-mint recovers a DIFFERENT owner
+  // for the read than the write, the read is reading someone else's (empty) record — the smoking gun.
+  const wo = String(out.writeOwner ?? '').toLowerCase();
+  const ro = String(out.readOwner ?? '').toLowerCase();
+  if (wo && ro && wo !== ro) {
+    throw new Error(`OWNER MISMATCH — the server wrote to ${wo} but the read resolved ${ro} (session ${String(out.sessionSa ?? '')}, principal ${String(out.principal ?? '')}). The save landed on the right record; the read is resolving a different one.`);
   }
 }
 

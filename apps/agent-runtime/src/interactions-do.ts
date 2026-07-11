@@ -642,14 +642,15 @@ export class InteractionsDO {
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
-        await this.writeDoc(grant, recordType, body.record);
-        // DIAGNOSTIC (2026-07-11) — read the record straight back through the SAME grant/owner and
-        // report whether the DO's own write→read round-trips. This isolates a vault-layer
-        // write-that-doesn't-stick from a cross-call/session issue. `verified` = the readback deep-
-        // equals what we wrote; `readback` is what the vault actually returned.
-        const rb = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
-        const verified = JSON.stringify(rb?.data ?? null) === JSON.stringify(body.record);
-        return json({ ok: true, verified, readback: rb?.data ?? null });
+        // DIAGNOSTIC (2026-07-11) — capture the OWNER each mint recovers. The write and read use the
+        // SAME grant, so if writeOwner !== readOwner the server-mint is recovering different principals
+        // (the read is reading someone else's empty record → "saved but reads back empty").
+        const wResp = await callMcpToolViaDelegation({ env: this.env, toolName: 'set_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType, data: body.record } });
+        const wOut = (await wResp.json().catch(() => ({}))) as { ok?: boolean; owner?: string; error?: string };
+        if (!wResp.ok || wOut.ok === false) return json({ error: wOut.error ?? 'write failed' }, 409);
+        const rResp = await callMcpToolViaDelegation({ env: this.env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType } });
+        const rOut = (await rResp.json().catch(() => ({}))) as { ok?: boolean; owner?: string; hasData?: boolean };
+        return json({ ok: true, writeOwner: wOut.owner ?? null, readOwner: rOut.owner ?? null, readHasData: rOut.hasData === true, sessionSa, principal });
       }
 
       return json({ error: `unknown op: ${op}` }, 400);
