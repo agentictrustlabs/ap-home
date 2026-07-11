@@ -41,7 +41,9 @@ export function grantCoversCurrentScope(d: DelegationWireLike | null): boolean {
   if (!cav?.terms) return false;
   try {
     const resources = new Set(decodeVaultRecordScopeTerms(cav.terms as `0x${string}`).flatMap((g) => g.resources));
-    return resources.has(INBOX_DATA_RESOURCE_SCOPE) && resources.has(CHANNELS_DATA_RESOURCE_SCOPE);
+    // spec 322 W3: channels ride the INTERACTIONS plane now — the delivery grant only needs the
+    // inbox doc (+ its body namespace via prefix). CHANNELS_DATA no longer required here.
+    return resources.has(INBOX_DATA_RESOURCE_SCOPE);
   } catch {
     return false;
   }

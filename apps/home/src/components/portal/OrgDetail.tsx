@@ -19,7 +19,7 @@ import { BuildingIcon, LinkIcon } from '../shared/Icons';
 /** The org's managed profile — the canonical "org details" record the steward edits.
  *  Stored in the ORG's own vault under `org:profile`, written over the stewardship
  *  delegation (delegator = org). Free-form, vertical-agnostic. */
-const RT_ORG_PROFILE = 'org:profile';
+const RT_ORG_PROFILE = 'org.profile'; // spec 322 W3 record-grammar rename (no migration — old records orphaned)
 interface OrgProfile {
   v: 1;
   displayName?: string;

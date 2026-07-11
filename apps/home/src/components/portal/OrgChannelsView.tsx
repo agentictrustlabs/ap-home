@@ -121,7 +121,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
         const b = (await r.json().catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; memberAccessDelegation?: DelegationWire | null }> };
         const mad = (b.orgs ?? []).find((o) => (o.orgAgent ?? '').toLowerCase() === communityId)?.memberAccessDelegation;
         if (!mad || cancelled) return;
-        const about = await vaultReadWithDelegation<{ displayName?: string; description?: string; website?: string }>(mad, 'org:profile');
+        const about = await vaultReadWithDelegation<{ displayName?: string; description?: string; website?: string }>(mad, 'org.profile');
         if (!cancelled && about) setOrgAbout(about);
       } catch { /* no grant / no profile — the card just doesn't render */ }
     })();

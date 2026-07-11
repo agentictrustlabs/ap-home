@@ -261,7 +261,7 @@ export async function createOrganization(
     // spec 321 items 1+3 — seed the org profile record + a default channel (same as the
     // Organizations-page create), so relying-flow orgs are usable without steward follow-up.
     if (x.stewardshipDelegation) {
-      await vaultWriteWithDelegation(x.stewardshipDelegation, 'org:profile', { v: 1, displayName: x.childName }).catch((e: unknown) => console.warn('[org-create] org profile seed failed:', e));
+      await vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: x.childName }).catch((e: unknown) => console.warn('[org-create] org profile seed failed:', e));
     }
     const bearer = storedSessionToken(auth);
     if (bearer) {
@@ -686,8 +686,8 @@ export async function activateInteractionsIfNeeded(
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!INTERACTIONS_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
   try {
-    const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean };
-    if (st?.granted) return { ok: true, skipped: true };
+    const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean };
+    if (st?.granted && st?.current !== false) return { ok: true, skipped: true }; // stale grants re-issue (scope widened — spec 322 W3)
   } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
   try {
     const signHash = await signHashFor(via, principal, auth);

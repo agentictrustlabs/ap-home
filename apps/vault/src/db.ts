@@ -217,6 +217,8 @@ export interface VaultObjectRow {
   ciphertext_b64: string;
   wrapped_dek_b64: string;
   crypto_meta: string; // JSON: { alg, dekKid, keyVersion, aadHash }
+  /** spec 322 W3 — optimistic concurrency: increments on every upsert; callers MAY CAS on it. */
+  rev: number;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -238,22 +240,32 @@ export async function getVaultObjectRow(
   );
 }
 
-/** Upsert an encrypted vault object (clears any tombstone). */
+/** Upsert an encrypted vault object (clears any tombstone). `rev` increments on every update
+ *  (spec 322 W3). When `expectedRev` is passed, the update applies ONLY if the stored rev matches —
+ *  an atomic compare-and-swap; a mismatch throws VaultRevConflictError instead of clobbering
+ *  (defense-in-depth: the per-principal DO is the ordering authority; out-of-band writers are
+ *  REJECTED, never silently merged). */
+export class VaultRevConflictError extends Error {
+  constructor(resource: string) { super(`vault_rev_conflict: ${resource}`); }
+}
 export async function putVaultObjectRow(
   db: D1Database,
   row: Pick<VaultObjectRow, 'owner_address' | 'resource' | 'classification' | 'ciphertext_b64' | 'wrapped_dek_b64' | 'crypto_meta'>,
+  expectedRev?: number,
 ): Promise<void> {
-  await db
+  const res = await db
     .prepare(
-      `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO vault_objects (owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, rev)
+       VALUES (?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(owner_address, resource) DO UPDATE SET
          classification = excluded.classification,
          ciphertext_b64 = excluded.ciphertext_b64,
          wrapped_dek_b64 = excluded.wrapped_dek_b64,
          crypto_meta = excluded.crypto_meta,
          updated_at = CURRENT_TIMESTAMP,
-         deleted_at = NULL`,
+         deleted_at = NULL,
+         rev = vault_objects.rev + 1
+       WHERE ? IS NULL OR vault_objects.rev = ?`,
     )
     .bind(
       row.owner_address.toLowerCase(),
@@ -262,8 +274,14 @@ export async function putVaultObjectRow(
       row.ciphertext_b64,
       row.wrapped_dek_b64,
       row.crypto_meta,
+      expectedRev ?? null,
+      expectedRev ?? null,
     )
     .run();
+  // CAS miss: the row existed but its rev didn't match — the conditional DO UPDATE wrote nothing.
+  if (expectedRev !== undefined && (res.meta?.changes ?? 1) === 0) {
+    throw new VaultRevConflictError(row.resource);
+  }
 }
 
 /** Soft-delete (tombstone) an encrypted vault object. */

@@ -19,14 +19,13 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { createPublicClient, http, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
 import {
   appendBoardPost,
   createBoardChannel,
   canonicalizeMessage,
   createVaultMessageBodyStore,
   isListingCurrent,
-  messageBodyResource,
   sha256Hex32,
   validateDirectoryListing,
   type ChannelV1,
@@ -43,10 +42,17 @@ const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutabili
 const ERC1271_MAGIC = '0x1626ba7e';
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
-// The vault RECORD is 'channels.data' (spec 316 §11a / 322 §1) — `channels:<sa>` is only the Home's
-// KV routing key (makeVaultDocKv), never the record name.
-const CHANNELS_RESOURCE = (_principal: string): string => 'channels.data';
+// spec 322 W3 board split: descriptors in `board.index`; per-channel message projections in
+// `board.channel:<id>` (multi-writer conflicts shrink to same-channel; reads stop paying for the
+// whole board; per-channel scopes become possible). NO migration from the old single
+// `channels.data` doc — disposable by product decision.
+const BOARD_INDEX_RESOURCE = 'board.index';
+const CHANNEL_RESOURCE = (channelId: string): string => `board.channel:${channelId}`;
 const DIRECTORY_RESOURCE = 'directory.data';
+
+/** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
+ *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data'] as const;
 
 interface IndexedListing { listing: DirectoryListingV1; label: string }
 interface StoredState {
@@ -131,6 +137,17 @@ export class InteractionsDO {
     } catch { return false; } // fail-closed on chain-read failure
   }
 
+
+  /** Does the stored grant cover the CURRENT wave's scope set? Stale ⇒ steward re-enables. */
+  private grantIsCurrent(grant: IncomingDelegation): boolean {
+    const cav = (grant.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+    if (!cav?.terms) return false;
+    try {
+      const resources = new Set(decodeVaultRecordScopeTerms(cav.terms as Hex).flatMap((g) => g.resources));
+      return REQUIRED_SCOPES.every((r) => resources.has(r));
+    } catch { return false; }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
@@ -158,7 +175,7 @@ export class InteractionsDO {
     }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      return json({ ok: true, granted: !!st.grant });
+      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant) });
     }
 
     // ── Skills — caller = broker-verified Home session (any principal kind). ──
@@ -170,6 +187,7 @@ export class InteractionsDO {
     const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
     const grant = st.grant;
     if (!grant) return json({ error: 'no interactions grant — a steward must enable storage for this agent' }, 409);
+    if (!this.grantIsCurrent(grant)) return json({ error: 'interactions grant is stale — a steward must re-enable storage (scope widened this wave)' }, 409);
     const audit = buildAuditSink(this.env);
 
     try {
@@ -243,15 +261,17 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
-        const board = await this.readDoc<ChannelV1[]>(grant, CHANNELS_RESOURCE(principal), []);
-        const wire = board.map((c) => ({ ...c, messages: c.messages.map(({ envelope, authorName }) => ({ envelope, authorName })) }));
+        // Board split (W3): descriptors from board.index; ONE channel's messages from its own doc.
+        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
+        let wire = index.map((c) => ({ ...c, messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
         if (op === 'channels.read' && typeof body.channelId === 'string') {
+          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(body.channelId), []);
+          wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
-          const channel = board.find((c) => c.descriptor.id === body.channelId);
-          await Promise.all((channel?.messages ?? []).map(async (m) => {
-            const normalized: MessageEnvelopeV1 = { ...m.envelope, body: { ...m.envelope.body, resource: messageBodyResource(m.envelope.id) } };
-            try { bodies[m.envelope.id] = new TextDecoder().decode(await store.loadBody(normalized)); } catch { /* fail-closed omit */ }
+          await Promise.all(messages.map(async (m) => {
+            // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
+            try { bodies[m.envelope.id] = new TextDecoder().decode(await store.loadBody(m.envelope)); } catch { /* fail-closed omit */ }
           }));
         }
         return json({ ok: true, channels: wire, bodies, you: name ?? 'Steward', steward });
@@ -261,24 +281,31 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
-        const board = await this.readDoc<ChannelV1[]>(grant, CHANNELS_RESOURCE(principal), []);
-        const r = createBoardChannel(board, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
+        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+        const r = createBoardChannel(index, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
         if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
-        await this.writeDoc(grant, CHANNELS_RESOURCE(principal), board);
+        await this.writeDoc(grant, BOARD_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
         return json({ ok: true, channelId: r.channel.descriptor.id });
       }
 
       if (op === 'channels.post') {
         const name = await this.memberName(grant, principal, sessionCaip);
         if (!name) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403); // posting = listing members ONLY
-        const board = await this.readDoc<ChannelV1[]>(grant, CHANNELS_RESOURCE(principal), []);
-        const r = await appendBoardPost(board, { channelId: String(body.channelId ?? ''), from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
+        // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
+        const channelId = String(body.channelId ?? '');
+        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+        const entry = index.find((c) => c.descriptor.id === channelId);
+        if (!entry) return json({ error: 'unknown channel' }, 404);
+        const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(channelId), []);
+        const composed: ChannelV1[] = [{ ...entry, messages }];
+        const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
         if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
         const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
-        await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal' });
-        await this.writeDoc(grant, CHANNELS_RESOURCE(principal), board);
+        // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
+        await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
+        await this.writeDoc(grant, CHANNEL_RESOURCE(channelId), composed[0]!.messages);
         return json({ ok: true, messageId: r.envelope.id });
       }
 

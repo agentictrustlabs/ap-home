@@ -186,7 +186,7 @@ export function CreateAgentForm({
         // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
         setStep('Setting up the organization…');
         if (res.result.stewardshipDelegation) {
-          await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org:profile', { v: 1, displayName: res.result.name || clean }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
+          await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org.profile', { v: 1, displayName: res.result.name || clean }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
         }
         await fetch('/connect/channels', {
           method: 'POST',

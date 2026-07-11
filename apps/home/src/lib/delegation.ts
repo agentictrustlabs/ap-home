@@ -231,7 +231,9 @@ export async function issueInboxDeliveryDelegation(
     // spec 316 §11a cutover: the grant covers the message-body records AND the vault-resident documents —
     // the personal inbox (`inbox.data`) and the org channel board (`channels.data`) — read+write, so delivery
     // (a2a skill append) + render/mutate (owner Home) + channel post/read run on ONE grant.
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, CHANNELS_DATA_RESOURCE_SCOPE, ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    // spec 322 W3: channels moved to the INTERACTIONS plane; NEW delivery grants narrow to the DM
+    // body namespace + inbox doc + invite tracking. Old broad grants keep working until re-signed.
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
@@ -247,6 +249,12 @@ export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
 
 /** The membership directory record (spec 322 W2/W3 — the DO-managed vault residency). */
 export const DIRECTORY_DATA_RESOURCE_SCOPE = 'vault:directory.data' as const;
+/** Board split (spec 322 W3): descriptors index + per-channel docs + channel-namespace bodies. */
+export const BOARD_INDEX_RESOURCE_SCOPE = 'vault:board.index' as const;
+export const BOARD_CHANNEL_RESOURCE_SCOPE = 'vault:board.channel:*' as const;
+export const CHANNEL_BODIES_RESOURCE_SCOPE = 'vault:message.body:channel:*' as const;
+/** 1-1 (DM) bodies — the DELIVERY plane's namespace; disjoint from channel bodies (FAB-SSO-2). */
+export const DM_BODIES_RESOURCE_SCOPE = 'vault:message.body:dm:*' as const;
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
@@ -268,7 +276,7 @@ export async function issueInteractionsDelegation(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [CHANNELS_DATA_RESOURCE_SCOPE, INBOX_DELIVERY_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE], ops: ['read', 'write'] }]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
@@ -280,7 +288,7 @@ export async function issueInteractionsDelegation(
 
 /** The org's managed profile record (`org:profile` — what OrgDetail's steward edits): the org
  *  information a MEMBER may read over their member-access grant (spec 321 W2). */
-export const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org:profile' as const;
+export const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org.profile' as const; // spec 322 W3 rename
 
 /**
  * spec 321 W2 — the member-access delegation `org → member`, signed by the ORG's custody (the
