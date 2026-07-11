@@ -121,6 +121,12 @@ export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProf
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
   const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
+  // DIAGNOSTIC: the DO read the record straight back through the SAME grant/owner right after writing.
+  // If ITS read-back already differs, the write doesn't stick at the VAULT layer (KEK/D1) — distinct
+  // from a cross-call/session mismatch. Report it precisely.
+  if (out.verified === false) {
+    throw new Error(`vault layer did not persist: the server wrote and immediately re-read a DIFFERENT value through the same grant. readback=${JSON.stringify(out.readback)}`);
+  }
   // Read-back VERIFY (no false "✓ Saved"): re-read the record and confirm the vault retained the
   // contact we just wrote. If the write returned ok but the value didn't persist (a silent
   // write-that-doesn't-stick), fail LOUD with what came back instead of the value we sent.

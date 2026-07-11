@@ -630,7 +630,13 @@ export class InteractionsDO {
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
         await this.writeDoc(grant, recordType, body.record);
-        return json({ ok: true });
+        // DIAGNOSTIC (2026-07-11) — read the record straight back through the SAME grant/owner and
+        // report whether the DO's own write→read round-trips. This isolates a vault-layer
+        // write-that-doesn't-stick from a cross-call/session issue. `verified` = the readback deep-
+        // equals what we wrote; `readback` is what the vault actually returned.
+        const rb = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
+        const verified = JSON.stringify(rb?.data ?? null) === JSON.stringify(body.record);
+        return json({ ok: true, verified, readback: rb?.data ?? null });
       }
 
       return json({ error: `unknown op: ${op}` }, 400);
