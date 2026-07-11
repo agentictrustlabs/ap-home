@@ -189,6 +189,23 @@ export class InteractionsDO {
     return verifyBridgeCall({ request, rawBody, secret, expectedAudience: `interactions.${op}`, nonces });
   }
 
+  /** spec 323 W4 — the PORTABLE gate for owner-facing residency ops: the OWNER's broker session
+   *  (verifyHomeSession, session SA === principal) is accepted DIRECTLY, so ANY Home holding the
+   *  owner's session drives them with NO shared bridge secret. Caller-selected (not a fallback,
+   *  ADR-0013): a request that carries `session` takes the Web3-authenticated owner path; one that
+   *  carries the SEC-010 envelope instead takes the incumbent demo-a2a↔Home server transport. Each
+   *  fails closed. (Non-owner-facing ops — invite.* — stay bridge-only: they are org-steward /
+   *  token-redeem substrate flows, not the owner acting on their own records.) */
+  private async ownerOrBridge(request: Request, rawBody: string, op: string, principal: string, session: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (session) {
+      const g = await verifyHomeSession(session, this.env);
+      if (!g.ok) return { ok: false, reason: g.error };
+      if (g.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
+      return { ok: true };
+    }
+    return this.bridgeGate(request, rawBody, op);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
@@ -248,8 +265,14 @@ export class InteractionsDO {
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
     if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put') {
+      // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
+      // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
+      // are in-Worker (a2a deliver skill) → no external gate.
+      const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
       if (op !== 'internal.deliver' && op !== 'internal.dm.body.put') {
-        const bg = await this.bridgeGate(request, rawBody, op);
+        const bg = OWNER_FACING
+          ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''))
+          : await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
       }
       const st0 = ((await this.state.storage.get('state')) ?? {}) as StoredState;
