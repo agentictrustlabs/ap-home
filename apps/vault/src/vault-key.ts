@@ -209,6 +209,17 @@ export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB'>, 
  * the person SA actually SIGNED the authorization via ERC-1271 (UniversalSignatureValidator).
  * No stub: a forged/unsigned authorization fails the on-chain signature check.
  */
+// Positive-verdict cache for the vault-key authorization ERC-1271 check. The verdict is DETERMINISTIC
+// per (delegator, authorization digest, signature) — the person signed the authorization once — so an
+// on-chain `isValidSig` RPC on EVERY vault op was both wasteful and the ROOT of the read-after-write
+// flakiness (rapid successive ops rate-limited the free RPC → a valid signature intermittently
+// verified false → `vault_key_unauthorized` → a just-written value "read back empty"). We cache ONLY
+// the TRUE verdict (a valid, stable authorization) with a TTL; a false/negative is never cached (it
+// re-verifies, so a genuine bad sig stays rejected and a transient RPC error is not memoized). A
+// re-bind changes the digest → new key → re-verify. Per-isolate; a cold isolate just re-checks once.
+const VAULT_KEY_VERDICT_TTL_MS = 10 * 60 * 1000;
+const vaultKeyVerdictCache = new Map<string, number>(); // key → expiresAt(ms)
+
 export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVerifier {
   return createVaultKeyAuthorizationVerifier({
     verifyAuthorization: async ({ authorization, binding }) => {
@@ -234,6 +245,14 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
         throw new Error('buildVaultKeyVerifier: UNIVERSAL_SIGNATURE_VALIDATOR is required to verify the vault-key authorization signature (fail-closed).');
       }
       const digest = hashDelegation(del, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
+      // Cache-first: a prior TRUE verdict for this exact (delegator, digest, signature) short-circuits
+      // the RPC — the check can't have changed. Never caches a negative.
+      const cacheKey = `${del.delegator.toLowerCase()}:${digest}:${del.signature}`;
+      const cachedExp = vaultKeyVerdictCache.get(cacheKey);
+      if (cachedExp !== undefined) {
+        if (cachedExp > Date.now()) return true;
+        vaultKeyVerdictCache.delete(cacheKey);
+      }
       const client = createPublicClient({ transport: http(env.RPC_URL) });
       const ok = (await client.readContract({
         address: usv as Address,
@@ -241,6 +260,7 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
         functionName: 'isValidSig',
         args: [del.delegator as Address, digest, del.signature],
       })) as boolean;
+      if (ok === true) vaultKeyVerdictCache.set(cacheKey, Date.now() + VAULT_KEY_VERDICT_TTL_MS);
       return ok === true;
     },
   });
