@@ -26,4 +26,8 @@ export const MCP_SERVER_ID = 'demo-mcp';
  *  point). DISTINCT from DELIVERY_SERVICE_SA by design (the security review's two-plane split).
  *  Unset until provisioned ⇒ `undefined` ⇒ the activation short-circuits to skipped (deploy-safe). */
 export const INTERACTIONS_SERVICE_SA: Address | undefined =
-  ((process.env.NEXT_PUBLIC_INTERACTIONS_SERVICE_SA as string | undefined)?.trim() || undefined) as Address | undefined;
+  ((process.env.NEXT_PUBLIC_INTERACTIONS_SERVICE_SA as string | undefined)?.trim() ||
+    // Provisioned 2026-07-10 (spec 322 W2.3): a dedicated mode-0 SA minted by the platform deployer
+    // (factory tx 0xd732ee88…). A PUBLIC address — deployment-specific app config, committed by the
+    // same doctrine as DEMO_EDGE_ORIGIN_DEFAULT (ADR-0021: deployment specifics live in apps).
+    '0x39508624387FEd3b9D6dD15Ba86D3ACE8a3F0a6A') as Address | undefined;
