@@ -135,10 +135,22 @@ export class InteractionsDO {
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault write failed (${resp.status})`);
       },
       async read<T>({ resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
-        const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource } });
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; record?: T | null; error?: string };
-        if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
-        return out.record === null || out.record === undefined ? null : { data: out.record };
+        // BOUNDED RETRY (2026-07-11): a delegated read is served by a FRESH server-minted session each
+        // call; occasionally the mint recovers the wrong principal → get_vault_record returns
+        // `{ok:false, vault_key_unauthorized}`. That is an ERROR, not an empty record — masking it as
+        // `null` made a just-written value "read back empty" (the write persists; only the read
+        // flakes). Retry the SAME call (a new mint usually recovers the right principal). A real empty
+        // (`ok:true, record:null`) returns immediately — empty is an answer, an auth error is not
+        // (ADR-0013: bounded retry of the same call, no fallback to a different mechanism).
+        let lastErr = 'vault read failed';
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource } });
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; record?: T | null; error?: string };
+          if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
+          if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
+          return out.record === null || out.record === undefined ? null : { data: out.record };
+        }
+        throw new Error(lastErr);
       },
       async list(): Promise<never[]> { return []; },
     } as unknown as Vault;
