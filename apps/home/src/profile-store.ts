@@ -121,13 +121,6 @@ export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProf
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
   const out = await postProfile('set', addr, profile);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
-  // DIAGNOSTIC: the write and read use the SAME grant. If the server-mint recovers a DIFFERENT owner
-  // for the read than the write, the read is reading someone else's (empty) record — the smoking gun.
-  const wo = String(out.writeOwner ?? '').toLowerCase();
-  const ro = String(out.readOwner ?? '').toLowerCase();
-  if (wo && ro && wo !== ro) {
-    throw new Error(`OWNER MISMATCH — the server wrote to ${wo} but the read resolved ${ro} (session ${String(out.sessionSa ?? '')}, principal ${String(out.principal ?? '')}). The save landed on the right record; the read is resolving a different one.`);
-  }
 }
 
 /** Seed vault-profile fields from a CONNECTION (metadata-tiers doctrine: a verified contact point is
