@@ -2,7 +2,6 @@
 // Accessible tabs — in-house. role=tablist/tab/tabpanel, roving tabindex, ←/→/Home/End keyboard nav,
 // aria-selected + aria-controls wiring. Data-driven: pass the tab list; the active panel renders below.
 import { useId, useRef, useState, type ReactNode } from 'react';
-import './ui.css';
 
 export interface TabItem { id: string; label: ReactNode; content: ReactNode }
 

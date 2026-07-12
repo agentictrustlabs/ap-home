@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import '../src/components/portal/chat/chat.css';
 import '../src/components/portal/settings/settings.css';
+import '../src/components/shared/ui/ui.css';
 
 // Brand typeface (Inter) exposed as --font-brand; the warm palette + the rest of the
 // vertical identity live in app config (whitelabel) + globals.css (ADR-0021).

@@ -24,6 +24,7 @@ import { GoogleSignInPanel } from '../../../src/components/portal/settings/Googl
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { PhoneAuthCard } from '../../../src/components/portal/PhoneAuthCard';
 import { FingerprintIcon, MonitorIcon, ShieldIcon } from '../../../src/components/shared/Icons';
+import { Dialog, Field, Row, Stack } from '../../../src/components/shared/ui';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -184,7 +185,7 @@ export default function SecurityPage() {
         {add?.done ? (
           <p className="onboarding-hint ok" style={{ marginTop: '.5rem' }}>✓ {add.done} — same agent, same details.</p>
         ) : add?.step ? (
-          <p className="muted" style={{ marginTop: '.5rem', display: 'flex', gap: '.4rem', alignItems: 'center' }}><span className="spinner" /> {add.step}</p>
+          <Row gap={0.4} className="muted" style={{ marginTop: '.5rem' }}><span className="spinner" /> {add.step}</Row>
         ) : (
           <button className="btn-ghost" style={{ marginTop: '.65rem' }} onClick={addComplementary}>
             {via === 'passkey' ? 'Add a wallet' : 'Add a passkey'}
@@ -192,47 +193,52 @@ export default function SecurityPage() {
         )}
         {add?.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{add.error}</p>}
 
-        {/* Remove (replace a lost device) — symmetric onlySelf op, signed by the current credential. */}
+        {/* Remove (replace a lost device) — symmetric onlySelf op, signed by the current credential.
+            A destructive action → a focus-trapped Dialog (shared/ui) rather than an inline block. */}
         {remove.done ? (
           <p className="onboarding-hint ok" style={{ marginTop: '.75rem' }}>✓ {remove.done} — your home and name are unchanged.</p>
-        ) : remove.step ? (
-          <p className="muted" style={{ marginTop: '.75rem', display: 'flex', gap: '.4rem', alignItems: 'center' }}><span className="spinner" /> {remove.step}</p>
-        ) : !remove.open ? (
+        ) : (
           <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem' }} onClick={() => setRemove({ open: true })}>
             Remove a sign-in method
           </button>
-        ) : (
-          <div className="remove-credential" style={{ marginTop: '.65rem' }}>
-            {!canRemove ? (
-              <p className="muted" style={{ fontSize: '.85rem' }}>
-                This is your only sign-in method — add another above before removing one (you can’t lock yourself out).
-              </p>
-            ) : (
-              <>
-                <p className="muted" style={{ fontSize: '.85rem', marginBottom: '.4rem' }}>
-                  Removing a method revokes its access immediately. Your home, name, and connected apps are untouched.
-                </p>
+        )}
+        <Dialog
+          open={!!remove.open}
+          onClose={() => setRemove({})}
+          title="Remove a sign-in method"
+          description="Removing a method revokes its access immediately. Your home, name, and connected apps are untouched."
+        >
+          {remove.step ? (
+            <Row gap={0.4} className="muted"><span className="spinner" /> {remove.step}</Row>
+          ) : !canRemove ? (
+            <p className="muted" style={{ fontSize: '.85rem' }}>
+              This is your only sign-in method — add another first (you can’t lock yourself out).
+            </p>
+          ) : (
+            <Stack gap={0.6}>
+              <Field label="Wallet address to remove" hint="0x… — its access is revoked immediately.">
                 <input
                   className="onboarding-input"
                   value={remove.addr ?? ''}
                   onChange={(e) => setRemove((r) => ({ ...r, addr: e.target.value, error: undefined }))}
-                  placeholder="Wallet address to remove (0x…)"
-                  aria-label="Wallet address to remove"
+                  placeholder="0x…"
                   autoCapitalize="none"
                   spellCheck={false}
                 />
-                <button className="btn-ghost" style={{ marginTop: '.4rem' }} onClick={removeWallet}>Remove this wallet</button>
-                {via === 'passkey' && loadPasskey() && (
-                  <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem' }} onClick={removeThisDevice}>
-                    Remove this device’s passkey (signs you out here)
-                  </button>
-                )}
-              </>
-            )}
-            <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem' }} onClick={() => setRemove({})}>Cancel</button>
-          </div>
-        )}
-        {remove.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{remove.error}</p>}
+              </Field>
+              <Row gap={0.5} justify="flex-end">
+                <button className="btn-ghost onboarding-secondary" onClick={() => setRemove({})}>Cancel</button>
+                <button className="btn-primary" style={{ width: 'auto' }} onClick={removeWallet}>Remove wallet</button>
+              </Row>
+              {via === 'passkey' && loadPasskey() && (
+                <button className="btn-ghost onboarding-secondary" onClick={removeThisDevice}>
+                  Remove this device’s passkey (signs you out here)
+                </button>
+              )}
+            </Stack>
+          )}
+          {remove.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{remove.error}</p>}
+        </Dialog>
       </div>
 
       <div className="dash-section">

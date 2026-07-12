@@ -6,7 +6,6 @@
 //   • ESC and scrim-click close; body scroll is locked while open
 //   • one history entry is pushed so the device Back button closes it (mobile parity)
 import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react';
-import './ui.css';
 
 const FOCUSABLE = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 

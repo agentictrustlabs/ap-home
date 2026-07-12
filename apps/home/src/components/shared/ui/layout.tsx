@@ -3,7 +3,6 @@
 // Token-driven (warm CSS vars via ui.css); every one accepts `style`/`className` passthrough so callers
 // can still tweak without dropping back to a full inline object.
 import { cloneElement, useId, type CSSProperties, type ReactElement, type ReactNode } from 'react';
-import './ui.css';
 
 type Div = { style?: CSSProperties; className?: string; children?: ReactNode };
 

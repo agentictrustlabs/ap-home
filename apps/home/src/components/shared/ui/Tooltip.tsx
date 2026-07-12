@@ -2,7 +2,6 @@
 // Tooltip — in-house. Shows on hover AND keyboard focus, hides on blur/leave/ESC, small open delay.
 // role="tooltip" + aria-describedby wiring on the wrapped child. Content must be a short string/node.
 import { useId, useRef, useState, cloneElement, type ReactElement, type ReactNode } from 'react';
-import './ui.css';
 
 export function Tooltip({
   content,

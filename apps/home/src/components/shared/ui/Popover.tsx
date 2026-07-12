@@ -2,7 +2,6 @@
 // Anchored popover — in-house. Outside-click + ESC dismiss, focus returns to the trigger, the trigger
 // gets aria-expanded/aria-haspopup. Uncontrolled by default; pass open/onOpenChange to control it.
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import './ui.css';
 
 export function Popover({
   trigger,
