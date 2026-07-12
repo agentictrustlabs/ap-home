@@ -1,6 +1,7 @@
 // Celebratory confirmation of a completed milestone (sage). role=status so screen readers
 // announce it. Optional detail + block-explorer link.
 import { CheckCircleIcon, ExternalLinkIcon } from './Icons';
+import { Tooltip } from './ui';
 
 export function ReceiptCard({
   title,
@@ -23,9 +24,11 @@ export function ReceiptCard({
           <div className="receipt-card-detail">
             <span>{detail}</span>
             {explorerUrl && (
-              <a href={explorerUrl} target="_blank" rel="noreferrer" aria-label="View on block explorer">
-                <ExternalLinkIcon size={14} />
-              </a>
+              <Tooltip content="View on block explorer">
+                <a href={explorerUrl} target="_blank" rel="noreferrer" aria-label="View on block explorer">
+                  <ExternalLinkIcon size={14} />
+                </a>
+              </Tooltip>
             )}
           </div>
         )}

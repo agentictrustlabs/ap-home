@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { reverseAgentName } from '../../lib/reverse-name';
 import { CopyIcon, CheckIcon } from './Icons';
+import { Tooltip } from './ui';
 
 function short(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
@@ -47,21 +48,22 @@ export function AddressChip({ address, size = 'md', withName = false }: { addres
 
   const label = name ?? short(address);
   return (
-    <button
-      type="button"
-      className={`address-chip ${size}`}
-      title={name ? `${name} · ${address}` : address}
-      aria-label={`Copy address ${short(address)}`}
-      onClick={async () => {
-        if (await copy(address)) {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }
-      }}
-    >
-      <span className="address-chip-text">{label}</span>
-      {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-      {copied && <span className="address-chip-copied">Copied</span>}
-    </button>
+    <Tooltip content={copied ? 'Copied' : name ? `${name} · ${address}` : address}>
+      <button
+        type="button"
+        className={`address-chip ${size}`}
+        aria-label={`Copy address ${short(address)}`}
+        onClick={async () => {
+          if (await copy(address)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }
+        }}
+      >
+        <span className="address-chip-text">{label}</span>
+        {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+        {copied && <span className="address-chip-copied">Copied</span>}
+      </button>
+    </Tooltip>
   );
 }

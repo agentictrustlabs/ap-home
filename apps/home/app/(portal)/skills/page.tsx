@@ -11,6 +11,7 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { listSkillClaims, saveSkillClaims, setSkills, getSkills, type SkillClaim } from '../../../src/connect-client';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 import { cardSty, btnSty, btnPrimarySty, mutedText, errorText, inputSty, infoBannerSty, pillStyle as pill } from '../../../src/components/portal/theme';
+import { Tooltip } from '../../../src/components/shared/ui';
 
 const toViaForSign = (via: string | undefined): Via => {
   const v = (via ?? '').toLowerCase();
@@ -92,7 +93,9 @@ export default function SkillsPage() {
                   <span style={{ fontWeight: 600, fontSize: '.9rem' }}>{c.label}</span>
                   <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
                     <span style={pill(c.asserted)} role="button" onClick={() => toggle(c.label)} title="Toggle public assertion">{c.asserted ? '● Public' : '○ Private'}</span>
-                    <button onClick={() => remove(c.label)} aria-label={`remove ${c.label}`} style={{ border: 'none', background: 'none', color: 'var(--color-text-faint)', cursor: 'pointer', fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+                    <Tooltip content={`Remove ${c.label}`}>
+                      <button onClick={() => remove(c.label)} aria-label={`remove ${c.label}`} style={{ border: 'none', background: 'none', color: 'var(--color-text-faint)', cursor: 'pointer', fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+                    </Tooltip>
                   </div>
                 </div>
               ))}
