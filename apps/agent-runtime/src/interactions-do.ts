@@ -637,8 +637,11 @@ export class InteractionsDO {
         const recordType = String(body.recordType ?? '');
         if (!CAPABILITY_RECORDS.has(recordType)) return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
         if (op === 'record.get') {
-          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
-          return json({ ok: true, record: r?.data ?? null });
+          // DIAG(2026-07-12): surface the resolved owner + hasData to pin the read-empty-after-write.
+          const rResp = await callMcpToolViaDelegation({ env: this.env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType }, skipDelegationVerify: true });
+          const rOut = (await rResp.json().catch(() => ({}))) as { ok?: boolean; owner?: string; data?: unknown; error?: string };
+          console.warn(`[record.get] rt=${recordType} urlPrincipal=${principal} sessionSa=${sessionSa.toLowerCase()} grantDelegator=${String(grant.delegator).toLowerCase()} readOwner=${rOut.owner ?? 'null'} hasData=${(rOut.data ?? null) !== null} ok=${rOut.ok} err=${rOut.error ?? ''}`);
+          return json({ ok: true, record: rOut.ok === false ? null : (rOut.data ?? null), _diag: { urlPrincipal: principal, sessionSa: sessionSa.toLowerCase(), grantDelegator: String(grant.delegator).toLowerCase(), readOwner: rOut.owner ?? null, hasData: (rOut.data ?? null) !== null, err: rOut.error ?? null } });
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
