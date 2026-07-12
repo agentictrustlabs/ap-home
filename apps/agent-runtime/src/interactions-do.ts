@@ -17,7 +17,7 @@
 //   replay    = monotonic publishedAt per subject + tombstones honored by the gate.
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
-import { createPublicClient, http, type Address, type Hex } from 'viem';
+import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
 import {
@@ -206,9 +206,35 @@ export class InteractionsDO {
     if (!/^0x[0-9a-f]{40}$/.test(targetEnforcer)) return false;
     const caveats = wire.caveats ?? [];
     const enforcer = (c: { enforcer?: string }): string => (c.enforcer ?? '').toLowerCase();
-    const hasGovernanceTargets = caveats.some((c) => enforcer(c) === targetEnforcer);
-    const hasRecordScope = caveats.some((c) => enforcer(c) === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
-    return hasGovernanceTargets && !hasRecordScope;
+
+    // STEWARD-SHAPE-CONFUSION-1 — stewardship must be a POSITIVE identity, not "allowedTargets present ∧ no
+    // record-scope". Payment mandates ([payment, timestamp, allowedTargets, allowedMethods]) and A2A message
+    // grants ([timestamp, allowedTargets, allowedMethods]) ALSO carry allowedTargets and no record-scope, so
+    // the old negative test accepted any of them as a steward proof → member/outsider → steward escalation
+    // (the SEC-C1 hole reached through a different wire shape). The genuine steward/site wire
+    // (`buildSiteDelegation`/`siteCaveats`): carries NO allowedMethods and NO record-scope caveat, AND its
+    // allowedTargets terms pin the GOVERNANCE contracts (agentRelationship + agentNameRegistry + subregistry).
+    // A payment mandate targets an asset; an a2a grant targets the recipient agent — neither names the
+    // governance registries — and both add allowedMethods, so both are rejected here.
+    const methodsEnforcer = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+    if (methodsEnforcer && caveats.some((c) => enforcer(c) === methodsEnforcer)) return false; // a2a grant / payment mandate
+    if (caveats.some((c) => enforcer(c) === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase())) return false; // data grant (SEC-C1)
+
+    const rel = (this.env.AGENT_RELATIONSHIP ?? '').toLowerCase();
+    const reg = (this.env.AGENT_NAME_REGISTRY ?? '').toLowerCase();
+    // Fail closed if we can't positively identify the governance targets (prod injects both; org-create
+    // already depends on them). No governance anchor ⇒ no stewardship.
+    if (!/^0x[0-9a-f]{40}$/.test(rel) || !/^0x[0-9a-f]{40}$/.test(reg)) return false;
+    const targetsCav = caveats.find((c) => enforcer(c) === targetEnforcer);
+    if (!targetsCav?.terms) return false;
+    let targets: string[];
+    try {
+      targets = (decodeAbiParameters([{ type: 'address[]' }], targetsCav.terms as Hex)[0] as readonly Address[]).map((a) => a.toLowerCase());
+    } catch { return false; }
+    // The site wire pins [agentRelationship, agentNameRegistry, subregistry]; require BOTH registries to be
+    // present so a wire whose allowedTargets name anything else (asset, agent SA, host endpoint) is not
+    // stewardship.
+    return targets.includes(rel) && targets.includes(reg);
   }
 
   /** Member-access proof (SEC-H1): a presented org→member member-access wire — the ORG's
@@ -408,6 +434,16 @@ export class InteractionsDO {
           const resource = String(body.resource ?? '');
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           if (body.data === undefined) return json({ error: 'data required' }, 400);
+          // DM-BODY-OVERWRITE-1 — the resource id is sender-controlled beyond the dm: prefix and the write is
+          // last-writer-wins. A sender who knows an existing message id could overwrite that slot with a body
+          // whose hash no longer matches the persisted envelope's bodyHash → the recipient's loadBody sees a
+          // hash mismatch and silently drops the message (per-message censorship). DM bodies are write-once:
+          // reject an overwrite whose bodyHash differs (an idempotent same-hash re-delivery still succeeds).
+          const incomingHash = (body.data as { bodyHash?: string } | null)?.bodyHash;
+          const existing = await this.vaultFor(dg).read<{ bodyHash?: string }>({ owner: '', resource }).catch(() => null);
+          if (existing?.data?.bodyHash && incomingHash && existing.data.bodyHash !== incomingHash) {
+            return json({ error: 'dm body already exists with a different hash — bodies are write-once' }, 409);
+          }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           return json({ ok: true });
         }
@@ -471,6 +507,15 @@ export class InteractionsDO {
           const w = body.subjectStewardship as IncomingDelegation | undefined;
           const ok = !!subjAddr && (await this.isSteward(subjAddr, sessionSa, w));
           if (!ok) return json({ error: 'listing subject must be the session principal (or present its stewardship wire)' }, 403);
+          // DIR-INJECT-1 — proving you steward the SUBJECT is NOT enough: `principal` here is the DIRECTORY
+          // OWNER (this org shard) and `listing.context.id`/communityId is caller-chosen, so without this
+          // check any steward of any org could inject their org's card into an arbitrary victim org's
+          // membership index (the doc `memberName` trusts) — the SEC-H1 self-publish gate reached through the
+          // cross-subject branch. The directory OWNER must also have authorized this caller.
+          const ownerAuthorized =
+            (await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined)) ||
+            (await this.hasMemberAccess(principal, sessionSa, body.memberAccess as IncomingDelegation | undefined));
+          if (!ownerAuthorized) return json({ error: 'this organization has not authorized you to publish listings into its directory' }, 403);
         } else {
           // SELF-publish (join / update own listing). SEC-H1: a self-signed listing is NOT enough —
           // the ORG must have authorized this member. Require the org→you member-access grant (from an
@@ -484,7 +529,10 @@ export class InteractionsDO {
         const digest = await sha256Hex32(canonicalizeMessage(draft));
         const proofSubject = (listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? sessionSa) as Address;
         if (!(await this.erc1271(proofSubject, digest as Hex, proof.signature as Hex))) return json({ error: 'listing signature failed ERC-1271 verification' }, 403);
-        const me = sessionCaip.toLowerCase();
+        // DIR-INJECT-1 — the replay/tombstone/dedup key is the LISTING SUBJECT, not the caller session. For a
+        // self-publish these are equal; for a steward-of-subject publish they differ, and keying on the caller
+        // let a tombstoned (subject-keyed) listing be re-injected and duplicate subject rows accumulate.
+        const me = listing.subject.toLowerCase();
         // NEW-M1 (ARCH-H1 residual) — the directory doc + st.subjects RMW is a shared-doc write across
         // concurrent joins; serialize it (re-reading both inside the lock) so two simultaneous joins can't
         // lost-update each other's listing. The expensive ERC-1271 proof stays outside the lock.
