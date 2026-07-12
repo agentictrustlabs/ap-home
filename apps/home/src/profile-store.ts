@@ -68,6 +68,16 @@ export class VaultKeyUnauthorizedError extends Error {
   }
 }
 
+/** Raised when the member's INTERACTIONS plane isn't enabled (no/stale grant on their InteractionsDO).
+ *  DISTINCT from the vault key — the record lives on the DO, gated by the interactions grant, not the
+ *  KEK. The UI enables that plane (silent on KMS/wallet homes) rather than mislabeling it "vault key". */
+export class InteractionsNotEnabledError extends Error {
+  constructor() {
+    super('interactions_not_enabled');
+    this.name = 'InteractionsNotEnabledError';
+  }
+}
+
 export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 'email' | 'tel' | 'text'; placeholder: string; help: string }[] = [
   { key: 'firstName',           label: 'First name',            type: 'text',  placeholder: 'Rich',                     help: 'Used to greet you across community apps.' },
   { key: 'lastName',            label: 'Last name',             type: 'text',  placeholder: 'Pedersen',                 help: 'Used together with your first name to render a friendly display name.' },
@@ -101,7 +111,9 @@ async function postProfile(path: 'get' | 'set', principal: Address, data?: Impac
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
-  if (res.status === 409) throw new VaultKeyUnauthorizedError(); // interactions plane not enabled yet — same "run the ceremony" UX
+  // 409 from the InteractionsDO = the person's interactions plane isn't enabled (no grant / stale grant,
+  // both carry "interactions grant" in the message). The caller enables that plane, NOT the vault key.
+  if (res.status === 409) throw new InteractionsNotEnabledError();
   if (!res.ok) throw new Error(`profile ${path} failed: ${String(body.error ?? res.status)}`);
   return body;
 }
