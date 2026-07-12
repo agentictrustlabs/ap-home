@@ -375,3 +375,26 @@ export async function putVaultKeyBindingRow(
     )
     .run();
 }
+
+// ─── Durable signature-verdict cache (migration 0012) ────────────────────────
+// Cross-isolate cache of POSITIVE + deployed delegation signature verdicts. A valid signature over a
+// fixed digest is immutable and a deployed SA never un-deploys, so a verdict cached here is authoritative
+// forever — it removes the per-op ERC-1271 RPC that made valid vault reads intermittently flake. Only
+// `valid && deployed` verdicts are written (monotonic); revocation is checked live elsewhere.
+
+/** True if this exact (signer, digest, signature) was already verified valid+deployed on-chain. */
+export async function hasSigVerdict(db: D1Database, verdictKey: string): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT 1 AS ok FROM delegation_sig_verdicts WHERE verdict_key = ?')
+    .bind(verdictKey)
+    .first<{ ok: number }>();
+  return row != null;
+}
+
+/** Record a positive+deployed verdict (idempotent). Best-effort; never overwrites. */
+export async function putSigVerdict(db: D1Database, verdictKey: string, chainId: number): Promise<void> {
+  await db
+    .prepare('INSERT OR IGNORE INTO delegation_sig_verdicts (verdict_key, chain_id) VALUES (?, ?)')
+    .bind(verdictKey, chainId)
+    .run();
+}

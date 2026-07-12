@@ -28,6 +28,8 @@ import {
   buildSeedProfile,
   createD1JtiStore,
   createD1AuditSink,
+  hasSigVerdict,
+  putSigVerdict,
 } from './db';
 import {
   RESOURCE_PROFILE,
@@ -54,7 +56,7 @@ import {
   RPC_ERROR,
 } from '@agenticprimitives/mcp-protocol';
 import { defineSurface, buildMcpToolsList, buildMcpServerCapabilities, mcpListCacheHint, type SurfaceDescriptor } from '@agenticprimitives/surface-catalog';
-import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
+import { createChainAuthorityReader, type ChainAuthorityReader, type SignatureInput } from '@agenticprimitives/chain-state';
 import { createMemorySoftRateLimiter, type SoftRateLimiter } from '@agenticprimitives/rate-control';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import { vaultRecordScopeAllows } from '@agenticprimitives/delegation';
@@ -516,9 +518,56 @@ function stage2RateLimiter(): SoftRateLimiter {
   return _stage2Limiter;
 }
 
-let _chainReader: ReturnType<typeof createChainAuthorityReader> | undefined;
+/** sha256(signer:digest:signature) — the durable signature-verdict cache key. Including the signature
+ *  means a different/forged signature for the same digest MISSES and is re-verified on-chain. */
+async function sigVerdictKey(input: SignatureInput): Promise<string> {
+  const data = new TextEncoder().encode(
+    `${input.signer.toLowerCase()}:${input.digest.toLowerCase()}:${input.signature.toLowerCase()}`,
+  );
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Wrap the resilient chain reader with a DURABLE, cross-isolate cache of the IMMUTABLE positive signature
+ * verdict (D1 migration 0012). Mirrors the vault-key hash-pin: a valid ERC-1271/6492/ECDSA signature over
+ * a fixed delegation digest never becomes invalid, and a deployed SA never un-deploys — so a
+ * `valid && deployed` verdict is checked on-chain ONCE and cached forever, removing the per-op RPC that
+ * (under Cloudflare isolate churn) intermittently rate-limited and made valid vault reads flake.
+ *
+ * ONLY `verifySmartAgentSignature` positive+deployed verdicts are cached (monotonic; a negative or
+ * counterfactual verdict re-checks). Revocation + acceptance PASS THROUGH unchanged — they MUST stay
+ * fresh (ADR-0013 revocation-freshness invariant; a durable "not revoked" would never expire).
+ */
+function withDurableSigCache(env: Env, base: ChainAuthorityReader): ChainAuthorityReader {
+  const chainId = Number(env.CHAIN_ID);
+  return {
+    isDelegationRevoked: (hash, risk) => base.isDelegationRevoked(hash, risk),
+    isSessionDelegationAccepted: (principal, hash, risk) => base.isSessionDelegationAccepted(principal, hash, risk),
+    async verifySmartAgentSignature(input, risk) {
+      const key = await sigVerdictKey(input);
+      try {
+        if (await hasSigVerdict(env.DB, key)) {
+          return {
+            valid: true,
+            deployed: true,
+            // source must NOT start with 'fail-closed' (token.ts treats that as unconfirmable).
+            evidence: { chainId, blockNumber: 0n, blockHash: `0x${'0'.repeat(64)}`, observedAt: 0, source: 'durable-cache:demo-mcp-sig' },
+          };
+        }
+      } catch { /* cache-read failure → fall through to the real on-chain verify */ }
+      const r = await base.verifySmartAgentSignature(input, risk);
+      if (r.valid && r.deployed) {
+        try { await putSigVerdict(env.DB, key, chainId); } catch { /* best-effort cache write */ }
+      }
+      return r;
+    },
+  };
+}
+
+let _chainReader: ChainAuthorityReader | undefined;
 let _chainReaderTried = false;
-function chainAuthorityReader(env: Env): ReturnType<typeof createChainAuthorityReader> | undefined {
+function chainAuthorityReader(env: Env): ChainAuthorityReader | undefined {
   if (_chainReaderTried) return _chainReader;
   _chainReaderTried = true;
   const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
@@ -529,7 +578,7 @@ function chainAuthorityReader(env: Env): ReturnType<typeof createChainAuthorityR
     universalSignatureValidator: usv as Address,
     rpcUrl: env.RPC_URL,
   });
-  _chainReader = createChainAuthorityReader({ chainId: Number(env.CHAIN_ID), providers: [provider] });
+  _chainReader = withDurableSigCache(env, createChainAuthorityReader({ chainId: Number(env.CHAIN_ID), providers: [provider] }));
   return _chainReader;
 }
 
