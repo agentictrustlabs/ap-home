@@ -179,8 +179,18 @@ export async function verifyHomeSession(
   } catch {
     return { ok: false, status: 503, error: 'broker JWKS unavailable (fail-closed)' };
   }
-  const iss = env.BROKER_ISS.replace(/\/$/, '');
-  const base = iss.replace(/^https?:\/\//, '').toLowerCase();
+  // Accept the broker apex AND any single-label `<handle>.<registrable-domain>` home origin (spec 232):
+  // the broker signs them all with the same key, so a session minted on a per-handle subdomain must
+  // verify here too. Derive the REGISTRABLE DOMAIN (last two labels) from BROKER_ISS — NOT its full
+  // hostname. Using the full host (e.g. `www.impact-agent.me`) made every `<handle>.impact-agent.me`
+  // session 401 with "iss mismatch" on record.get/put (profile + channels broken on the subdomain home).
+  // Mirrors ownConnectIssuer() in index.ts.
+  const issRaw = env.BROKER_ISS.replace(/\/$/, '');
+  let base = issRaw.replace(/^https?:\/\//, '').toLowerCase();
+  try {
+    const parts = new URL(issRaw).hostname.toLowerCase().split('.');
+    base = parts.length >= 2 ? parts.slice(-2).join('.') : parts.join('.');
+  } catch { /* keep the stripped host */ }
   const issOk = (v: string): boolean => {
     try {
       const h = new URL(v).hostname.toLowerCase();
