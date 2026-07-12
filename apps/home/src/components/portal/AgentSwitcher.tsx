@@ -16,6 +16,7 @@ import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
 import { agentClassOf, serviceRoleOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
+import { Popover } from '../shared/ui';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const lc = (s: string) => s.toLowerCase();
@@ -86,95 +87,88 @@ export function AgentSwitcher() {
   );
 
   return (
-    <div style={{ position: 'relative', marginLeft: '.35rem' }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-label="Switch workspace"
-        style={{
-          display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.3rem .6rem', minHeight: 0,
-          background: 'var(--color-surface)', border: '1px solid var(--color-border-strong)', borderRadius: 8,
-          color: 'var(--color-text-primary)', cursor: 'pointer', fontWeight: 400, maxWidth: 260,
-        }}
-      >
-        {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
-        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-          <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
-            {triggerName}
-          </span>
-          <span style={{ fontSize: '.66rem', opacity: 0.6, lineHeight: 1.1 }}>{caption}</span>
-        </span>
-        <span aria-hidden style={{ opacity: 0.5, fontSize: '.7rem' }}>▾</span>
-      </button>
-
-      {open && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
-          <div
+    <div style={{ marginLeft: '.35rem' }}>
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        panelStyle={{ width: 300, maxHeight: '70vh', overflowY: 'auto' }}
+        trigger={(p) => (
+          <button
+            {...p}
+            aria-label="Switch workspace"
             style={{
-              position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 41, width: 300,
-              background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12,
-              boxShadow: 'var(--shadow-modal)', padding: '.4rem', maxHeight: '70vh', overflowY: 'auto',
+              display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.3rem .6rem', minHeight: 0,
+              background: 'var(--color-surface)', border: '1px solid var(--color-border-strong)', borderRadius: 8,
+              color: 'var(--color-text-primary)', cursor: 'pointer', fontWeight: 400, maxWidth: 260,
             }}
           >
-            {heading('Your smart agents')}
-            <Row
-              icon={<UserIcon size={17} />}
-              title={personLabel}
-              sub="person · your home"
-              activeRow={active.kind === 'person'}
-              onClick={() => go('/you')}
-            />
+            {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
+            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+              <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
+                {triggerName}
+              </span>
+              <span style={{ fontSize: '.66rem', opacity: 0.6, lineHeight: 1.1 }}>{caption}</span>
+            </span>
+            <span aria-hidden style={{ opacity: 0.5, fontSize: '.7rem' }}>▾</span>
+          </button>
+        )}
+      >
+        {heading('Your smart agents')}
+        <Row
+          icon={<UserIcon size={17} />}
+          title={personLabel}
+          sub="person · your home"
+          activeRow={active.kind === 'person'}
+          onClick={() => go('/you')}
+        />
 
-            {orgs.length > 0 && heading('Organizations you steward')}
-            {orgs.map((o) => (
-              <Row
-                key={o.agent}
-                icon={<BuildingIcon size={17} />}
-                title={o.name ? nameLabel(o.name) : short(o.agent)}
-                sub={`organization · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
-                activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
-                onClick={() => go(orgHref(o.agent, 'overview'))}
-              />
-            ))}
+        {orgs.length > 0 && heading('Organizations you steward')}
+        {orgs.map((o) => (
+          <Row
+            key={o.agent}
+            icon={<BuildingIcon size={17} />}
+            title={o.name ? nameLabel(o.name) : short(o.agent)}
+            sub={`organization · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
+            activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
+            onClick={() => go(orgHref(o.agent, 'overview'))}
+          />
+        ))}
 
-            {memberOrgs.length > 0 && heading('Organizations you belong to')}
-            {memberOrgs.map((o) => (
-              <Row
-                key={o.agent}
-                icon={<BuildingIcon size={17} />}
-                title={o.name ? nameLabel(o.name) : short(o.agent)}
-                sub="organization · member (no custody)"
-                activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
-                onClick={() => go(orgHref(o.agent, 'channels'))}
-              />
-            ))}
+        {memberOrgs.length > 0 && heading('Organizations you belong to')}
+        {memberOrgs.map((o) => (
+          <Row
+            key={o.agent}
+            icon={<BuildingIcon size={17} />}
+            title={o.name ? nameLabel(o.name) : short(o.agent)}
+            sub="organization · member (no custody)"
+            activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
+            onClick={() => go(orgHref(o.agent, 'channels'))}
+          />
+        ))}
 
-            {services.length > 0 && heading('Services you manage')}
-            {services.map((t) => (
-              <Row
-                key={t.agent}
-                icon={<LandmarkIcon size={17} />}
-                title={t.name ? nameLabel(t.name) : short(t.agent)}
-                sub={lineageFor(t)}
-                activeRow={active.kind === 'service' && lc(active.agent) === lc(t.agent)}
-                onClick={() => go(serviceHref(t.agent))}
-              />
-            ))}
+        {services.length > 0 && heading('Services you manage')}
+        {services.map((t) => (
+          <Row
+            key={t.agent}
+            icon={<LandmarkIcon size={17} />}
+            title={t.name ? nameLabel(t.name) : short(t.agent)}
+            sub={lineageFor(t)}
+            activeRow={active.kind === 'service' && lc(active.agent) === lc(t.agent)}
+            onClick={() => go(serviceHref(t.agent))}
+          />
+        ))}
 
-            <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
-            <button
-              onClick={() => go('/organizations')}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left', padding: '.45rem .6rem', minHeight: 0,
-                background: 'transparent', border: 'none', color: 'var(--color-amber-700)', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
-              }}
-            >
-              ＋ Create an organization or service
-            </button>
-          </div>
-        </>
-      )}
+        <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
+        <button
+          onClick={() => go('/organizations')}
+          style={{
+            display: 'block', width: '100%', textAlign: 'left', padding: '.45rem .6rem', minHeight: 0,
+            background: 'transparent', border: 'none', color: 'var(--color-amber-700)', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
+          }}
+        >
+          ＋ Create an organization or service
+        </button>
+      </Popover>
     </div>
   );
 }

@@ -1,21 +1,31 @@
 'use client';
 // Anchored popover — in-house. Outside-click + ESC dismiss, focus returns to the trigger, the trigger
 // gets aria-expanded/aria-haspopup. Uncontrolled by default; pass open/onOpenChange to control it.
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 export function Popover({
   trigger,
   children,
   side = 'bottom',
   align = 'start',
+  role = 'dialog',
+  panelClassName,
+  panelStyle,
   open: controlledOpen,
   onOpenChange,
 }: {
   /** A render function receiving the props to spread onto your trigger element. */
-  trigger: (props: { onClick: () => void; 'aria-expanded': boolean; 'aria-haspopup': 'dialog'; ref: (el: HTMLElement | null) => void }) => ReactNode;
+  trigger: (props: { onClick: () => void; 'aria-expanded': boolean; 'aria-haspopup': 'dialog' | 'menu'; ref: (el: HTMLElement | null) => void }) => ReactNode;
   children: ReactNode;
   side?: 'bottom' | 'top';
   align?: 'start' | 'end';
+  /** Panel ARIA role — 'menu' for an action list (keep role="menuitem" children), else 'dialog'. */
+  role?: 'dialog' | 'menu';
+  /** Replace the default `ap-popover-panel` class (and its data-side/align positioning) with your own
+   *  fully-styled + positioned panel class. Omit to use the default warm-token panel. */
+  panelClassName?: string;
+  /** Merged onto the panel — e.g. width / maxHeight / overflow for a long list. */
+  panelStyle?: CSSProperties;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -43,11 +53,19 @@ export function Popover({
       {trigger({
         onClick: () => setOpen(!open),
         'aria-expanded': open,
-        'aria-haspopup': 'dialog',
+        'aria-haspopup': role,
         ref: (el) => { triggerRef.current = el; },
       })}
       {open && (
-        <div ref={panelRef} id={panelId} className="ap-popover-panel" role="dialog" data-side={side} data-align={align}>
+        <div
+          ref={panelRef}
+          id={panelId}
+          className={panelClassName ?? 'ap-popover-panel'}
+          role={role}
+          data-side={panelClassName ? undefined : side}
+          data-align={panelClassName ? undefined : align}
+          style={panelStyle}
+        >
           {children}
         </div>
       )}
