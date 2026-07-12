@@ -3333,7 +3333,10 @@ app.post('/mcp/youversion/:type', async (c) => {
   const passageId = (body.passageId ?? '').trim();
   if (!passageId) return c.json({ ok: false, error: 'passage_required', detail: 'YouVersion highlights are per chapter; pass passageId (chapter USFM, e.g. JHN.3)' }, 400);
   // 1. Verify the person→app delegation (delegate == requester, ERC-1271 against the delegator person SA).
-  const v = await verifyDelegation(c.env, body.delegation, body.requester);
+  // R712-H1 — YouVersion highlights are special-category religious-activity data (spec 265); never front
+  // them with the 60s positive-verdict cache (same posture as get_pii/get_org_sensitive, NEW-H4), so an
+  // on-chain revocation is honored on the next read, not up to VERDICT_TTL_MS later per warm isolate.
+  const v = await verifyDelegation(c.env, body.delegation, body.requester, { cacheable: false });
   if (!v.ok) return c.json({ ok: false, error: `delegation_invalid: ${v.reason}` }, 403);
   const person = body.delegation.delegator;
   const app = body.delegation.delegate;
