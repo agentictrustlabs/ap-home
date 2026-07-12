@@ -47,7 +47,7 @@ function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
 }
 
 export function OrgChannelsView({ org }: { org: Address }) {
-  const { session, profile: homeProfile, agentAddress } = useSession();
+  const { session, profile: homeProfile, agentAddress, agentName } = useSession();
   const communityId = org.toLowerCase();
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
@@ -262,6 +262,21 @@ export function OrgChannelsView({ org }: { org: Address }) {
     return m;
   }, [listings]);
 
+  // SEC-H1 regression fix: steward access (via the stewardship wire) no longer implies a member
+  // LISTING — a steward can read/create channels while absent from the directory (Members · 0, no way
+  // to be messaged). Compute whether THIS person already has a listing; if a steward isn't listed, the
+  // main view offers a self-add CTA (the member===false join card never shows for them, since the
+  // server returns member=true). Listing subjects are CAIP-10 (`eip155:<chain>:0x…`) → match by suffix.
+  const youAreListed = useMemo(() => {
+    const me = (agentAddress ?? '').toLowerCase();
+    return !!me && listings.some((l) => l.listing.subject.toLowerCase().endsWith(me));
+  }, [listings, agentAddress]);
+
+  // Prefill the self-add display name from the home's name once, when the CTA first applies.
+  useEffect(() => {
+    if (steward && member && !youAreListed && !joinName && agentName) setJoinName(agentName);
+  }, [steward, member, youAreListed, joinName, agentName]);
+
   const openProfile = (name: string, label?: string, subject?: string) => {
     setProfile({
       name,
@@ -316,6 +331,29 @@ export function OrgChannelsView({ org }: { org: Address }) {
   return (
     <SectionShell title="Channels" description="Topic discussion inside this organization">
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+
+      {/* SEC-H1 regression fix — a steward can reach channels without a directory listing, so they show
+          up as Members · 0 with no way to be seen/messaged. Offer an explicit self-add (publishes the
+          steward's own signed listing via the same join() path). Members see the member===false card. */}
+      {steward && member && !youAreListed && (
+        <div className="chat-attention" style={{ marginBottom: '0.85rem' }}>
+          <span style={{ fontSize: '0.85rem' }}>
+            <b>You steward this organization but aren&rsquo;t listed as a member.</b> Add yourself so members can see and message you here.
+          </span>
+          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
+            <input
+              placeholder="Display name (how members see you)"
+              value={joinName}
+              onChange={(e) => setJoinName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void join(); }}
+              style={{ flex: 1 }}
+            />
+            <button type="button" className="btn-primary" style={{ width: 'auto', whiteSpace: 'nowrap' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
+              {busy ? 'Signing…' : 'Add yourself as member'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {orgAbout && (orgAbout.displayName || orgAbout.description) && (
         <div className="manage-card" style={{ marginBottom: '0.85rem', padding: '0.7rem 0.9rem' }}>
