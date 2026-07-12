@@ -146,10 +146,15 @@ export class InteractionsDO {
         let lastErr = 'vault read failed';
         for (let attempt = 0; attempt < 4; attempt++) {
           const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource }, skipDelegationVerify: true });
-          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; record?: T | null; error?: string };
+          // get_vault_record returns the payload under `data` (NOT `record`). Reading `out.record` here
+          // made vaultFor.read ALWAYS return null → every readDoc-based read (directory/channels/board/
+          // inbox/relationships/member.profile + profile via record.get) came back empty though the
+          // write persisted. This was THE "saved but reads back empty" bug — a field-name mismatch, not
+          // an RPC/verify flake.
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string };
           if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
-          return out.record === null || out.record === undefined ? null : { data: out.record };
+          return out.data === null || out.data === undefined ? null : { data: out.data };
         }
         throw new Error(lastErr);
       },
@@ -637,10 +642,8 @@ export class InteractionsDO {
         const recordType = String(body.recordType ?? '');
         if (!CAPABILITY_RECORDS.has(recordType)) return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
         if (op === 'record.get') {
-          const rResp = await callMcpToolViaDelegation({ env: this.env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType }, skipDelegationVerify: true });
-          const rOut = (await rResp.json().catch(() => ({}))) as { ok?: boolean; owner?: string; data?: unknown; error?: string };
-          console.warn(`[record.get] rt=${recordType} urlPrincipal=${principal} sessionSa=${sessionSa.toLowerCase()} grantDelegator=${String(grant.delegator).toLowerCase()} grantDelegate=${String(grant.delegate).toLowerCase()} readOwner=${rOut.owner ?? 'null'} hasData=${(rOut.data ?? null) !== null} ok=${rOut.ok} err=${rOut.error ?? ''}`);
-          return json({ ok: true, record: rOut.ok === false ? null : (rOut.data ?? null) });
+          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
+          return json({ ok: true, record: r?.data ?? null });
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
