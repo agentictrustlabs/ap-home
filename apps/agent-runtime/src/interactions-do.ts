@@ -197,9 +197,16 @@ export class InteractionsDO {
    *  delegation (same delegator=org, delegate=member, org-signed, unrevoked) passed as a steward
    *  proof → member→steward escalation (kick members, dump the ledger, act as steward). */
   private hasStewardshipShape(wire: IncomingDelegation): boolean {
+    // NEW-H2 — FAIL CLOSED on an unconfigured enforcer. If ALLOWED_TARGETS_ENFORCER is unset (wrangler
+    // binds "" for a placeholder var), the old `enforcer(c) === ''` matched ANY caveat with a missing/empty
+    // enforcer → a record-scoped member wire (with a blank-enforcer caveat) would pass as stewardship
+    // (member→steward escalation). A stewardship wire is unrecognizable without the real governance-targets
+    // address, so no address ⇒ no stewardship.
+    const targetEnforcer = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(targetEnforcer)) return false;
     const caveats = wire.caveats ?? [];
     const enforcer = (c: { enforcer?: string }): string => (c.enforcer ?? '').toLowerCase();
-    const hasGovernanceTargets = caveats.some((c) => enforcer(c) === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
+    const hasGovernanceTargets = caveats.some((c) => enforcer(c) === targetEnforcer);
     const hasRecordScope = caveats.some((c) => enforcer(c) === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
     return hasGovernanceTargets && !hasRecordScope;
   }
@@ -477,17 +484,23 @@ export class InteractionsDO {
         const digest = await sha256Hex32(canonicalizeMessage(draft));
         const proofSubject = (listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? sessionSa) as Address;
         if (!(await this.erc1271(proofSubject, digest as Hex, proof.signature as Hex))) return json({ error: 'listing signature failed ERC-1271 verification' }, 403);
-        // Replay guard: monotonic publishedAt per subject; publishing clears any tombstone (rejoin).
         const me = sessionCaip.toLowerCase();
-        const prev = st.subjects?.[me]?.publishedAt;
-        if (prev && Date.parse(listing.publishedAt) <= Date.parse(prev)) return json({ error: 'stale listing (publishedAt must be monotonic)' }, 409);
-        const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => l.listing.subject.toLowerCase() !== me);
-        rows.push({ listing, label: String(body.label ?? '') });
-        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.directory.publish', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'listing', id: me } });
-        await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
-        st.subjects = { ...(st.subjects ?? {}), [me]: { publishedAt: listing.publishedAt } };
-        await this.state.storage.put('state', st);
-        return json({ ok: true });
+        // NEW-M1 (ARCH-H1 residual) — the directory doc + st.subjects RMW is a shared-doc write across
+        // concurrent joins; serialize it (re-reading both inside the lock) so two simultaneous joins can't
+        // lost-update each other's listing. The expensive ERC-1271 proof stays outside the lock.
+        return this.serialize(async () => {
+          const fresh = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+          // Replay guard: monotonic publishedAt per subject; publishing clears any tombstone (rejoin).
+          const prev = fresh.subjects?.[me]?.publishedAt;
+          if (prev && Date.parse(listing.publishedAt) <= Date.parse(prev)) return json({ error: 'stale listing (publishedAt must be monotonic)' }, 409);
+          const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => l.listing.subject.toLowerCase() !== me);
+          rows.push({ listing, label: String(body.label ?? '') });
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.directory.publish', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'listing', id: me } });
+          await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
+          fresh.subjects = { ...(fresh.subjects ?? {}), [me]: { publishedAt: listing.publishedAt } };
+          await this.state.storage.put('state', fresh);
+          return json({ ok: true });
+        });
       }
 
       if (op === 'directory.revoke') {

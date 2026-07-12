@@ -3572,7 +3572,14 @@ async function verifyDelegation(
   env: Env,
   delegation: IncomingDelegation,
   expectedDelegate: Address,
+  // NEW-H4 (FAB-A2A-1): the 60s positive-verdict cache is a deliberate RPC-429 mitigation for the
+  // HIGH-FREQUENCY, non-sensitive path (inbox/channel body polls, classification 'internal'). It must
+  // NEVER front a PII/regulated read — there a revoked delegate would keep decrypting for up to
+  // VERDICT_TTL_MS/isolate. Callers pass `cacheable: false` for pii.*/regulated.* tools so the verdict
+  // is neither read nor written for them; every such read re-runs the on-chain revocation check.
+  opts: { cacheable?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const cacheable = opts.cacheable !== false;
   if (!env.DELEGATION_MANAGER) {
     return { ok: false, reason: 'DELEGATION_MANAGER env not configured' };
   }
@@ -3626,7 +3633,7 @@ async function verifyDelegation(
   );
   // spec 316 §3a — a fresh POSITIVE verdict for this exact digest skips the two eth_calls below
   // (the time-window checks above already re-ran; the caveat pass runs downstream regardless).
-  if (verdictCached(digest, delegation.signature)) return { ok: true };
+  if (cacheable && verdictCached(digest, delegation.signature)) return { ok: true };
   // spec 253 (auditor P0 #2) — fail closed on revocation BEFORE trusting the signature. For an
   // approved-hash (0x03 sentinel) delegation the approved hash never expires, so owner revocation
   // is the only kill switch; it must be honored here off-chain, not only at on-chain redeem. We
@@ -3757,7 +3764,7 @@ async function verifyDelegation(
       }
       return { ok: false, reason: `ERC-1271 returned ${magic} (expected ${ERC1271_MAGIC})` };
     }
-    cacheVerdict(digest, delegation.signature); // spec 316 §3a — not-revoked + signature-valid, TTL-bounded
+    if (cacheable) cacheVerdict(digest, delegation.signature); // spec 316 §3a — not-revoked + signature-valid, TTL-bounded (never for pii.*/regulated.*, NEW-H4)
     return { ok: true };
   } catch (e) {
     console.error('[verifyDelegation] ERC-1271 call threw:', delegation.delegator, String(e));
@@ -3907,7 +3914,12 @@ export async function callMcpToolViaDelegation(args: {
   //    grant.put and are immutable at rest, so this per-op RPC is pure redundancy and its rate-limiting
   //    under polling load was the residual read/write flake. demo-mcp re-verifies server-side regardless.
   if (!args.skipDelegationVerify) {
-    const verify = await verifyDelegation(args.env, args.delegation, args.requester);
+    // NEW-H4: the explicitly PII/regulated tools bypass the positive-verdict cache so a revoked delegate
+    // cannot keep reading them for up to VERDICT_TTL_MS. The high-frequency 'internal' body reads
+    // (get_vault_record message bodies) stay cacheable — that is the RPC-429 mitigation this cache exists
+    // for. A regulated record served via get_vault_record remains the spec-316 §9-W2 durable-fix item.
+    const sensitiveTool = args.toolName === 'get_pii' || args.toolName === 'get_org_sensitive';
+    const verify = await verifyDelegation(args.env, args.delegation, args.requester, { cacheable: !sensitiveTool });
     if (!verify.ok) {
       return new Response(
         JSON.stringify({ ok: false, error: 'delegation_invalid', detail: verify.reason }),

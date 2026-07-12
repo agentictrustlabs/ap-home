@@ -73,7 +73,16 @@ function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: str
 
       const errors = validateMessageEnvelope(envelope);
       if (errors.length > 0) return { state: 'failed', error: `invalid envelope: ${errors.join(', ')}` };
-      if (!envelope.to.some((t) => t.toLowerCase().includes(recipient))) {
+      // NEW-H1 — bind envelope.from to the VERIFIED sender (ctx.principal = delegation.delegator, on whose
+      // behalf this delivery is authorized). Without this the sender set `from` to anyone (e.g. Alice), the
+      // envelope passed shape + bodyHash, and the recipient saw a forged-author message with a valid receipt.
+      // Addresses are CAIP-10 suffixes (`eip155:<chain>:0x…`) — match the trailing 40-hex, exactly.
+      const addrOf = (caip: string): string => (caip.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+      if (addrOf(envelope.from) !== ctx.principal.toLowerCase()) {
+        return { state: 'failed', error: 'envelope.from does not match the authorized sender' };
+      }
+      // Exact recipient match (was a loose `.includes`, which any substring could satisfy).
+      if (!envelope.to.some((t) => addrOf(t) === recipient)) {
         return { state: 'failed', error: 'envelope is not addressed to this recipient' };
       }
       const bytes = new TextEncoder().encode(payload.bodyText);
