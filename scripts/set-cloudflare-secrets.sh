@@ -94,6 +94,24 @@ if [ "$KMS_BACKEND_VALUE" = "gcp-kms" ]; then
   A2A_ADDR="(set via GCP KMS — run scripts/deploy-cloudflare.ts to fetch from cloud)"
   echo "  ✓ GCP_SERVICE_ACCOUNT_JSON  (from $GCP_FILE)"
 else
+  # D-P0-1 GUARD: A2A_MASTER_PRIVATE_KEY is the OIDC custody-derivation ROOT — every Google/email-
+  # custodied Smart Agent's address is a pure function HKDF(master) (packages/key-custody/src/derive-subject.ts;
+  # the demo-a2a resolver keeps NO (iss,sub)→SA map). Minting a FRESH master over an existing one silently
+  # orphans every such SA: new C_sub → new SA → the old account + ALL its vault data are stranded with no
+  # reproducible custodian, unrecoverable even by ADR-0011. This script must never regenerate the master
+  # over a live one. Refuse if the secret already exists for this env, unless the operator explicitly
+  # acknowledges the orphaning (and has first done the migration: persist (iss,sub)→SA + on-chain custodian
+  # re-association) via A2A_ALLOW_FRESH_CUSTODY_ROOT=1. See docs/audits/findings.yaml D-P0-1.
+  EXISTING_MASTER="$( (cd "$APP_DIR" && wrangler secret list --env "$ENV" 2>/dev/null) | grep -c 'A2A_MASTER_PRIVATE_KEY' || true )"
+  if [ "${EXISTING_MASTER:-0}" != "0" ] && [ "${A2A_ALLOW_FRESH_CUSTODY_ROOT:-}" != "1" ]; then
+    echo "ERROR: A2A_MASTER_PRIVATE_KEY is ALREADY set for env '$ENV' — it is the OIDC custody-derivation ROOT."
+    echo "  Regenerating it ORPHANS every Google/email-custodied Smart Agent (new C_sub → new SA → old"
+    echo "  account + all vault data stranded, unrecoverable — findings.yaml D-P0-1)."
+    echo "  Leave it as-is (the common case). To ROTATE anyway you MUST first migrate: persist (iss,sub)→SA"
+    echo "  and re-associate the custodian on-chain (ADR-0011) so the SA address stays stable, THEN re-run"
+    echo "  with A2A_ALLOW_FRESH_CUSTODY_ROOT=1."
+    exit 1
+  fi
   # Fresh local EOA. Capture once, expose only address, pipe the private key
   # directly to wrangler stdin via a node parser.
   WALLET_JSON="$(cast wallet new --json)"
