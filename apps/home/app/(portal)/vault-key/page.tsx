@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
-import { bindVaultKey, resolveVia, type Via } from '../../../src/home/onboarding';
+import { bindVaultKey, activateInteractionsIfNeeded, resolveVia, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 
 const MCP_BIND = '/mcp-bind';
@@ -100,6 +100,14 @@ export default function VaultKeyPage() {
         session?.token ? { token: session.token } : undefined,
       );
       if (!out.ok) { setError(out.error); return; }
+      // The owner's own records (profile, skills) live on their InteractionsDO (record.get/put), which
+      // needs the INTERACTIONS grant — a distinct plane from the vault key. Users onboarded before the
+      // interactions plane (spec 322) existed have their vault key bound but `granted:false`, so every
+      // record.get 409s ("no interactions grant") and the profile misreads it as "activate your vault
+      // key". Enabling it here (idempotent; zero-prompt on KMS/wallet homes) unblocks them on this one
+      // ceremony — the same plane securing sets up for new users. Best-effort: the vault key still bound.
+      const ix = await activateInteractionsIfNeeded(agentAddress, via, session?.token ? { token: session.token } : undefined);
+      if (!ix.ok) console.warn('[vault-key] interactions plane not enabled:', ix.error);
       setDone(out.kmsKeyRef);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'vault-key bind failed');
