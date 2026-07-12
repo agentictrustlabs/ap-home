@@ -11,8 +11,9 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import type { DelegationWire } from '../../lib/delegation';
-import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
+import { issueMemberAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../../lib/inbox-delivery';
+import { BusyButton } from '../shared/BusyButton';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import {
   communityAvatarKey,
@@ -236,9 +237,28 @@ export function OrgChannelsView({ org }: { org: Address }) {
     setInviteHits(await searchAgentsKb(inviteQuery.trim()).catch(() => []));
   }, [inviteQuery]);
 
+  const [inviteBusyFor, setInviteBusyFor] = useState<string | null>(null);
   const invite = useCallback(async (hit: AgentSearchHit) => {
-    setBusy(true); setError(null); setInviteSent(null);
+    if (!session) return;
+    setBusy(true); setInviteBusyFor(hit.name); setError(null); setInviteSent(null);
+    let grantNote = '';
     try {
+      // spec 321 W2b — same as the org Invite page: pre-sign the org→invitee member-access grant and
+      // store it in the org vault so /connect/org-membership attaches it when they join. Best-effort —
+      // a non-steward's sign fails (only the org's custodian signs AS the org) and the chip still sends.
+      try {
+        const via = resolveVia(homeProfile?.credential, session.via);
+        const sign = await signHashFor(via, org, { token: session.token });
+        const mad = toWire(await issueMemberAccessDelegation(org, hit.smartAgent as Address, MCP_SERVER_ID, sign));
+        const gr = await fetch('/connect/org-invite/agent', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),
+        });
+        const gb = (await gr.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!gr.ok || !gb.ok) throw new Error(gb.error ?? `grant store failed (${gr.status})`);
+      } catch (e) {
+        grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
+      }
       const res = await fetch('/connect/inbox', {
         method: 'POST', headers: authed,
         body: JSON.stringify({
@@ -252,12 +272,12 @@ export function OrgChannelsView({ org }: { org: Address }) {
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || body.ok === false) throw new Error(body.error ?? `invite failed (${res.status})`);
-      setInviteSent(hit.displayName ?? hit.name);
+      setInviteSent((hit.displayName ?? hit.name) + grantNote);
       setInviteQuery(''); setInviteHits(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  }, [authed, communityId]);
+    } finally { setBusy(false); setInviteBusyFor(null); }
+  }, [session, homeProfile?.credential, org, authed, communityId]);
 
   const listingBySubject = useMemo(() => {
     const m = new Map<string, Listing>();
@@ -530,7 +550,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
                   <div style={{ minWidth: 0, flex: 1, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <b>{h.displayName ?? h.label}</b>
                   </div>
-                  <button type="button" className="btn" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite</button>
+                  <BusyButton busy={inviteBusyFor === h.name} busyLabel="Signing…" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite</BusyButton>
                 </div>
               ))}
               {inviteSent && <p style={{ fontSize: '0.75rem', color: 'var(--color-sage-700)' }}>Invitation sent to {inviteSent}.</p>}
