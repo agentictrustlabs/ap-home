@@ -116,7 +116,10 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const t = setInterval(() => void load(), 5000);
+    // 12s (was 5s): each poll drives 2 delegated vault reads (channels + directory); at 5s an open tab
+    // alone kept the free RPC near its rate limit, which is what made valid reads flake intermittently.
+    // The a2a DO reads no longer re-verify the grant on-chain per op, but a slower poll keeps headroom.
+    const t = setInterval(() => void load(), 12000);
     return () => clearInterval(t);
   }, [load]);
 

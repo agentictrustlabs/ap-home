@@ -1138,13 +1138,11 @@ app.post('/tools/get_vault_record', async (c) => {
         const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
         // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
         if (!recordScopeAllows(recordScopes, resource, 'read')) {
-          console.warn(`[gvr] SCOPE-DENIED owner=${principal} res=${resource} scopes=${JSON.stringify(recordScopes)}`);
           return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_vault_record' };
         }
         const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'internal');
-        if (!gate.ok) { console.warn(`[gvr] GATE-DENIED owner=${principal} res=${resource} err=${gate.error}`); return { ok: false, error: gate.error, served_by: 'demo-mcp:get_vault_record' }; }
+        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:get_vault_record' };
         const obj = await gate.pv.vault.read({ owner: principal, resource });
-        console.warn(`[gvr] OK owner=${principal} res=${resource} hasData=${obj?.data != null}`);
         return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: 'demo-mcp:get_vault_record' };
       },
       {

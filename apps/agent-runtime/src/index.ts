@@ -3876,6 +3876,13 @@ export async function callMcpToolViaDelegation(args: {
   requester: Address;
   /** Tool args forwarded to demo-mcp (e.g. vault recordType/data). Default {}. */
   toolArgs?: Record<string, unknown>;
+  /** Skip the a2a-side ERC-1271 delegation pre-check. Set ONLY when the caller holds a grant that was
+   *  ALREADY ERC-1271-verified before it was custodied and is immutable at rest (the InteractionsDO's
+   *  `st.grant`/`deliveryGrant`, verified at `grant.put`/`grant.delivery.put`). Re-verifying it on every
+   *  vault op re-hit the free RPC and, under polling load, rate-limited → valid reads/writes flaked
+   *  intermittently (same class of flake the demo-mcp vault-key hash-pin removed). demo-mcp still runs
+   *  its own token/delegation verification server-side; this only drops the REDUNDANT a2a-side RPC. */
+  skipDelegationVerify?: boolean;
 }): Promise<Response> {
   // KC-1 (2026-07-05): SERVER-MINT is the fabrication path. It signs the delegation token with a
   // SERVER-held session key (`sessionManagerFor(env, requester)`) for an UNAUTHENTICATED `requester` body
@@ -3895,14 +3902,18 @@ export async function callMcpToolViaDelegation(args: {
       { status: 403, headers: { 'Content-Type': 'application/json' } },
     );
   }
-  // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side
-  //    rejection; same proof either way).
-  const verify = await verifyDelegation(args.env, args.delegation, args.requester);
-  if (!verify.ok) {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'delegation_invalid', detail: verify.reason }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } },
-    );
+  // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side rejection; same proof either
+  //    way). SKIPPED for DO-custodied grants (skipDelegationVerify) — those were ERC-1271-verified at
+  //    grant.put and are immutable at rest, so this per-op RPC is pure redundancy and its rate-limiting
+  //    under polling load was the residual read/write flake. demo-mcp re-verifies server-side regardless.
+  if (!args.skipDelegationVerify) {
+    const verify = await verifyDelegation(args.env, args.delegation, args.requester);
+    if (!verify.ok) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'delegation_invalid', detail: verify.reason }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
   }
   const auditSink = buildAuditSink(args.env);
   const correlationId = crypto.randomUUID();

@@ -130,7 +130,7 @@ export class InteractionsDO {
     const env = this.env;
     return {
       async write({ resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
-        const resp = await callMcpToolViaDelegation({ env, toolName: 'set_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource, data } });
+        const resp = await callMcpToolViaDelegation({ env, toolName: 'set_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource, data }, skipDelegationVerify: true });
         const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault write failed (${resp.status})`);
       },
@@ -145,7 +145,7 @@ export class InteractionsDO {
         // — empty is an answer, an auth error is not (ADR-0013: bounded retry of the same call).
         let lastErr = 'vault read failed';
         for (let attempt = 0; attempt < 4; attempt++) {
-          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource } });
+          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource }, skipDelegationVerify: true });
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; record?: T | null; error?: string };
           if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
