@@ -238,7 +238,8 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
       // signer rotates credentials — re-verifying live could wrongly reject it). A HASH MISMATCH (a
       // different/tampered authorization than the one bound) falls through to the real on-chain check.
       const presentedHash = (await sha256Hex(canonicalize(delegationToWire(del)))) as Sha256;
-      if (presentedHash === binding.authorizationHash) return true;
+      if (presentedHash === binding.authorizationHash) { console.warn(`[vk] PIN-FIRED owner=${binding.ownerPersonSA}`); return true; }
+      console.warn(`[vk] PIN-MISS owner=${binding.ownerPersonSA} presented=${String(presentedHash).slice(0, 22)} stored=${String(binding.authorizationHash).slice(0, 22)} → RPC`);
 
       // Fallback: the presented authorization is NOT the pinned one — verify it on-chain. Fail-closed
       // on a missing validator (we will not accept an authorization we can't verify).
@@ -254,6 +255,7 @@ export function buildVaultKeyVerifier(env: VaultKeyEnv): VaultKeyAuthorizationVe
         functionName: 'isValidSig',
         args: [del.delegator as Address, digest, del.signature],
       })) as boolean;
+      console.warn(`[vk] RPC-VERDICT owner=${binding.ownerPersonSA} verdict=${ok}`);
       return ok === true;
     },
   });
