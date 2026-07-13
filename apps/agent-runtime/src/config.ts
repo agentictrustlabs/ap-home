@@ -72,6 +72,9 @@ export function loadConfig(): DemoA2aConfig {
   } else {
     require_('A2A_MASTER_PRIVATE_KEY');
   }
+  // Phase A / D-P0-1: the OIDC custody-derivation root is required in EVERY backend (even gcp-kms, where the
+  // relay signer is a KMS key but C_sub still derives from this key). Fail-closed at boot — no fallback.
+  require_('A2A_CUSTODY_ROOT_KEY');
 
   return {
     port: Number(process.env.PORT ?? 8787),

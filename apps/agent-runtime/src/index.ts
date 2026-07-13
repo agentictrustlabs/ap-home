@@ -291,7 +291,18 @@ export interface Env {
   SESSION_JWT_SECRETS: string;
   CSRF_SECRET: string;
   A2A_SESSION_SECRET: string;
+  // Phase A / D-P0-1: the relay/paymaster/bundler signer (local-aes path). FREELY ROTATABLE — rotating it
+  // only changes the relayer signer (re-set paymaster.verifyingSigner() on-chain), it NEVER touches custody.
   A2A_MASTER_PRIVATE_KEY: string;
+  // Phase A / D-P0-1: the OIDC custody-DERIVATION ROOT (HKDF ikm for every C_sub → every Google/email SA
+  // address). This key must NEVER rotate — rotating it re-derives a different SA for every subject, orphaning
+  // the old accounts. It is now a DEDICATED key, distinct from the relay signer above; the set-cloudflare-secrets
+  // never-regen guard is pinned to it, and config.ts requires it at boot (fail-closed, no fallback).
+  A2A_CUSTODY_ROOT_KEY: string;
+  // Phase A / D-P0-1: durable (iss,sub)→SA map. If a resolve re-derivation yields a DIFFERENT SA than the one
+  // recorded for this subject, the resolve FAILS CLOSED (the custody root changed — refuse to silently orphan).
+  // Optional/inert until the KV namespace is provisioned (deploy-safe during migration).
+  SUBJECT_SA_MAP?: KVNamespace;
   /**
    * R5.12d — Per-tx cap (in wei) for the paymaster top-up signer.
    * Defaults to 0.002 ETH when unset (matches the route's documented
@@ -2153,6 +2164,25 @@ function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: (iss: stri
  * effect — fast. Authenticated by the shared bridge secret (the user's Google
  * authn already happened at the broker).
  */
+/**
+ * Phase A / D-P0-1 — the OIDC-custodied SA address is a pure function of the custody-derivation root, and this
+ * resolver keeps a durable (iss,sub)→SA map. If a re-derivation yields a DIFFERENT SA than the one first
+ * recorded for this subject, the custody root has CHANGED — routing the user to the new (empty) SA would
+ * silently orphan the old account + all its vault data. Fail closed instead of orphaning. Inert until
+ * SUBJECT_SA_MAP is provisioned (deploy-safe). Records the SA on first sight; returns an error string on drift.
+ */
+async function assertSubjectSaStable(env: Env, iss: string, sub: string, agent: string): Promise<string | null> {
+  if (!env.SUBJECT_SA_MAP) return null; // inert until the KV namespace is provisioned
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${iss} ${sub}`));
+  const key = `oidc-sa:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  const prior = await env.SUBJECT_SA_MAP.get(key);
+  if (prior && prior.toLowerCase() !== agent.toLowerCase()) {
+    return `this identity previously resolved to Smart Agent ${prior} but now derives ${agent}: the custody-derivation root (A2A_CUSTODY_ROOT_KEY) changed. It must NEVER rotate (D-P0-1) — refusing to route to a new, empty account.`;
+  }
+  if (!prior) await env.SUBJECT_SA_MAP.put(key, agent);
+  return null;
+}
+
 app.post('/custody/oidc/resolve', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
@@ -2173,8 +2203,10 @@ app.post('/custody/oidc/resolve', async (c) => {
   if (!body?.iss || !body?.sub) return c.json({ ok: false, error: 'iss + sub required' }, 400);
   const rotation = typeof body.rotation === 'number' && body.rotation >= 0 ? body.rotation : 0;
   try {
-    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY, { rotation });
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { rotation });
     const agent = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    const drift = await assertSubjectSaStable(c.env, body.iss, body.sub, agent);
+    if (drift) return c.json({ ok: false, error: 'custody_root_changed', detail: drift }, 409);
     return c.json({ ok: true, agent, agentId: caip10(Number(c.env.CHAIN_ID), agent), custodian: cSub });
   } catch (e) {
     console.error('[demo-a2a] custody/google/resolve failed:', e);
@@ -2210,7 +2242,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -2306,7 +2338,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -2472,7 +2504,7 @@ async function recoverCustodian(
   }
   const gate = await verifyCustodySession(args.ownerSession, gateCfg);
   if (!gate.ok) return { ok: false, error: gate.error, status: gate.status };
-  const { cSub, sign } = await deriveSubjectCustodian(gate.subject, env.A2A_MASTER_PRIVATE_KEY, {
+  const { cSub, sign } = await deriveSubjectCustodian(gate.subject, env.A2A_CUSTODY_ROOT_KEY, {
     auditSink: buildAuditSink(env),
     rotation: descriptor.custody.rotation,
   });
@@ -2542,7 +2574,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation,
     });
@@ -2679,7 +2711,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -2790,7 +2822,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -2851,7 +2883,7 @@ app.post('/custody/oidc/sign', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -2893,7 +2925,7 @@ app.post('/custody/oidc/custodian', async (c) => {
   const gate = await verifyCustodySession(body.session, gateCfg);
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
   try {
-    const { cSub } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -2955,7 +2987,7 @@ app.post('/custody/oidc/sign-site-delegation', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation,
     });
@@ -3036,7 +3068,7 @@ app.post('/custody/oidc/activate-vault', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
 
   try {
-    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_MASTER_PRIVATE_KEY, {
+    const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -3193,7 +3225,7 @@ app.post('/custody/youversion/store-token', async (c) => {
     return c.json({ ok: false, error: 'iss + sub + access_token + appKey required' }, 400);
   }
   try {
-    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_MASTER_PRIVATE_KEY, { rotation: 0 });
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { rotation: 0 });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     await storeFederatedToken(
       c.env, sa, { access: body.access_token, refresh: body.refresh_token ?? null },
