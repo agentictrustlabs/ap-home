@@ -655,11 +655,25 @@ function vaultConfig(env: Env, enforceBinding: boolean | undefined): McpResource
   };
 }
 
+// CRIT-2 W3 (audit 2026-07-13) — the a2a-task-do SERVER-SIDE seams (orchestrate + FR-3.4 entitlement-VC)
+// have no browser to sign a DEL-001 self-leaf, so they CLIENT-MINT with a DO-held KMS session key + a
+// per-call AgenticInvocationProofV1 (proof-of-possession), forwarded over the MAC /tools path. When the
+// (MAC-authenticated, unforgeable) body carries an `invocationProof`, verify possession via the spec-287
+// requireInvocationProof gate (mirrors /mcp/native) layered on the route's base config — NO server-mint.
+// Absent ⇒ the route's existing config is unchanged (fully backward-compatible). Fail-closed: proof
+// requested but no UniversalSignatureValidator ⇒ throw (mapped to 500, rejecting the call).
+function withProof(env: Env, base: McpResourceVerifyConfig, invocationProof: AgenticInvocationProofV1 | undefined): McpResourceVerifyConfig {
+  if (!invocationProof) return base;
+  const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
+  if (!usv) throw new Error('invocation-proof verification requested but UNIVERSAL_SIGNATURE_VALIDATOR is unset (fail-closed)');
+  return { ...base, requireInvocationProof: true, universalSignatureValidator: usv as Address };
+}
+
 // Variables stashed on the Hono context by the service-mac middleware
 // so the tool route handlers don't need to re-read the body (Hono
 // consumes the stream on first read).
 interface Variables {
-  parsedBody: { token?: string; args?: Record<string, unknown>; enforceBinding?: boolean };
+  parsedBody: { token?: string; args?: Record<string, unknown>; enforceBinding?: boolean; invocationProof?: AgenticInvocationProofV1 };
 }
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -785,7 +799,7 @@ app.post('/tools/get_profile', async (c) => {
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: Record<string, unknown> };
   const handler = withDelegation<Args>(
-    baseConfig(c.env),
+    withProof(c.env, baseConfig(c.env), body.invocationProof),
     async ({ principal }) => {
       // Profile lives in the encrypted vault (resource `profile`, pii.low). spec 278:
       // gated on the person's vault-key binding + authorization — no binding ⇒ fail closed.
@@ -810,7 +824,7 @@ app.post('/tools/get_profile', async (c) => {
   );
 
   try {
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -842,7 +856,7 @@ app.post('/tools/get_pii', async (c) => {
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
-    baseConfig(c.env),
+    withProof(c.env, baseConfig(c.env), body.invocationProof),
     async ({ principal, args, grants }) => {
       const r = await readSensitive(
         c.env,
@@ -865,7 +879,7 @@ app.post('/tools/get_pii', async (c) => {
     },
   );
   try {
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -896,7 +910,7 @@ app.post('/tools/get_org_sensitive', async (c) => {
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: { fields?: string[]; purpose?: string } };
   const handler = withDelegation<Args>(
-    baseConfig(c.env),
+    withProof(c.env, baseConfig(c.env), body.invocationProof),
     async ({ principal, args, grants }) => {
       const r = await readSensitive(
         c.env,
@@ -919,7 +933,7 @@ app.post('/tools/get_org_sensitive', async (c) => {
     },
   );
   try {
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -1180,7 +1194,7 @@ app.post('/tools/get_vault_record', async (c) => {
   type Args = { args?: { recordType?: string } };
   try {
     const handler = withDelegation<Args>(
-      vaultConfig(c.env, body.enforceBinding),
+      withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
       async ({ principal, args, recordScopes }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
@@ -1204,7 +1218,7 @@ app.post('/tools/get_vault_record', async (c) => {
           : 'development'),
       },
     );
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -1226,7 +1240,7 @@ app.post('/tools/set_vault_record', async (c) => {
   type Args = { args?: { recordType?: string; data?: unknown } };
   try {
     const handler = withDelegation<Args>(
-      vaultConfig(c.env, body.enforceBinding),
+      withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
       async ({ principal, args, recordScopes }) => {
         const recordType = args?.recordType;
         if (!recordType) return { ok: false, error: 'recordType required' };
@@ -1255,7 +1269,7 @@ app.post('/tools/set_vault_record', async (c) => {
           : 'development'),
       },
     );
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -1277,7 +1291,7 @@ app.post('/tools/list_vault_record', async (c) => {
   type Args = { args?: Record<string, unknown> };
   try {
     const handler = withDelegation<Args>(
-      vaultConfig(c.env, body.enforceBinding),
+      withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
       async ({ principal, recordScopes }) => {
         // spec 278: listing the owner's own records still requires the vault-key binding
         // (the listing comes from the per-person-KEK vault). `vault:` prefix → 'internal'.
@@ -1304,7 +1318,7 @@ app.post('/tools/list_vault_record', async (c) => {
           : 'development'),
       },
     );
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
@@ -1744,7 +1758,7 @@ app.post('/tools/update_profile', async (c) => {
   const auditSink = buildAuditSink(c.env);
   type Args = { args?: { full_name?: string; email?: string; phone?: string | null; notes?: string | null } };
   const handler = withDelegation<Args>(
-    baseConfig(c.env),
+    withProof(c.env, baseConfig(c.env), body.invocationProof),
     async ({ principal, args }) => {
       const gate = await authorizePersonVaultOp(c.env, principal, RESOURCE_PROFILE, 'write', 'pii.low');
       if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:update_profile' };
@@ -1771,7 +1785,7 @@ app.post('/tools/update_profile', async (c) => {
     },
   );
   try {
-    const result = await handler({ token: body.token, args: body.args ?? {} });
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
     return c.json(result as Record<string, unknown>);
   } catch (e) {
     if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code, (e as any).reason, e.stack); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
