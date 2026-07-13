@@ -3,6 +3,7 @@
 // into an org produces a delegating member. Best-effort by design: the join consent artifact (the
 // listing) already landed; a failed grant mint must never strand the join — it can be re-minted.
 import type { Address } from '@agenticprimitives/types';
+import { writeOrganizationMembership } from './membership-write';
 import { issueMembershipDelegation, toWire } from './delegation';
 import { MCP_SERVER_ID } from './inbox-delivery';
 
@@ -44,9 +45,23 @@ export async function recordOrgMembership(
     // related-orgs.ts self-heals `related:*` from `entry.delegations[0]`, so any Home reconstructs it.
     const doBase = `/a2a/interactions/${member.toLowerCase()}`;
     const hdrs = { 'content-type': 'application/json' };
+    // spec 324 W3 — the AUTHORITATIVE OrganizationMembership Situation (+ credential) in the member's vault.
+    // The org authorized this member (the org→member access grant / listing acceptance is the EnrollmentDecision
+    // evidence); membership is the Situation, NOT the memberProfileAccess delegation just minted (ADR-0048 #3).
+    const enrollmentSource = madMatches
+      ? ({ kind: 'invite-link', inviteLinkId: `mad:${(memberAccess?.delegate ?? '').toLowerCase()}` } as const)
+      : ({ kind: 'application', applicationId: `join:${org.toLowerCase()}:${member.toLowerCase()}` } as const);
+    const membershipProvenance = await writeOrganizationMembership({
+      member,
+      org: org as Address,
+      enrollmentSource,
+      memberAcceptanceRef: `join-accept:${member.toLowerCase()}`,
+      organizationDecisionRef: `enroll-decision:${org.toLowerCase()}:${member.toLowerCase()}`,
+      bearer,
+    });
     await fetch(`${doBase}/relationships.merge`, {
       method: 'POST', headers: hdrs,
-      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)] } }),
+      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)], ...(membershipProvenance ?? {}) } }),
     }).catch(() => null);
     if (displayName?.trim()) {
       await fetch(`${doBase}/member.profile.put`, {

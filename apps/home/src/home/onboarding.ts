@@ -29,6 +29,7 @@ import {
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
+import { writeOrganizationMembership } from '../lib/membership-write';
 import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -313,6 +314,18 @@ export async function createOrganization(
       // whole block is best-effort like the rest of the ceremony).
       const ixp = await activateInteractionsIfNeeded(home.address, via, auth);
       if (!ixp.ok) console.warn('[org-create] creator interactions plane not enabled:', ixp.error);
+      // spec 324 W3 — the creator is BOTH a member AND a steward (ADR-0048 #3/#10: distinct facts). Record the
+      // AUTHORITATIVE OrganizationMembership (Situation + credential) so the "Members · 0 / add yourself" state
+      // is unrepresentable, then stamp its provenance onto the steward projection. Membership ≠ stewardship:
+      // the stewardship delegation is separate administration authority, not the membership itself.
+      const founderMembership = await writeOrganizationMembership({
+        member: home.address,
+        org: x.childAgent as Address,
+        enrollmentSource: { kind: 'open-enrollment', enrollmentPolicyId: `org-create:${x.childAgent.toLowerCase()}` },
+        memberAcceptanceRef: `org-create:${home.address.toLowerCase()}`,
+        organizationDecisionRef: `org-create-decision:${x.childAgent.toLowerCase()}`,
+        bearer,
+      });
       await fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -323,6 +336,7 @@ export async function createOrganization(
             relationship: 'steward',
             orgName: x.childName,
             ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
+            ...(founderMembership ? { membershipId: founderMembership.membershipId, membershipSituationHash: founderMembership.membershipSituationHash, enrollmentDecisionRef: founderMembership.enrollmentDecisionRef } : {}),
           },
         }),
       }).catch((e) => console.warn('[org-create] steward relationship write failed:', e));
