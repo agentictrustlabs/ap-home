@@ -16,7 +16,7 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVault, activateVaultIfNeeded, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, type Via } from '../../home/onboarding';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { listManagedAgents } from '../../connect-client';
@@ -191,7 +191,10 @@ export function OnboardingJourney({
     if (!home) return;
     setBusy(via === 'google' ? 'Activating your private vault…' : `Activating your private vault — confirm with your ${via}…`);
     setError('');
-    const act = await activateVault(home.address, via);
+    // B3 — secureHome→activatePersonPlanes already bound the vault, so use the is-bound-gated variant here:
+    // it SKIPS when already bound (no redundant re-provision + re-bind = no extra wallet prompts), and still
+    // binds if the earlier fail-soft bind didn't land.
+    const act = await activateVaultIfNeeded(home.address, via);
     if (!act.ok) {
       setBusy(null);
       setError(`Couldn't activate your vault (${act.error}). You can retry, or skip and turn it on later from your profile.`);

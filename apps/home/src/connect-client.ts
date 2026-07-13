@@ -88,6 +88,7 @@ export async function siweLogin(): Promise<SiweOutcome> {
 export async function bootstrapWithWallet(
   address: Address,
   onStep?: (s: string) => void,
+  callData?: Hex,
 ): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
   await ensureCsrfToken();
   onStep?.('Preparing your workspace…');
@@ -95,7 +96,9 @@ export async function bootstrapWithWallet(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ initMethod: 'eoa', owner: address }),
+    // deploy + claim in ONE userOp when callData is supplied (mirror bootstrapWithPasskey) — the server
+    // attaches it to the deploy op so the fresh SA runs register+setPrimary in the SAME wallet prompt.
+    body: JSON.stringify({ initMethod: 'eoa', owner: address, ...(callData ? { callData } : {}) }),
   });
   if (buildRes.status === 409) {
     return { ok: false, error: 'Gas sponsorship is not enabled on the backend (paymaster).' };
@@ -2069,25 +2072,32 @@ export async function signupWithName(
   }
   // wallet: the EOA's deterministic agent (reconnect if it exists, else bootstrap).
   onStep?.('Connecting your wallet…');
-  const first = await siweLogin(); // connects wallet + signs
-  let agent: Address;
-  let address: Address;
-  let minNonce: bigint | undefined; // set only on a fresh deploy (nonce 0 just consumed)
+  const first = await siweLogin(); // connects wallet + signs SIWE (also issues the session for an EXISTING agent)
   if (first.status === 'issued') {
-    agent = first.agent;
-    address = first.address;
-  } else if (first.status === 'bootstrap') {
-    address = first.address;
-    const dep = await bootstrapWithWallet(address, onStep);
-    if (!dep.ok) return { ok: false, error: dep.error };
-    agent = dep.agent;
-    minNonce = 1n;
-  } else {
+    // Existing DEPLOYED agent → claim the name in a standalone op (no deploy to batch it into). The SIWE
+    // above already issued the session token, so we do NOT sign in again (B1 — no redundant second SIWE).
+    const signHash: SignHash = (h) => personalSign(first.address, h);
+    const claim = await claimName(first.agent, signHash, base, onStep);
+    if (!claim.ok) return { ok: false, error: claim.error };
+    return { ok: true, token: first.token, name: claim.name, agent: first.agent };
+  }
+  if (first.status !== 'bootstrap') {
     return { ok: false, error: first.reason ?? `sign-in ${first.status}` };
   }
-  const signHash: SignHash = (h) => personalSign(address, h);
-  const claim = await claimName(agent, signHash, base, onStep, minNonce);
+  // Fresh EOA → DEPLOY + CLAIM in ONE userOp (B2 — mirror the passkey path). Derive the counterfactual SA
+  // (deriveEoaSa matches the server's eoa deploy: custodians=[owner], salt=0), build the claim calldata
+  // (newOwner = that SA), and attach it to the deploy so the SA is created AND the name claimed in a SINGLE
+  // wallet prompt — dropping the separate claim userOp.
+  const address = first.address;
+  const sa = await deriveEoaSa(address, 0n);
+  const claim = await buildClaimCallData(base, sa, onStep);
   if (!claim.ok) return { ok: false, error: claim.error };
+  const dep = await bootstrapWithWallet(address, onStep, claim.callData);
+  if (!dep.ok) return { ok: false, error: dep.error };
+  const agent = dep.agent;
+  // B1 — self-serve `secureHome` passes signIn=false; the OIDC/enrollment ceremony signs the person in via
+  // the grant + id_token, so skip the extra SIWE here (its token would be unused) — saving a picker + SIWE.
+  if (!signIn) return { ok: true, token: '', name: claim.name, agent };
   onStep?.('Signing you in…');
   const login = await siweLogin();
   return login.status === 'issued'
