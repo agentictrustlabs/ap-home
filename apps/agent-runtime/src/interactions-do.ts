@@ -54,7 +54,12 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:org.applications', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+// NOTE: `vault:org.applications` is deliberately NOT here. It ships in the interactions grant (so fresh grants
+// can write the applications doc), but it is a FEATURE-specific additive scope — gating the WHOLE interactions
+// plane (channels/directory/inbox/invite) on it would strand any grant that predates it (or was signed in a
+// deploy window) with a blanket "stale — re-enable". A grant lacking it simply can't write org.applications
+// (the vault-record-scope caveat enforces that at the vault); everything else keeps working.
+const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
