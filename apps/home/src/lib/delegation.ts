@@ -246,10 +246,11 @@ export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
 
 /** The membership directory record (spec 322 W2/W3 — the DO-managed vault residency). */
 export const DIRECTORY_DATA_RESOURCE_SCOPE = 'vault:directory.data' as const;
-/** Board split (spec 322 W3): descriptors index + per-channel docs + channel-namespace bodies. */
-export const BOARD_INDEX_RESOURCE_SCOPE = 'vault:board.index' as const;
-export const BOARD_CHANNEL_RESOURCE_SCOPE = 'vault:board.channel:*' as const;
-export const CHANNEL_BODIES_RESOURCE_SCOPE = 'vault:message.body:channel:*' as const;
+/** Conversation/topic split (spec 324 §10 — renamed from board.* in the W6 key migration): the org's
+ *  conversation descriptor index + per-topic docs + topic-namespace bodies. */
+export const CONVERSATION_INDEX_RESOURCE_SCOPE = 'vault:conversation.index' as const;
+export const CONVERSATION_TOPIC_RESOURCE_SCOPE = 'vault:conversation.topic:*' as const;
+export const TOPIC_BODIES_RESOURCE_SCOPE = 'vault:message.body:topic:*' as const;
 /** 1-1 (DM) bodies — the DELIVERY plane's namespace; disjoint from channel bodies (FAB-SSO-2). */
 export const DM_BODIES_RESOURCE_SCOPE = 'vault:message.body:dm:*' as const;
 /** The person's AUTHORITATIVE org-relationship doc (spec 322 W3d) — Home `related:*` KV is a cache. */
@@ -290,7 +291,7 @@ export async function issueInteractionsDelegation(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [BOARD_INDEX_RESOURCE_SCOPE, BOARD_CHANNEL_RESOURCE_SCOPE, CHANNEL_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },

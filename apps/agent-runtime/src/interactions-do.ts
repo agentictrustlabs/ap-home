@@ -43,17 +43,17 @@ const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutabili
 const ERC1271_MAGIC = '0x1626ba7e';
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
-// spec 322 W3 board split: descriptors in `board.index`; per-channel message projections in
-// `board.channel:<id>` (multi-writer conflicts shrink to same-channel; reads stop paying for the
-// whole board; per-channel scopes become possible). NO migration from the old single
-// `channels.data` doc — disposable by product decision.
-const BOARD_INDEX_RESOURCE = 'board.index';
-const CHANNEL_RESOURCE = (channelId: string): string => `board.channel:${channelId}`;
+// spec 324 §10 conversation/topic split (renamed from board.* in the W6 key migration): descriptors in
+// `conversation.index`; per-topic message projections in `conversation.topic:<id>` (multi-writer conflicts
+// shrink to same-topic; reads stop paying for the whole board; per-topic scopes become possible). NO dual-read
+// from the old `board.*` keys (ADR-0013) — the scope rename forces a grant re-enable, which self-invalidates.
+const CONVERSATION_INDEX_RESOURCE = 'conversation.index';
+const TOPIC_RESOURCE = (conversationId: string): string => `conversation.topic:${conversationId}`;
 const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -643,12 +643,12 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
-        // Board split (W3): descriptors from board.index; ONE channel's messages from its own doc.
-        const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+        // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
+        const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
         let wire = index.map((c) => ({ ...c, messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
         if (op === 'channels.read' && typeof body.channelId === 'string') {
-          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(body.channelId), []);
+          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
           wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
           await Promise.all(messages.map(async (m) => {
@@ -663,12 +663,12 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
-        return this.serialize(async () => { // ARCH-H1 — the board.index RMW is a shared-doc write; serialize it too
-          const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+        return this.serialize(async () => { // ARCH-H1 — the conversation.index RMW is a shared-doc write; serialize it too
+          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const r = createBoardChannel(index, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
           if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
-          await this.writeDoc(grant, BOARD_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
+          await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
           return json({ ok: true, channelId: r.channel.descriptor.id });
         });
       }
@@ -679,10 +679,10 @@ export class InteractionsDO {
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
-          const index = await this.readDoc<ChannelV1[]>(grant, BOARD_INDEX_RESOURCE, []);
+          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
-          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, CHANNEL_RESOURCE(channelId), []);
+          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
           const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
           if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
@@ -690,7 +690,7 @@ export class InteractionsDO {
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
           // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
           await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
-          await this.writeDoc(grant, CHANNEL_RESOURCE(channelId), composed[0]!.messages);
+          await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
           return json({ ok: true, messageId: r.envelope.id });
         });
       }
