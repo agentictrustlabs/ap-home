@@ -167,7 +167,18 @@ export class InteractionsDO {
         if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
           return callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
         }
+        // CRIT-2 W4 — the interactions-session key IS configured but this principal has NO custodied leaf
+        // (it enabled before leaf-signing shipped). FAIL-CLOSED (ADR-0013 one-mechanism): require a
+        // re-enable to custody the DEL-001 leaf; do NOT switch to the server-mint bridge. Server-mint is
+        // retired. The Home's activateInteractionsIfNeeded self-heals this on the principal's next login.
+        return new Response(
+          JSON.stringify({ ok: false, error: 'session_leaf_required', detail: 'interactions vault access needs a re-enable to custody the DEL-001 session leaf (server-mint retired — CRIT-2)' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        );
       }
+      // Interactions-session key UNCONFIGURED (dev/unprovisioned only) — the legacy server-mint bridge, which
+      // itself fail-closes (403 server_mint_disabled) unless DEMO_ALLOW_SERVER_MINT is set. Never reached in a
+      // provisioned deploy (prod always sets GCP_KMS_INTERACTIONS_KEY_NAME, taking the bound/fail-closed branch).
       return callMcpToolViaDelegation({ env, toolName, delegation: grant, requester: grant.delegate as Address, toolArgs, skipDelegationVerify: true });
     };
     return {

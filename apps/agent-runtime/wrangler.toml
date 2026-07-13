@@ -90,9 +90,12 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
-# KC-1: testnet demo — permit the server-mint delegation path (persona/operator-key demo, accepted hole
-# C-1). A real deployment OMITS this so sensitive/vault routes require a client-minted delegate-signed token.
-DEMO_ALLOW_SERVER_MINT = "true"
+# CRIT-2 (audit 2026-07-13) — server-mint RETIRED in production. Every prod vault path now CLIENT-MINTS:
+# interactions/messaging via the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation
+# proof, the A2aTaskDO orchestrate/FR-3.4 seams via callMcpToolWithProof (DO-side invocation proof). "false"
+# ⇒ callMcpToolViaDelegation fail-closes (403 server_mint_disabled); interactions-do fail-closes (409
+# session_leaf_required) for any pre-leaf principal until it re-enables. Do NOT set back to "true".
+DEMO_ALLOW_SERVER_MINT = "false"
 # spec 290 §8 — per-SA hard-budget unit cap for the A2A task path. MUST match demo-mcp's value (same
 # shared DO authority per SA across both paths).
 SA_BUDGET_LIMIT_UNITS = "25"
