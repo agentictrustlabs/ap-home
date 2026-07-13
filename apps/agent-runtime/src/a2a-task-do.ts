@@ -37,7 +37,7 @@ import { buildA2aReceiptsConfig } from './receipts.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { callMcpToolViaDelegation, type Env, type IncomingDelegation } from './index.js';
+import { callMcpToolWithProof, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -177,7 +177,7 @@ export class A2aTaskDO {
     const vault: VaultClient = {
       write: async ({ owner, recordType, data, delegation }) => {
         if (delegation) {
-          const resp = await callMcpToolViaDelegation({ env, toolName: 'set_vault_record', delegation: toWire(delegation), requester: delegation.delegate as Address, toolArgs: { recordType, data } });
+          const resp = await callMcpToolWithProof({ env, toolName: 'set_vault_record', delegation: toWire(delegation), toolArgs: { recordType, data } });
           if (!resp.ok) throw new Error(`a2a vault write via delegation failed (HTTP ${resp.status})`);
           return { owner, recordType };
         }
@@ -186,7 +186,7 @@ export class A2aTaskDO {
       },
       read: async (ref, opts) => {
         if (opts?.delegation) {
-          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: toWire(opts.delegation), requester: opts.delegation.delegate as Address, toolArgs: { recordType: ref.recordType } });
+          const resp = await callMcpToolWithProof({ env, toolName: 'get_vault_record', delegation: toWire(opts.delegation), toolArgs: { recordType: ref.recordType } });
           if (!resp.ok) return null;
           const j = (await resp.json().catch(() => null)) as { data?: unknown } | null;
           return j?.data ?? null;
@@ -217,16 +217,15 @@ export class A2aTaskDO {
     // authority; the planner only chose WHICH tool. Fail-closed: a tool call without a delegation, an
     // unauthorized grant, or a tool-level error throws → the loop observes the failure.
     const ALLOWED_MCP_TOOLS = new Set(['get_profile', 'get_pii', 'get_org_sensitive', 'get_vault_record', 'set_vault_record', 'list_vault_record']);
-    type DelegatedToolName = Parameters<typeof callMcpToolViaDelegation>[0]['toolName'];
+    type DelegatedToolName = Parameters<typeof callMcpToolWithProof>[0]['toolName'];
     const mcp: McpClient = {
       callTool: async ({ tool, toolArgs, delegation }) => {
         if (!ALLOWED_MCP_TOOLS.has(tool)) throw new Error(`mcp tool not exposed by this agent: ${tool}`);
         if (!delegation) throw new Error(`orchestrated MCP call requires a task delegation (tool ${tool})`);
-        const resp = await callMcpToolViaDelegation({
+        const resp = await callMcpToolWithProof({
           env,
           toolName: tool as DelegatedToolName,
           delegation: toWire(delegation),
-          requester: delegation.delegate as Address,
           toolArgs,
         });
         const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;

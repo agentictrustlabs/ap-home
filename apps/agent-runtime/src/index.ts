@@ -70,6 +70,8 @@ import {
   SessionManager,
   hashDelegation,
   mintDelegationToken,
+  buildInvocationProof,
+  type AgenticInvocationProofV1,
   buildCaveat,
   encodeTimestampTerms,
   encodeValueTerms,
@@ -3898,6 +3900,10 @@ async function forwardMcpToken(args: {
    *  DEL-001 session-key↔delegator binding. The flag rides the MAC-signed body, so it's unforgeable; the
    *  persona/admin path (callMcpToolViaDelegation) leaves it off and verifies under the legacy config. */
   enforceBinding?: boolean;
+  /** CRIT-2 W3 — the spec-287 per-call proof-of-possession. Set ONLY on the DO server-side client-mint
+   *  path (callMcpToolWithProof); demo-mcp verifies it via requireInvocationProof (no server-mint). Rides
+   *  the MAC-signed body ⇒ unforgeable. Mutually exclusive with enforceBinding in practice. */
+  invocationProof?: AgenticInvocationProofV1;
   auditSink: ReturnType<typeof buildAuditSink>;
   correlationId: string;
 }): Promise<Response> {
@@ -3905,6 +3911,7 @@ async function forwardMcpToken(args: {
     token: args.token,
     args: args.toolArgs ?? {},
     ...(args.enforceBinding ? { enforceBinding: true } : {}),
+    ...(args.invocationProof ? { invocationProof: args.invocationProof } : {}),
   });
   const macProvider = buildMacProvider(MCP_AUDIENCE, {
     backend: 'local-aes',
@@ -4134,6 +4141,65 @@ export async function callMcpToolBound(args: {
     token,
     enforceBinding: true,
     toolArgs: args.toolArgs,
+    auditSink,
+    correlationId,
+  });
+}
+
+/** CRIT-2 W3 (audit 2026-07-13) — SERVER-SIDE client-mint for the A2aTaskDO seams (orchestrate + FR-3.4
+ *  entitlement-VC). There is no browser to sign a DEL-001 self-leaf here, so possession is proven with a
+ *  per-call spec-287 `AgenticInvocationProofV1`: mint a token signed by a DO-held KMS session key (the
+ *  interactions-session key) + a proof over the EXACT call, forwarded over the MAC /tools path where
+ *  demo-mcp verifies it under `requireInvocationProof` (withProof). The bound alternative to
+ *  callMcpToolViaDelegation (server-mint, DEMO_ALLOW_SERVER_MINT). Mirrors the native path; no server-mint. */
+export async function callMcpToolWithProof(args: {
+  env: Env;
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  delegation: IncomingDelegation;   // the task/relying grant — its delegator is the principal whose vault is read
+  toolArgs?: Record<string, unknown>;
+}): Promise<Response> {
+  const auditSink = buildAuditSink(args.env);
+  const correlationId = crypto.randomUUID();
+  const signer = await interactionsSessionAccount(args.env);
+  const signRaw = signer.sign; // the KMS viem account implements raw-digest sign (kms-viem-account.ts)
+  if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign (invocation proof, W3)');
+  const principal = args.delegation.delegator as Address;
+  const toolArgs = args.toolArgs ?? {};
+  const { token } = await mintDelegationToken(
+    {
+      iss: 'demo-a2a',
+      aud: MCP_AUDIENCE,
+      sub: principal, // demo-mcp keys the record by the delegator (the principal SA)
+      delegation: toDelegationStruct(args.delegation),
+      sessionKeyAddress: signer.address as Address,
+      ttlSeconds: 300,
+      usageLimit: 10,
+    },
+    (msg) => signer.signMessage({ message: msg }),
+    { auditSink, correlationId },
+  );
+  // The proof `args` MUST be the EXACT handler arg object demo-mcp reconstructs (`{ args: <toolArgs> }`) so
+  // the argumentsHash matches after withDelegation strips the token/invocationProof envelope (spec 287).
+  const now = Date.now();
+  const invocationProof = await buildInvocationProof({
+    chainId: Number(args.env.CHAIN_ID),
+    audience: MCP_AUDIENCE,
+    principal,
+    sessionKey: signer.address as Address,
+    operation: args.toolName,
+    args: { args: toolArgs },
+    rawDelegationToken: token,
+    requestId: correlationId,
+    issuedAt: now,
+    expiresAt: now + 60_000,
+    sign: (digest) => signRaw({ hash: digest }),
+  });
+  return forwardMcpToken({
+    env: args.env,
+    toolName: args.toolName,
+    token,
+    invocationProof,
+    toolArgs,
     auditSink,
     correlationId,
   });
