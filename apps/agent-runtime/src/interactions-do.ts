@@ -53,7 +53,7 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+const REQUIRED_SCOPES = ['vault:board.index', 'vault:board.channel:*', 'vault:message.body:channel:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -64,6 +64,13 @@ const DM_BODY_PREFIX = 'message.body:dm:';
 // per-org shareable profile cards. Self-gated ops only — the session SA must BE the principal.
 const RELATIONSHIPS_RESOURCE = 'relationships.data';
 const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.toLowerCase()}`;
+
+// spec 324 W3 — the AUTHORITATIVE OrganizationMembership record (a private SituationV2 + its credential),
+// per org, in the party's own vault. Membership is NOT a delegation and NOT a directory listing (ADR-0048
+// #3/#6): this record is the single source of truth; the related:* link, directory roster row, and gate
+// caches are provenance-tagged projections of it. Self-gated writes (the principal owns their membership
+// record); the org retains its own copy in the org's DO.
+const MEMBERSHIP_RESOURCE = (org: string): string => `org.membership:${org.toLowerCase()}`;
 
 // spec 323 W2 — owner-own capability DOCUMENTS (last-writer-wins whole-doc records), reachable ONLY
 // self (session SA === principal) over the interactions grant. This is the delegation-authorized,
@@ -78,7 +85,11 @@ const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timelin
 // spec 323 W1-tail — kind/parent capture the managed-tree SHAPE (org / org-treasury / person-treasury
 // and where it hangs), so a second Home reconstructs the FULL tree + inbox-control from the vault, not
 // just member/steward org links.
-interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; updatedAt: string }
+// spec 324 W3 — provenance fields (membershipId / membershipSituationHash / enrollmentDecisionRef) make this
+// projection traceable back to its authoritative OrganizationMembership Situation. `relationship:'member'`
+// here is a projection LABEL, never authority (ADR-0048 #3): the delegations it carries are the authority
+// artifacts issued BECAUSE of membership; the membership itself is the SituationV2 the provenance points to.
+interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; membershipId?: string; membershipSituationHash?: string; enrollmentDecisionRef?: string; updatedAt: string }
 interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
 /** Grants LEDGER row (spec 322 W3e §2): hash + metadata ONLY — the wire itself is a bearer secret. */
 interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]; storedAt: string }
@@ -250,7 +261,7 @@ export class InteractionsDO {
     return targets.includes(rel) && targets.includes(reg);
   }
 
-  /** Member-access proof (SEC-H1): a presented org→member member-access wire — the ORG's
+  /** Organization-resource-access proof (SEC-H1): a presented org→member organizationResourceAccessDelegation wire — the ORG's
    *  authorization that this person may join (minted at invite time, `issueMemberAccessDelegation`).
    *  delegator = the org (this principal), delegate = the caller, org-signed + unrevoked, AND
    *  carrying the DATA-grant shape (a vault-record-scope caveat) so a governance/stewardship wire
@@ -271,7 +282,7 @@ export class InteractionsDO {
     } catch { return false; }
   }
 
-  /** Steward proof: a presented org→person stewardship wire, org-verified + unrevoked on-chain, AND
+  /** Steward proof: a presented org→person organizationStewardshipDelegation wire, org-verified + unrevoked on-chain, AND
    *  carrying the stewardship caveat shape (SEC-C1 — never a data grant). */
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
     if (!wire) return false;
@@ -713,6 +724,10 @@ export class InteractionsDO {
               ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
               ...(entry?.kind ? { kind: String(entry.kind) } : prev?.kind ? { kind: prev.kind } : {}),
               ...(entry?.parent ? { parent: String(entry.parent).toLowerCase() } : prev?.parent ? { parent: prev.parent } : {}),
+              // spec 324 W3 — provenance back to the authoritative OrganizationMembership Situation.
+              ...(entry?.membershipId ? { membershipId: String(entry.membershipId) } : prev?.membershipId ? { membershipId: prev.membershipId } : {}),
+              ...(entry?.membershipSituationHash ? { membershipSituationHash: String(entry.membershipSituationHash) } : prev?.membershipSituationHash ? { membershipSituationHash: prev.membershipSituationHash } : {}),
+              ...(entry?.enrollmentDecisionRef ? { enrollmentDecisionRef: String(entry.enrollmentDecisionRef) } : prev?.enrollmentDecisionRef ? { enrollmentDecisionRef: prev.enrollmentDecisionRef } : {}),
               ...(entry?.delegationHash ? { delegationHash: String(entry.delegationHash) } : {}),
               // Wires accumulate (a member-access grant may arrive after the membership entry);
               // self-gated op — only the person can place credentials in their own doc.
@@ -750,6 +765,24 @@ export class InteractionsDO {
         if (body.record === undefined) return json({ error: 'record required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.record.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'record', id: recordType } });
         await this.vaultFor(grant).write({ owner: '', resource: recordType, data: body.record, classification: 'internal' } as never);
+        return json({ ok: true });
+      }
+
+      // ── OrganizationMembership record (spec 324 W3) — STRICTLY self; the AUTHORITATIVE membership Situation
+      //    + credential per org, in the principal's OWN vault. Membership ≠ Delegation ≠ Listing (ADR-0048
+      //    #3/#6): this is the single source of truth the related:*/directory/gate projections point back to.
+      //    Writing it grants NO authority — the delegations issued *because of* membership are separate. ──
+      if (op === 'membership.get' || op === 'membership.put') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'this membership record belongs to the principal — self access only' }, 403);
+        const org = String(body.org ?? '').toLowerCase();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(org)) return json({ error: 'org (address) required' }, 400);
+        if (op === 'membership.get') {
+          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: MEMBERSHIP_RESOURCE(org) });
+          return json({ ok: true, membership: r?.data ?? null });
+        }
+        if (body.membership === undefined) return json({ error: 'membership (SituationV2) required' }, 400);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.membership.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'org-membership', id: org } });
+        await this.vaultFor(grant).write({ owner: '', resource: MEMBERSHIP_RESOURCE(org), data: { membership: body.membership, credential: body.credential ?? null }, classification: 'internal' } as never);
         return json({ ok: true });
       }
 
