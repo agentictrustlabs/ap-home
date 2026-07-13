@@ -61,6 +61,32 @@ export async function connectWallet(forceSelect = false): Promise<Address> {
   return (await connectWalletAccounts(forceSelect))[0]!;
 }
 
+/** The accounts already permitted to this dApp — a SILENT read (`eth_accounts`, no popup, no picker).
+ *  `[]` when the wallet is locked or the dApp isn't connected. Used by the session custodian cache (B5) to
+ *  confirm a remembered custodian is still connected before reusing it WITHOUT re-popping the picker. */
+export async function connectedAccountsSilent(): Promise<Address[]> {
+  if (!hasWallet()) return [];
+  try { return ((await provider().request({ method: 'eth_accounts' })) as Address[]) ?? []; }
+  catch { return []; }
+}
+
+// B5 — per-browser-session cache of the custodian EOA chosen for a given home SA. The picker
+// (`wallet_requestPermissions`) is the "choose your custodian" moment (spec 266); it should fire ONCE per
+// session per home, not on every `signHashFor`. Seeded from the SIWE/bootstrap pick; reused (after a silent
+// `eth_accounts` liveness check) for all later ceremonies in the flow. Module-scoped ⇒ resets on reload/tab
+// (the safe default) and is cleared on disconnect. Distinct from `rememberHomeEoa` (durable localStorage hint
+// that still pops the picker) — this SKIPS the picker.
+const sessionCustodians = new Map<string, Address>();
+export function rememberSessionCustodian(sa: Address, custodian: Address): void {
+  sessionCustodians.set(sa.toLowerCase(), custodian);
+}
+export function recallSessionCustodian(sa: Address): Address | undefined {
+  return sessionCustodians.get(sa.toLowerCase());
+}
+export function clearSessionCustodians(): void {
+  sessionCustodians.clear();
+}
+
 /** personal_sign(message, address) — EIP-191. `message` may be utf8 or 0x-hex. */
 export async function personalSign(address: Address, message: string): Promise<Hex> {
   return (await provider().request({ method: 'personal_sign', params: [message, address] })) as Hex;
@@ -72,6 +98,7 @@ export async function personalSign(address: Address, message: string): Promise<H
  *  method (older MetaMask / other wallets), or no permission to revoke (the dApp was never
  *  wallet-connected — e.g. a Google/passkey session) all no-op without prompting the user. */
 export async function disconnectWallet(): Promise<void> {
+  clearSessionCustodians(); // B5 — drop the cached custodian(s) so a fresh sign-in re-picks (choose-once per session)
   if (!hasWallet()) return;
   try {
     await provider().request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] });

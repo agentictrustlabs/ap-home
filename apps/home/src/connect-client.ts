@@ -28,7 +28,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
-import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa } from './lib/wallet';
+import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
@@ -1942,6 +1942,22 @@ export async function stepUpToAgent(
  *  which is often a DIFFERENT home's custodian (e.g. the platform deployer), so signing by-home/by-name must
  *  select among ALL connected accounts. Throws (clear message) if none of them custodies `sa`. Shared by the
  *  by-name sign-in (connectWithName) and the relying-app grant signer (signHashFor). */
+/** B5 — cache-first custodian connect. Reuse the session-cached custodian for `sa` (confirmed still connected
+ *  via a SILENT `eth_accounts` read — NO picker popup) instead of re-popping MetaMask's account picker on every
+ *  ceremony. Falls back to `connectCustodianWallet` (the picker + on-chain `isCustodian` validation) on a cache
+ *  miss or a stale/disconnected entry, then caches the result. `restrictTo` is the durable remembered-EOA hint
+ *  forwarded to the picker on the fallback. The picker thus fires ONCE per session per home, not N times. */
+export async function connectCustodianCached(sa: Address, restrictTo?: Address): Promise<Address> {
+  const cached = recallSessionCustodian(sa);
+  if (cached) {
+    const live = await connectedAccountsSilent();
+    if (live.some((a) => a.toLowerCase() === cached.toLowerCase())) return cached; // still connected → no picker
+  }
+  const addr = await connectCustodianWallet(sa, restrictTo);
+  rememberSessionCustodian(sa, addr);
+  return addr;
+}
+
 export async function connectCustodianWallet(sa: Address, restrictTo?: Address): Promise<Address> {
   // `restrictTo` (the remembered custodian EOA for this home) defaults MetaMask's picker to that account —
   // helpful after a disconnect cleared its memory. It's a hint only; we still verify isCustodian on-chain.
@@ -1975,7 +1991,7 @@ export async function connectWithName(
     // Default the picker to the EOA we last used for THIS name, falling back to the owner-PUBLISHED
     // connection address (spec 280) when local memory is empty — the cross-device / fresh-browser fix
     // (AgentAccount has no owner() to read the custodian from chain). Still validated by connectCustodianWallet.
-    try { address = await connectCustodianWallet(info.agent, recallHomeEoa(name) ?? info.connectionAddress); }
+    try { address = await connectCustodianCached(info.agent, recallHomeEoa(name) ?? info.connectionAddress); }
     catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'wallet connection failed' }; }
     rememberHomeEoa(name, address); // remember the custodian EOA so next sign-in defaults straight to it
     const nonce = await getNonce();
@@ -2076,6 +2092,7 @@ export async function signupWithName(
   if (first.status === 'issued') {
     // Existing DEPLOYED agent → claim the name in a standalone op (no deploy to batch it into). The SIWE
     // above already issued the session token, so we do NOT sign in again (B1 — no redundant second SIWE).
+    rememberSessionCustodian(first.agent, first.address); // B5 — the SIWE already picked; skip re-picking later
     const signHash: SignHash = (h) => personalSign(first.address, h);
     const claim = await claimName(first.agent, signHash, base, onStep);
     if (!claim.ok) return { ok: false, error: claim.error };
@@ -2095,6 +2112,9 @@ export async function signupWithName(
   const dep = await bootstrapWithWallet(address, onStep, claim.callData);
   if (!dep.ok) return { ok: false, error: dep.error };
   const agent = dep.agent;
+  // B5 — the SIWE above already picked this custodian; seed the session cache so activatePersonPlanes' vault +
+  // interactions ceremonies (signHashFor) reuse it WITHOUT re-popping the account picker each time.
+  rememberSessionCustodian(agent, address);
   // B1 — self-serve `secureHome` passes signIn=false; the OIDC/enrollment ceremony signs the person in via
   // the grant + id_token, so skip the extra SIWE here (its token would be unused) — saving a picker + SIWE.
   if (!signIn) return { ok: true, token: '', name: claim.name, agent };

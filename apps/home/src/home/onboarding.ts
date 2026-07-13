@@ -17,7 +17,7 @@ import {
   signupWithName,
   passkeySignHash,
   googleSignHash,
-  connectCustodianWallet,
+  connectCustodianCached,
   secureHomeWithGoogle,
   secureHomeGoogleNoName,
   chargePayment,
@@ -252,7 +252,8 @@ export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Prom
     // may be another home's custodian, e.g. the platform deployer). This is the relying-app GRANT signer,
     // so the site/session/payment delegations must be signed by the home's actual custodian. Falls back to
     // the active account only when no sender is known (shouldn't happen on the grant path).
-    const addr = sender ? await connectCustodianWallet(sender) : await connectWallet(true);
+    // B5 — cache-first: reuse the session custodian (seeded at SIWE/bootstrap) without re-popping the picker.
+    const addr = sender ? await connectCustodianCached(sender) : await connectWallet(true);
     return (h: Hex) => personalSign(addr, h);
   }
   if (isKmsVia(via)) {
