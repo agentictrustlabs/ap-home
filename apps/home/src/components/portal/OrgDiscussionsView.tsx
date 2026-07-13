@@ -98,9 +98,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       setListings(d.listings ?? []);
     }
     if (chRes.status === 403) {
-      // Surface WHY (no more silent "not a member"): the DO's gate message says whether to join, etc.
-      const b = (await chRes.json().catch(() => ({}))) as { error?: string };
-      setMember(false); setChannels(null); setError(b.error ?? 'you are not a member of this community'); return;
+      // Non-member: the enrollment card (Request to join / Complete membership) IS the explanation now (spec
+      // §12). Don't leak the DO's old listing-first gate message ("publish a directory listing to enter") into
+      // it — that framing contradicts request→approve→complete. Clear any stale error too.
+      setMember(false); setChannels(null); setError(null); return;
     }
     if (!chRes.ok) {
       const b = (await chRes.json().catch(() => ({}))) as { error?: string };
