@@ -688,6 +688,21 @@ async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address> {
   return agentAccountClient().getAddressForAgentAccount({ custodians: [owner], salt });
 }
 
+/** Client-side "is this SA already deployed on-chain?" — a single `getBytecode` read via the a2a RPC proxy.
+ *  Lets wallet signup detect fresh-vs-existing WITHOUT spending a SIWE (the old `siweLogin`-to-detect). On an
+ *  RPC hiccup we return false (treat as fresh) — a redundant deploy of an existing SA fails server-side with a
+ *  surfaced error, never a silent weaker path (ADR-0013). Deployed ⟺ this EOA custodies it (the address is
+ *  derived from custodians=[EOA], so only a deploy under this EOA yields it). */
+async function isAgentDeployed(sa: Address): Promise<boolean> {
+  try {
+    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    const code = await pub.getBytecode({ address: sa });
+    return !!code && code !== '0x';
+  } catch {
+    return false;
+  }
+}
+
 /** Pick a free name + build the `executeBatch(register, setPrimary)` calldata the new SA runs
  *  to claim it (newOwner = the SA itself). Returned to ride along in the deploy userOp. */
 async function buildClaimCallData(
@@ -2088,35 +2103,36 @@ export async function signupWithName(
   }
   // wallet: the EOA's deterministic agent (reconnect if it exists, else bootstrap).
   onStep?.('Connecting your wallet…');
-  const first = await siweLogin(); // connects wallet + signs SIWE (also issues the session for an EXISTING agent)
-  if (first.status === 'issued') {
-    // Existing DEPLOYED agent → claim the name in a standalone op (no deploy to batch it into). The SIWE
-    // above already issued the session token, so we do NOT sign in again (B1 — no redundant second SIWE).
-    rememberSessionCustodian(first.agent, first.address); // B5 — the SIWE already picked; skip re-picking later
-    const signHash: SignHash = (h) => personalSign(first.address, h);
-    const claim = await claimName(first.agent, signHash, base, onStep);
-    if (!claim.ok) return { ok: false, error: claim.error };
-    return { ok: true, token: first.token, name: claim.name, agent: first.agent };
-  }
-  if (first.status !== 'bootstrap') {
-    return { ok: false, error: first.reason ?? `sign-in ${first.status}` };
-  }
-  // Fresh EOA → DEPLOY + CLAIM in ONE userOp (B2 — mirror the passkey path). Derive the counterfactual SA
-  // (deriveEoaSa matches the server's eoa deploy: custodians=[owner], salt=0), build the claim calldata
-  // (newOwner = that SA), and attach it to the deploy so the SA is created AND the name claimed in a SINGLE
-  // wallet prompt — dropping the separate claim userOp.
-  const address = first.address;
+  // B6 — DETECTION WITHOUT SIWE. The old flow spent a `siweLogin` just to learn fresh-vs-existing. Instead
+  // pick the custodian account (the picker fires either way), derive its deterministic SA, and READ whether
+  // it's already deployed. A fresh self-serve signup then signs ZERO SIWE before deploy — only the deploy+claim
+  // userOp — and the session is issued later by `openHome` (the facet enrolls there too, like the passkey path).
+  const address = await connectWallet(true);
   const sa = await deriveEoaSa(address, 0n);
+  rememberSessionCustodian(sa, address); // B5 — seed the custodian cache for the ceremonies that follow
+  const deployed = await isAgentDeployed(sa);
+  if (deployed) {
+    // Existing agent → claim the name in a standalone op (no deploy to batch it into).
+    const signHash: SignHash = (h) => personalSign(address, h);
+    const claim = await claimName(sa, signHash, base, onStep);
+    if (!claim.ok) return { ok: false, error: claim.error };
+    if (!signIn) return { ok: true, token: '', name: claim.name, agent: sa };
+    onStep?.('Signing you in…');
+    const login = await siweLogin();
+    return login.status === 'issued'
+      ? { ok: true, token: login.token, name: claim.name, agent: sa }
+      : { ok: false, error: `created, but sign-in returned ${login.status}` };
+  }
+  // Fresh EOA → DEPLOY + CLAIM in ONE userOp (B2), NO SIWE. `deriveEoaSa` matches the server's eoa deploy
+  // (custodians=[owner], salt=0); build the claim calldata (newOwner = that SA) and attach it so the SA is
+  // created AND the name claimed in a SINGLE wallet prompt.
   const claim = await buildClaimCallData(base, sa, onStep);
   if (!claim.ok) return { ok: false, error: claim.error };
   const dep = await bootstrapWithWallet(address, onStep, claim.callData);
   if (!dep.ok) return { ok: false, error: dep.error };
   const agent = dep.agent;
-  // B5 — the SIWE above already picked this custodian; seed the session cache so activatePersonPlanes' vault +
-  // interactions ceremonies (signHashFor) reuse it WITHOUT re-popping the account picker each time.
-  rememberSessionCustodian(agent, address);
-  // B1 — self-serve `secureHome` passes signIn=false; the OIDC/enrollment ceremony signs the person in via
-  // the grant + id_token, so skip the extra SIWE here (its token would be unused) — saving a picker + SIWE.
+  // B1 — self-serve `secureHome` passes signIn=false; the session is issued later by openHome, so skip the
+  // SIWE here (its token would be unused).
   if (!signIn) return { ok: true, token: '', name: claim.name, agent };
   onStep?.('Signing you in…');
   const login = await siweLogin();
