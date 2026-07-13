@@ -53,9 +53,10 @@ export function makeEnv(): Env {
     TWILIO_ACCOUNT_SID: t(process.env.TWILIO_ACCOUNT_SID),
     TWILIO_FROM_NUMBER: t(process.env.TWILIO_FROM_NUMBER),
     // Testing: echo the dev OTP in the response when a provider is UNCONFIGURED (a real SendGrid/Twilio
-    // NEVER echoes). Defaults ON (testnet demo) so email/phone sign-in works with no provider — the code
-    // shows in the card. Set DEV_OTP_ECHO=false to require reading it from server logs instead.
-    DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO) ?? 'true',
+    // NEVER echoes). FAIL-CLOSED DEFAULT (audit 2026-07-13 CRIT-1): defaults OFF so a missing/misconfigured
+    // provider is a fail-closed OUTAGE (no code delivered), NOT an OTP disclosure that mints a session/custody.
+    // A developer testing with no provider must OPT IN explicitly via DEV_OTP_ECHO=true (never in production).
+    DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO) ?? 'false',
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
