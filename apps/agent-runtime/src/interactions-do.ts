@@ -333,6 +333,14 @@ export class InteractionsDO {
       if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
         return json({ error: 'grant signature failed verification against the delegator' }, 403);
       }
+      // NEW-H6 (Phase B): pin the delegate to the configured interactions service SA. `vaultFor` runs every
+      // op as requester=grant.delegate, so a grant issued to any OTHER delegate would route the principal's
+      // entire vault surface through the wrong delegate. Inert until provisioned (INTERACTIONS_SERVICE_SA
+      // unset ⇒ no pin, the pre-Phase-B behavior).
+      const expectedInteractionsSa = (this.env.INTERACTIONS_SERVICE_SA ?? '').toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(expectedInteractionsSa) && wire.delegate.toLowerCase() !== expectedInteractionsSa) {
+        return json({ error: 'grant delegate must be the configured interactions service SA (NEW-H6)' }, 403);
+      }
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       st.grant = wire;
       // Ledger row (W3e): hash + delegate + decoded resources — never the wire (bearer secret).
@@ -353,6 +361,11 @@ export class InteractionsDO {
       const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
       const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
       if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return json({ error: 'delivery grant signature failed verification against the delegator' }, 403);
+      // NEW-H6 (Phase B): pin the delivery delegate to the configured delivery service SA (inert until provisioned).
+      const expectedDeliverySa = (this.env.DELIVERY_SERVICE_SA ?? '').toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(expectedDeliverySa) && wire.delegate.toLowerCase() !== expectedDeliverySa) {
+        return json({ error: 'delivery grant delegate must be the configured delivery service SA (NEW-H6)' }, 403);
+      }
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       st.deliveryGrant = wire;
       st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: wire.delegate.toLowerCase(), resources: ['(delivery:write-only)'], storedAt: new Date().toISOString() }].slice(-50);

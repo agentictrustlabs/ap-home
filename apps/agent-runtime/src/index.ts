@@ -376,6 +376,13 @@ export interface Env {
    *  demo-a2a to derive SA_expected during the OIDC callback). Constant-time
    *  compared; the user's Google authn already happened at the broker. */
   A2A_CUSTODY_BRIDGE_SECRET?: string;
+  // Phase B / NEW-H6: the provisioned interactions + delivery service SAs. When set, the InteractionsDO PINS
+  // the custodied grant's delegate to these — a grant to any other delegate is rejected (vaultFor runs every
+  // op as requester=grant.delegate, so an unpinned grant would route the principal's whole vault through the
+  // wrong delegate). Inert until provisioned (unset ⇒ no pin, the pre-Phase-B behavior). These are also the
+  // SAs the DO will client-mint AS once the DEL-001 service-session infrastructure lands (kills server-mint).
+  INTERACTIONS_SERVICE_SA?: string;
+  DELIVERY_SERVICE_SA?: string;
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
