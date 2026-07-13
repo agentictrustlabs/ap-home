@@ -353,12 +353,12 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     key={h.smartAgent}
                     type="button"
                     onClick={() => setRecipient(h)}
-                    style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '0.5rem 0', borderBottom: '1px solid var(--color-border)' }}
+                    style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', justifyContent: 'flex-start', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--color-text-body)', fontWeight: 400, cursor: 'pointer', padding: '0.5rem 0', borderBottom: '1px solid var(--color-border)' }}
                   >
                     <AvatarUpload name={h.displayName ?? h.name} size={40} />
                     <div>
                       <b>{h.displayName ?? h.name}</b>
-                      <div style={{ fontSize: '0.76rem', opacity: 0.65 }}>{h.name}</div>
+                      {h.displayName && <div style={{ fontSize: '0.76rem', opacity: 0.65 }}>{h.name}</div>}
                     </div>
                   </button>
                 ))
