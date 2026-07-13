@@ -28,6 +28,7 @@ import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { agentNameForLabel } from '../../src/lib/domain';
 import type { ContextRefV1 } from '@agenticprimitives/fabric/messaging';
+import type { OrgApplication } from '../lib/org-applications';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -226,26 +227,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'apply') {
-      // spec 324 §7 — submit a MembershipApplication: a REQUEST-act message into the ORG's inbox
-      // (contextRef kind 'membership-application'). The message IS the application (recorded on one
-      // InteractionExchange); its messageId is the applicationId. Owner is the applicant's own inbox; the org
-      // is the recipient. NOT membership-gated — a non-member applies. Approval (steward, /connect/org-decide)
-      // creates the OrganizationMembership; this message confers NOTHING (ADR-0041/0048 #8).
+      // spec 324 §7 Tier-2 — submit a MembershipApplication into the ORG's `org.applications` vault doc (a plain
+      // whole-doc record via the org's InteractionsDO — NOT the inbox, so it surfaces reliably to the steward).
+      // NOT membership-gated (a non-member applies). Approval (steward, /connect/org-decide) creates the
+      // OrganizationMembership; this record confers NOTHING (ADR-0041/0048 #8). One entry per applicant (re-apply
+      // updates in place).
       const orgSa = (body.org ?? '').trim().toLowerCase();
       if (!/^0x[0-9a-fA-F]{40}$/.test(orgSa)) return jsonCors({ error: 'org (SA) required' }, request, 400);
       if (orgSa === owner.toLowerCase()) return jsonCors({ error: 'cannot apply to your own agent' }, request, 400);
-      const out = await sendFromInbox(inboxKvFor, owner as Address, {
-        recipient: orgSa as Address,
-        subject: 'Membership application',
-        bodyText: body.bodyText?.trim() || 'Requesting to join this organization.',
-        // Two anchors: the org this is about + the applicant SA (InboxItemV1 doesn't expose the sender, so the
-        // steward reads the applicant from this ref to decide). Both copies carry both refs.
-        contextRefs: [
-          { kind: 'membership-application', id: orgSa, label: 'Membership application' },
-          { kind: 'applicant', id: owner, label: 'Applicant' },
-        ],
-      }, makeBodyStoreFactory(env));
-      return jsonCors({ ok: true, applicationId: out.messageId, ...out }, request);
+      const { bridgeInteractions } = await import('../lib/interactions-bridge');
+      const cur = await bridgeInteractions<{ doc?: { applications?: OrgApplication[] } }>(env, orgSa, 'applications.get', {}).catch(() => null);
+      const apps = (cur?.ok ? cur.body.doc?.applications : undefined) ?? [];
+      const applicationId = `app_${crypto.randomUUID()}`;
+      const next = [
+        ...apps.filter((a) => a.applicant.toLowerCase() !== owner.toLowerCase()),
+        { applicationId, applicant: owner, message: body.bodyText?.trim() || 'Requesting to join this organization.', submittedAt: new Date().toISOString() },
+      ];
+      const put = await bridgeInteractions(env, orgSa, 'applications.put', { doc: { applications: next } });
+      if (!put.ok) return jsonCors({ error: put.body.error ?? `submit failed (${put.status})` }, request, 502);
+      return jsonCors({ ok: true, applicationId }, request);
     }
     if (body?.action === 'reply') {
       // In-thread chat reply (spec 313): recipient comes from the owner's own

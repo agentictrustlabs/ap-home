@@ -53,12 +53,16 @@ const DIRECTORY_RESOURCE = 'directory.data';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
-const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:org.applications', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
 const INBOX_RESOURCE = 'inbox.data';
 const DM_BODY_PREFIX = 'message.body:dm:';
+// spec 324 §7 Tier-2 — the org's pending MembershipApplications doc, a plain whole-doc record in the org's
+// vault (NOT the inbox — a non-member's application must surface reliably to the steward). Bridge-only: the
+// Home appends on the applicant's behalf (applying is open) and reads on the steward's behalf.
+const APPLICATIONS_RESOURCE = 'org.applications';
 
 // Person-plane records (spec 322 W3d): the person's authoritative org-relationship doc and their
 // per-org shareable profile cards. Self-gated ops only — the session SA must BE the principal.
@@ -421,7 +425,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill) → no external gate.
@@ -450,6 +454,15 @@ export class InteractionsDO {
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
           await this.writeDoc(g, INBOX_RESOURCE, body.doc);
+          return json({ ok: true });
+        }
+        if (op === 'applications.get') {
+          const doc = await this.readDoc<unknown>(g, APPLICATIONS_RESOURCE, { applications: [] });
+          return json({ ok: true, doc });
+        }
+        if (op === 'applications.put') {
+          if (body.doc === undefined) return json({ error: 'doc required' }, 400);
+          await this.writeDoc(g, APPLICATIONS_RESOURCE, body.doc);
           return json({ ok: true });
         }
         if (op === 'inbox.body.get') {

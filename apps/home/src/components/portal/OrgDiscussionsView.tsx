@@ -149,14 +149,17 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   }, [session, communityId]);
 
   const join = useCallback(async () => {
-    if (!session || !agentAddress || !joinName.trim()) return;
+    if (!session || !agentAddress) return;
     setBusy(true); setError(null);
     try {
+      // Use the agent's naming-service name by default — don't make the member type a display name (they can
+      // still override via the optional field). Falls back to a short address label only if unnamed.
+      const displayName = joinName.trim() || agentName || `member-${agentAddress.slice(2, 8)}`;
       // Route the signer by the home's ACTUAL credential (a KMS home must not pop a passkey/wallet).
       const sign = await signHashFor(resolveVia(homeProfile?.credential, session.via), agentAddress as Address, { token: session.token });
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId,
-        displayName: joinName.trim(),
+        displayName,
       });
       const res = await fetch('/connect/directory', {
         method: 'POST', headers: authed,
@@ -172,7 +175,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       if (isKmsVia(joinVia)) await activateInteractionsIfNeeded(agentAddress as Address, joinVia, { token: session.token }).catch(() => null);
       // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
       // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
-      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, joinName.trim());
+      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, displayName);
       await load();
       // The join added this org to the member's tree — reload every dropdown/list instance NOW (the
       // triggered related-orgs read also runs the org-name self-heal, so it arrives named, not 0x…).
@@ -180,7 +183,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [session, homeProfile?.credential, agentAddress, joinName, communityId, authed, load]);
+  }, [session, homeProfile?.credential, agentAddress, agentName, joinName, communityId, authed, load]);
 
   // spec 324 §7/§12 — a non-member REQUESTS to join (a MembershipApplication delivered to the org's inbox); a
   // steward approves/rejects from Members. The listing is published as a CONSEQUENCE of enrollment (join()
@@ -395,12 +398,12 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             message you here, and you can revoke it anytime.
           </p>
           <input
-            placeholder="Display name (how members see you)"
+            placeholder={agentName ? `Display name (optional — defaults to ${agentName})` : 'Display name (optional)'}
             value={joinName}
             onChange={(e) => setJoinName(e.target.value)}
             style={{ width: '100%', marginBottom: '0.6rem' }}
           />
-          <button type="button" className="btn" style={{ width: 'auto' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
+          <button type="button" className="btn" style={{ width: 'auto' }} disabled={busy} onClick={() => void join()}>
             {busy ? 'Signing…' : 'Sign & complete membership'}
           </button>
         </div>

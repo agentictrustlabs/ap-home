@@ -16,6 +16,8 @@ import { orgVault } from '../lib/org-vault';
 import { sendFromInbox } from '../../src/home/inbox-data';
 import { makeInboxKv } from '../lib/inbox-store';
 import { makeBodyStoreFactory } from './message-body-store';
+import { bridgeInteractions } from '../lib/interactions-bridge';
+import type { OrgApplication } from '../lib/org-applications';
 import { CHAIN_ID } from '../../src/lib/chain';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
@@ -84,6 +86,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       contextRefs: ctx,
     }, bodyStoreFor).catch(() => {});
   }
+
+  // Remove the decided application from the org's pending queue (best-effort; the notification + grant already
+  // stand). One entry per applicant, so filter by applicant SA.
+  try {
+    const cur = await bridgeInteractions<{ doc?: { applications?: OrgApplication[] } }>(env, org, 'applications.get', {});
+    const apps = (cur.ok ? cur.body.doc?.applications : undefined) ?? [];
+    const next = apps.filter((a) => a.applicant.toLowerCase() !== applicant);
+    if (next.length !== apps.length) await bridgeInteractions(env, org, 'applications.put', { doc: { applications: next } });
+  } catch { /* queue cleanup is best-effort */ }
 
   return json({ ok: true, decision: enrollmentDecision });
 };
