@@ -12,6 +12,7 @@ import { orgVault } from '../lib/org-vault';
 import { controlsOrg } from './org-invite';
 import { callInteractions, stewardWireFor } from './channels';
 import { removeOrgMemberLink } from './membership';
+import { planMembershipRevocationCascade } from '@agenticprimitives/organization';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -68,12 +69,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (rec) await vault.set(key, { ...rec, status: 'removed', removedAt: Date.now() });
     }
   } catch { /* vault unreachable — the app-level removal above already stands */ }
-  // Also surface a grant recorded only on the member link (email-path invites store it there).
-  if (!memberAccessDelegation) {
-    const linkRaw = await env.AUTH_CODES.get(`related:${member}:${org}`);
-    const link = linkRaw ? (JSON.parse(linkRaw) as { memberAccessDelegation?: unknown }) : null;
-    memberAccessDelegation = link?.memberAccessDelegation ?? null;
-  }
+  // Read the member link once — its provenance (W3) drives the cascade, and email-path invites store the
+  // grant here too.
+  const linkRaw = await env.AUTH_CODES.get(`related:${member}:${org}`);
+  const link = linkRaw ? (JSON.parse(linkRaw) as { memberAccessDelegation?: unknown; membershipId?: string; delegationHash?: string }) : null;
+  if (!memberAccessDelegation) memberAccessDelegation = link?.memberAccessDelegation ?? null;
 
-  return json({ ok: true, memberAccessDelegation });
+  // spec 324 §11 — the ordered membership-end cascade. Membership end cascades over its DERIVED artifacts
+  // (invariant #12: a single delegation revoke does NOT end membership). The planner emits the ordered
+  // disable/revoke/remove/tombstone: the projection keys were removed above; the CLIENT revokes the returned
+  // delegation hashes ON-CHAIN as the org (custody stays with the steward), and the member's Home ends the
+  // OrganizationMembership Situation (status='ended') from `cascade.membershipId`. This replaces the ad-hoc
+  // "remove listing + tombstone one grant" with an explicit, ordered §11 plan.
+  const cascade = planMembershipRevocationCascade({
+    membershipId: (link?.membershipId ?? `sit_mem_${member.replace('0x', '')}`) as `sit_${string}`,
+    endedAt: new Date().toISOString(),
+    endReason: 'removed',
+    membershipDerivedDelegationHashes: [link?.delegationHash].filter((h): h is string => !!h),
+    conversationProjectionKeys: [`related:${member}:${org}`, `delegated-idx:${org}`, `directory:${org}:${member}`],
+  });
+
+  return json({ ok: true, memberAccessDelegation, cascade });
 };
