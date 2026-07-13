@@ -4360,11 +4360,15 @@ app.post('/mcp/vault/get', async (c) => {
       });
     }
     if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
-    return await callMcpToolViaDelegation({
+    // CRIT-2 W6a — server-side CLIENT-MINT: prove possession with a DO-side invocation proof (the a2a's
+    // interactions-session KMS key) over the exact call instead of server-mint. Same posture as the
+    // A2aTaskDO seams (W3). The Home's browser vault-client presents {delegation, requester} over its
+    // authenticated CSRF session; the a2a re-verifies the delegation (ERC-1271) + mints token+proof — no
+    // DEMO_ALLOW_SERVER_MINT. (Full delegate-possession would need browser-mint infra in demo-sso-next.)
+    return await callMcpToolWithProof({
       env: c.env,
       toolName: 'get_vault_record',
       delegation: body.delegation,
-      requester: body.requester,
       toolArgs: { recordType: body.recordType },
     });
   } catch (e) {
@@ -4395,11 +4399,11 @@ app.post('/mcp/vault/set', async (c) => {
       });
     }
     if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
-    return await callMcpToolViaDelegation({
+    // CRIT-2 W6a — server-side client-mint via DO-side invocation proof (see /mcp/vault/get). No server-mint.
+    return await callMcpToolWithProof({
       env: c.env,
       toolName: 'set_vault_record',
       delegation: body.delegation,
-      requester: body.requester,
       toolArgs: { recordType: body.recordType, data: body.data },
     });
   } catch (e) {
@@ -4428,11 +4432,11 @@ app.post('/mcp/vault/list', async (c) => {
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
-    return await callMcpToolViaDelegation({
+    // CRIT-2 W6a — server-side client-mint via DO-side invocation proof (see /mcp/vault/get). No server-mint.
+    return await callMcpToolWithProof({
       env: c.env,
       toolName: 'list_vault_record',
       delegation: body.delegation,
-      requester: body.requester,
     });
   } catch (e) {
     return c.json({ ok: false, error: 'vault_list_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
