@@ -37,11 +37,16 @@ export async function recordOrgMembership(
     // their relationships doc + the per-org profile card (the server's `related:*` KV is a
     // projection/cache of this). A 409 here (person hasn't enabled interactions yet) is expected —
     // the doc catches up at their enable ceremony; the KV projection covers display meanwhile.
+    // HOME-PORT-1 (2026-07-12) — include the member→org membership WIRE in the vault entry, not just the
+    // relationship label. Previously the wire lived ONLY in the Home's `delegated-idx`/`related:*` KV, so a
+    // second Home could rebuild the member LIST but not the authority wire (steward Members panel /
+    // delegated-orgs broker went dark after a Home swap). Storing it in relationships.data makes it portable:
+    // related-orgs.ts self-heals `related:*` from `entry.delegations[0]`, so any Home reconstructs it.
     const doBase = `/a2a/interactions/${member.toLowerCase()}`;
     const hdrs = { 'content-type': 'application/json' };
     await fetch(`${doBase}/relationships.merge`, {
       method: 'POST', headers: hdrs,
-      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member' } }),
+      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)] } }),
     }).catch(() => null);
     if (displayName?.trim()) {
       await fetch(`${doBase}/member.profile.put`, {
