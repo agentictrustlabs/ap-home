@@ -73,6 +73,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [applied, setApplied] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newPrivate, setNewPrivate] = useState(false);
+  const [newMembers, setNewMembers] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
@@ -210,17 +212,21 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     try {
       const res = await fetch('/connect/channels', {
         method: 'POST', headers: authed,
-        body: JSON.stringify({ action: 'create', communityId, title: newTitle.trim() }),
+        body: JSON.stringify({
+          action: 'create', communityId, title: newTitle.trim(),
+          // spec 324 §10 — public (all members) or private (only the members you pick + you).
+          ...(newPrivate ? { visibility: 'private', members: newMembers } : {}),
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; channelId?: string; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error ?? `create failed (${res.status})`);
-      setNewTitle(''); setCreating(false);
+      setNewTitle(''); setCreating(false); setNewPrivate(false); setNewMembers([]);
       await load();
       if (body.channelId) setActive(body.channelId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [newTitle, communityId, authed, load]);
+  }, [newTitle, newPrivate, newMembers, communityId, authed, load]);
 
   const enableOrgVault = useCallback(async () => {
     if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
@@ -485,7 +491,36 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') void createChannel(); }}
                 style={{ width: '100%', marginBottom: '0.3rem' }}
               />
-              <button type="button" className="btn" disabled={busy || !newTitle.trim()} onClick={() => void createChannel()}>Create</button>
+              {/* spec 324 §10 — public (all members) or private (only the members you pick + you). */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', margin: '0.2rem 0' }}>
+                <input type="checkbox" checked={newPrivate} onChange={(e) => setNewPrivate(e.target.checked)} />
+                Private (only selected members)
+              </label>
+              {newPrivate && (
+                <div style={{ maxHeight: 130, overflowY: 'auto', border: '1px solid var(--color-border, #e5e7eb)', borderRadius: 6, padding: '0.3rem', marginBottom: '0.3rem' }}>
+                  {listings.filter((l) => l.listing.displayName !== you).length === 0 && (
+                    <p style={{ fontSize: '0.72rem', opacity: 0.6, margin: 0 }}>No other members yet — you can add them later.</p>
+                  )}
+                  {listings.filter((l) => l.listing.displayName !== you).map((l) => {
+                    const sa = (l.listing.subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase();
+                    const checked = newMembers.includes(sa);
+                    return (
+                      <label key={l.listing.subject} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', padding: '0.1rem 0' }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!sa}
+                          onChange={(e) => setNewMembers((prev) => e.target.checked ? [...prev, sa] : prev.filter((m) => m !== sa))}
+                        />
+                        {l.listing.displayName}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <button type="button" className="btn" disabled={busy || !newTitle.trim()} onClick={() => void createChannel()}>
+                {newPrivate ? 'Create private topic' : 'Create'}
+              </button>
             </div>
           )}
           {(channels ?? []).map((c) => (

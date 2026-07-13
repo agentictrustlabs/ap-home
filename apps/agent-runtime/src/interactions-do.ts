@@ -23,6 +23,7 @@ import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCE
 import {
   appendBoardPost,
   createBoardChannel,
+  canSeeChannel,
   canonicalizeMessage,
   createVaultMessageBodyStore,
   isListingCurrent,
@@ -659,7 +660,10 @@ export class InteractionsDO {
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
-        let wire = index.map((c) => ({ ...c, messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
+        // spec 324 §10 — a viewer sees public topics + only the private topics they're a member of (steward sees all).
+        let wire = index
+          .filter((c) => canSeeChannel(c, sessionSa, steward))
+          .map((c) => ({ ...c, messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
         if (op === 'channels.read' && typeof body.channelId === 'string') {
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
           wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
@@ -678,7 +682,13 @@ export class InteractionsDO {
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
         return this.serialize(async () => { // ARCH-H1 — the conversation.index RMW is a shared-doc write; serialize it too
           const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
-          const r = createBoardChannel(index, { contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward' });
+          const r = createBoardChannel(index, {
+            contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward',
+            // spec 324 §10 — public (default) or private-to-a-member-subset; the creator is always a member.
+            visibility: body.visibility === 'private' ? 'private' : 'public',
+            members: Array.isArray(body.members) ? (body.members as unknown[]).map((m) => String(m)) : [],
+            creatorSa: sessionSa,
+          });
           if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
           await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
@@ -695,6 +705,8 @@ export class InteractionsDO {
           const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
+          // spec 324 §10 — a private topic only admits its own members (the creator is one).
+          if (!canSeeChannel(entry, sessionSa)) return json({ error: 'not a member of this private topic' }, 403);
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
           const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });

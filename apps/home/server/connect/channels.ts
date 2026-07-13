@@ -123,7 +123,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const who = await personFrom(request, env);
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string }
+    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string; visibility?: 'public' | 'private'; members?: string[] }
     | null;
   const communityId = (body?.communityId ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
@@ -131,7 +131,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const stewardship = await stewardWireFor(env, who.person, communityId);
   if (body?.action === 'create') {
     const r = await callInteractions(env, communityId, 'channels.create', {
-      session: who.token, title: body.title ?? '', ...(stewardship ? { stewardship } : {}),
+      session: who.token, title: body.title ?? '',
+      // spec 324 §10 — public (default) or private-to-selected-members topic.
+      ...(body.visibility === 'private' ? { visibility: 'private', members: Array.isArray(body.members) ? body.members : [] } : {}),
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }
