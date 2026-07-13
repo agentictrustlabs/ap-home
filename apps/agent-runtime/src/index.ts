@@ -4853,12 +4853,13 @@ app.post('/intent', async (c) => {
     goal,
     principal: wire.delegator as Address,
     // The invoker IS the authority boundary — every composed MCP call rides the supplied delegation.
+    // CRIT-2 W6a — the direct /intent orchestration (demo-web read-profile) client-mints via DO-side
+    // invocation proof (callMcpToolWithProof), same as the A2aTaskDO orchestrate seam (W3). No server-mint.
     invoke: async (toolId, toolArgs) => {
-      const resp = await callMcpToolViaDelegation({
+      const resp = await callMcpToolWithProof({
         env: c.env,
-        toolName: toolId as Parameters<typeof callMcpToolViaDelegation>[0]['toolName'],
+        toolName: toolId as Parameters<typeof callMcpToolWithProof>[0]['toolName'],
         delegation: wire,
-        requester,
         toolArgs,
       });
       const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
