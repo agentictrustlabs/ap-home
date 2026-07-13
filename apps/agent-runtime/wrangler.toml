@@ -184,6 +184,14 @@ bindings = [
 binding = "BRIDGE_NONCES"
 id = "7580076e201f480aa9dce2ec1294d0cd"
 
+# D-P0-1 (spec 220 / ADR-0011): the durable (iss,sub)->SA map that ACTIVATES the assertSubjectSaStable
+# guard. Records each OIDC subject's derived Smart Agent on first resolve; fail-closed 409 custody_root_changed
+# if a later resolve derives a DIFFERENT SA (the custody-derivation root A2A_CUSTODY_ROOT_KEY changed) so a
+# rotation can never silently orphan the old account + its vault. Empty map = records-on-first-sight (safe).
+[[env.production.kv_namespaces]]
+binding = "SUBJECT_SA_MAP"
+id = "ceb52b3418ae4ac9acde3206b3ec8862"
+
 # Federated user-data tokens (spec 265): per-person YouVersion OAuth access/refresh tokens, KMS-encrypted
 # at rest (envelope), keyed by person SA. Read ONLY server-side by the youversion read-proxy — never
 # returned to a relying app or grantee.
