@@ -351,6 +351,15 @@ export interface Env {
    *  receiptHash). Unset ⇒ unsigned (integrity-only) receipts. Production
    *  target: agent-SA KMS EIP-712. */
   VERIFICATION_RECEIPT_SECRET?: string;
+  /** NEW-C2 — signer backend selector for the relay/bundler/paymaster signer.
+   *  'gcp-kms' routes signing to GCP_KMS_KEY_NAME; 'local-aes' (default) uses
+   *  A2A_MASTER_PRIVATE_KEY. Injected as a --var by deploy-cloudflare; must be
+   *  bridged into process.env (bridgeEnvToProcessEnv) for the signer sites to see it. */
+  A2A_KMS_BACKEND?: string;
+  /** NEW-C2 — full VERSIONED resource name of the asymmetric secp256k1 Cloud KMS
+   *  signing key (.../cryptoKeys/<K>/cryptoKeyVersions/<V>). Required when
+   *  A2A_KMS_BACKEND=gcp-kms; GcpKmsSigner reads it from process.env. */
+  GCP_KMS_KEY_NAME?: string;
   /** Full resource name of the symmetric Cloud KMS key for envelope
    *  encryption. Required when A2A_KMS_BACKEND=gcp-kms. */
   GCP_KMS_ENCRYPT_KEY_NAME?: string;
@@ -400,6 +409,13 @@ function bridgeEnvToProcessEnv(env: Env) {
     'A2A_ALLOW_LOCAL_ENVELOPE_KEY',
     'RPC_URL',
     'CHAIN_ID',
+    // NEW-C2: the signer-selection + signing-key resolvers read these from process.env
+    // (index.ts signer sites + gcp.ts:86). Without them bridged, A2A_KMS_BACKEND=gcp-kms
+    // injected as a Worker --var stays invisible to process.env → signer silently falls back
+    // to local-aes / GcpKmsSigner throws "GCP_KMS_KEY_NAME is required". This gap was the real
+    // reason the a2a KMS relay was deferred (the GCP transport itself is workerd-native).
+    'A2A_KMS_BACKEND',
+    'GCP_KMS_KEY_NAME',
     'GCP_KMS_ENCRYPT_KEY_NAME',
     'GCP_SERVICE_ACCOUNT_JSON',
   ] as const;
