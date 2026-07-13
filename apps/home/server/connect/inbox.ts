@@ -177,6 +177,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         conversationId?: string;
         /** Optional managed org/service SA to act as — the person must control it (else 403). */
         agent?: string;
+        /** action:'apply' — the organization SA the applicant is requesting to join (spec 324 §7). */
+        org?: string;
       }
     | null;
 
@@ -222,6 +224,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         conversationId: body.conversationId,
       }, makeBodyStoreFactory(env));
       return jsonCors({ ok: true, ...out }, request);
+    }
+    if (body?.action === 'apply') {
+      // spec 324 §7 — submit a MembershipApplication: a REQUEST-act message into the ORG's inbox
+      // (contextRef kind 'membership-application'). The message IS the application (recorded on one
+      // InteractionExchange); its messageId is the applicationId. Owner is the applicant's own inbox; the org
+      // is the recipient. NOT membership-gated — a non-member applies. Approval (steward, /connect/org-decide)
+      // creates the OrganizationMembership; this message confers NOTHING (ADR-0041/0048 #8).
+      const orgSa = (body.org ?? '').trim().toLowerCase();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(orgSa)) return jsonCors({ error: 'org (SA) required' }, request, 400);
+      if (orgSa === owner.toLowerCase()) return jsonCors({ error: 'cannot apply to your own agent' }, request, 400);
+      const out = await sendFromInbox(inboxKvFor, owner as Address, {
+        recipient: orgSa as Address,
+        subject: 'Membership application',
+        bodyText: body.bodyText?.trim() || 'Requesting to join this organization.',
+        contextRefs: [{ kind: 'membership-application', id: orgSa, label: 'Membership application' }],
+      }, makeBodyStoreFactory(env));
+      return jsonCors({ ok: true, applicationId: out.messageId, ...out }, request);
     }
     if (body?.action === 'reply') {
       // In-thread chat reply (spec 313): recipient comes from the owner's own
