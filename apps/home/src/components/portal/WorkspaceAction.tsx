@@ -1,7 +1,7 @@
 'use client';
 // The primary action for the currently-selected workspace, shown just right of the switcher (spec 315):
 //   • person  → "Add organization"  → the org-create surface (/organizations)
-//   • org      → "Invite member"     → the org invite view (email link — flow wired up next)
+//   • org      → "Invite member"     → the Members surface, where the Invite panel now lives (spec 324 §12)
 // URL-derived scope, same as the sidebar. Kept minimal; the invite flow itself is a follow-up.
 import { usePathname, useRouter } from 'next/navigation';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
@@ -27,7 +27,7 @@ export function WorkspaceAction() {
   }
   if (active.kind === 'org') {
     return (
-      <button type="button" style={STYLE} onClick={() => router.push(orgHref(active.org, 'invite'))} title="Invite someone to this organization">
+      <button type="button" style={STYLE} onClick={() => router.push(orgHref(active.org, 'members'))} title="Invite someone to this organization">
         ✉ Invite member
       </button>
     );

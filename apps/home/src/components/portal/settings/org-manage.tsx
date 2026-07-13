@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
+import { OrgInvitePanel } from '../OrgInvitePanel';
 import {
   DelegationCard,
   OrgMembers,
@@ -72,6 +73,9 @@ export function OrgMembersSection({ orgSa }: { orgSa: string }) {
   return (
     <SectionShell title="Members">
       <OrgMembers org={record} token={token} />
+      {/* spec 324 §12 — ONE enrollment surface: Invite lives with the roster (the standalone /invite page
+          308-redirects here; the topbar "Invite member" action points here). */}
+      <OrgInvitePanel org={orgSa} />
     </SectionShell>
   );
 }
