@@ -363,6 +363,12 @@ export interface Env {
   /** Full resource name of the symmetric Cloud KMS key for envelope
    *  encryption. Required when A2A_KMS_BACKEND=gcp-kms. */
   GCP_KMS_ENCRYPT_KEY_NAME?: string;
+  /** NEW-C1 — full VERSIONED resource name of the asymmetric secp256k1 Cloud KMS key that the
+   *  InteractionsDO uses as its DEL-001 SESSION key for CLIENT-MINT (bound) vault tokens. Each principal
+   *  signs a sessionDelegation leaf binding THIS key's address to their SA at enable; the DO mints tokens
+   *  signed by it (callMcpToolBound) instead of server-mint. When set, the DO prefers the bound path; when
+   *  unset, the DO falls back to server-mint (DEMO_ALLOW_SERVER_MINT). Read directly from env (not process.env). */
+  GCP_KMS_INTERACTIONS_KEY_NAME?: string;
   /** Service-account JSON (set as wrangler secret). Same SA as the
    *  signing key; needs roles/cloudkms.cryptoKeyEncrypterDecrypter on
    *  GCP_KMS_ENCRYPT_KEY_NAME. */
@@ -1151,6 +1157,21 @@ app.get('/agent/identity', async (c) => {
       { backend, error: err instanceof Error ? err.message : String(err) },
       500,
     );
+  }
+});
+
+// NEW-C1 — the InteractionsDO's DEL-001 session-key address. The Home fetches this at the enable ceremony
+// and signs a sessionDelegation leaf binding it to the principal, so the DO can CLIENT-MINT bound vault
+// tokens (no server-mint). 404 when the interactions-session KMS key isn't configured (bound-mint disabled).
+app.get('/agent/interactions-session-key', async (c) => {
+  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+    return c.json({ ok: false, error: 'interactions_session_key_unconfigured' }, 404);
+  }
+  try {
+    const acct = await interactionsSessionAccount(c.env);
+    return c.json({ ok: true, address: acct.address });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
 
@@ -4033,6 +4054,85 @@ export async function callMcpToolViaDelegation(args: {
     env: args.env,
     toolName: args.toolName,
     token,
+    toolArgs: args.toolArgs,
+    auditSink,
+    correlationId,
+  });
+}
+
+// ─── NEW-C1: CLIENT-MINT (DEL-001-bound) vault transport for the InteractionsDO ──────────────────────────
+// callMcpToolViaDelegation above is SERVER-MINT (a server-held session key, no principal-signed leaf,
+// forwarded WITHOUT enforceBinding — fabrication, gated on DEMO_ALLOW_SERVER_MINT). callMcpToolBound is the
+// real thing: it mints a token signed by the interactions-session KMS key AND carries the PRINCIPAL-signed
+// sessionDelegation leaf binding that key to the principal, then forwards with enforceBinding — the exact
+// proof a relying app produces (mirrors demo-jp memberVaultToken). demo-mcp recovers the session key from the
+// signature and checks the leaf binds it to the principal SA (spec 270 v4). No server-mint.
+let _interactionsSessionAccount: Awaited<ReturnType<typeof createKmsViemAccount>> | null = null;
+
+/** The InteractionsDO's DEL-001 session signer — a viem account over the interactions-session KMS key
+ *  (GCP_KMS_INTERACTIONS_KEY_NAME). Cached per isolate (the key name is stable). Throws if unset. */
+export async function interactionsSessionAccount(env: Env): Promise<Awaited<ReturnType<typeof createKmsViemAccount>>> {
+  if (_interactionsSessionAccount) return _interactionsSessionAccount;
+  const keyName = (env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim();
+  if (!keyName) {
+    throw new Error('GCP_KMS_INTERACTIONS_KEY_NAME unset — the InteractionsDO bound-mint (NEW-C1) needs the interactions-session KMS key');
+  }
+  const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
+  if (!serviceAccountJson) {
+    throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
+  }
+  const backend = buildSignerBackend({
+    backend: 'gcp-kms',
+    config: { cryptoKeyVersionName: keyName, serviceAccountJson },
+    auditSink: buildAuditSink(env),
+  });
+  _interactionsSessionAccount = await createKmsViemAccount(backend);
+  return _interactionsSessionAccount;
+}
+
+function toDelegationStruct(w: IncomingDelegation): Delegation {
+  return {
+    delegator: w.delegator,
+    delegate: w.delegate,
+    authority: w.authority,
+    caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })),
+    salt: BigInt(w.salt),
+    signature: w.signature,
+  };
+}
+
+/** CLIENT-MINT a DEL-001-bound token (signed by the interactions-session KMS key + the principal-signed
+ *  sessionDelegation leaf) and forward it to demo-mcp with enforceBinding. The bound alternative to
+ *  callMcpToolViaDelegation — no server-mint, no DEMO_ALLOW_SERVER_MINT. */
+export async function callMcpToolBound(args: {
+  env: Env;
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  grant: IncomingDelegation;        // principal SA → INTERACTIONS_SERVICE_SA (the custodied st.grant)
+  sessionLeaf: IncomingDelegation;  // principal SA → interactions-session key (PRINCIPAL-signed DEL-001 leaf)
+  toolArgs?: Record<string, unknown>;
+}): Promise<Response> {
+  const auditSink = buildAuditSink(args.env);
+  const correlationId = crypto.randomUUID();
+  const signer = await interactionsSessionAccount(args.env);
+  const { token } = await mintDelegationToken(
+    {
+      iss: 'demo-a2a',
+      aud: MCP_AUDIENCE,
+      sub: args.grant.delegator, // the principal SA (grant delegator) — demo-mcp keys the record here
+      delegation: toDelegationStruct(args.grant),
+      sessionKeyAddress: signer.address as Address,
+      sessionDelegation: toDelegationStruct(args.sessionLeaf),
+      ttlSeconds: 300,
+      usageLimit: 10,
+    },
+    (msg) => signer.signMessage({ message: msg }),
+    { auditSink, correlationId },
+  );
+  return forwardMcpToken({
+    env: args.env,
+    toolName: args.toolName,
+    token,
+    enforceBinding: true,
     toolArgs: args.toolArgs,
     auditSink,
     correlationId,

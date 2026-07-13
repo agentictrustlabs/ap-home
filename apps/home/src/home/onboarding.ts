@@ -754,12 +754,23 @@ export async function activateInteractionsIfNeeded(
   try {
     const signHash = await signHashFor(via, principal, auth);
     const delegation = await issueInteractionsDelegation(principal, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID, signHash);
+    // NEW-C1 — also sign a DEL-001 session leaf binding the DO's interactions-session KMS key to the
+    // principal, so the DO CLIENT-MINTS bound vault tokens (no server-mint). Best-effort: if the a2a hasn't
+    // configured the interactions-session key (404), the DO stays on the server-mint bridge — the grant still
+    // lands, so activation is never blocked. (One extra principal signature at enable; KMS homes sign silently.)
+    let sessionLeafWire: DelegationWire | undefined;
+    try {
+      const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
+      if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
+        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash));
+      }
+    } catch { /* session-key fetch/sign hiccup — DO falls back to the server-mint bridge; grant still lands */ }
     await ensureCsrfToken();
     const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/grant`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
-      body: JSON.stringify({ delegation: toWire(delegation) }),
+      body: JSON.stringify({ delegation: toWire(delegation), ...(sessionLeafWire ? { sessionLeaf: sessionLeafWire } : {}) }),
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `interactions grant store failed (HTTP ${res.status})` };

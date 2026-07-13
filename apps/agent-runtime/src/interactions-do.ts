@@ -37,7 +37,7 @@ import type { Vault } from '@agenticprimitives/vault';
 import { verifyHomeSession } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolViaDelegation, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolViaDelegation, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -86,6 +86,11 @@ interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]
 interface IndexedListing { listing: DirectoryListingV1; label: string }
 interface StoredState {
   grant?: IncomingDelegation;
+  /** NEW-C1 — the PRINCIPAL-signed DEL-001 session-delegation leaf (principal → the interactions-session
+   *  KMS key). Custodied at grant.put alongside `grant`. When present (+ GCP_KMS_INTERACTIONS_KEY_NAME set),
+   *  vaultFor CLIENT-MINTS a bound token (callMcpToolBound) instead of server-mint — no DEMO_ALLOW_SERVER_MINT.
+   *  Absent ⇒ vaultFor falls back to the server-mint bridge (existing principals migrate on next enable). */
+  sessionLeaf?: IncomingDelegation;
   /** spec 323 W3 — the WRITE-ONLY delivery wire (owner → DELIVERY_SERVICE_SA), custodied HERE (a
    *  stored wire is a bearer secret; the DO is the delegate-service side, spec 322 §2). The DO is
    *  now the sole holder+wielder for dm-body writes — no app (not even the Home) keeps it. */
@@ -128,29 +133,37 @@ export class InteractionsDO {
   /** The fabric Vault port over the delegation-authorized demo-mcp transport (plane B). */
   private vaultFor(grant: IncomingDelegation): Vault {
     const env = this.env;
+    // NEW-C1 — per-op transport selection. When the principal has custodied a DEL-001 session leaf
+    // (st.sessionLeaf, PRINCIPAL-signed, binding the interactions-session KMS key) AND that key is
+    // configured, CLIENT-MINT a bound token (callMcpToolBound, enforceBinding) — the leaf's delegator MUST
+    // equal this grant's delegator (the principal / token sub), else it's not the right principal's leaf.
+    // Otherwise fall back to the server-mint bridge so pre-enable principals keep working; they migrate to
+    // bound-mint on their next enable (grant.put). No behavior change until GCP_KMS_INTERACTIONS_KEY_NAME set.
+    const callTool = async (toolName: 'get_vault_record' | 'set_vault_record', toolArgs: Record<string, unknown>): Promise<Response> => {
+      if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+        const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+        const leaf = st.sessionLeaf;
+        if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
+          return callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
+        }
+      }
+      return callMcpToolViaDelegation({ env, toolName, delegation: grant, requester: grant.delegate as Address, toolArgs, skipDelegationVerify: true });
+    };
     return {
       async write({ resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
-        const resp = await callMcpToolViaDelegation({ env, toolName: 'set_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource, data }, skipDelegationVerify: true });
+        const resp = await callTool('set_vault_record', { recordType: resource, data });
         const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault write failed (${resp.status})`);
       },
       async read<T>({ resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
-        // BOUNDED RETRY (2026-07-11) — defense-in-depth for the cold-cache first read. ROOT CAUSE
-        // (fixed in demo-mcp vault-key.ts): the per-op vault-key ERC-1271 verify hit the rate-limited
-        // RPC, so a valid authorization intermittently verified false → `{ok:false,
-        // vault_key_unauthorized}`. That is an ERROR, not an empty record — masking it as `null` made
-        // a just-written value "read back empty" (the write persists; only the read flaked). demo-mcp
-        // now caches the deterministic verdict, so only the first op per isolate touches the chain;
-        // this retry covers that first call. A real empty (`ok:true, record:null`) returns immediately
-        // — empty is an answer, an auth error is not (ADR-0013: bounded retry of the same call).
+        // BOUNDED RETRY (2026-07-11) — cold-cache first read; demo-mcp caches the deterministic vault-key
+        // verdict, so only the first op per isolate touches the chain. A real empty (`ok:true, record:null`)
+        // returns immediately — empty is an answer, an auth error is not (ADR-0013: retry the SAME call).
+        // NOTE: get_vault_record returns the payload under `data` (NOT `record`) — the field-name mismatch
+        // was THE "saved but reads back empty" bug.
         let lastErr = 'vault read failed';
         for (let attempt = 0; attempt < 4; attempt++) {
-          const resp = await callMcpToolViaDelegation({ env, toolName: 'get_vault_record', delegation: grant, requester: grant.delegate as Address, toolArgs: { recordType: resource }, skipDelegationVerify: true });
-          // get_vault_record returns the payload under `data` (NOT `record`). Reading `out.record` here
-          // made vaultFor.read ALWAYS return null → every readDoc-based read (directory/channels/board/
-          // inbox/relationships/member.profile + profile via record.get) came back empty though the
-          // write persisted. This was THE "saved but reads back empty" bug — a field-name mismatch, not
-          // an RPC/verify flake.
+          const resp = await callTool('get_vault_record', { recordType: resource });
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string };
           if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
@@ -343,6 +356,21 @@ export class InteractionsDO {
       }
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       st.grant = wire;
+      // NEW-C1 — custody the PRINCIPAL-signed DEL-001 session leaf (principal → interactions-session key), if
+      // supplied. Verify it ERC-1271 against the principal (== grant delegator) so the DO never bound-mints
+      // with a junk leaf; demo-mcp re-checks the binding at enforceBinding. Absent ⇒ server-mint bridge.
+      const leafWire = body.sessionLeaf as IncomingDelegation | undefined;
+      if (leafWire?.signature) {
+        if (leafWire.delegator.toLowerCase() !== wire.delegator.toLowerCase()) {
+          return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
+        }
+        const ld: Delegation = { ...leafWire, salt: BigInt(leafWire.salt), caveats: leafWire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+        const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        if (!(await this.erc1271(leafWire.delegator as Address, ldigest, leafWire.signature as Hex))) {
+          return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
+        }
+        st.sessionLeaf = leafWire;
+      }
       // Ledger row (W3e): hash + delegate + decoded resources — never the wire (bearer secret).
       let resources: string[] = [];
       try {
