@@ -3962,118 +3962,14 @@ async function forwardMcpToken(args: {
   });
 }
 
-export async function callMcpToolViaDelegation(args: {
-  env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
-  delegation: IncomingDelegation;
-  requester: Address;
-  /** Tool args forwarded to demo-mcp (e.g. vault recordType/data). Default {}. */
-  toolArgs?: Record<string, unknown>;
-  /** Skip the a2a-side ERC-1271 delegation pre-check. Set ONLY when the caller holds a grant that was
-   *  ALREADY ERC-1271-verified before it was custodied and is immutable at rest (the InteractionsDO's
-   *  `st.grant`/`deliveryGrant`, verified at `grant.put`/`grant.delivery.put`). Re-verifying it on every
-   *  vault op re-hit the free RPC and, under polling load, rate-limited → valid reads/writes flaked
-   *  intermittently (same class of flake the demo-mcp vault-key hash-pin removed). demo-mcp still runs
-   *  its own token/delegation verification server-side; this only drops the REDUNDANT a2a-side RPC. */
-  skipDelegationVerify?: boolean;
-}): Promise<Response> {
-  // KC-1 (2026-07-05): SERVER-MINT is the fabrication path. It signs the delegation token with a
-  // SERVER-held session key (`sessionManagerFor(env, requester)`) for an UNAUTHENTICATED `requester` body
-  // param, so demo-a2a manufactures a valid DEL-001 binding for whoever presents a leaked
-  // {delegation, requester} blob — the enforceBinding flip downstream is theater because the server made the
-  // binding. Fail-closed by default (ADR-0045): a real deployment leaves DEMO_ALLOW_SERVER_MINT unset and
-  // callers MUST client-mint a delegate-signed, DEL-001-bound token (body.token → forwardMcpToken with
-  // enforceBinding), which proves possession of the delegate key. The named, greppable, testnet-only flag
-  // keeps the persona/operator-key demo (accepted hole C-1) working.
-  if (args.env.DEMO_ALLOW_SERVER_MINT !== 'true') {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: 'server_mint_disabled',
-        detail: 'this route requires a client-minted, delegate-signed token (body.token); server-mint is disabled (KC-1)',
-      }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-  // 1. ERC-1271 pre-check (clearer error than waiting for the MCP-side rejection; same proof either
-  //    way). SKIPPED for DO-custodied grants (skipDelegationVerify) — those were ERC-1271-verified at
-  //    grant.put and are immutable at rest, so this per-op RPC is pure redundancy and its rate-limiting
-  //    under polling load was the residual read/write flake. demo-mcp re-verifies server-side regardless.
-  if (!args.skipDelegationVerify) {
-    // NEW-H4: the explicitly PII/regulated tools bypass the positive-verdict cache so a revoked delegate
-    // cannot keep reading them for up to VERDICT_TTL_MS. The high-frequency 'internal' body reads
-    // (get_vault_record message bodies) stay cacheable — that is the RPC-429 mitigation this cache exists
-    // for. A regulated record served via get_vault_record remains the spec-316 §9-W2 durable-fix item.
-    const sensitiveTool = args.toolName === 'get_pii' || args.toolName === 'get_org_sensitive';
-    const verify = await verifyDelegation(args.env, args.delegation, args.requester, { cacheable: !sensitiveTool });
-    if (!verify.ok) {
-      return new Response(
-        JSON.stringify({ ok: false, error: 'delegation_invalid', detail: verify.reason }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-  }
-  const auditSink = buildAuditSink(args.env);
-  const correlationId = crypto.randomUUID();
-
-  const sm = sessionManagerFor(args.env, args.requester);
-  const initRes = await sm.init(args.requester, Number(args.env.CHAIN_ID));
-
-  const delegationStruct: Delegation = {
-    delegator: args.delegation.delegator,
-    delegate: args.delegation.delegate,
-    authority: args.delegation.authority,
-    caveats: args.delegation.caveats.map((c) => ({
-      enforcer: c.enforcer,
-      terms: c.terms,
-      args: (c.args ?? '0x') as Hex,
-    })),
-    salt: BigInt(args.delegation.salt),
-    signature: args.delegation.signature,
-  };
-  await sm.package(initRes.sessionId, delegationStruct);
-
-  const resolved = await sm.resolve(initRes.sessionId);
-  if (!resolved.delegation) {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'session_resolve_no_delegation' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
-  // 4. Mint the delegation token signed by the session key.
-  const { token } = await mintDelegationToken(
-    {
-      iss: 'demo-a2a',
-      aud: MCP_AUDIENCE,
-      sub: resolved.delegation.delegator,
-      delegation: resolved.delegation,
-      sessionKeyAddress: resolved.signer.address,
-      ttlSeconds: 300,
-      usageLimit: 10,
-    },
-    (msg) => resolved.signer.signMessage(msg),
-    { auditSink, correlationId },
-  );
-
-  // 5 + 6. Service-MAC envelope + worker-to-worker call to demo-mcp (shared with the client-mint path).
-  return forwardMcpToken({
-    env: args.env,
-    toolName: args.toolName,
-    token,
-    toolArgs: args.toolArgs,
-    auditSink,
-    correlationId,
-  });
-}
-
 // ─── NEW-C1: CLIENT-MINT (DEL-001-bound) vault transport for the InteractionsDO ──────────────────────────
-// callMcpToolViaDelegation above is SERVER-MINT (a server-held session key, no principal-signed leaf,
-// forwarded WITHOUT enforceBinding — fabrication, gated on DEMO_ALLOW_SERVER_MINT). callMcpToolBound is the
-// real thing: it mints a token signed by the interactions-session KMS key AND carries the PRINCIPAL-signed
-// sessionDelegation leaf binding that key to the principal, then forwards with enforceBinding — the exact
-// proof a relying app produces (mirrors demo-jp memberVaultToken). demo-mcp recovers the session key from the
-// signature and checks the leaf binds it to the principal SA (spec 270 v4). No server-mint.
+// (CRIT-2: the old SERVER-MINT helper callMcpToolViaDelegation — server-held session key, no principal leaf,
+// forwarded without a binding, gated on the now-removed DEMO_ALLOW_SERVER_MINT — is DELETED.) callMcpToolBound
+// is the real thing: it mints a token signed by the interactions-session KMS key AND carries the PRINCIPAL-
+// signed sessionDelegation leaf binding that key to the principal, then forwards with enforceBinding — the
+// exact proof a relying app produces (mirrors demo-jp memberVaultToken). demo-mcp recovers the session key
+// from the signature and checks the leaf binds it to the principal SA (spec 270 v4). No server-mint. The
+// sibling callMcpToolWithProof does the same for server-side callers via a per-call invocation proof (W3/W6).
 let _interactionsSessionAccount: Awaited<ReturnType<typeof createKmsViemAccount>> | null = null;
 
 /** The InteractionsDO's DEL-001 session signer — a viem account over the interactions-session KMS key
@@ -4228,12 +4124,13 @@ app.post('/mcp/person/pii', async (c) => {
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
-    // Server-mint fallback — fails closed unless DEMO_ALLOW_SERVER_MINT (persona demo, C-1). See KC-1.
-    return await callMcpToolViaDelegation({
+    // CRIT-2 W6 — server-side client-mint via DO-side invocation proof (no server-mint). The first-party
+    // Act6 demo uses the native invocation-proof path; this {delegation,requester} entry proves possession
+    // server-side over the caller's authenticated session.
+    return await callMcpToolWithProof({
       env: c.env,
       toolName: 'get_pii',
       delegation: body.delegation,
-      requester: body.requester,
     });
   } catch (e) {
     return c.json(
@@ -4264,12 +4161,11 @@ app.post('/mcp/org/sensitive', async (c) => {
     if (!body?.delegation || !body?.requester) {
       return c.json({ ok: false, error: 'bad_body' }, 400);
     }
-    // Server-mint fallback — fails closed unless DEMO_ALLOW_SERVER_MINT (persona demo, C-1). See KC-1.
-    return await callMcpToolViaDelegation({
+    // CRIT-2 W6 — server-side client-mint via DO-side invocation proof (no server-mint). See /mcp/person/pii.
+    return await callMcpToolWithProof({
       env: c.env,
       toolName: 'get_org_sensitive',
       delegation: body.delegation,
-      requester: body.requester,
     });
   } catch (e) {
     return c.json(

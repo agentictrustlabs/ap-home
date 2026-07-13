@@ -37,9 +37,6 @@ new_sqlite_classes = ["A2aTaskDO"]
 RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = "31337"
 ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
-# KC-1: permit the server-mint delegation path (persona/operator-key demo, accepted hole C-1). A real
-# deployment leaves this UNSET so sensitive/vault routes require a client-minted delegate-signed token.
-DEMO_ALLOW_SERVER_MINT = "true"
 MCP_URL = "http://127.0.0.1:8788"
 
 # Contract addresses + secrets live in .dev.vars (gitignored) for local dev.
@@ -90,12 +87,11 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
-# CRIT-2 (audit 2026-07-13) — server-mint RETIRED in production. Every prod vault path now CLIENT-MINTS:
-# interactions/messaging via the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation
-# proof, the A2aTaskDO orchestrate/FR-3.4 seams via callMcpToolWithProof (DO-side invocation proof). "false"
-# ⇒ callMcpToolViaDelegation fail-closes (403 server_mint_disabled); interactions-do fail-closes (409
-# session_leaf_required) for any pre-leaf principal until it re-enables. Do NOT set back to "true".
-DEMO_ALLOW_SERVER_MINT = "false"
+# CRIT-2 (audit 2026-07-13) — server-mint RETIRED: DEMO_ALLOW_SERVER_MINT is removed entirely (the
+# callMcpToolViaDelegation path is deleted). Every vault path client-mints — interactions/messaging via
+# the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation proof, the A2aTaskDO seams +
+# /mcp/vault/* + /intent + /mcp/person|org via DO-side invocation proof (callMcpToolWithProof). The
+# interactions-do fail-closes (409) if the interactions-session key is unprovisioned. No server-mint knob.
 # spec 290 §8 — per-SA hard-budget unit cap for the A2A task path. MUST match demo-mcp's value (same
 # shared DO authority per SA across both paths).
 SA_BUDGET_LIMIT_UNITS = "25"

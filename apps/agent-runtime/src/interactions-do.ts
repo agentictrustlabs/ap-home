@@ -38,7 +38,7 @@ import type { Vault } from '@agenticprimitives/vault';
 import { verifyHomeSession } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolViaDelegation, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -176,10 +176,13 @@ export class InteractionsDO {
           { status: 409, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      // Interactions-session key UNCONFIGURED (dev/unprovisioned only) — the legacy server-mint bridge, which
-      // itself fail-closes (403 server_mint_disabled) unless DEMO_ALLOW_SERVER_MINT is set. Never reached in a
-      // provisioned deploy (prod always sets GCP_KMS_INTERACTIONS_KEY_NAME, taking the bound/fail-closed branch).
-      return callMcpToolViaDelegation({ env, toolName, delegation: grant, requester: grant.delegate as Address, toolArgs, skipDelegationVerify: true });
+      // CRIT-2 W6 — server-mint retired. The interactions-session KMS key is REQUIRED for interactions vault
+      // ops (bound-mint above / DO-side proof). Unconfigured ⇒ FAIL-CLOSED (dev must provision
+      // GCP_KMS_INTERACTIONS_KEY_NAME); prod always sets it, taking the bound/409 branch above. No fallback.
+      return new Response(
+        JSON.stringify({ ok: false, error: 'interactions_key_unprovisioned', detail: 'GCP_KMS_INTERACTIONS_KEY_NAME is unset — interactions vault ops require it (server-mint retired, CRIT-2)' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      );
     };
     return {
       async write({ resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
