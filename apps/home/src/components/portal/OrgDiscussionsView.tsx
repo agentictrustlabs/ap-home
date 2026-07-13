@@ -201,7 +201,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
     setBusy(true); setError(null);
     try {
-      const via = session.via as Via;
+      // Route the signer by the home's ACTUAL credential (resolveVia), NOT raw session.via — a social/KMS
+      // connected custodian signs the enable ceremony SERVER-SIDE (no passkey prompt). Matches join() above;
+      // the old raw-via path popped a passkey for KMS/social homes (sign-by-credential-not-via).
+      const via = resolveVia(homeProfile?.credential, session.via);
       const auth = isKmsVia(via) ? { token: session.token } : undefined;
       const bound = await activateVaultIfNeeded(org, via, auth);
       if (!bound.ok) throw new Error(bound.error);
@@ -216,7 +219,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [session, agentAddress, org, load]);
+  }, [session, homeProfile?.credential, agentAddress, org, load]);
 
   const postMessage = useCallback(async (body: string) => {
     if (!active || !body.trim()) return;
