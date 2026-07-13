@@ -720,7 +720,10 @@ export class InteractionsDO {
             const prev = doc.orgs[org];
             doc.orgs[org] = {
               org,
-              relationship: entry?.relationship === 'steward' ? 'steward' : 'member',
+              // steward ⊇ member: a subsequent 'member' merge must NEVER downgrade an existing steward (spec
+              // 324 W3 fix — recording the creator as a member was silently stripping their steward inbox
+              // control, resolveInboxOwner then 403'd them from their own application queue).
+              relationship: entry?.relationship === 'steward' || prev?.relationship === 'steward' ? 'steward' : 'member',
               ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
               ...(entry?.kind ? { kind: String(entry.kind) } : prev?.kind ? { kind: prev.kind } : {}),
               ...(entry?.parent ? { parent: String(entry.parent).toLowerCase() } : prev?.parent ? { parent: prev.parent } : {}),
