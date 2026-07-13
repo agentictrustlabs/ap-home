@@ -59,7 +59,7 @@ export function buildNav(
         {
           heading: workspaceName ?? 'Organization',
           items: [
-            { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: HashIcon, status: 'live' },
+            { id: 'org-discussions', label: 'Discussions', href: orgHref(a, 'discussions'), Icon: HashIcon, status: 'live' },
           ],
         },
         backHome,
@@ -71,7 +71,7 @@ export function buildNav(
         items: [
           { id: 'org-overview', label: 'Overview', href: orgHref(a, 'overview'), Icon: BuildingIcon, status: 'live' },
           { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
-          { id: 'org-channels', label: 'Channels', href: orgHref(a, 'channels'), Icon: HashIcon, status: 'live' },
+          { id: 'org-discussions', label: 'Discussions', href: orgHref(a, 'discussions'), Icon: HashIcon, status: 'live' },
         ],
       },
       // Manage: the old scrolling "Data" page split into its real pieces (spec 315) + Treasury.
@@ -166,7 +166,7 @@ export function bottomNav(groups: NavGroup[]): NavItem[] {
   const byId = (id: string) => flat.find((i) => i.id === id);
   // Org/service workspaces have no 'home' item in their nav — still give mobile a way back.
   const home = byId('home') ?? { id: 'home', label: 'Home', href: '/', Icon: HomeIcon, status: 'live' as const };
-  const picks = [home, byId('messages'), byId('organization') ?? byId('org-channels') ?? byId('service-overview'), byId('you')]
+  const picks = [home, byId('messages'), byId('organization') ?? byId('org-discussions') ?? byId('service-overview'), byId('you')]
     .filter((i): i is NavItem => !!i);
   // Fill remaining slots (4 tabs max) from whatever's left, preserving nav order.
   for (const item of flat) {

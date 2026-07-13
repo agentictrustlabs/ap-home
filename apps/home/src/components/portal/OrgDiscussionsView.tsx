@@ -1,6 +1,9 @@
 'use client';
-// Org channels — Discord/Slack topic boards with Telegram-style member→DM slide-over,
-// group avatars, rich messages (emoji + images), amber design system.
+// Org Discussions (spec 324 §10) — the org's forum-profile Conversation, presented as Topics (Telegram-forum
+// shape: each Topic is a DiscussionTopic inside the org's discussion space, NOT a sibling conversation) with a
+// Telegram-style member→DM slide-over, group avatars, rich messages (emoji + images), amber design system.
+// NOTE: the internal transport keys (`/connect/channels`, `channelId`, `communityId`, CSS `channels-*`) are
+// unchanged pending the W6 record-key migration; only the user-facing vocabulary is Discussions/Topics here.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
@@ -47,7 +50,7 @@ function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
   return <AvatarUpload name={name} imageUrl={imageUrl} size={30} />;
 }
 
-export function OrgChannelsView({ org }: { org: Address }) {
+export function OrgDiscussionsView({ org }: { org: Address }) {
   const { session, profile: homeProfile, agentAddress, agentName } = useSession();
   const communityId = org.toLowerCase();
   const communityAvatar = useAvatar(communityAvatarKey(org));
@@ -265,7 +268,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
           action: 'send',
           toName: hit.name,
           bodyText:
-            `You're invited to join this organization's channel discussion. ` +
+            `You're invited to join this organization's discussions. ` +
             `Open the invitation chip on this conversation to join — you'll sign a listing you can revoke anytime.`,
           contextRefs: [{ kind: 'org-channels', id: communityId, label: 'Join the discussion' }],
         }),
@@ -326,13 +329,13 @@ export function OrgChannelsView({ org }: { org: Address }) {
 
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
 
-  if (!session || !agentAddress) return <SectionShell title="Channels"><p>Not signed in.</p></SectionShell>;
+  if (!session || !agentAddress) return <SectionShell title="Discussions"><p>Not signed in.</p></SectionShell>;
 
   if (member === false) {
     return (
-      <SectionShell title="Channels" description="Topic discussion inside this organization">
+      <SectionShell title="Discussions" description="Topic discussion inside this organization">
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem' }}>
-          <h3 className="subhead">Join this organization&rsquo;s channels</h3>
+          <h3 className="subhead">Join this organization&rsquo;s discussions</h3>
           <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
             Joining publishes a listing you sign — members can see you here and message you directly.
           </p>
@@ -352,7 +355,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
   }
 
   return (
-    <SectionShell title="Channels" description="Topic discussion inside this organization">
+    <SectionShell title="Discussions" description="Topic discussion inside this organization">
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
 
       {/* SEC-H1 regression fix — a steward can reach channels without a directory listing, so they show
@@ -394,7 +397,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
       {orgVault === false && (
         <div className="chat-attention" style={{ marginBottom: '0.85rem' }}>
           <span style={{ fontSize: '0.85rem' }}>
-            <b>Channel storage isn&rsquo;t enabled yet.</b> A steward authorizes the org vault once — then channels + posts are encrypted under the org&rsquo;s authority.
+            <b>Discussion storage isn&rsquo;t enabled yet.</b> A steward authorizes the org vault once — then topics + posts are encrypted under the org&rsquo;s authority.
           </span>
           {/* Steward-only: the ceremony signs AS THE ORG — a member's credential can't (and the old
               always-shown button just failed them with sender_mismatch). */}
@@ -413,8 +416,8 @@ export function OrgChannelsView({ org }: { org: Address }) {
       <div className="channels-layout">
         <div className="channels-sidebar">
           <div className="channels-sidebar__title">
-            <span>Channels</span>
-            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title="New channel">＋</button>
+            <span>Topics</span>
+            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title="New topic">＋</button>
           </div>
           {creating && orgVault !== false && (
             <div style={{ marginBottom: '0.6rem', padding: '0 0.4rem' }}>
@@ -440,7 +443,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
             </button>
           ))}
           {channels && channels.length === 0 && !creating && (
-            <p style={{ fontSize: '0.8rem', opacity: 0.6, padding: '0 0.4rem' }}>No channels yet.</p>
+            <p style={{ fontSize: '0.8rem', opacity: 0.6, padding: '0 0.4rem' }}>No topics yet.</p>
           )}
         </div>
 
@@ -523,11 +526,11 @@ export function OrgChannelsView({ org }: { org: Address }) {
                 onSend={postMessage}
                 disabled={orgVault === false}
                 busy={busy}
-                placeholder={orgVault === false ? 'Enable channel storage to post' : `Message # ${channel.title}`}
+                placeholder={orgVault === false ? 'Enable discussion storage to post' : `Message # ${channel.title}`}
               />
             </>
           ) : (
-            <p className="manage-card-blurb" style={{ margin: 'auto', padding: '2rem', textAlign: 'center' }}>{channels === null ? 'Loading…' : 'Pick or create a channel.'}</p>
+            <p className="manage-card-blurb" style={{ margin: 'auto', padding: '2rem', textAlign: 'center' }}>{channels === null ? 'Loading…' : 'Pick or create a topic.'}</p>
           )}
         </div>
 

@@ -28,7 +28,7 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
     const orgName = names?.[r.id.toLowerCase()];
     return (
       <a
-        href={`/org/${r.id}/channels`}
+        href={`/org/${r.id}/discussions`}
         className="badge"
         style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', textDecoration: 'none', fontWeight: 600 }}
         title={`Organization ${orgName ?? r.id}`}

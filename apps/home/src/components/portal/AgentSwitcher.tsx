@@ -142,7 +142,7 @@ export function AgentSwitcher() {
             title={o.name ? nameLabel(o.name) : short(o.agent)}
             sub="organization · member (no custody)"
             activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
-            onClick={() => go(orgHref(o.agent, 'channels'))}
+            onClick={() => go(orgHref(o.agent, 'discussions'))}
           />
         ))}
 
