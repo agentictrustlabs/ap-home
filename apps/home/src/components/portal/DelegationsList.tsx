@@ -45,10 +45,12 @@ function grantItems(orgs: MyOrg[]): GrantItem[] {
 function grantCopy(it: GrantItem): { badge: string; title: string; blurb: ReactNode } {
   const name = it.org.orgName || 'this org';
   if (it.kind === 'membership') {
+    // spec 324 §12 — this is the member→org PROFILE-ACCESS delegation, NOT membership itself (ADR-0048 #3):
+    // membership is a private Situation; revoking this authority never ends the membership.
     return {
-      badge: 'Membership',
+      badge: 'Member profile access',
       title: `You → ${name}`,
-      blurb: <>You let <b>{name}</b> read your member profile from your vault. Revoke and it can no longer see you.</>,
+      blurb: <>You let <b>{name}</b> read your member profile from your vault. This is an access grant, not your membership — revoking it stops the reads but you stay a member.</>,
     };
   }
   if (it.kind === 'stewardship') {

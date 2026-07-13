@@ -4,7 +4,7 @@
 // listing) already landed; a failed grant mint must never strand the join — it can be re-minted.
 import type { Address } from '@agenticprimitives/types';
 import { writeOrganizationMembership } from './membership-write';
-import { issueMembershipDelegation, toWire } from './delegation';
+import { issueMemberProfileAccessDelegation, toWire } from './delegation';
 import { MCP_SERVER_ID } from './inbox-delivery';
 
 export type SignHash = (h: `0x${string}`) => Promise<`0x${string}`>;
@@ -22,7 +22,7 @@ export async function recordOrgMembership(
   displayName?: string,
 ): Promise<void> {
   try {
-    const d = await issueMembershipDelegation(member, org as Address, MCP_SERVER_ID, sign);
+    const d = await issueMemberProfileAccessDelegation(member, org as Address, MCP_SERVER_ID, sign);
     const madMatches = !!memberAccess && (memberAccess.delegate ?? '').toLowerCase() === member.toLowerCase();
     await fetch('/connect/org-membership', {
       method: 'POST',

@@ -12,7 +12,7 @@ import { searchAgentsKb, type AgentSearchHit } from '../../../../../src/lib/agen
 import { Avatar } from '../../../../../src/components/portal/chat/Avatar';
 import { BusyButton } from '../../../../../src/components/shared/BusyButton';
 import { signHashFor, resolveVia } from '../../../../../src/home/onboarding';
-import { issueMemberAccessDelegation, toWire, type DelegationWire } from '../../../../../src/lib/delegation';
+import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../../../../src/lib/delegation';
 import { MCP_SERVER_ID } from '../../../../../src/lib/inbox-delivery';
 
 export default function OrgInvitePage({ params }: { params: Promise<{ org: string }> }) {
@@ -47,7 +47,7 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
       try {
         const via = resolveVia(profile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
-        const mad = toWire(await issueMemberAccessDelegation(communityId as Address, hit.smartAgent as Address, MCP_SERVER_ID, sign));
+        const mad = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, hit.smartAgent as Address, MCP_SERVER_ID, sign));
         const gr = await fetch('/connect/org-invite/agent', {
           method: 'POST', headers: authed,
           body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),
@@ -91,7 +91,7 @@ export default function OrgInvitePage({ params }: { params: Promise<{ org: strin
         if (!pr.ok || !pb.ok || !pb.agent) throw new Error(pb.error ?? `predict failed (${pr.status})`);
         const via = resolveVia(profile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
-        memberAccessDelegation = toWire(await issueMemberAccessDelegation(communityId as Address, pb.agent, MCP_SERVER_ID, sign));
+        memberAccessDelegation = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, pb.agent, MCP_SERVER_ID, sign));
       } catch (e) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
       }

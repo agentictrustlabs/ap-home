@@ -11,7 +11,7 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import { issueMemberAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { BusyButton } from '../shared/BusyButton';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
@@ -249,7 +249,7 @@ export function OrgChannelsView({ org }: { org: Address }) {
       try {
         const via = resolveVia(homeProfile?.credential, session.via);
         const sign = await signHashFor(via, org, { token: session.token });
-        const mad = toWire(await issueMemberAccessDelegation(org, hit.smartAgent as Address, MCP_SERVER_ID, sign));
+        const mad = toWire(await issueOrganizationResourceAccessDelegation(org, hit.smartAgent as Address, MCP_SERVER_ID, sign));
         const gr = await fetch('/connect/org-invite/agent', {
           method: 'POST', headers: authed,
           body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),

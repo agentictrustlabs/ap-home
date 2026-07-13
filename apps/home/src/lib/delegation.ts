@@ -316,7 +316,7 @@ export const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org.profile' as const; // spec 
  * against any other account it is inert — fail-closed, no re-targeting). Read-only over the org's
  * shareable profile record; time-boxed; on-chain revocable.
  */
-export async function issueMemberAccessDelegation(
+export async function issueOrganizationResourceAccessDelegation(
   orgSA: Address,
   member: Address,
   mcpServerId: string,
@@ -345,7 +345,7 @@ export async function issueMemberAccessDelegation(
  * each member's own vault (spec 247: it holds a delegation, never a copy) and NOTHING else.
  * Time-boxed, value 0, on-chain revocable.
  */
-export async function issueMembershipDelegation(
+export async function issueMemberProfileAccessDelegation(
   member: Address,
   orgSA: Address,
   mcpServerId: string,
