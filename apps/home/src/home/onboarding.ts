@@ -7,6 +7,7 @@
 // the server signs with — see spec 235). The operations are via-parameterized so the journey
 // branches on the chosen credential.
 import type { Address, Hex } from '@agenticprimitives/types';
+import { keccak256, toBytes } from 'viem';
 import {
   createSecureHomePasskey,
   deployAndClaimAgent,
@@ -609,10 +610,18 @@ export async function activateVault(
       classificationCeiling?: string;
       ops?: ('read' | 'write')[];
     };
+    // Phase C / NEW-C3 — the KEK-provision route wields the admin credential to mint a per-owner GCP KEK, so
+    // it requires an OWNER-CONTROL PROOF (ERC-1271 over a freshness-bound challenge) rather than trusting the
+    // body-supplied `owner`. Sign the same challenge the server re-derives (provisionChallengeHash). For KMS
+    // homes this is server-side (no extra prompt); passkey/wallet homes take one extra onboarding signature
+    // (UX follow-up: batch with the vault-key authorization below once the flow allows).
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const provChallenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', owner.toLowerCase(), String(issuedAt)].join('\n')));
+    const provProof = await (await signHashFor(via, owner, auth))(provChallenge);
     const prov = (await fetch('/mcp-bind/custody/vault-key/provision', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ owner }),
+      body: JSON.stringify({ owner, issuedAt, proof: provProof }),
     }).then((r) => r.json())) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
     if (!prov?.ok || !prov.kmsKeyRef) {
       return { ok: false, error: prov?.error_description ?? prov?.detail ?? 'could not provision vault key' };

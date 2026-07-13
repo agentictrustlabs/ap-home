@@ -1547,7 +1547,12 @@ app.post('/custody/vault-key/provision', async (c) => {
   // deployment leaves DEMO_VAULT_PROVISION_SKIP_PROOF unset ⇒ proof enforced (missing/stale/invalid → 401).
   // The named, greppable, testnet-only opt-out lets the live demo ceremony auto-provision while its 4
   // client callers (demo-sso-next / demo-a2a / demo-web-pro) are updated to sign the provision challenge.
-  if (c.env.DEMO_VAULT_PROVISION_SKIP_PROOF !== 'true') {
+  // Phase C / NEW-C3: SKIP_PROOF is a TESTNET-ONLY opt-out — in production it is REFUSED (the owner-control
+  // proof is always enforced), so a prod config that sets it to 'true' can no longer re-open the hole
+  // (mirrors the local-aes production guard). Only honored outside production.
+  const isProduction = typeof process !== 'undefined' && process.env?.NODE_ENV === 'production';
+  const skipProof = c.env.DEMO_VAULT_PROVISION_SKIP_PROOF === 'true' && !isProduction;
+  if (!skipProof) {
     const issuedAt = typeof body.issuedAt === 'number' ? body.issuedAt : Number(body.issuedAt);
     const proofSig = typeof body.proof === 'string' ? body.proof : undefined;
     const proof = await verifyProvisionControlProof(
