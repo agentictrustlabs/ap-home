@@ -238,7 +238,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         recipient: orgSa as Address,
         subject: 'Membership application',
         bodyText: body.bodyText?.trim() || 'Requesting to join this organization.',
-        contextRefs: [{ kind: 'membership-application', id: orgSa, label: 'Membership application' }],
+        // Two anchors: the org this is about + the applicant SA (InboxItemV1 doesn't expose the sender, so the
+        // steward reads the applicant from this ref to decide). Both copies carry both refs.
+        contextRefs: [
+          { kind: 'membership-application', id: orgSa, label: 'Membership application' },
+          { kind: 'applicant', id: owner, label: 'Applicant' },
+        ],
       }, makeBodyStoreFactory(env));
       return jsonCors({ ok: true, applicationId: out.messageId, ...out }, request);
     }

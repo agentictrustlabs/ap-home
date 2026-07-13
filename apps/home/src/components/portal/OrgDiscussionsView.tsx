@@ -69,6 +69,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [joinName, setJoinName] = useState('');
+  const [applyMessage, setApplyMessage] = useState('');
+  const [applied, setApplied] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [draft, setDraft] = useState('');
@@ -178,6 +180,25 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }, [session, homeProfile?.credential, agentAddress, joinName, communityId, authed, load]);
+
+  // spec 324 §7/§12 — a non-member REQUESTS to join (a MembershipApplication delivered to the org's inbox); a
+  // steward approves/rejects from Members. The listing is published as a CONSEQUENCE of enrollment (join()
+  // below), not the join mechanism itself.
+  const apply = useCallback(async () => {
+    if (!session) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/inbox', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'apply', org: communityId, bodyText: applyMessage.trim() || 'Requesting to join this organization.' }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `request failed (${res.status})`);
+      setApplied(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }, [session, authed, communityId, applyMessage]);
 
   const createChannel = useCallback(async () => {
     if (!newTitle.trim()) return;
@@ -337,10 +358,40 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   if (member === false) {
     return (
       <SectionShell title="Discussions" description="Topic discussion inside this organization">
+        {/* spec 324 §12 — a non-member REQUESTS to join; membership is granted by a steward (enrollment), and
+            the presence listing is published as a CONSEQUENCE of that (Complete membership, below). */}
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem' }}>
-          <h3 className="subhead">Join this organization&rsquo;s discussions</h3>
+          <h3 className="subhead">Request to join this organization</h3>
+          {applied ? (
+            <p style={{ color: 'var(--color-sage-700, #047857)', fontSize: '0.85rem', margin: 0 }}>
+              Application sent — a steward will review it. You&rsquo;ll get a message with a Join link when approved.
+            </p>
+          ) : (
+            <>
+              <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
+                Membership is granted by a steward. Send a request — you&rsquo;ll be notified when it&rsquo;s reviewed.
+              </p>
+              <input
+                placeholder="Add a note for the steward (optional)"
+                value={applyMessage}
+                onChange={(e) => setApplyMessage(e.target.value)}
+                style={{ width: '100%', marginBottom: '0.6rem' }}
+              />
+              <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={() => void apply()}>
+                {busy ? 'Sending…' : 'Request to join'}
+              </button>
+            </>
+          )}
+          {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+        </div>
+
+        {/* After a steward approves, the applicant completes membership here — publishing the listing they sign
+            (revocable). recordOrgMembership picks up the org→member grant the approval stored. */}
+        <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem', marginTop: '0.85rem' }}>
+          <h3 className="subhead">Approved? Complete your membership</h3>
           <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
-            Joining publishes a listing you sign — members can see you here and message you directly.
+            Once a steward approves your request, publish your listing to finish joining — members can see and
+            message you here, and you can revoke it anytime.
           </p>
           <input
             placeholder="Display name (how members see you)"
@@ -348,10 +399,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             onChange={(e) => setJoinName(e.target.value)}
             style={{ width: '100%', marginBottom: '0.6rem' }}
           />
-          <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
-            {busy ? 'Signing…' : 'Sign & join'}
+          <button type="button" className="btn" style={{ width: 'auto' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
+            {busy ? 'Signing…' : 'Sign & complete membership'}
           </button>
-          {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
         </div>
       </SectionShell>
     );
