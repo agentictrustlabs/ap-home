@@ -1226,6 +1226,61 @@ app.post('/tools/get_vault_record', async (c) => {
   }
 });
 
+// VL-W2 — batch multi-get: read MANY of one owner's records in ONE round-trip (collapses N cross-worker
+// calls + N per-op binding resolves into 1). Same classification/gates as get_vault_record.
+declareTool({ name: 'get_vault_records' }, GET_VAULT_RECORD_CLASSIFICATION);
+
+app.post('/tools/get_vault_records', async (c) => {
+  const body = c.get('parsedBody');
+  if (!body?.token) return c.json({ error: 'token required' }, 400);
+  const auditSink = buildAuditSink(c.env);
+  type Args = { args?: { recordTypes?: string[] } };
+  try {
+    const handler = withDelegation<Args>(
+      withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
+      async ({ principal, args, recordScopes }) => {
+        const recordTypes = Array.isArray(args?.recordTypes) ? args!.recordTypes!.filter((r): r is string => typeof r === 'string') : [];
+        if (recordTypes.length === 0) return { ok: true, owner: principal, records: {}, served_by: 'demo-mcp:get_vault_records' };
+        // Resolve the per-person vault ONCE for the whole batch (one binding read + one KEK provider),
+        // then verify + read each record against it. ADR-0013: an owner-level vault-key auth failure fails
+        // the WHOLE batch (never a partial silent-empty); a per-record DELEGATION-scope denial is a legit
+        // omission; a decrypt failure throws (→ 500, the client retries). VL-W3's DEK cache makes the
+        // repeat batch (re-hydration) skip KMS.
+        const pv = await resolvePersonVault(c.env, principal);
+        if (!pv) return { ok: false, error: 'vault_key_unauthorized', served_by: 'demo-mcp:get_vault_records' };
+        const verifier = buildVaultKeyVerifier(c.env);
+        const records: Record<string, unknown> = {};
+        let authFailed = false;
+        await Promise.all(recordTypes.map(async (rt) => {
+          const resource = `${VAULT_RECORD_PREFIX}${rt}`;
+          if (!recordScopeAllows(recordScopes, resource, 'read')) return; // scoped-out → omit (legit)
+          const verdict = await verifyVaultKeyAuthorization({
+            verifier, authorization: pv.authorization, binding: pv.binding,
+            request: { vaultId: pv.binding.vaultId, ownerPersonSA: principal, serverId: VAULT_SERVER_ID, resource, op: 'read', classification: 'internal' },
+          });
+          if (!verdict.ok) { authFailed = true; return; } // do NOT read; fail the whole batch below
+          const obj = await pv.vault.read({ owner: principal, resource });
+          records[rt] = obj?.data ?? null;
+        }));
+        if (authFailed) return { ok: false, error: 'vault_key_unauthorized', served_by: 'demo-mcp:get_vault_records' };
+        return { ok: true, owner: principal, records, served_by: 'demo-mcp:get_vault_records' };
+      },
+      {
+        toolName: 'get_vault_records',
+        classification: GET_VAULT_RECORD_CLASSIFICATION,
+        auditSink,
+        correlationId: getCorrelationId(c),
+        environment: (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development'),
+      },
+    );
+    const result = await handler({ token: body.token, args: body.args ?? {}, invocationProof: body.invocationProof } as Parameters<typeof handler>[0] & { invocationProof?: AgenticInvocationProofV1 });
+    return c.json(result as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof McpAuthError) { console.error('[demo-mcp] McpAuthError:', e.message, e.code); return c.json({ error: 'auth failed', detail: e.message, code: e.code }, 401); }
+    return c.json({ error: 'internal error', detail: String(e) }, 500);
+  }
+});
+
 const SET_VAULT_RECORD_CLASSIFICATION = {
   '@sa-tool': 'delegation-verified',
   '@sa-auth': 'session-token',

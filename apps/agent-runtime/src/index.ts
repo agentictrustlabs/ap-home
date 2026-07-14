@@ -3893,7 +3893,7 @@ async function verifyDelegation(
  */
 async function forwardMcpToken(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
   token: string;
   toolArgs?: Record<string, unknown>;
   /** spec 270 v4 W3 — per-source binding: set true ONLY on the client-mint path so demo-mcp enforces the
@@ -4009,7 +4009,7 @@ function toDelegationStruct(w: IncomingDelegation): Delegation {
  *  callMcpToolViaDelegation — no server-mint, no DEMO_ALLOW_SERVER_MINT. */
 export async function callMcpToolBound(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
   grant: IncomingDelegation;        // principal SA → INTERACTIONS_SERVICE_SA (the custodied st.grant)
   sessionLeaf: IncomingDelegation;  // principal SA → interactions-session key (PRINCIPAL-signed DEL-001 leaf)
   toolArgs?: Record<string, unknown>;
@@ -4050,7 +4050,7 @@ export async function callMcpToolBound(args: {
  *  callMcpToolViaDelegation (server-mint, DEMO_ALLOW_SERVER_MINT). Mirrors the native path; no server-mint. */
 export async function callMcpToolWithProof(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
   delegation: IncomingDelegation;   // the task/relying grant — its delegator is the principal whose vault is read
   toolArgs?: Record<string, unknown>;
 }): Promise<Response> {
@@ -4269,6 +4269,40 @@ app.post('/mcp/vault/get', async (c) => {
     });
   } catch (e) {
     return c.json({ ok: false, error: 'vault_get_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// VL-W2 — batch multi-get: one round-trip reads MANY of the owner's records (demo-gs member registry).
+// Mirrors /mcp/vault/get: client-mint token OR {delegation,requester}; never a server-mint fallback.
+app.post('/mcp/vault/get-many', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      token?: string;
+      delegation?: IncomingDelegation;
+      requester?: Address;
+      recordTypes?: string[];
+    } | null;
+    if (!body || !Array.isArray(body.recordTypes)) return c.json({ ok: false, error: 'bad_body' }, 400);
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env,
+        toolName: 'get_vault_records',
+        token: body.token,
+        toolArgs: { recordTypes: body.recordTypes },
+        enforceBinding: true,
+        auditSink: buildAuditSink(c.env),
+        correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({
+      env: c.env,
+      toolName: 'get_vault_records',
+      delegation: body.delegation,
+      toolArgs: { recordTypes: body.recordTypes },
+    });
+  } catch (e) {
+    return c.json({ ok: false, error: 'vault_get_many_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
