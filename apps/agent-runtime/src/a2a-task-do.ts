@@ -187,8 +187,13 @@ export class A2aTaskDO {
       read: async (ref, opts) => {
         if (opts?.delegation) {
           const resp = await callMcpToolWithProof({ env, toolName: 'get_vault_record', delegation: toWire(opts.delegation), toolArgs: { recordType: ref.recordType } });
-          if (!resp.ok) return null;
-          const j = (await resp.json().catch(() => null)) as { data?: unknown } | null;
+          const j = (await resp.json().catch(() => null)) as { ok?: boolean; data?: unknown; error?: unknown } | null;
+          // ADR-0013 — a soft failure (non-2xx from a rate-limited verify/decrypt, or `{ok:false}`) MUST throw,
+          // never masquerade as an empty record (the "saw it, then it went away" bug). `null` is an answer only
+          // for a genuine absent record (`data===null`); mirrors the `mcp` seam below + interactions-do read.
+          if (!resp.ok || (j && j.ok === false)) {
+            throw new Error(`a2a vault read via delegation failed (HTTP ${resp.status})${j?.error ? `: ${String(j.error)}` : ''}`);
+          }
           return j?.data ?? null;
         }
         return (await this.state.storage.get(`vault:${ref.owner.toLowerCase()}:${ref.recordType}`)) ?? null;

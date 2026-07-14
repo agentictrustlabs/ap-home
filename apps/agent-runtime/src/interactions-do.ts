@@ -525,7 +525,11 @@ export class InteractionsDO {
           // hash mismatch and silently drops the message (per-message censorship). DM bodies are write-once:
           // reject an overwrite whose bodyHash differs (an idempotent same-hash re-delivery still succeeds).
           const incomingHash = (body.data as { bodyHash?: string } | null)?.bodyHash;
-          const existing = await this.vaultFor(dg).read<{ bodyHash?: string }>({ owner: '', resource }).catch(() => null);
+          // ADR-0013 — do NOT swallow a soft-failed read into "no record": a transient auth/RPC error would then
+          // re-open the write-once overwrite this guards (per-message censorship). `read` returns null ONLY for a
+          // genuine-absent body (it bounded-retries transients and throws on auth/decrypt failure); let a real
+          // failure fail the write CLOSED rather than silently permit an overwrite.
+          const existing = await this.vaultFor(dg).read<{ bodyHash?: string }>({ owner: '', resource });
           if (existing?.data?.bodyHash && incomingHash && existing.data.bodyHash !== incomingHash) {
             return json({ error: 'dm body already exists with a different hash — bodies are write-once' }, 409);
           }
