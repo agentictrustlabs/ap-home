@@ -3893,7 +3893,7 @@ async function verifyDelegation(
  */
 async function forwardMcpToken(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
   token: string;
   toolArgs?: Record<string, unknown>;
   /** spec 270 v4 W3 — per-source binding: set true ONLY on the client-mint path so demo-mcp enforces the
@@ -4009,7 +4009,7 @@ function toDelegationStruct(w: IncomingDelegation): Delegation {
  *  callMcpToolViaDelegation — no server-mint, no DEMO_ALLOW_SERVER_MINT. */
 export async function callMcpToolBound(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
   grant: IncomingDelegation;        // principal SA → INTERACTIONS_SERVICE_SA (the custodied st.grant)
   sessionLeaf: IncomingDelegation;  // principal SA → interactions-session key (PRINCIPAL-signed DEL-001 leaf)
   toolArgs?: Record<string, unknown>;
@@ -4050,7 +4050,7 @@ export async function callMcpToolBound(args: {
  *  callMcpToolViaDelegation (server-mint, DEMO_ALLOW_SERVER_MINT). Mirrors the native path; no server-mint. */
 export async function callMcpToolWithProof(args: {
   env: Env;
-  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record';
+  toolName: 'get_profile' | 'get_pii' | 'get_org_sensitive' | 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record' | 'issue_org_entitlement' | 'revoke_org_entitlement' | 'list_org_entitlements' | 'get_entitled_record' | 'manage_entitlement_group';
   delegation: IncomingDelegation;   // the task/relying grant — its delegator is the principal whose vault is read
   toolArgs?: Record<string, unknown>;
 }): Promise<Response> {
@@ -4370,6 +4370,121 @@ app.post('/mcp/vault/list', async (c) => {
     });
   } catch (e) {
     return c.json({ ok: false, error: 'vault_list_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// ─── Cross-principal ENTITLEMENTS (spec 277) — org → member (ported from impact-a2a) ─────────────
+//
+// issue/revoke/list/group: the ORG (or group owner) presents its own authority (a delegation whose
+// DELEGATOR is the org — e.g. the org→person stewardship grant), so demo-mcp recovers principal = the
+// org (the issuer). get: the MEMBER presents THEIR OWN session delegation, so principal = the member
+// (the entitlement actor). Both request shapes of the vault routes are supported: a client-minted
+// `token` (forwarded with the DEL-001 binding enforced) or `{delegation, requester}` (CRIT-2 W6a —
+// server-side client-mint via the DO-side invocation proof; no server-mint).
+
+app.post('/mcp/entitlement/issue', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      token?: string; delegation?: IncomingDelegation; requester?: Address;
+      subject?: Address; subjectGroup?: string; recordType?: string; fields?: string[]; actions?: string[]; classificationCeiling?: string; purpose?: string; ttlSeconds?: number;
+    } | null;
+    // D2: either a concrete subject SA or a subjectGroup is required (plus recordType).
+    if (!body?.recordType || (!body?.subject && !body?.subjectGroup)) return c.json({ ok: false, error: 'bad_body' }, 400);
+    const toolArgs = {
+      recordType: body.recordType,
+      ...(body.subject ? { subject: body.subject } : {}),
+      ...(body.subjectGroup ? { subjectGroup: body.subjectGroup } : {}),
+      ...(body.fields ? { fields: body.fields } : {}),
+      ...(body.actions ? { actions: body.actions } : {}),
+      ...(body.classificationCeiling ? { classificationCeiling: body.classificationCeiling } : {}),
+      ...(body.purpose ? { purpose: body.purpose } : {}),
+      ...(typeof body.ttlSeconds === 'number' ? { ttlSeconds: body.ttlSeconds } : {}),
+    };
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env, toolName: 'issue_org_entitlement', token: body.token, toolArgs,
+        enforceBinding: true, auditSink: buildAuditSink(c.env), correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({ env: c.env, toolName: 'issue_org_entitlement', delegation: body.delegation, toolArgs });
+  } catch (e) {
+    return c.json({ ok: false, error: 'entitlement_issue_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.post('/mcp/entitlement/revoke', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as { token?: string; delegation?: IncomingDelegation; requester?: Address; id?: string } | null;
+    if (!body?.id) return c.json({ ok: false, error: 'bad_body' }, 400);
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env, toolName: 'revoke_org_entitlement', token: body.token, toolArgs: { id: body.id },
+        enforceBinding: true, auditSink: buildAuditSink(c.env), correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({ env: c.env, toolName: 'revoke_org_entitlement', delegation: body.delegation, toolArgs: { id: body.id } });
+  } catch (e) {
+    return c.json({ ok: false, error: 'entitlement_revoke_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.post('/mcp/entitlement/list', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as { token?: string; delegation?: IncomingDelegation; requester?: Address } | null;
+    if (typeof body?.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env, toolName: 'list_org_entitlements', token: body.token,
+        enforceBinding: true, auditSink: buildAuditSink(c.env), correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body?.delegation || !body?.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({ env: c.env, toolName: 'list_org_entitlements', delegation: body.delegation });
+  } catch (e) {
+    return c.json({ ok: false, error: 'entitlement_list_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.post('/mcp/entitled/get', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      token?: string; delegation?: IncomingDelegation; requester?: Address; owner?: Address; recordType?: string; fields?: string[]; purpose?: string;
+    } | null;
+    if (!body?.owner || !body?.recordType) return c.json({ ok: false, error: 'bad_body' }, 400);
+    const toolArgs = { owner: body.owner, recordType: body.recordType, ...(body.fields ? { fields: body.fields } : {}), ...(body.purpose ? { purpose: body.purpose } : {}) };
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env, toolName: 'get_entitled_record', token: body.token, toolArgs,
+        enforceBinding: true, auditSink: buildAuditSink(c.env), correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({ env: c.env, toolName: 'get_entitled_record', delegation: body.delegation, toolArgs });
+  } catch (e) {
+    return c.json({ ok: false, error: 'entitled_get_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// D2 — maintain a subjectGroup roster (the presenter, token principal = the group owner, e.g. an
+// Alliance SA, lists the member SAs that count as readers of any grant issued to that group).
+app.post('/mcp/entitlement/group', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as {
+      token?: string; delegation?: IncomingDelegation; requester?: Address; groupId?: string; members?: string[]; op?: 'set' | 'add';
+    } | null;
+    if (!body?.groupId) return c.json({ ok: false, error: 'bad_body' }, 400);
+    const toolArgs = { groupId: body.groupId, members: body.members ?? [], op: body.op ?? 'set' };
+    if (typeof body.token === 'string') {
+      return await forwardMcpToken({
+        env: c.env, toolName: 'manage_entitlement_group', token: body.token, toolArgs,
+        enforceBinding: true, auditSink: buildAuditSink(c.env), correlationId: crypto.randomUUID(),
+      });
+    }
+    if (!body.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body' }, 400);
+    return await callMcpToolWithProof({ env: c.env, toolName: 'manage_entitlement_group', delegation: body.delegation, toolArgs });
+  } catch (e) {
+    return c.json({ ok: false, error: 'entitlement_group_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
