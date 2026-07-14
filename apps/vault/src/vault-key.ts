@@ -29,6 +29,7 @@ import {
   type Hex,
 } from '@agenticprimitives/delegation';
 import { selectVaultKeyProvider } from '@agenticprimitives/key-custody';
+import { cachingDekWrapper } from './dek-cache';
 import { canonicalize, sha256Hex, type Sha256 } from '@agenticprimitives/key-authorization';
 import { createDemoVault } from './vault.js';
 import { getVaultKeyBindingRow, putVaultKeyBindingRow, type VaultKeyBindingRow } from './db.js';
@@ -111,10 +112,13 @@ export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promi
         'No local-aes fallback for person data.',
     );
   }
-  const wrapper = selectVaultKeyProvider({
+  // VL-W3 — memoize the KMS DEK-unwrap in-isolate (cachingDekWrapper). Sits downstream of this
+  // function's callers' per-op vault-key auth gate, so it never bypasses authorization; it only spares
+  // repeat reads the cross-cloud KMS `:decrypt` (the dominant read latency).
+  const wrapper = cachingDekWrapper(selectVaultKeyProvider({
     kmsKeyRef: row.kms_key_ref,
     serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
-  });
+  }));
   return {
     binding: bindingFromRow(row),
     authorization: delegationFromWire(row.authorization_json), // salt → bigint for hashDelegation
