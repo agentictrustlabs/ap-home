@@ -31,8 +31,9 @@ import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, del
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
+import { OrgChooser, type OrgChoice } from './OrgChooser';
 
-type Phase = 'resolving' | 'consent' | 'granting' | 'connected' | 'error';
+type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
 /** The CAIP-10 tail (`eip155:<chain>:0x…` → `0x…`), or null. Mirrors context/session. */
 function addressOf(caip10: string | undefined): Address | null {
@@ -64,6 +65,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const [viaLower, setViaLower] = useState<Via>('passkey');
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
+  // Chooser-mode org-create (spec 246 select-existing): the enroll carries NO org_base/existing_org —
+  // the member picks a stewarded org (grant-only) or names a new one HERE before consenting.
+  const [orgSel, setOrgSel] = useState<OrgChoice | null>(null);
 
   const enroll = api.enroll;
   const relyingApp = enroll ? whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) : undefined;
@@ -146,7 +150,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       setHome({ address: addr, name: profile.name ?? '' });
       setViaLower(v);
       setToken(sso.token);
-      setPhase('consent');
+      // Chooser-mode org-create → ask WHICH org first; everything else goes straight to consent.
+      setPhase(enroll.template === 'org-create' && !enroll.orgBase && !enroll.existingOrg ? 'choose-org' : 'consent');
     })();
   }, [enroll, onUnrecognized]);
 
@@ -192,21 +197,25 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
 
       let code: string;
-      if (enroll.orgBase) {
+      if (enroll.template === 'org-create') {
         // ORG-CREATE for a RECOGNIZED member (e.g. a facilitator org for demo-jp). This component is
         // reached for a NAMELESS enroll (spec 257 §11) — including org-create — but previously ran ONLY
         // the site-login pipeline below, submitting `org=undefined`. The relying app's /token then
         // returned no org → demo-jp threw "no organization returned from your home" even though the
         // request WAS an org-create (no org was ever deployed). Deploy the org custodied by this member
         // and submit the grant WITH the org payload (KMS → bootstrap-org; the descriptor build is
-        // non-fatal per #295). One mechanism, no fallback (ADR-0013).
+        // non-fatal per #295). One mechanism, no fallback (ADR-0013). Gated by TEMPLATE, not org_base:
+        // a chooser-mode request carries no org_base — the choose-org step above resolved `orgSel`.
+        const orgBase = enroll.orgBase ?? orgSel?.orgName;
+        const existingOrg = enroll.existingOrg ?? orgSel?.existingOrg;
+        if (!orgBase) return fail('No organization was chosen for this request.');
         const created = await createOrganization(
           home,
-          enroll.orgBase,
+          orgBase,
           delegate,
           viaLower,
           auth,
-          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg: enroll.existingOrg },
+          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
         );
         if (!created.ok) return fail(created.error);
         code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
@@ -306,6 +315,19 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     );
   }
 
+  if (phase === 'choose-org') {
+    return (
+      <Shell>
+        <OrgChooser
+          token={token}
+          appHost={appHost}
+          onChoose={(c) => { setOrgSel(c); setPhase('consent'); }}
+          onDecline={onDecline}
+        />
+      </Shell>
+    );
+  }
+
   if (phase === 'granting') {
     return (
       <Shell>
@@ -350,6 +372,12 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     <div className="onboarding-screen">
       <div className="onboarding-card wide">
         <p className="onboarding-sub">Signed in as <strong>{home?.name || 'your home'}</strong>.</p>
+        {enroll.template === 'org-create' && (enroll.orgBase ?? orgSel?.orgName) && (
+          <p className="onboarding-sub">
+            Organization: <strong>{enroll.orgBase ?? orgSel?.orgName}</strong>
+            {(enroll.existingOrg ?? orgSel?.existingOrg) ? ' — existing; no new org is created.' : ' — new.'}
+          </p>
+        )}
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}
           appName={appName}

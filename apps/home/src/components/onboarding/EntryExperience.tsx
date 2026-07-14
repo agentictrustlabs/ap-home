@@ -21,6 +21,7 @@ const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet')
 import { useEnrollReq, type EnrollApi } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { RecognizedEnroll } from './RecognizedEnroll';
+import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -185,8 +186,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         setView({ k: 'incomplete', name: api.enroll!.name });
         return;
       }
-      if (api.enroll!.orgBase) {
-        // org-create assumes an existing member; resolve their person agent.
+      if (api.enroll!.template === 'org-create') {
+        // org-create assumes an existing member; resolve their person agent. Routed by TEMPLATE,
+        // not `orgBase`: a chooser-mode request (spec 246 select-existing) carries NO org_base —
+        // the member picks/creates the org HERE (OrgConsent's choose step).
         if (info.agent) setView({ k: 'org', name: api.enroll!.name, agent: info.agent });
         else setView({ k: 'blocked' });
         return;
@@ -890,11 +893,17 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
 
 // ── Org-create consent (existing member creates an org via a relying app) ──────
 function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnType<typeof useEnrollReq> }) {
-  const [phase, setPhase] = useState<'consent' | 'busy' | 'connected' | 'error'>('consent');
+  // A request with a preselected org (org_base / existing_org) goes straight to consent; a
+  // CHOOSER-MODE request (neither present) first asks WHICH org — an existing stewarded one
+  // (grant-only, no deploy) or a new name to deploy (OrgChooser).
+  const preselected = !!(api.enroll?.orgBase || api.enroll?.existingOrg);
+  const [phase, setPhase] = useState<'choose' | 'consent' | 'busy' | 'connected' | 'error'>(preselected ? 'consent' : 'choose');
+  const [choice, setChoice] = useState<OrgChoice | null>(null);
   const [err, setErr] = useState('');
   const { session } = useSession();
   const tpl = whitelabel.delegationTemplates['org-create'] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
-  const orgBase = api.enroll?.orgBase ?? '';
+  const orgBase = api.enroll?.orgBase ?? choice?.orgName ?? '';
+  const existingOrg = api.enroll?.existingOrg ?? choice?.existingOrg;
   // spec 256 — the org inherits the member's ACTUAL custody. A Google member's org is deployed by
   // their KMS C_sub server-side (zero device prompts); passkey/wallet members sign on device. The
   // credential is the one they're signed in with (via is 'passkey' | 'wallet' | 'Google').
@@ -932,7 +941,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         purpose: api.enroll.purpose,
         requestedBy: api.enroll.aud,
         grantOrg: api.enroll.grantOrg,
-        existingOrg: api.enroll.existingOrg, // select-existing GCO: grant from an existing org instead of deploying
+        existingOrg, // select-existing: grant from an existing org (URL-preselected or chosen here) instead of deploying
       });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
       const code = await api.submitGrant(grant_id, created.grant, created.org);
@@ -944,25 +953,38 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     }
   }
 
-  if (phase === 'busy') return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Creating your organization…</p></div></Shell>;
+  if (phase === 'choose') {
+    return (
+      <Shell>
+        <OrgChooser
+          token={cred?.token}
+          appHost={api.host}
+          onChoose={(c) => { setChoice(c); setPhase('consent'); }}
+          onDecline={api.denyEnroll}
+        />
+      </Shell>
+    );
+  }
+  if (phase === 'busy') return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{existingOrg ? 'Connecting your organization…' : 'Creating your organization…'}</p></div></Shell>;
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={`Its home is started, its name is claimed, and ${api.host} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {api.host}…</p></Shell>;
-  if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase('consent')}>Try again</button></Shell>;
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${api.host} can now read what it posts — the organization stays custodied by you.` : `Its home is started, its name is claimed, and ${api.host} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {api.host}…</p></Shell>;
+  if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;
   return (
     <Shell>
       {/* Spec 255 W3.3 — pre-org-create explainer ABOVE the consent sheet. Consent-level copy (NOT
           passkey-specific — never says "passkey"), so it's correct for ALL org-create credentials
           including Google. */}
       <div className="securing-explainer pre-prompt-explainer">
-        <div className="securing-explainer-title">One tap — approve creating {orgBase}</div>
+        <div className="securing-explainer-title">One tap — approve {existingOrg ? `connecting ${orgBase}` : `creating ${orgBase}`}</div>
         <p>
-          This single approval starts the org, claims its name, and gives {api.host} scoped read access to
-          its posted needs. Nothing beyond that.
+          {existingOrg
+            ? `This single approval gives ${api.host} scoped read access to what ${orgBase} posts. Nothing beyond that — no new org is created.`
+            : `This single approval starts the org, claims its name, and gives ${api.host} scoped read access to its posted needs. Nothing beyond that.`}
         </p>
         <p className="securing-wait">You can revoke {api.host}&apos;s access at any time from your Impact home.</p>
       </div>
       <ConsentSheet
-        title={`Create ${orgBase} in the ${whitelabel.brand.community}`}
+        title={existingOrg ? `Connect ${orgBase} to ${api.host}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
         appName={api.host}
         appDomain={api.host}
         template={tpl}
