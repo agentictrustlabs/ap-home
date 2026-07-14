@@ -90,10 +90,21 @@ export async function verifyDelegation(
   if (!deployed) {
     return { ok: false, reason: 'delegator account not yet deployed (retry shortly)' };
   }
-  try {
-    const ok = await accounts.isValidSignature(d.delegator, digest, d.signature);
-    return ok ? { ok: true, digest } : { ok: false, reason: 'ERC-1271 verification failed against the delegator' };
-  } catch (e) {
-    return { ok: false, reason: `ERC-1271 call failed: ${e instanceof Error ? e.message : String(e)}` };
+  // B4 (approved-hash grants): an `0x03` delegation validates via the SA's ERC-1271 `0x03` branch →
+  // `ApprovedHashRegistry.isApproved`, which depends on the `approveHash` userOp (batched by givePermission
+  // moments earlier) being RPC-visible. Like the `isDeployed` check above, ride out brief read-replica lag
+  // with a BOUNDED retry of the SAME `isValidSignature` call (ADR-0013 — same call, not a weaker mechanism).
+  // A normal signed (ECDSA/1271) delegation is self-contained, so it needs no retry (attempts = 1).
+  const approvedHash = d.signature.toLowerCase() === '0x03';
+  const attempts = approvedHash ? 5 : 1;
+  let lastErr = '';
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      if (await accounts.isValidSignature(d.delegator, digest, d.signature)) return { ok: true, digest };
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e);
+    }
+    if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, 600));
   }
+  return { ok: false, reason: lastErr ? `ERC-1271 call failed: ${lastErr}` : 'ERC-1271 verification failed against the delegator' };
 }
