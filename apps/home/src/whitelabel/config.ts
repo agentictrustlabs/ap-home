@@ -126,6 +126,18 @@ const faithImpact: WhiteLabelConfig = {
         a2aBase: 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },
     },
+    // UUPG+ Alliance Engagement Tracker (agentictrustlabs/uupg — the ported demo-uupg) — connects via
+    // Global.Church identity; site-login + org-create (the tracker's alliance/org ceremonies hand off
+    // to the Home). No PII held by the broker; aud = client_id; allowed origin derived from the
+    // exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
+    {
+      client_id: 'uupg-tracker',
+      name: 'UUPG+ Tracker',
+      redirect_uris: ['https://uupg.richardpedersen3.workers.dev/', 'http://127.0.0.1:8797/', 'http://localhost:8797/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
