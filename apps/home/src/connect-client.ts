@@ -751,6 +751,22 @@ function buildApproveHashCall(digest: Hex): ContractCall {
   };
 }
 
+/** B4 — pre-approve a set of the DELEGATOR's own grant digests in ONE userOp on the delegator SA: batch an
+ *  `approveHash(digest)` call per digest into a single `executeBatch`, signed ONCE. Approved-hash (`0x03`)
+ *  delegations then validate via the SA's ERC-1271 `0x03` branch. Lets `givePermission` fold the person-SA
+ *  site + session grant approvals into one wallet prompt instead of an off-chain signature per leaf. The
+ *  delegator SA MUST be deployed (it is — this is the member's home). No-op for an empty digest set. */
+export async function approveGrantHashes(
+  delegator: Address,
+  signHash: SignHash,
+  digests: Hex[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (digests.length === 0) return { ok: true };
+  const callData = buildExecuteBatchCallData(digests.map((d) => buildApproveHashCall(d)));
+  const res = await executeCall(delegator, signHash, callData);
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
 /** Bootstrap a passkey-direct person SA (no server custodian ever, P0-A). When `callData` is
  *  given, the deploy userOp ALSO executes it (e.g. claim the name) — one signature, not two. */
 export async function bootstrapWithPasskey(

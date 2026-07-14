@@ -463,3 +463,27 @@ export async function issueSessionDelegation(
   leaf.signature = await signHash(digest); // the ROOT credential authorizes the session key
   return leaf;
 }
+
+/** spec 253 + 270 v4 — the DEL-001 session leaf WITHOUT an off-chain signature (B4). Same struct + EIP-712
+ *  `digest` as `issueSessionDelegation`, but the wire signature is the `0x03` approved-hash sentinel, so the
+ *  caller batches `approvedHashRegistry.approveHash(digest)` into the DELEGATOR (person SA) userOp alongside
+ *  the site grant — ONE signature approves both instead of one off-chain sign per leaf. The verifier validates
+ *  it identically to a signed leaf: `UniversalSignatureValidator.isValidSig(personSA, digest, 0x03)` → the SA's
+ *  ERC-1271 `0x03` branch → `ApprovedHashRegistry.isApproved`. The digest excludes the signature field, so it
+ *  is identical to what the relayer + demo-mcp client-mint verifier recompute (spec 270 W1). */
+export function buildApprovedSessionDelegation(
+  personAgent: Address,
+  sessionKeyAddress: Address,
+  validitySeconds = 60 * 60 * 12,
+): { delegation: Delegation; digest: Hex } {
+  const { leaf, digest } = buildSessionDelegation({
+    delegator: personAgent,
+    sessionKeyAddress,
+    validUntil: Math.floor(Date.now() / 1000) + validitySeconds,
+    enforcers: { timestamp: CONTRACTS.timestampEnforcer, value: CONTRACTS.valueEnforcer },
+    chainId: CHAIN_ID,
+    delegationManager: CONTRACTS.delegationManager,
+  });
+  leaf.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch (same as site)
+  return { delegation: leaf, digest };
+}

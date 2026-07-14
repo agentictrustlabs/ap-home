@@ -18,6 +18,7 @@ import {
   passkeySignHash,
   googleSignHash,
   connectCustodianCached,
+  approveGrantHashes,
   secureHomeWithGoogle,
   secureHomeGoogleNoName,
   chargePayment,
@@ -30,7 +31,7 @@ import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { writeOrganizationMembership } from '../lib/membership-write';
-import { issueSiteDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -411,14 +412,22 @@ export async function givePermission(
 ): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex }>> {
   try {
     const signHash = await signHashFor(via, home.address, auth);
-    const delegation = await issueSiteDelegation(home.address, delegate, signHash);
-    // The leaf is signed in the SAME ceremony, by the SAME credential. Only the PUBLIC leaf crosses back
-    // to the relying app — the session private key never leaves the relying app (no cross-origin key
-    // transport). The relying app signs its tokens with that key + presents the leaf; the verifier binds
-    // it to the person SA's authority (closing observe-and-re-mint). One credential interaction covers both.
-    const sessionDelegation = sessionKeyAddress
-      ? toWire(await issueSessionDelegation(home.address, sessionKeyAddress, signHash))
-      : undefined;
+    // B4 — batch the person-SA grants (site + the DEL-001 session leaf) via APPROVED-HASH: build both as
+    // `0x03` leaves and pre-approve their digests in ONE userOp on the person SA (one credential prompt),
+    // instead of a separate off-chain signature per leaf. Only the PUBLIC `0x03` leaves cross back to the
+    // relying app; its session private key never leaves its origin. The verifier validates each leaf via the
+    // person SA's ERC-1271 `0x03` branch (UniversalSignatureValidator → ApprovedHashRegistry) — identical to
+    // the org-create outbound grants, and to a signed leaf for the binding checks. (spec 253 + 270 v4 W2.)
+    const siteApp = buildApprovedSiteDelegation(home.address, delegate);
+    const sessionApp = sessionKeyAddress ? buildApprovedSessionDelegation(home.address, sessionKeyAddress) : undefined;
+    const approve = await approveGrantHashes(
+      home.address,
+      signHash,
+      sessionApp ? [siteApp.digest, sessionApp.digest] : [siteApp.digest],
+    );
+    if (!approve.ok) return { ok: false, error: `grant approval failed: ${approve.error}` };
+    const delegation = siteApp.delegation;
+    const sessionDelegation = sessionApp ? toWire(sessionApp.delegation) : undefined;
     // x402 payment delegation — issued from the TREASURY, signed by the same credential, in the same
     // ceremony. delegate = OPEN (push: reader redeems) or the payee (pull: provider redeems).
     const payDeleg = payment
