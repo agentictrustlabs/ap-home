@@ -1,5 +1,44 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.15
+
+### Patch Changes
+
+- 70af7e7: Spec 311 W2 — the deployment-epoch session guard rolls out to all four
+  relying apps. demo-gs migrates its bespoke `dm`-only staleness check to the
+  shared `deploymentEpoch`; demo-org stamps+gates its session (forcing a
+  re-mint of the separately-stored delegations); demo-web-pro adds a boot-time
+  sweep of its stale delegation/seat/demo-state stores (VITE_DEPLOYMENT_EPOCH
+  injected by deploy-cloudflare); demo-sso-next drops a pre-reset localStorage
+  session so the user re-onboards onto the new-factory identity.
+- Updated dependencies [15f33cf]
+- Updated dependencies [6bcff10]
+- Updated dependencies [963dc91]
+- Updated dependencies [f282183]
+- Updated dependencies [92f5be0]
+- Updated dependencies [e2bfc81]
+  - @agenticprimitives/contracts@1.0.0-alpha.17
+  - @agenticprimitives/fabric@0.0.0-alpha.1
+  - @agenticprimitives/agent-account@1.0.0-alpha.17
+  - @agenticprimitives/payments@0.0.0-alpha.13
+  - @agenticprimitives/home@0.0.0-alpha.1
+  - @agenticprimitives/identity-directory@1.0.0-alpha.17
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.14
+  - @agenticprimitives/agent-naming@1.0.0-alpha.17
+  - @agenticprimitives/agent-profile@1.0.0-alpha.17
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.17
+  - @agenticprimitives/delegation@1.0.0-alpha.17
+  - @agenticprimitives/treasury-service-agent@0.0.0-alpha.4
+  - @agenticprimitives/connect@1.0.0-alpha.17
+  - @agenticprimitives/identity-directory-adapters@1.0.0-alpha.17
+  - @agenticprimitives/related-agents@0.0.0-alpha.13
+  - @agenticprimitives/types@1.0.0-alpha.17
+  - @agenticprimitives/audit@1.0.0-alpha.17
+  - @agenticprimitives/connect-auth@1.0.0-alpha.17
+  - @agenticprimitives/organization@0.0.0-alpha.1
+  - @agenticprimitives/registry-kit@0.0.0-alpha.5
+  - @agenticprimitives/situations@0.0.0-alpha.1
+
 ## 0.0.2-alpha.14
 
 ### Patch Changes

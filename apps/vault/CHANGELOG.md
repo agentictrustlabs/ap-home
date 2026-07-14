@@ -1,5 +1,34 @@
 # @agenticprimitives-demo/mcp
 
+## 0.0.2-alpha.15
+
+### Patch Changes
+
+- 528b69e: Spec 311 server complement — `GET /custody/vault-key/is-bound` now does a
+  CURRENCY check, not just existence. A vault-key binding row survives a
+  full-reset redeploy, but its stored authorization binds the old
+  DelegationManager and no longer ERC-1271-verifies against the new one — so
+  existence-only `is-bound` returned `bound: true`, the client skipped
+  re-binding, and every read failed `vault_key_unauthorized` forever.
+  `isVaultKeyBindingCurrent` re-runs the read path's signature verify; a stale
+  binding now returns `bound: false` + `stale: true` so onboarding re-binds
+  against the live contracts. Fail-open only on RPC error (no re-bind storm on a
+  transient blip; the per-read path fail-closes on the same check).
+- Updated dependencies [f646aa3]
+- Updated dependencies [2f5e96c]
+- Updated dependencies [e21098f]
+- Updated dependencies [bdd6424]
+  - @agenticprimitives/key-authorization@0.0.0-alpha.4
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.1
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.17
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.14
+  - @agenticprimitives/agent-naming@1.0.0-alpha.17
+  - @agenticprimitives/delegation@1.0.0-alpha.17
+  - @agenticprimitives/types@1.0.0-alpha.17
+  - @agenticprimitives/audit@1.0.0-alpha.17
+  - @agenticprimitives/key-custody@1.0.0-alpha.17
+  - @agenticprimitives/tool-policy@1.0.0-alpha.17
+
 ## 0.0.2-alpha.14
 
 ### Patch Changes
