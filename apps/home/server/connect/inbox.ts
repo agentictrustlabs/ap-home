@@ -13,12 +13,12 @@
 // machine then enforces the ROLE for every transition (a session alone cannot
 // approve a case it is not the responder/resource-owner of). All decisions and
 // admissions are audit-backed fail-closed inside src/home/inbox-data.ts.
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { InteractionMandateV1, InteractionTransitionType } from '@agenticprimitives/fabric/interactions';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
@@ -49,8 +49,41 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
   const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
-  if (!v.ok) return null;
-  return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+  if (v.ok) return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+  // Relying-app path (spec: messaging-from-relying-app): a registered client (e.g. the uupg tracker) drives
+  // the signed-in person's inbox with the OIDC id_token it received at connect — a Home-signed, aud-scoped,
+  // exp-bound assertion of "this person authenticated via <client>". We verify it against OUR OWN JWKS
+  // (same keys as sessions), pin iss=self, and require aud ∈ the registered relying clients. The subject is
+  // the person SA. Org inboxes stay gated by resolveInboxOwner's on-chain relationships-doc steward check,
+  // so an id_token only ever reaches the person's own inbox + orgs they actually steward. No new grant is
+  // needed: the interactions plane was provisioned at onboarding/org-create.
+  const idv = await verifyIdTokenForRelyingClient(token, keys, ownIssuer(request, env));
+  return idv;
+}
+
+/** Verify `token` as an id_token this Home minted for a REGISTERED relying client. The SIGNATURE is checked
+ *  against our own JWKS (the real proof it's ours); iss is gated by the same `ownIssuer` predicate the
+ *  session path uses (accepts apex/www/subdomain forms); aud must be a registered client_id. Returns the
+ *  subject SA (lowercased) or null. */
+async function verifyIdTokenForRelyingClient(
+  token: string,
+  keys: Awaited<ReturnType<typeof importJwks>>,
+  isOwnIss: (iss: string) => boolean,
+): Promise<string | null> {
+  // Peek the unverified iss + aud, gate them cheaply, THEN verify (signature/iss/aud/exp) against exactly
+  // those values. verifyIdToken's iss/aud checks are strict-equality, so we pass the peeked values — the
+  // signature check against our JWKS is what actually authenticates; the gates constrain what we accept.
+  let iss: string | undefined, aud: string | undefined;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    iss = typeof payload.iss === 'string' ? payload.iss : undefined;
+    aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+  } catch { return null; }
+  if (!iss || !isOwnIss(iss) || !aud || !getClient(aud)) return null;
+  const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
+  if (!r.ok) return null;
+  const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
+  return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
 /** Reverse-resolve counterparty SAs → names for display, KV-cached (10 min).
