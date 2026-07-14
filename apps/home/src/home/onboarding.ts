@@ -33,8 +33,8 @@ import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { writeOrganizationMembership } from '../lib/membership-write';
-import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, issueSessionDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
-import { vaultWriteWithDelegation } from '../lib/vault-client';
+import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
@@ -295,6 +295,49 @@ export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Prom
   return passkeySignHash;
 }
 
+/** uupg interop (ported from the GC impact home) — PROJECT the steward relationship into the person's
+ *  `impact-relationships` VAULT record. The authoritative store is the interactions-plane relationships
+ *  doc (spec 323 W1 — merged in createOrganization below); this vault record is a PROJECTION for relying
+ *  apps (the uupg tracker) that discover "orgs you steward" + the acting grants from the person's vault
+ *  via their site-login delegation. Merge-by-agent: a re-create never clobbers grants it doesn't carry
+ *  (same upsert semantics as impact's relationships-store). Best effort — a failed projection never
+ *  fails the ceremony (the relying app can self-heal the record from its own org-create return). */
+async function projectStewardRelationshipToVault(
+  person: Address,
+  via: Via,
+  auth: Auth | undefined,
+  org: { agent: Address; name: string | null; purpose?: string; stewardship?: DelegationWire | null; membership?: DelegationWire | null },
+): Promise<void> {
+  try {
+    const signHash = await signHashFor(via, person, auth);
+    const self = toWire(await issueSiteDelegation(person, person, signHash, 12 * 3600));
+    const rec = await vaultReadWithDelegation<{ v?: number; relationships?: Record<string, unknown>[] }>(self, 'impact-relationships').catch(() => null);
+    const list = Array.isArray(rec?.relationships) ? rec!.relationships! : [];
+    const key = org.agent.toLowerCase();
+    const prev = list.find((r) => String(r.agent ?? '').toLowerCase() === key);
+    const entry = {
+      ...prev,
+      agent: org.agent,
+      agentName: org.name ?? (prev?.agentName as string | undefined) ?? null,
+      kind: 'org',
+      relation: 'steward',
+      purpose: org.purpose ?? (prev?.purpose as string | undefined) ?? 'org',
+      parent: person,
+      createdAt: (prev?.createdAt as number | undefined) ?? Math.floor(Date.now() / 1000),
+      grants: {
+        ...(prev?.grants as Record<string, unknown> | undefined),
+        ...(org.stewardship ? { stewardship: org.stewardship } : {}),
+        ...(org.membership ? { membership: org.membership } : {}),
+      },
+      attestation: (prev?.attestation as Record<string, unknown> | undefined) ?? { type: 'gc:Attestation', confidence: 1, method: 'self-issued', basis: 'deployed and stewarded by the owner agent' },
+    };
+    const next = [...list.filter((r) => String(r.agent ?? '').toLowerCase() !== key), entry];
+    await vaultWriteWithDelegation(self, 'impact-relationships', { v: 1, relationships: next });
+  } catch (e) {
+    console.warn('[org-create] impact-relationships vault projection failed:', e);
+  }
+}
+
 /**
  * Set up an organization you'll help oversee — a home of its own, custodied by you, with a
  * private vault credential recording the link (ADR-0025) + a scoped grant for the app.
@@ -329,6 +372,10 @@ export async function createOrganization(
       const approve = await approveGrantHashes(org, signHash, digests);
       if (!approve.ok) return { ok: false, error: `grant approval failed: ${approve.error}` };
       // The org already exists ⇒ its vault / channels / membership are already set up; nothing to seed.
+      // uupg interop: still project the steward relationship (+ the fresh stewardship wire) into the
+      // person's impact-relationships vault record — a select-existing may be this org's FIRST exposure
+      // to a vault-reading relying app.
+      await projectStewardRelationshipToVault(home.address, via, auth, { agent: org, name: base || null, purpose: opts.purpose, stewardship: toWire(stewardApp.delegation) });
       return {
         ok: true,
         org: {
@@ -415,6 +462,15 @@ export async function createOrganization(
   } catch (e) {
     console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
   }
+  // uupg interop — project the steward relationship into the person's impact-relationships vault record
+  // (see projectStewardRelationshipToVault). Best-effort, after the org's own seeding.
+  await projectStewardRelationshipToVault(home.address, via, auth, {
+    agent: x.childAgent as Address,
+    name: (x.childName as string | null) ?? null,
+    purpose: opts.purpose,
+    stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
+    membership: (x.membershipDelegation as DelegationWire | null) ?? null,
+  });
   // ADR-0025: the `org` payload carries the private credential + the person SA so the
   // server's /oidc/grant step can write the vault; the relying app receives only the org
   // metadata + proofHash + (optional) brokerDelegation back via /token.

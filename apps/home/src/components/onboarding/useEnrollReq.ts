@@ -202,12 +202,31 @@ export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, resu
   window.location.href = url.toString();
 }
 
+/** OIDC error bounce (spec 230 §4.3 / prompt=none silent SSO): deliver `?error&state` back to the
+ *  relying app with NO UI. Popup → postMessage (exact origin) + close; else full-page redirect.
+ *  Standard values a relying app's connect client handles: `login_required` (no home session — the
+ *  app clears its silent-SSO hint) / `interaction_required` (a session exists but a silent grant
+ *  would mint delegations without a consent gesture) / `access_denied`. */
+export function deliverEnrollError(enroll: EnrollReq, popupMode: boolean, error: string): void {
+  if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
+    postEnrollToOpener(enroll, { type: 'AC_ERROR', state: enroll.state, error });
+    window.close();
+    return;
+  }
+  const url = new URL(enroll.redirectUri);
+  url.searchParams.set('error', error);
+  url.searchParams.set('state', enroll.state);
+  window.location.href = url.toString();
+}
+
 export interface EnrollApi {
   enroll: EnrollReq | null;
   popupMode: boolean;
   allowed: boolean;
   host: string;
   postToOpener(msg: Record<string, unknown>): void;
+  /** OIDC error bounce to the relying app (prompt=none outcomes) — see deliverEnrollError. */
+  deliverError(error: string): void;
   /** Server-mint the enrollment grant (SEC-001). Returns the grant_id + the canonical
    *  delegate the SPA MUST use when building the delegation (which overrides the
    *  URL-supplied `enroll.delegate` — anti-spoof). Call this BEFORE the ceremony. */
@@ -278,12 +297,20 @@ export function useEnrollReq(): EnrollApi {
     window.location.href = url.toString();
   }, [enroll, popupMode, postToOpener]);
 
+  const deliverError = useCallback(
+    (error: string) => {
+      if (enroll) deliverEnrollError(enroll, popupMode, error);
+    },
+    [enroll, popupMode],
+  );
+
   return {
     enroll,
     popupMode,
     allowed: enroll ? relyingAllowed(enroll.redirectUri) : false,
     host: enroll ? hostOf(enroll.redirectUri) : '',
     postToOpener,
+    deliverError,
     beginGrant,
     submitGrant,
     deliverCode,

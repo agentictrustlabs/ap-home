@@ -2,19 +2,27 @@
 // both the SIWE login message and the deploy userOpHash (personal_sign / EIP-191;
 // AgentAccount._verifyEcdsa accepts raw-or-EIP-191 recovery).
 import type { Address, Hex } from '@agenticprimitives/types';
+import { remoteSignerActive, remoteSigner, isRemotePersonaSession, clearRemotePersonaMarker } from './remote-signer';
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 }
 
 function provider(): Eip1193 {
+  // Remote-persona mode (uupg tracker demo): route EVERY wallet touch to the opener's signer — never the
+  // injected wallet, which would pop MetaMask and sign as the wrong identity. After a reload severed the
+  // bridge, fail with a return-to-tracker message instead of silently falling back.
+  if (remoteSignerActive()) return remoteSigner;
+  if (isRemotePersonaSession()) throw new Error('This tab was signed in from the tracker — return to the tracker and reopen your Home.');
   const eth = (window as unknown as { ethereum?: Eip1193 }).ethereum;
   if (!eth) throw new Error('No Ethereum wallet found — install MetaMask (or another wallet) to connect.');
   return eth;
 }
 
 export function hasWallet(): boolean {
-  return typeof window !== 'undefined' && !!(window as unknown as { ethereum?: unknown }).ethereum;
+  if (typeof window === 'undefined') return false;
+  if (remoteSignerActive()) return true;
+  return !!(window as unknown as { ethereum?: unknown }).ethereum;
 }
 
 /** All accounts the wallet has connected (order = wallet's, [0] = active). `forceSelect` pops MetaMask's
@@ -99,6 +107,7 @@ export async function personalSign(address: Address, message: string): Promise<H
  *  wallet-connected — e.g. a Google/passkey session) all no-op without prompting the user. */
 export async function disconnectWallet(): Promise<void> {
   clearSessionCustodians(); // B5 — drop the cached custodian(s) so a fresh sign-in re-picks (choose-once per session)
+  clearRemotePersonaMarker(); // a real disconnect ends the tracker remote-persona session; a later real-wallet login must not be blocked
   if (!hasWallet()) return;
   try {
     await provider().request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] });

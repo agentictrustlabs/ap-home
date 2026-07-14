@@ -82,6 +82,7 @@ export function buildNav(
           { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
           { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
+          { id: 'org-trust-graph', label: 'Trust graph', href: orgHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
         ],
       },
@@ -120,12 +121,19 @@ export function buildNav(
     Icon: AGENT_META[a.id]?.Icon ?? BuildingIcon,
     status: a.status,
   }));
+  // Alliances (uupg interop, ported from the GC impact home): orgs you steward that HOST a coalition —
+  // an org-with-purpose fact, so it lives beside the other stewarded things, not in whitelabel agents.
+  yourAgents.push({ id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' });
 
   // Discovery: how you and your agents are found + described.
   const discovery: NavItem[] = [
     { id: 'registry', label: 'Registry', href: '/registry', Icon: DatabaseIcon, status: 'live' },
     { id: 'naming', label: 'Naming', href: '/naming', Icon: TagIcon, status: 'live' },
     { id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' },
+    // Trust web (impact port): who holds keys vs who granted authority — the person's live graph.
+    { id: 'trust-graph', label: 'Trust graph', href: '/trust-graph', Icon: ShieldIcon, status: 'live' },
+    // Live backend status (impact port): a2a/mcp health, chain head, the on-chain contract registry.
+    { id: 'network', label: 'Network', href: '/network', Icon: GlobeIcon, status: 'live' },
   ];
 
   // Manage (was "Account"): the /you tab content merged into real left items — Profile (personal +

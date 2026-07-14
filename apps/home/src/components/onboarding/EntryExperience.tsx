@@ -8,6 +8,7 @@ import { openHome, createOrganization, continueWithGoogle, continueWithYouVersio
 import { passkeyLogin, fetchProfile, siweLogin, claimName } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
+import { initRemoteSigner } from '../../lib/remote-signer';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
@@ -146,6 +147,15 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     if (mode !== 'enroll' || !api.enroll) return;
     if (!api.allowed) {
       setView({ k: 'blocked' });
+      return;
+    }
+    // OIDC prompt=none — SILENT SSO (spec 230): the relying app asked for a no-UI outcome, so never
+    // render the connect experience. No home session (no ap_sso cookie) → `login_required` (the app
+    // clears its silent-SSO hint and shows its own Connect button). A recognized session → still
+    // `interaction_required`: a silent grant here would mint a delegation without a consent gesture,
+    // and this broker keeps no per-client remembered-consent store (yet) to justify skipping it.
+    if (api.enroll.prompt === 'none') {
+      api.deliverError(readSsoCookie() ? 'interaction_required' : 'login_required');
       return;
     }
     void (async () => {
@@ -491,6 +501,16 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
   // set after mount to avoid an SSR/first-paint mismatch).
   const [walletAvail, setWalletAvail] = useState(false);
   useEffect(() => { setWalletAvail(walletEnabled && hasWallet()); }, []);
+  // Remote-persona arrival (uupg tracker demo — ?signer=remote&opener=<allowlisted>): the opener holds the
+  // persona's key and signs over postMessage, so auto-run the REAL wallet ceremony — the SIWE message +
+  // any deploy userOpHash route to the opener via wallet.ts provider(). One-shot per mount.
+  const remoteStarted = useRef(false);
+  useEffect(() => {
+    if (remoteStarted.current || !initRemoteSigner()) return;
+    remoteStarted.current = true;
+    void withWallet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const onGoogle = () => {
     const stash = enrollApi?.enroll
       ? JSON.stringify({ enroll: enrollApi.enroll, popupMode: enrollApi.popupMode, name: '' })
