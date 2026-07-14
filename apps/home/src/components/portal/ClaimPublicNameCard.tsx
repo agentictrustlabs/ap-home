@@ -23,7 +23,7 @@ import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { claimName, fetchProfile } from '../../connect-client';
 import { notifyAgentsChanged } from './ManagedAgents';
-import { signHashFor } from '../../home/onboarding';
+import { signHashFor, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
 import type { Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
 import { CONNECT_DOMAIN, nameLabel } from '../../lib/domain';
@@ -100,6 +100,9 @@ export function ClaimPublicNameCard() {
       }
       setClaimedName(res.name);
       setPhase('done');
+      // spec 280 carve-out — a social home that just claimed its public name publishes its connection KIND
+      // so it's signable on a fresh device (no-op for wallet/passkey; kind-only; best-effort).
+      void publishSocialConnectionKindIfNeeded(agentAddress as Address, res.name, via, { token: session.token });
       // The reverse-resolve can lag the RPC read replica — poll until the name is visible, then
       // commit + nudge every agents dropdown (same fix as the naming page's claim card).
       void (async () => {

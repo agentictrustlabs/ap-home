@@ -17,7 +17,7 @@
 // identical whether the member stays nameless or later claims a custom one. ADR-0013: ONE
 // mechanism — deploy nameless, claim on demand; no silent auto-name fallback.
 import { useEffect, useRef, useState } from 'react';
-import { secureHome, secureHomeNoName, activateVault } from '../../home/onboarding';
+import { secureHome, secureHomeNoName, activateVault, resolveVia, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel, toAgentName } from '../../lib/domain';
@@ -96,6 +96,10 @@ export function GoogleSecureHome() {
         return;
       }
       void activateVault(res.home.address, 'google', { token: session.token }); // spec 278 — best-effort
+      // spec 280 carve-out — publish this NAMED social home's connection KIND so a returning member can
+      // sign in on a FRESH device. True provider (google/youversion) resolved from the session, not the
+      // hardcoded 'google' above (a YouVersion session routes through this same component).
+      void publishSocialConnectionKindIfNeeded(res.home.address, res.home.name, resolveVia(undefined, session.via), { token: session.token });
       clearPendingName();
       setSecuredName(res.home.name);
       setPhase('done');

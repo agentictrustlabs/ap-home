@@ -24,9 +24,11 @@ import {
   chargePayment,
   collectSubscriptions,
   claimName,
+  setConnectionInfo,
   AUD,
   type SignHash,
 } from '../connect-client';
+import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
@@ -167,6 +169,35 @@ async function activatePersonPlanes(owner: Address, via: Via, auth?: Auth): Prom
     if (!ix.ok) console.warn('[home-create] interactions plane not enabled (enable later):', ix.error);
   } catch (e) {
     console.warn('[home-create] person-plane activation deferred:', e);
+  }
+}
+
+/**
+ * spec 280 carve-out — publish a SOCIAL home's connection KIND (google/youversion) onto its PUBLIC name
+ * node, so a returning member can sign in on a FRESH device (no session cookie). The returning name-path
+ * sign-in (`EntryExperience`) reads `connectionKind` (via `/connect/name-info`) to offer "Continue with
+ * Google/YouVersion"; without it, `connectionKind` is null AND the KMS `C_sub` counts as an EOA
+ * (`hasEoa=true`), so the screen mis-offers "Continue with wallet" and the social member is locked out.
+ *
+ * Reconciles with the "never call setConnectionInfo automatically" doctrine (opt-in bootstrap carve-out):
+ * KIND ONLY — never the address (the real linkability risk stays opt-in); owner-authorized (the C_sub
+ * signs, gaslessly, no gesture); necessary-for-function (cross-device return of a social home). Idempotent
+ * (skips when the kind is already published) + best-effort (never blocks onboarding). Non-social vias and
+ * nameless homes are no-ops.
+ */
+export async function publishSocialConnectionKindIfNeeded(agent: Address, name: string, via: Via, auth?: Auth): Promise<void> {
+  if (via !== 'google' && via !== 'youversion') return;
+  if (!name || !nameLabel(name)) return; // a nameless home has no name node to write
+  try {
+    // Idempotency: read the SAME record the returning sign-in reads; skip the on-chain write if it's set.
+    const info = (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)
+      .then((r) => r.json())
+      .catch(() => ({}))) as { connectionKind?: string | null };
+    if (info?.connectionKind === via) return;
+    const signHash = await signHashFor(via, agent, auth);
+    await setConnectionInfo(agent, name, via as ConnectionKind, signHash); // KIND only — never the address
+  } catch (e) {
+    console.warn('[connection-kind] social publish deferred (retry from Naming):', e);
   }
 }
 
