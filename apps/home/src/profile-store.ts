@@ -127,10 +127,36 @@ async function postProfile(path: 'get' | 'set', principal: Address, data?: Impac
 export const PERSON_CAPABILITY_RECORDS = ['impact-profile', 'skills.data', 'home.manifest', 'control-events.data'] as const;
 export type PersonRecordType = (typeof PERSON_CAPABILITY_RECORDS)[number];
 
-/** Read one of the person's OWN capability records from their vault (self-gated `record.get`). Same
- *  fail-closed surface as the profile read: {@link VaultKeyUnauthorizedError} (activate the vault key)
- *  / {@link InteractionsNotEnabledError} (enable the interactions plane). `null` = no such record yet. */
-export async function readPersonRecord(principal: Address, recordType: PersonRecordType): Promise<unknown> {
+/** A record ref the person's vault list returns (spec 315 vault viewer). */
+export interface PersonVaultRecordRef {
+  record_type: string;
+  updated_at: string;
+}
+
+/** List the person's OWN Home-managed vault record types (self-gated `record.list`). demo-mcp scope-filters
+ *  to the interactions grant, so app-specific records (written under a DIFFERENT app's grant, e.g. a relying
+ *  app's) never appear — least-privilege. Same fail-closed surface as the reads below. */
+export async function listPersonRecords(principal: Address): Promise<PersonVaultRecordRef[]> {
+  await ensureCsrfToken();
+  const session = homeBearer();
+  if (!session) throw new Error('record list failed: no home session');
+  const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/record.list`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { records?: Array<{ resource?: string; record_type?: string; updatedAt?: string; updated_at?: string }>; error?: string };
+  if (body?.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (res.status === 409) throw new InteractionsNotEnabledError();
+  if (!res.ok) throw new Error(`record list failed: ${String(body.error ?? res.status)}`);
+  return (body.records ?? []).map((r) => ({ record_type: r.resource ?? r.record_type ?? '', updated_at: r.updatedAt ?? r.updated_at ?? '' })).filter((r) => r.record_type);
+}
+
+/** Read one of the person's OWN records from their vault (self-gated `record.get`; reads are scope-gated at
+ *  demo-mcp, not whitelisted). Same fail-closed surface: {@link VaultKeyUnauthorizedError} (activate the
+ *  vault key) / {@link InteractionsNotEnabledError} (enable the interactions plane). `null` = no such record. */
+export async function readPersonRecord(principal: Address, recordType: string): Promise<unknown> {
   await ensureCsrfToken();
   const session = homeBearer();
   if (!session) throw new Error(`record ${recordType} read failed: no home session`);

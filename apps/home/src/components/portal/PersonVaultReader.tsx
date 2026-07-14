@@ -1,35 +1,46 @@
 'use client';
 // Personal vault-records viewer (spec 315 Manage) — the person's own analog of the org Records page
-// (`OrgRecordsSection` → `VaultReader`). Shows what's in YOUR vault, read over your interactions grant
-// via the self-gated `record.get`. This is the SELF-READABLE capability set (matches the InteractionsDO
-// whitelist), NOT the whole vault — the person's own record list is whitelist-gated by design; a full
-// "every record" list would need a server `record.list` op. Reads are fired CONCURRENTLY.
-import { useEffect, useState } from 'react';
+// (`OrgRecordsSection` → `VaultReader`). Lists the person's OWN Home-managed vault records (self-gated
+// `record.list`) and reads each on demand (`record.get`). demo-mcp scope-filters both to the interactions
+// grant, so app-specific records written under a DIFFERENT app's grant (e.g. a relying app's own records)
+// never appear here — least-privilege. Reads defer to demo-mcp's record-scope gate, never a silent empty.
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from '../../context/session';
 import {
-  PERSON_CAPABILITY_RECORDS,
+  listPersonRecords,
   readPersonRecord,
   VaultKeyUnauthorizedError,
   InteractionsNotEnabledError,
-  type PersonRecordType,
+  type PersonVaultRecordRef,
 } from '../../profile-store';
 
-const LABELS: Record<PersonRecordType, string> = {
-  'impact-profile': 'Community profile',
-  'skills.data': 'Skills',
-  'home.manifest': 'Home manifest',
-  'control-events.data': 'Activity timeline',
-};
-
-type RecordState = { data: unknown; error?: string };
+// Friendly labels for the known Home-managed record types; unknown/wildcard types fall back to the raw id.
+function labelFor(recordType: string): string {
+  const exact: Record<string, string> = {
+    'impact-profile': 'Community profile',
+    'skills.data': 'Skills',
+    'home.manifest': 'Home manifest',
+    'control-events.data': 'Activity timeline',
+    'inbox.data': 'Inbox',
+    'relationships.data': 'Relationships',
+    'directory.data': 'Directory listing',
+  };
+  if (exact[recordType]) return exact[recordType];
+  if (recordType.startsWith('member.profile:')) return 'Member profile';
+  if (recordType.startsWith('org.membership:')) return 'Org membership';
+  if (recordType.startsWith('conversation.') || recordType.startsWith('topic.')) return 'Conversation';
+  if (recordType.startsWith('message.body:')) return 'Message body';
+  return recordType;
+}
 
 export function PersonVaultReader() {
   const { session, agentAddress } = useSession();
-  const [records, setRecords] = useState<Record<string, RecordState> | null>(null);
+  const [records, setRecords] = useState<PersonVaultRecordRef[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [gate, setGate] = useState<'vault-key' | 'interactions' | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [bodies, setBodies] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -39,32 +50,28 @@ export function PersonVaultReader() {
     setGate(null);
     setErr(null);
     setRecords(null);
-    void (async () => {
-      try {
-        // Read every capability record CONCURRENTLY (they share one owner + one vault key). A per-record
-        // non-auth error is captured inline; an auth/enablement failure is shared by all, so it bubbles
-        // to the single gate below (ADR-0013: an auth failure is NOT an empty record).
-        const results = await Promise.all(
-          PERSON_CAPABILITY_RECORDS.map(async (rt) => {
-            try {
-              return [rt, { data: await readPersonRecord(agentAddress, rt) }] as const;
-            } catch (e) {
-              if (e instanceof VaultKeyUnauthorizedError || e instanceof InteractionsNotEnabledError) throw e;
-              return [rt, { data: null, error: e instanceof Error ? e.message : 'read failed' }] as const;
-            }
-          }),
-        );
-        if (!cancelled) setRecords(Object.fromEntries(results));
-      } catch (e) {
-        if (e instanceof VaultKeyUnauthorizedError) { if (!cancelled) setGate('vault-key'); return; }
-        if (e instanceof InteractionsNotEnabledError) { if (!cancelled) setGate('interactions'); return; }
-        if (!cancelled) setErr(e instanceof Error ? e.message : 'read failed');
-      } finally {
-        if (!cancelled) setBusy(false);
-      }
-    })();
+    void listPersonRecords(agentAddress)
+      .then((r) => { if (!cancelled) setRecords(r.sort((a, b) => a.record_type.localeCompare(b.record_type))); })
+      .catch((e) => {
+        if (cancelled) return;
+        if (e instanceof VaultKeyUnauthorizedError) setGate('vault-key');
+        else if (e instanceof InteractionsNotEnabledError) setGate('interactions');
+        else setErr(e instanceof Error ? e.message : 'read failed');
+      })
+      .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
   }, [agentAddress]);
+
+  const show = useCallback(async (recordType: string) => {
+    setOpen((o) => ({ ...o, [recordType]: !o[recordType] }));
+    if (bodies[recordType] || !agentAddress) return;
+    try {
+      const data = await readPersonRecord(agentAddress, recordType);
+      setBodies((b) => ({ ...b, [recordType]: JSON.stringify(data, null, 2) }));
+    } catch (e) {
+      setBodies((b) => ({ ...b, [recordType]: `(error: ${e instanceof Error ? e.message : 'read failed'})` }));
+    }
+  }, [agentAddress, bodies]);
 
   if (!session) {
     return (
@@ -79,8 +86,9 @@ export function PersonVaultReader() {
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
       <h3 className="subhead">Your vault records</h3>
       <p className="manage-card-blurb" style={{ margin: '0 0 .6rem' }}>
-        The records in YOUR vault, read with your own authority (your interactions grant + vault key). This
-        data lives in your vault — the Home only reads it for you, on this device, over your session.
+        The records in YOUR vault that your Home is entitled to read (your interactions grant + vault key).
+        This data lives in your vault — the Home reads it for you, on this device, over your session. Records
+        an app writes under its own grant aren&rsquo;t listed here; view those inside that app.
       </p>
       {busy ? (
         <p className="manage-card-blurb">Reading your vault…</p>
@@ -95,37 +103,28 @@ export function PersonVaultReader() {
         </p>
       ) : err ? (
         <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read: {err}</p>
-      ) : !records ? (
+      ) : !records || records.length === 0 ? (
         <p className="manage-card-blurb">No records yet.</p>
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '.82rem' }}>
-          {PERSON_CAPABILITY_RECORDS.map((rt) => {
-            const st = records[rt];
-            const present = st && st.data != null;
-            return (
-              <li key={rt} style={{ borderTop: '1px solid var(--c-g100, #eee)', padding: '.45rem 0' }}>
-                <strong>{LABELS[rt]}</strong> <code style={{ color: 'var(--c-g500, #64748b)' }}>{rt}</code>{' '}
-                {st?.error ? (
-                  <span style={{ color: 'var(--c-danger, #dc2626)' }}>· {st.error}</span>
-                ) : present ? (
-                  <button
-                    type="button"
-                    onClick={() => setOpen((o) => ({ ...o, [rt]: !o[rt] }))}
-                    style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: '.8rem' }}
-                  >
-                    {open[rt] ? 'hide' : 'show'}
-                  </button>
-                ) : (
-                  <span style={{ color: 'var(--c-g500, #64748b)' }}>· empty</span>
-                )}
-                {present && open[rt] && (
-                  <pre style={{ background: 'var(--c-g50, #f8fafc)', padding: '.45rem .6rem', borderRadius: 6, overflowX: 'auto', fontSize: '.72rem', margin: '.3rem 0 0' }}>
-                    {JSON.stringify(st.data, null, 2)}
-                  </pre>
-                )}
-              </li>
-            );
-          })}
+          {records.map((r) => (
+            <li key={r.record_type} style={{ borderTop: '1px solid var(--c-g100, #eee)', padding: '.45rem 0' }}>
+              <strong>{labelFor(r.record_type)}</strong> <code style={{ color: 'var(--c-g500, #64748b)' }}>{r.record_type}</code>
+              {r.updated_at && <span style={{ color: 'var(--c-g400, #94a3b8)' }}> · {r.updated_at}</span>}{' '}
+              <button
+                type="button"
+                onClick={() => void show(r.record_type)}
+                style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: '.8rem' }}
+              >
+                {open[r.record_type] ? 'hide' : 'show'}
+              </button>
+              {open[r.record_type] && (
+                <pre style={{ background: 'var(--c-g50, #f8fafc)', padding: '.45rem .6rem', borderRadius: 6, overflowX: 'auto', fontSize: '.72rem', margin: '.3rem 0 0' }}>
+                  {bodies[r.record_type] ?? 'Reading…'}
+                </pre>
+              )}
+            </li>
+          ))}
         </ul>
       )}
     </div>

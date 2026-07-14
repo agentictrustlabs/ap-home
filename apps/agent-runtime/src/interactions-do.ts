@@ -160,7 +160,7 @@ export class InteractionsDO {
     // equal this grant's delegator (the principal / token sub), else it's not the right principal's leaf.
     // Otherwise fall back to the server-mint bridge so pre-enable principals keep working; they migrate to
     // bound-mint on their next enable (grant.put). No behavior change until GCP_KMS_INTERACTIONS_KEY_NAME set.
-    const callTool = async (toolName: 'get_vault_record' | 'set_vault_record', toolArgs: Record<string, unknown>): Promise<Response> => {
+    const callTool = async (toolName: 'get_vault_record' | 'set_vault_record' | 'list_vault_record', toolArgs: Record<string, unknown>): Promise<Response> => {
       if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
         const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
         const leaf = st.sessionLeaf;
@@ -206,7 +206,15 @@ export class InteractionsDO {
         }
         throw new Error(lastErr);
       },
-      async list(): Promise<never[]> { return []; },
+      // spec 315 — enumerate the owner's OWN vault record types. demo-mcp's list_vault_record is
+      // record-scope-FILTERED to the interactions grant, so this returns ONLY the Home-managed records
+      // (app-specific records under other grants stay invisible — least-privilege). Bare record types.
+      async list(): Promise<Array<{ resource: string; updatedAt: string }>> {
+        const resp = await callTool('list_vault_record', {});
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Array<{ record_type: string; updated_at: string }>; error?: string };
+        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault list failed (${resp.status})`);
+        return (out.records ?? []).map((r) => ({ resource: r.record_type, updatedAt: r.updated_at }));
+      },
     } as unknown as Vault;
   }
 
@@ -805,10 +813,25 @@ export class InteractionsDO {
       // person's own profile/skills/manifest, replacing the V-1 bearer path + app-local KV. The
       // interactions grant's record scope + the vault's KEK gate BOTH bound this at demo-mcp; the
       // self-check + whitelist here are the belt to those suspenders.
+      if (op === 'record.list') {
+        // spec 315 vault viewer — the person enumerates their OWN Home-managed vault records (self-gated).
+        // demo-mcp's list is record-scope-filtered to the interactions grant, so app-specific records under
+        // other grants never appear (least-privilege).
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'this vault belongs to the principal — self access only' }, 403);
+        const records = await this.vaultFor(grant).list('');
+        return json({ ok: true, records });
+      }
       if (op === 'record.get' || op === 'record.put') {
         if (sessionSa.toLowerCase() !== principal) return json({ error: 'this record belongs to the principal — self access only' }, 403);
         const recordType = String(body.recordType ?? '');
-        if (!CAPABILITY_RECORDS.has(recordType)) return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
+        if (!recordType) return json({ error: 'recordType required' }, 400);
+        // WRITES stay whitelisted (only the known capability records may be written from here). READS defer
+        // to demo-mcp's record-scope gate (the interactions grant's scope) so the vault viewer (spec 315)
+        // can VIEW any Home-managed record; an out-of-scope record is denied at demo-mcp, never silently.
+        // The self-check above + the KEK gate + the grant scope remain.
+        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType)) {
+          return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
+        }
         if (op === 'record.get') {
           const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
           return json({ ok: true, record: r?.data ?? null });
