@@ -136,6 +136,8 @@ export function buildNav(
     manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
     // Unified metadata editor (docs/architecture/agent-metadata-tiers.md): all three tiers, one page.
     manage.push({ id: 'metadata', label: 'Metadata', href: '/metadata', Icon: TagIcon, status: 'live' });
+    // Records: what's in YOUR vault (the person's own analog of the org Records page).
+    manage.push({ id: 'records', label: 'Records', href: '/records', Icon: DatabaseIcon, status: 'live' });
   }
   if (wl.services.devices) {
     manage.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });

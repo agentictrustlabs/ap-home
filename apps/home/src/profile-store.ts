@@ -118,6 +118,35 @@ async function postProfile(path: 'get' | 'set', principal: Address, data?: Impac
   return body;
 }
 
+// ── Personal vault-records viewer (spec 315 Manage) ───────────────────────────────────────────────
+// "See your personal vault records like we do for org." The person self-reads their OWN vault over
+// the interactions grant (self-gated `record.get`). This is the SELF-READABLE set — it matches the
+// InteractionsDO `CAPABILITY_RECORDS` whitelist, NOT the whole vault: the person's own list is
+// whitelist-gated by design (unlike the org viewer, which lists everything through the stewardship
+// delegation's record scope). Showing every vault record would need a server `record.list` op.
+export const PERSON_CAPABILITY_RECORDS = ['impact-profile', 'skills.data', 'home.manifest', 'control-events.data'] as const;
+export type PersonRecordType = (typeof PERSON_CAPABILITY_RECORDS)[number];
+
+/** Read one of the person's OWN capability records from their vault (self-gated `record.get`). Same
+ *  fail-closed surface as the profile read: {@link VaultKeyUnauthorizedError} (activate the vault key)
+ *  / {@link InteractionsNotEnabledError} (enable the interactions plane). `null` = no such record yet. */
+export async function readPersonRecord(principal: Address, recordType: PersonRecordType): Promise<unknown> {
+  await ensureCsrfToken();
+  const session = homeBearer();
+  if (!session) throw new Error(`record ${recordType} read failed: no home session`);
+  const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/record.get`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session, recordType }),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (res.status === 409) throw new InteractionsNotEnabledError();
+  if (!res.ok) throw new Error(`record ${recordType} read failed: ${String(body.error ?? res.status)}`);
+  return body.record ?? null;
+}
+
 /** Read the member's encrypted community profile from their vault. Returns an empty profile if the
  *  member has never saved one. Throws `VaultKeyUnauthorizedError` if they haven't activated their
  *  vault key (run the /vault-key ceremony) yet. */
