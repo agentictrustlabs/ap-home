@@ -206,7 +206,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           delegate,
           viaLower,
           auth,
-          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg },
+          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg: enroll.existingOrg },
         );
         if (!created.ok) return fail(created.error);
         code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);

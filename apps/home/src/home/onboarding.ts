@@ -275,8 +275,46 @@ export async function createOrganization(
   delegate: Address,
   via: Via = 'passkey',
   auth?: Auth,
-  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address } = {},
+  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address; existingOrg?: Address } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
+  // REUSE AN EXISTING ORG the person already stewards (select-existing GCO): skip the deploy + name claim
+  // and mint the SAME grants org-create would (site → relying delegate, broker → grantOrg, stewardship →
+  // person) as approved-hash (0x03) leaves, pre-approving all their digests in ONE `approveHash` userOp on
+  // the already-deployed org. The org is custodied by the person, so `signHashFor(via, org, auth)` signs it —
+  // one prompt, no deploy. `/oidc/grant` verifies the 0x03 site grant via ERC-1271 (approved-hash branch) and
+  // writes the related-org link (credential/proofHash are optional there). Reuses the B4 approved-hash batch.
+  if (opts.existingOrg) {
+    const org = opts.existingOrg;
+    try {
+      const signHash = await signHashFor(via, org, auth);
+      const siteApp = buildApprovedSiteDelegation(org, delegate);        // org → relying app's delegate
+      const stewardApp = buildApprovedSiteDelegation(org, home.address); // org → person (stewardship)
+      const digests: Hex[] = [siteApp.digest, stewardApp.digest];
+      let brokerApp: ReturnType<typeof buildApprovedSiteDelegation> | undefined;
+      if (opts.grantOrg && opts.grantOrg.toLowerCase() !== delegate.toLowerCase()) {
+        brokerApp = buildApprovedSiteDelegation(org, opts.grantOrg);     // org → broker (Switchboard)
+        digests.push(brokerApp.digest);
+      }
+      const approve = await approveGrantHashes(org, signHash, digests);
+      if (!approve.ok) return { ok: false, error: `grant approval failed: ${approve.error}` };
+      // The org already exists ⇒ its vault / channels / membership are already set up; nothing to seed.
+      return {
+        ok: true,
+        org: {
+          orgAgent: org,
+          orgName: base,
+          person: home.address,
+          purpose: opts.purpose,
+          requestedBy: opts.requestedBy,
+          brokerDelegation: brokerApp ? toWire(brokerApp.delegation) : null,
+          stewardshipDelegation: toWire(stewardApp.delegation),
+        },
+        grant: toWire(siteApp.delegation),
+      };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'existing-org grant failed' };
+    }
+  }
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
   const r = isKmsVia(via)

@@ -932,6 +932,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         purpose: api.enroll.purpose,
         requestedBy: api.enroll.aud,
         grantOrg: api.enroll.grantOrg,
+        existingOrg: api.enroll.existingOrg, // select-existing GCO: grant from an existing org instead of deploying
       });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
       const code = await api.submitGrant(grant_id, created.grant, created.org);
