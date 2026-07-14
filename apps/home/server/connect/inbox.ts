@@ -131,7 +131,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     });
     return jsonCors({ items }, request);
   }
-  const view = await readInboxView(inboxKv, owner, await makeBodyStoreFactory(env)(owner));
+  // VL-W4 — metadata-first: the list/poll resolves NO bodies (zero KMS decrypts → sub-second first paint);
+  // a thread hydrate (?conversationId=…) resolves ONLY that conversation's bodies. The rail renders from
+  // metadata (subject/sender/time); the open thread lazily fetches its own bodies.
+  const wantConversationId = url.searchParams.get('conversationId') ?? undefined;
+  const bodyStore = wantConversationId ? await makeBodyStoreFactory(env)(owner) : undefined;
+  const view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {

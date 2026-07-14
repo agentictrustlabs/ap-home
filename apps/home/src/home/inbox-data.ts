@@ -127,10 +127,13 @@ export interface InboxView {
  *  never a KV fallback — the UI's "Enable vault storage" action is the one path to readable bodies.
  *  Vault reads go to `message.body:<id>` — the resource `putBody` actually keys by — never the
  *  sender-supplied `envelope.body.resource` (an external app's envelope may carry an `inline:*` stub). */
-async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore): Promise<Record<string, string>> {
+async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore, conversationId?: string): Promise<Record<string, string>> {
   if (!bodyStore) return {};
   const out: Record<string, string> = {};
-  await Promise.all(doc.envelopes.map(async (e) => {
+  // VL-W4 — metadata-first: the list/poll passes NO body store (bodies stay lazy); a thread hydrate passes
+  // a store + conversationId so we resolve ONLY that conversation's bodies (not the whole inbox).
+  const envelopes = conversationId ? doc.envelopes.filter((e) => e.conversationId === conversationId) : doc.envelopes;
+  await Promise.all(envelopes.map(async (e) => {
     // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
     // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
     const normalized: MessageEnvelopeV1 = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
@@ -153,7 +156,7 @@ async function persistBody(_doc: InboxDataV1, envelope: MessageEnvelopeV1, bodyT
   });
 }
 
-export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyStore): Promise<InboxView> {
+export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyStore, conversationId?: string): Promise<InboxView> {
   const doc = await loadInboxData(kv, person);
   const { projector, interactions } = hydrate(person, doc);
   const items = projector.listInbox();
@@ -178,7 +181,7 @@ export async function readInboxView(kv: KV, person: string, bodyStore?: MessageB
     summary: projectHomeInboxSummary({ items, cases }),
     cases,
     cards: doc.cards,
-    bodies: await resolveBodies(doc, bodyStore),
+    bodies: await resolveBodies(doc, bodyStore, conversationId),
     mandates: doc.mandates ?? {},
     conversations: summarizeConversations(items),
     descriptors,

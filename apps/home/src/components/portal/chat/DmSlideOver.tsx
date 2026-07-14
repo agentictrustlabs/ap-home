@@ -28,7 +28,7 @@ export function DmSlideOver({
   channelContext?: { channelTitle: string };
   onClose: () => void;
 }) {
-  const { view, refresh, post, busy } = useInboxView(session);
+  const { view, refresh, loadThread, post, busy } = useInboxView(session);
   const [draft, setDraft] = useState('');
   const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>('resolving');
@@ -123,6 +123,15 @@ export function DmSlideOver({
   }, [view, recipientLabel, recipientName]);
 
   const canSend = !!conversationId || resolution === 'resolved';
+
+  // VL-W4 — bodies are lazy (metadata-first list); load this DM conversation's bodies when it resolves.
+  // Guard on missing bodies so it fires once + when a poll delivers a new message, without looping.
+  const dmNeedsBodies =
+    !!conversationId && !!view &&
+    view.items.some((i) => i.conversationId === conversationId && i.folder !== 'trash' && !(i.messageId in view.bodies));
+  useEffect(() => {
+    if (dmNeedsBodies && conversationId) void loadThread(conversationId);
+  }, [dmNeedsBodies, conversationId, loadThread]);
 
   const thread = useMemo(() => {
     if (!view || !conversationId) return [];

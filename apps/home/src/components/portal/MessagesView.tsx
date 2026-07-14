@@ -59,7 +59,7 @@ function ConvAvatar({ conversationId, title, view }: { conversationId: string; t
 
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { session, agentAddress } = useSession();
-  const { view, refresh, post, busy, error, setError } = useInboxView(session, targetAgent);
+  const { view, refresh, loadThread, post, busy, error, setError } = useInboxView(session, targetAgent);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
@@ -114,6 +114,16 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   );
   const activeId = open ?? conversations[0]?.conversationId ?? null;
 
+  // VL-W4 — the list/poll is metadata-only; lazily fetch the OPEN thread's bodies. The guard fires once
+  // per opened thread (and again when a poll delivers a new message into it, since that messageId won't be
+  // in `bodies`), and settles as soon as the bodies land — no render loop.
+  const threadNeedsBodies =
+    !!activeId && !!view &&
+    view.items.some((i) => i.conversationId === activeId && i.folder !== 'trash' && !(i.messageId in view.bodies));
+  useEffect(() => {
+    if (threadNeedsBodies && activeId) void loadThread(activeId);
+  }, [threadNeedsBodies, activeId, loadThread]);
+
   const thread = useMemo(() => {
     if (!view || !activeId) return [];
     return view.items
@@ -159,7 +169,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         .filter((i) => i.conversationId === conversationId && i.folder !== 'trash')
         .sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt))[0];
       if (!last) return '';
-      return messagePreview(view.bodies[last.messageId]) || 'New message';
+      // VL-W4 — bodies are lazy: use the body preview when it's already loaded (open threads), else fall
+      // back to the envelope subject (metadata, always present) so the rail never blocks on a body read.
+      return messagePreview(view.bodies[last.messageId]) || view.envelopeMeta[last.messageId]?.subject || 'New message';
     },
     [view],
   );

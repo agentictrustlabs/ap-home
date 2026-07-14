@@ -53,8 +53,27 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   const refresh = useCallback(async () => {
     if (!session) return;
     const res = await fetch(`/connect/inbox${agentQs}`, { headers: { authorization: `Bearer ${session.token}` } });
-    if (res.ok) setView((await res.json()) as InboxView);
+    if (res.ok) {
+      const next = (await res.json()) as InboxView;
+      // VL-W4 — the list/poll is metadata-only (bodies:{}). MERGE so bodies already lazily fetched for an
+      // open thread survive a re-poll (a plain setView would blank the open thread every 5s).
+      setView((prev) => ({ ...next, bodies: { ...(prev?.bodies ?? {}), ...next.bodies } }));
+    }
   }, [session, agentQs]);
+
+  // VL-W4 — lazily fetch ONE conversation's bodies when its thread is opened, merged into the view. The
+  // list never resolves bodies (zero KMS on first paint + on every poll); only the open thread pays.
+  const loadThread = useCallback(
+    async (conversationId: string) => {
+      if (!session || !conversationId) return;
+      const qs = `${agentQs ? agentQs + '&' : '?'}conversationId=${encodeURIComponent(conversationId)}`;
+      const res = await fetch(`/connect/inbox${qs}`, { headers: { authorization: `Bearer ${session.token}` } });
+      if (!res.ok) return;
+      const thread = (await res.json()) as InboxView;
+      setView((prev) => (prev ? { ...prev, bodies: { ...prev.bodies, ...thread.bodies } } : thread));
+    },
+    [session, agentQs],
+  );
 
   // Initial load + light polling (5s, paused while the tab is hidden) so new
   // deliveries appear without a manual refresh.
@@ -122,7 +141,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, post, busy, error, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, post, busy, error, setError, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {
