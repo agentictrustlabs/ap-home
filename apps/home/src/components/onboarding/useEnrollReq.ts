@@ -29,6 +29,7 @@ export interface EnrollReq {
   collectToken?: string; // spec 272 recurring — owner id_token passed by the owner app for the `subscription-collect` ceremony (authorizes the a2a due/collected calls).
   contentSignerTarget?: string; // spec 266 — the single signing identity (e.g. demo-validator.impact) this `content-signer` ceremony authorizes. Per-custodian: you authorize only the SA you connected as.
   prompt?: string; // OIDC `prompt`: 'select_account'/'login' force the custodian chooser instead of silently reusing the active session (multi-custodian admin must never assume an identity).
+  requireNamedAgent?: boolean; // relying app requires a unique Impact name before issuing the grant.
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -71,6 +72,7 @@ export function parseEnrollReq(): EnrollReq | null {
       collectToken: p.get('collect_token') ?? undefined,
       contentSignerTarget: p.get('content_signer_target') ?? undefined,
       prompt: p.get('prompt') ?? undefined,
+      requireNamedAgent: p.get('require_named_agent') === 'true' || p.get('require_named_agent') === '1',
     };
   } catch {
     return null;

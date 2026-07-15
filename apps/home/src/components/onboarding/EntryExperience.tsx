@@ -176,6 +176,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
       // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
+        const clientCfg = whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud);
+        if (api.enroll!.requireNamedAgent || clientCfg?.requireNamedAgent) {
+          setView({ k: 'enroll-name' });
+          return;
+        }
         // An ALREADY-authenticated member (cross-subdomain `ap_sso` cookie) is RECOGNIZED → one-tap
         // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
         // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is

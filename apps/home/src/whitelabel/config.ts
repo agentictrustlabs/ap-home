@@ -79,6 +79,7 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      requireNamedAgent: true,
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church

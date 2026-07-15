@@ -31,6 +31,9 @@ export interface RelyingApp {
    *  SELF-CONTAINED demos (e.g. demo-web) that bootstrap their own SA across SIWE/passkey/social —
    *  NOT for true relying apps (demo-org/jp/gs stay login-grade). Default false/undefined. */
   socialCustody?: boolean;
+  /** When true, this relying app cannot authorize a nameless person Smart Agent. Empty `agent_name`
+   *  requests must collect/claim a unique Impact name before granting. */
+  requireNamedAgent?: boolean;
   /** x402 payment params for the `x402-pay` template (spec 272/243). Present only on clients that
    *  sell paid content. The home mints a `person-treasury → payee` PaymentEnforcer delegation with
    *  these caps; amounts are atomic-unit strings (plain data / JSON-serializable). `mode`: 'push'
