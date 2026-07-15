@@ -619,17 +619,48 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
       </p>
       <SocialConnect onGoogle={onGoogle} onYouVersion={onYouVersion} primary />
       {enrollApi ? (
-        // Relying-app popup enroll (spec 257 §11 / spec 259): passkey + wallet BOTH lead to name entry
-        // here — a new passkey home is subdomain-bound (its WebAuthn RP ID is the handle's home origin),
-        // so a handle is needed and is collected on the NEXT screen (NameStart), inside this home popup,
-        // never on the relying app. One accurate button instead of two that both route to the name path
-        // plus a redundant "use my name" link.
-        <button
-          className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-          onClick={() => onUseName('passkey')}
-        >
-          Continue with a passkey or wallet
-        </button>
+        <>
+          {/* Relying-app enroll still needs the full front door. Social/email/phone can resolve a nameless
+              home directly; passkey/wallet/Impact-name collect the public handle first. */}
+          <button
+            className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
+            onClick={() => onUseName('passkey')}
+          >
+            Continue with a passkey or wallet
+          </button>
+          <button
+            className="btn-ghost onboarding-secondary"
+            style={showEmail ? SELECTED_METHOD_STY : undefined}
+            aria-pressed={showEmail}
+            onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
+            disabled={busy !== null}
+          >
+            {showEmail ? '● Continue with email' : 'Continue with email'}
+          </button>
+          {showEmail && (
+            <div style={{ margin: '.4rem 0 .2rem' }}>
+              <EmailAuthCard onLinked={() => setTimeout(() => window.location.reload(), 0)} />
+            </div>
+          )}
+          <button
+            className="btn-ghost onboarding-secondary"
+            style={showPhone ? SELECTED_METHOD_STY : undefined}
+            aria-pressed={showPhone}
+            onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
+            disabled={busy !== null}
+          >
+            {showPhone ? '● Continue with phone' : 'Continue with phone'}
+          </button>
+          {showPhone && (
+            <div style={{ margin: '.4rem 0 .2rem' }}>
+              <PhoneAuthCard onLinked={() => setTimeout(() => window.location.reload(), 0)} />
+            </div>
+          )}
+          <div className="method-or">or</div>
+          <button className="btn-ghost onboarding-secondary" onClick={() => onUseName()}>
+            Use my {whitelabel.brand.name} name
+          </button>
+        </>
       ) : (
         <>
           {/* Self-serve: real device login. A discoverable passkey / existing wallet home resolves

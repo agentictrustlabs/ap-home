@@ -57,6 +57,7 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
           void activateVault(res.home.address, 'phone', { token: d.token }); // spec 278 — best-effort vault
         }
         const p = await openSession(d.token, 'phone', false);
+        onLinked?.();
         // Metadata-tiers doctrine: the VERIFIED phone number is tier-1 PII — seed the private vault
         // profile (fill-only-empty, best-effort; the member edits/removes it on /profile anytime).
         const addr = p?.agent?.split(':').pop();

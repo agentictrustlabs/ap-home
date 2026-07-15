@@ -56,6 +56,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
         }
         const p = await openSession(d.token, 'email', false);
+        onLinked?.();
         // Metadata-tiers doctrine: the VERIFIED email is tier-1 PII — seed the private vault profile
         // (fill-only-empty, best-effort; the member edits/removes it on /profile anytime).
         const addr = p?.agent?.split(':').pop();
