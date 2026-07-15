@@ -167,8 +167,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // VL-W4 — metadata-first: the list/poll resolves NO bodies (zero KMS decrypts → sub-second first paint);
   // a thread hydrate (?conversationId=…) resolves ONLY that conversation's bodies. The rail renders from
   // metadata (subject/sender/time); the open thread lazily fetches its own bodies.
+  // `?preview=1` opts into resolving ALL bodies for the list (so a client can show a last-message
+  // snippet per conversation) — heavier (one vault read per message), so it stays OFF by default and
+  // the portal keeps its metadata-first fast paint. A thread hydrate (?conversationId) is unaffected.
   const wantConversationId = url.searchParams.get('conversationId') ?? undefined;
-  const bodyStore = wantConversationId ? await makeBodyStoreFactory(env)(owner) : undefined;
+  const wantPreview = url.searchParams.get('preview') === '1';
+  const bodyStore = wantConversationId || wantPreview ? await makeBodyStoreFactory(env)(owner) : undefined;
   const view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
