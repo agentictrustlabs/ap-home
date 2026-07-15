@@ -533,11 +533,16 @@ export class InteractionsDO {
           // hash mismatch and silently drops the message (per-message censorship). DM bodies are write-once:
           // reject an overwrite whose bodyHash differs (an idempotent same-hash re-delivery still succeeds).
           const incomingHash = (body.data as { bodyHash?: string } | null)?.bodyHash;
-          // ADR-0013 — do NOT swallow a soft-failed read into "no record": a transient auth/RPC error would then
-          // re-open the write-once overwrite this guards (per-message censorship). `read` returns null ONLY for a
-          // genuine-absent body (it bounded-retries transients and throws on auth/decrypt failure); let a real
-          // failure fail the write CLOSED rather than silently permit an overwrite.
-          const existing = await this.vaultFor(dg).read<{ bodyHash?: string }>({ owner: '', resource });
+          // The write-once guard READS the existing body — but the DELIVERY grant (dg) is WRITE-ONLY on dm
+          // bodies (record scope `message.body:dm:*` : write), so reading with it is record_scope_denied and
+          // NO dm ever writes. Read via the INTERACTIONS grant instead (st0.grant carries `message.body:dm:*`
+          // : read); the delivery grant still performs the WRITE. Participants enable both planes together,
+          // so require the interactions grant here and fail CLOSED if absent (ADR-0013 — never silently permit
+          // an overwrite). `read` returns null only for a genuine-absent body (bounded-retries transients,
+          // throws on auth/decrypt failure), so a real failure fails the write closed.
+          const readGrant = st0.grant;
+          if (!readGrant) return json({ error: 'interactions grant required to verify dm body write-once — enable messaging for this agent' }, 409);
+          const existing = await this.vaultFor(readGrant).read<{ bodyHash?: string }>({ owner: '', resource });
           if (existing?.data?.bodyHash && incomingHash && existing.data.bodyHash !== incomingHash) {
             return json({ error: 'dm body already exists with a different hash — bodies are write-once' }, 409);
           }
