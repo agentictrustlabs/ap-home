@@ -73,6 +73,7 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
  *  session's (iss, sub) — spec 235). Both sign + recover with no device gesture, unlike passkey/wallet.
  *  The signer path (`signHashFor`), org-create, and the recognized-connect grant all branch on this. */
 export function isKmsVia(via: Via): boolean {
+  via = (String(via ?? '').toLowerCase() as Via); // tolerate the 'Google'/'YouVersion' display form the session stores
   // `email` + `phone` join the KMS family (email/phone-bootstrap): a verified email/phone with no home of
   // its own gets a per-subject KMS-custodied home (iss='email'|'phone', sub=SHA-256(value)) — the same
   // server-side C_sub signing as Google.
@@ -279,6 +280,7 @@ export async function openHome(
  *  Exported so portal surfaces (e.g. the spec-257 W4 "Claim your public name" card) can sign a
  *  userOp with the member's CURRENT credential without re-deriving the signer logic. */
 export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
+  via = (String(via ?? '').toLowerCase() || 'passkey') as Via; // tolerate the display-form via from the session
   if (via === 'wallet') {
     // Sign with the wallet that CUSTODIES `sender` (the home SA) — not MetaMask's active account (which
     // may be another home's custodian, e.g. the platform deployer). This is the relying-app GRANT signer,
@@ -351,6 +353,12 @@ export async function createOrganization(
   auth?: Auth,
   opts: { purpose?: string; requestedBy?: string; grantOrg?: Address; existingOrg?: Address } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
+  // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback), but
+  // isKmsVia/signHashFor/createChildAgentForSite match lowercase. Without this, a SOCIAL home's org-create
+  // is misrouted to the passkey path (createChildAgentForSite → loadPasskey → empty pubkey → the account
+  // factory reverts, "getAddressForAgentAccount reverted 0x1dacb0d2"). Lowercase makes isKmsVia true → the
+  // Google/KMS org-create path.
+  via = (String(via ?? '').toLowerCase() || 'passkey') as Via;
   // REUSE AN EXISTING ORG the person already stewards (select-existing GCO): skip the deploy + name claim
   // and mint the SAME grants org-create would (site → relying delegate, broker → grantOrg, stewardship →
   // person) as approved-hash (0x03) leaves, pre-approving all their digests in ONE `approveHash` userOp on
