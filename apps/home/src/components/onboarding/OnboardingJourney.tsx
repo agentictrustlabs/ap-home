@@ -14,12 +14,12 @@
 // limitation; the GOOGLE path (GoogleSecureHome) is the primary no-name flow. The wallet/EOA path
 // is not subdomain-bound and COULD auto-assign, but it too is only reached after the member
 // explicitly typed a name, so we honour their choice rather than discard it.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, type Via } from '../../home/onboarding';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
-import { listManagedAgents } from '../../connect-client';
+import { fetchProfile, listManagedAgents } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
@@ -53,7 +53,7 @@ export function OnboardingJourney({
    *  on-chain credentials by EntryExperience), so a wallet home isn't defaulted to passkey. */
   initialVia?: Via;
 }) {
-  const { openSession } = useSession();
+  const { session, openSession } = useSession();
   const c = whitelabel.copy;
   const community = whitelabel.brand.community;
   const appHost = api?.host ?? '';
@@ -81,6 +81,25 @@ export function OnboardingJourney({
   const [socialOpen, setSocialOpen] = useState(false); // "Continue with Social" → Google/YouVersion picker
   const [contactKind, setContactKind] = useState<'email' | 'phone'>('email');
   const failBack = useRef<Screen>('overview');
+
+  useEffect(() => {
+    if (!hasApp || screen !== 'contact' || !session?.token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const profile = await fetchProfile(session.token);
+        const addr = profile?.agent?.split(':').pop();
+        if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
+        if (cancelled) return;
+        setHome({ address: addr as Address, name: profile?.name || name });
+        setVia(contactKind);
+        setScreen('grant');
+      } catch (e) {
+        if (!cancelled) fail(e, 'contact');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [contactKind, hasApp, name, screen, session?.token]);
 
   // Surface the real reason — secureHome/etc. return error STRINGS, not Error objects.
   const fail = (e: unknown, back: Screen) => {
@@ -356,7 +375,7 @@ export function OnboardingJourney({
       <Frame>
         <h1 className="onboarding-h1">{c.overviewTitle}</h1>
         <ValueStepList steps={steps} />
-        <p className="onboarding-note">Choose how to secure your home — only you will be able to open it.</p>
+        <p className="onboarding-note">Choose one way to secure your named home — only you will be able to open it.</p>
         {/* Spec 255 W3.1 — pre-create explainer. Renders ONLY when passkey is an offered method (so it
             never appears on a Google-only screen) and sits directly above the passkey CTA. */}
         {methods.includes('passkey') && (
@@ -372,9 +391,12 @@ export function OnboardingJourney({
             )}
           </div>
         )}
-        <div className="method-choice">
+        <div className="method-choice" style={{ alignItems: 'stretch' }}>
           {methods.includes('passkey') && (
-            <button className="btn-primary" onClick={onCreateKey}>{c.portalStepCreateCta}</button>
+            <button className="btn-primary" onClick={onCreateKey}>
+              {c.portalStepCreateCta}
+              <span style={{ display: 'block', fontSize: '.78rem', fontWeight: 500, opacity: .86, marginTop: 3 }}>Best for this device</span>
+            </button>
           )}
           {methods.includes('wallet') && (
             <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
@@ -398,16 +420,14 @@ export function OnboardingJourney({
               )}
             </div>
           )}
-          {/* Email / phone (specs 319/320): OTP-verified, KMS-custodied homes. SELF-SERVE only for
-              now — the relying-app enrollment resume machinery (stash → grant → code) exists for the
-              redirect IdPs but not yet for the OTP cards (RecognizedEnroll dual-path rule: don't
-              offer a method on one path that silently dead-ends the other). */}
-          {!hasApp && methods.includes('email') && (
+          {/* Email / phone (specs 319/320): OTP-verified, KMS-custodied homes. In relying-app
+              enrollment, completion returns to this journey and continues to the permission step. */}
+          {methods.includes('email') && (
             <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('email'); }}>
               Continue with email
             </button>
           )}
-          {!hasApp && methods.includes('phone') && (
+          {methods.includes('phone') && (
             <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('phone'); }}>
               Continue with phone
             </button>
