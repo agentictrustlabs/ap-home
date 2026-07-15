@@ -27,6 +27,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { HomeResolvedView } from './HomeResolvedView';
+import { RequiredNameGate } from './RequiredNameGate';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
@@ -102,6 +103,7 @@ type View =
   | { k: 'credential' } // spec 257 W1 — the credential-first front door (default; name demoted)
   | { k: 'enroll-entry' } // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll
   | { k: 'enroll-recognized' } // already-authenticated member (ap_sso cookie) → one-tap authorize (ADR-0032)
+  | { k: 'enroll-require-name'; agent: Address; token: string; via: Via }
   | { k: 'enroll-name'; reason?: 'passkey' | 'wallet' } // "Use my Impact name" within a name-deferred enroll → the named journey
   | { k: 'name'; reason?: 'passkey' | 'wallet' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
@@ -131,6 +133,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     // is a public handle, not a login key; social/passkey resolve the home without it.
     return { k: 'credential' };
   });
+  const clientCfg = api.enroll ? whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) : undefined;
+  const appName = clientCfg?.name ?? (api.enroll ? (() => {
+    try { return new URL(api.enroll!.redirectUri).host; } catch { return api.enroll!.redirectUri; }
+  })() : whitelabel.brand.name);
+  const requiresNamedAgent = !!(api.enroll?.requireNamedAgent || clientCfg?.requireNamedAgent);
 
   // spec 321 — OTP continuation for relying-app enrolls: the email/phone cards open the session
   // INTERNALLY (they never call this component's onSession), so an enroll that reaches the
@@ -139,8 +146,19 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // grant on the fresh home session and returns the code (same machinery the owner-op resume uses).
   useEffect(() => {
     if (mode !== 'enroll' || !api.enroll || !session) return;
-    if (view.k === 'enroll-entry') setView({ k: 'enroll-recognized' });
-  }, [mode, api.enroll, session, view.k]);
+    if (view.k !== 'enroll-entry') return;
+    void (async () => {
+      if (requiresNamedAgent) {
+        const profile = await fetchProfile(session.token).catch(() => null);
+        const addr = addressOf(profile?.agent);
+        if (profile && addr && profile.deployed !== false && !profile.name) {
+          setView({ k: 'enroll-require-name', agent: addr, token: session.token, via: resolveVia(profile.credential, session.via) });
+          return;
+        }
+      }
+      setView({ k: 'enroll-recognized' });
+    })();
+  }, [mode, api.enroll, requiresNamedAgent, session, view.k]);
 
   // Enroll mode: resolve the requested name → new vs existing vs org-create.
   useEffect(() => {
@@ -176,11 +194,6 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
       // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
-        const clientCfg = whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud);
-        if (api.enroll!.requireNamedAgent || clientCfg?.requireNamedAgent) {
-          setView({ k: 'enroll-name' });
-          return;
-        }
         // An ALREADY-authenticated member (cross-subdomain `ap_sso` cookie) is RECOGNIZED → one-tap
         // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
         // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
@@ -300,6 +313,17 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           const t2 = api.enroll?.template;
           if (t2 === 'content-signer' || t2 === 'subscription-collect') setView({ k: 'enroll-recognized' });
         }}
+      />
+    );
+  }
+  if (view.k === 'enroll-require-name') {
+    return (
+      <RequiredNameGate
+        agent={view.agent}
+        token={view.token}
+        via={view.via}
+        appName={appName}
+        onClaimed={() => setView({ k: 'enroll-recognized' })}
       />
     );
   }

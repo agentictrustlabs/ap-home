@@ -19,6 +19,7 @@ import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, typ
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
+import { RequiredNameGate } from './RequiredNameGate';
 
 const STASH_KEY = 'pendingEnroll';
 
@@ -58,7 +59,7 @@ function enrollReqToQuery(e: EnrollReq): string {
   return p.toString();
 }
 
-type Phase = 'securing' | 'mismatch' | 'consent' | 'granting' | 'connected' | 'error';
+type Phase = 'securing' | 'mismatch' | 'name' | 'consent' | 'granting' | 'connected' | 'error';
 
 export function GoogleEnrollResume() {
   const { session, agentAddress, agentName, agentDeployed } = useSession();
@@ -74,6 +75,7 @@ export function GoogleEnrollResume() {
   const relyingApp = enroll ? whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) : undefined;
   const appHost = enroll ? hostOf(enroll.redirectUri) : '';
   const appName = relyingApp?.name ?? appHost;
+  const requiresNamedAgent = !!(enroll?.requireNamedAgent || relyingApp?.requireNamedAgent);
   const token = session?.token ?? '';
 
   const fail = (e: unknown) => {
@@ -114,7 +116,9 @@ export function GoogleEnrollResume() {
         // below self-skips when EITHER side is empty (only meaningful when both have a name).
         setHome({ address: agentAddress, name: agentName ?? '' });
         const requested = nameLabel(pending.enroll.name);
-        setPhase(requested && nameLabel(agentName ?? '') !== requested ? 'mismatch' : 'consent');
+        if (requested && nameLabel(agentName ?? '') !== requested) setPhase('mismatch');
+        else if (requiresNamedAgent && !agentName) setPhase('name');
+        else setPhase('consent');
         return;
       }
       // Brand-new member: TRUE name-deferral (Google only). Deploy a NAMELESS SA (empty callData,
@@ -123,9 +127,9 @@ export function GoogleEnrollResume() {
       const res = await secureHomeNoName({ token });
       if (!res.ok) return fail(res.error);
       setHome(res.home);
-      setPhase('consent');
+      setPhase(requiresNamedAgent ? 'name' : 'consent');
     })();
-  }, [pending, token, agentName, agentAddress]);
+  }, [pending, token, agentName, agentAddress, requiresNamedAgent]);
 
   async function onAuthorize() {
     if (!enroll || !home) return;
@@ -205,6 +209,22 @@ export function GoogleEnrollResume() {
           To use the name “{requested}”, go back to {appName} and secure it with a passkey or wallet instead.
         </p>
       </Shell>
+    );
+  }
+
+  if (phase === 'name' && home) {
+    return (
+      <RequiredNameGate
+        agent={home.address}
+        token={token}
+        via="google"
+        appName={appName}
+        onClaimed={(name) => {
+          setHome({ ...home, name });
+          setPhase('consent');
+        }}
+        onCancel={onDecline}
+      />
     );
   }
 
