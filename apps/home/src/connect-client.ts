@@ -6,9 +6,11 @@ import {
   buildSetPrimaryNameCall,
   buildSetBytes32AttributeCall,
   buildSetAddressAttributeCall,
+  buildSetStringAttributeCall,
   namehash,
   PREDICATE_ID,
   CONNECTION_KIND_ID,
+  AGENT_KIND_ID,
   type ConnectionKind,
 } from '@agenticprimitives/agent-naming';
 import {
@@ -413,7 +415,7 @@ export async function claimName(
     newOwner: agent,
   });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
-  const batch = buildExecuteBatchCallData([register, setPrimary]);
+  const batch = buildExecuteBatchCallData([register, setPrimary, ...buildNameRecordCalls(picked.node, agent, { agentKind: 'person' })]);
   const res = await executeCall(agent, signHash, batch, { minNonce, attempts: 10 });
   if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
   requestReindex([agent]); // auto-index: surface the freshly-named agent in discovery immediately
@@ -490,6 +492,12 @@ export async function secureHomeWithGoogle(
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; name?: string; error?: string; detail?: string };
   if (!res.ok || !body.ok || !body.agent) {
     return { ok: false, error: [body.error, body.detail].filter(Boolean).join(' — ') || `secure-home failed (HTTP ${res.status})` };
+  }
+  try {
+    const wr = await executeCalls(body.agent, googleSignHash(body.agent, sessionToken), buildNameRecordCalls(picked.node, body.agent, { agentKind: 'person' }));
+    if (!wr.ok) console.warn('[secure-home] public naming metadata write failed:', wr.error);
+  } catch (e) {
+    console.warn('[secure-home] public naming metadata write failed:', e);
   }
   return { ok: true, agent: body.agent, name: body.name ?? picked.name };
 }
@@ -705,11 +713,69 @@ async function isAgentDeployed(sa: Address): Promise<boolean> {
 
 /** Pick a free name + build the `executeBatch(register, setPrimary)` calldata the new SA runs
  *  to claim it (newOwner = the SA itself). Returned to ride along in the deploy userOp. */
+type NameClaimRecords = {
+  agentKind?: keyof typeof AGENT_KIND_ID;
+  displayName?: string;
+  appContext?: string;
+  orgRole?: string;
+  serviceUrl?: string;
+  siteUrl?: string;
+  description?: string;
+};
+const NAME_RECORD_STRING_PREDICATE: Record<Exclude<keyof NameClaimRecords, 'agentKind'>, Hex> = {
+  displayName: PREDICATE_ID.displayName,
+  appContext: keccak256(toBytes('atl:appContext')),
+  orgRole: keccak256(toBytes('atl:orgRole')),
+  serviceUrl: keccak256(toBytes('atl:serviceUrl')),
+  siteUrl: keccak256(toBytes('atl:siteUrl')),
+  description: keccak256(toBytes('atl:description')),
+};
+
+function buildNameRecordCalls(node: Hex, sa: Address, records: NameClaimRecords): ContractCall[] {
+  const calls: ContractCall[] = [
+    buildSetAddressAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: PREDICATE_ID.addr, value: sa }),
+  ];
+  if (records.agentKind) {
+    calls.push(buildSetBytes32AttributeCall({
+      resolver: CONTRACTS.agentNameResolver,
+      node,
+      predicate: PREDICATE_ID.agentKind,
+      value: AGENT_KIND_ID[records.agentKind],
+    }));
+  }
+  for (const key of ['displayName', 'appContext', 'orgRole', 'serviceUrl', 'siteUrl', 'description'] as const) {
+    const value = records[key];
+    if (value) {
+      calls.push(buildSetStringAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: NAME_RECORD_STRING_PREDICATE[key], value }));
+    }
+  }
+  return calls;
+}
+
+function childDiscoveryRecords(base: string, cOpts: CreateChildOpts): NameClaimRecords {
+  const purpose = (cOpts.purpose ?? '').toLowerCase();
+  const requestedBy = (cOpts.requestedBy ?? '').toLowerCase();
+  const name = `${base.replace(/\.(impact|demo\.agent)$/i, '')}.impact`;
+  const records: NameClaimRecords = { agentKind: 'org', displayName: name };
+  if (purpose.includes('uupg') || requestedBy === 'uupg-tracker') {
+    const orgRole = purpose.includes('alliance') ? 'alliance' : 'organization';
+    records.appContext = 'uupg';
+    records.orgRole = orgRole;
+    records.serviceUrl = 'https://uupg.richardpedersen3.workers.dev/';
+    if (orgRole === 'organization') records.siteUrl = `https://${name.replace(/\.impact$/i, '')}.impact-agent.me/`;
+    records.description = orgRole === 'alliance'
+      ? 'UUPG alliance agent discoverable by public Agent Naming metadata.'
+      : 'UUPG organization agent discoverable by public Agent Naming metadata.';
+  }
+  return records;
+}
+
 async function buildClaimCallData(
   base: string,
   sa: Address,
   onStep?: (s: string) => void,
   exact = false,
+  records: NameClaimRecords = { agentKind: 'person' },
 ): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string }> {
   // exact (spec 275 MAM-D4): the member typed the precise label — claim it or fail, no
   // suffix bump. Otherwise forced-unique (spec 220) picks the next free `<base>[N]`.
@@ -733,7 +799,7 @@ async function buildClaimCallData(
   // `calls` is surfaced so an org-create can EXTEND the batch with approveHash(digest) calls
   // (spec 253) and still deploy + claim + approve in ONE userOp. `callData` is the standalone
   // deploy+claim batch for the simpler person-SA bootstrap callers.
-  const calls: ContractCall[] = [register, setPrimary];
+  const calls: ContractCall[] = [register, setPrimary, ...buildNameRecordCalls(picked.node, sa, records)];
   return { ok: true, callData: buildExecuteBatchCallData(calls), calls, name: picked.name };
 }
 
@@ -1020,7 +1086,7 @@ export async function createChildAgentForSite(
   if (childAgent.toLowerCase() === personAgent.toLowerCase()) {
     return { ok: false, error: 'agent collided with your person agent (salt)' };
   }
-  const claim = await buildClaimCallData(base, childAgent, onStep);
+  const claim = await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts));
   if (!claim.ok) return { ok: false, error: claim.error };
 
   // spec 253 — ONE PROMPT. The org's outbound grants are built as approved-hash (0x03
@@ -1238,7 +1304,10 @@ export async function createManagedAgent(
   let claimCalls: ContractCall[] = [];
   let name = '';
   if (wantName) {
-    const claim = await buildClaimCallData(input.label!, child, onStep, true);
+    const claim = await buildClaimCallData(input.label!, child, onStep, true, {
+      agentKind: input.kind === 'org' ? 'org' : 'service',
+      displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.impact`,
+    });
     if (!claim.ok) return { ok: false, error: claim.error };
     claimCalls = claim.calls;
     name = claim.name;
@@ -1343,7 +1412,10 @@ export async function nameManagedAgent(
     signHash = passkeySignHash;
   }
 
-  const claim = await buildClaimCallData(input.label, input.agent, onStep, true); // EXACT or fail
+  const claim = await buildClaimCallData(input.label, input.agent, onStep, true, {
+    agentKind: input.kind === 'org' ? 'org' : 'service',
+    displayName: `${input.label.replace(/\.(impact|demo\.agent)$/i, '')}.impact`,
+  }); // EXACT or fail
   if (!claim.ok) return { ok: false, error: claim.error };
 
   onStep?.('Naming your agent on the network…');
@@ -1543,6 +1615,7 @@ export async function createOrganizationWithGoogle(
   base: string,
   delegate: Address,
   cOpts: CreateChildOpts = {},
+  _via: string = 'google',
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
   // Resolve a free org name (label + node), like secureHomeWithGoogle does.
   const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
@@ -1569,6 +1642,14 @@ export async function createOrganizationWithGoogle(
   const childAgent = b.org;
   const personAgent = b.person;
   const childName = b.name ?? picked.name;
+  try {
+    const signHash = googleSignHash(childAgent, sessionToken);
+    const writes = buildNameRecordCalls(picked.node, childAgent, childDiscoveryRecords(base, cOpts));
+    const wr = await executeCalls(childAgent, signHash, writes);
+    if (!wr.ok) console.warn('[org-create] public naming metadata write failed:', wr.error);
+  } catch (e) {
+    console.warn('[org-create] public naming metadata write failed:', e);
+  }
   const relationshipType = RELATIONSHIP_TYPE.HAS_GOVERNANCE_OVER as RelationshipType;
   const edgeId = computeEdgeId(personAgent, childAgent, relationshipType);
   const purpose = cOpts.purpose ?? 'related-org';

@@ -405,7 +405,7 @@ export async function createOrganization(
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
   const r = isKmsVia(via)
     ? (auth?.token
-        ? await createOrganizationWithGoogle(auth.token, base, delegate, opts)
+        ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via)
         : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
     : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts, via);
   if (!r.ok) return r;

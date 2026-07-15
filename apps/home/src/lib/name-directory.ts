@@ -17,6 +17,11 @@ export interface RegisteredName {
   /** 'PersonAgent' | 'OrganizationAgent' | 'ServiceAgent' | null (undeclared on-chain). */
   kind: string | null;
   displayName: string | null;
+  description: string | null;
+  appContext: string | null;
+  orgRole: string | null;
+  serviceUrl: string | null;
+  siteUrl: string | null;
 }
 
 export async function listRegisteredNames(limit = 200): Promise<RegisteredName[]> {
@@ -25,4 +30,12 @@ export async function listRegisteredNames(limit = 200): Promise<RegisteredName[]
   const out = (await res.json()) as { ok?: boolean; error?: string; names?: RegisteredName[] };
   if (!out.ok) throw new Error(out.error ?? 'name directory read failed');
   return out.names ?? [];
+}
+
+export async function getRegisteredNameMetadata(key: string): Promise<{ agent: string; triples: { p: string; o: string }[] }> {
+  const res = await fetch(`${MCP_URL}/agent?key=${encodeURIComponent(key)}`);
+  if (!res.ok) throw new Error(`agent metadata read failed (${res.status})`);
+  const out = (await res.json()) as { ok?: boolean; error?: string; agent?: string; triples?: { p: string; o: string }[] };
+  if (!out.ok || !out.agent) throw new Error(out.error ?? 'agent metadata read failed');
+  return { agent: out.agent, triples: out.triples ?? [] };
 }
