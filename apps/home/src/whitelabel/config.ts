@@ -147,7 +147,7 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'org-site',
       name: 'Organization Site',
-      redirect_uris: ['https://org.richardpedersen3.workers.dev/', 'http://127.0.0.1:8798/', 'http://localhost:8798/'],
+      redirect_uris: ['https://uupg-org.richardpedersen3.workers.dev/', 'https://org.richardpedersen3.workers.dev/', 'http://127.0.0.1:8798/', 'http://localhost:8798/'],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
