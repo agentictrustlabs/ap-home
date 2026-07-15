@@ -138,6 +138,20 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // Single-organization site (agentictrustlabs/uupg apps/org) — ONE Worker serving a dedicated
+    // per-org website; the org is resolved from the hostname (or `?org=<label>` on the workers.dev
+    // and local-dev origins, which is why those redirect_uris are enough for now). site-login only.
+    // NOTE: redirect_uris are EXACT-match (CN-1) — production per-org subdomains
+    // (`https://<label>.<zone>/`) must each be registered here explicitly, or clientAllowsRedirect
+    // needs a deliberate wildcard-host extension for this client before subdomain routing goes live.
+    {
+      client_id: 'org-site',
+      name: 'Organization Site',
+      redirect_uris: ['https://org.richardpedersen3.workers.dev/', 'http://127.0.0.1:8798/', 'http://localhost:8798/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
