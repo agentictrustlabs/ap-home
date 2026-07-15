@@ -50,6 +50,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 
   console.log(`[phone-start] (dev) OTP for ${phone} = ${code}`);
-  const devCode = env.DEV_OTP_ECHO === 'true' ? code : undefined; // opt-in echo (unconfigured only)
-  return json({ ok: true, delivery: 'logged', ...(devCode ? { devCode } : {}) });
+  // Twilio is unconfigured, so the only delivery channel is this same trusted browser flow.
+  // Real Twilio Verify/Messaging paths above never echo codes.
+  return json({ ok: true, delivery: 'logged', devCode: code });
 };
