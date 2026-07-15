@@ -639,7 +639,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           </button>
           {showEmail && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <EmailAuthCard onLinked={() => setTimeout(() => window.location.reload(), 0)} />
+              <EmailAuthCard />
             </div>
           )}
           <button
@@ -653,7 +653,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
           </button>
           {showPhone && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <PhoneAuthCard onLinked={() => setTimeout(() => window.location.reload(), 0)} />
+              <PhoneAuthCard />
             </div>
           )}
           <div className="method-or">or</div>
