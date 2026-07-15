@@ -26,10 +26,11 @@ export default function EnableMessagingPage() {
     void (async () => {
       const via = session.via as Via;
       const auth = isKmsVia(via) ? { token: session.token } : undefined;
-      // Interactions first (the inbox doc plane), then delivery (the body plane). Both fail-closed if the
-      // send path needs them; provision both so a relying-app DM never 409s on a missing plane.
-      const a = await activateInteractionsIfNeeded(agentAddress as Address, via, auth);
-      const b = await activateInboxDeliveryIfNeeded(agentAddress as Address, via, auth);
+      // Interactions first (the inbox doc plane), then delivery (the body plane). FORCE re-issue both so a
+      // grant minted before the current resource scope (which /status can't detect — it reports presence,
+      // not scope-currency) is refreshed; a stale delivery scope is what makes a DM send `record_scope_denied`.
+      const a = await activateInteractionsIfNeeded(agentAddress as Address, via, auth, true);
+      const b = await activateInboxDeliveryIfNeeded(agentAddress as Address, via, auth, true);
       if (cancelled) return;
       if (!a.ok || !b.ok) {
         setState('error');

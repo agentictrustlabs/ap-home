@@ -854,15 +854,21 @@ export async function activateInboxDeliveryIfNeeded(
   recipient: Address,
   via: Via = 'passkey',
   auth?: Auth,
+  force = false,
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!DELIVERY_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
   // spec 323 W3.2 — the delivery wire is custodied ONLY in the recipient's InteractionsDO now; the
   // Home stores no wire. Skip when the DO already holds it (`status.deliveryGranted` — an open read).
-  try {
-    const st = (await fetch(`/a2a/interactions/${recipient.toLowerCase()}/status`).then((r) => r.json())) as { deliveryGranted?: boolean };
-    if (st?.deliveryGranted) return { ok: true, skipped: true };
-  } catch {
-    /* fall through to (re)issue — a read hiccup never blocks provisioning the grant */
+  // `force` re-issues even when present: /status reports only PRESENCE, not scope-currency, so a grant
+  // minted before a resource-scope change (e.g. the dm-body write scope) stays stale and causes
+  // `record_scope_denied` on send. A forced re-issue upserts the wire with the CURRENT scope. Idempotent.
+  if (!force) {
+    try {
+      const st = (await fetch(`/a2a/interactions/${recipient.toLowerCase()}/status`).then((r) => r.json())) as { deliveryGranted?: boolean };
+      if (st?.deliveryGranted) return { ok: true, skipped: true };
+    } catch {
+      /* fall through to (re)issue — a read hiccup never blocks provisioning the grant */
+    }
   }
   try {
     const signHash = await signHashFor(via, recipient, auth);
@@ -894,12 +900,15 @@ export async function activateInteractionsIfNeeded(
   principal: Address,
   via: Via = 'passkey',
   auth?: Auth,
+  force = false,
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!INTERACTIONS_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
-  try {
-    const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean };
-    if (st?.granted && st?.current !== false) return { ok: true, skipped: true }; // stale grants re-issue (scope widened — spec 322 W3)
-  } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
+  if (!force) {
+    try {
+      const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean };
+      if (st?.granted && st?.current !== false) return { ok: true, skipped: true }; // stale grants re-issue (scope widened — spec 322 W3)
+    } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
+  }
   try {
     const signHash = await signHashFor(via, principal, auth);
     const delegation = await issueInteractionsDelegation(principal, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID, signHash);
