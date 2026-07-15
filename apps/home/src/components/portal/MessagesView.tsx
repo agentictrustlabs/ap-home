@@ -7,7 +7,7 @@ import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
 import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
-import { activateInboxDeliveryIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
+import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
@@ -88,12 +88,21 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     if (!session || !agentAddress) return;
     setVaultBusy(true);
     try {
-      const via = session.via as Via;
-      const r = await activateInboxDeliveryIfNeeded(agentAddress as Address, via, isKmsVia(via) ? { token: session.token } : undefined);
-      if (r.ok) setVaultBodies(true);
-      else setError(r.error);
+      // Normalize via (session stores 'Google'/'YouVersion' display form; isKmsVia matches lowercase) so a
+      // SOCIAL home signs gesture-free via KMS instead of falling to a passkey prompt. FORCE-reissue BOTH
+      // planes: the send path needs the interactions grant (inbox writes) AND the delivery grant (dm bodies),
+      // and /status reports only presence — so a grant minted before the dm-body write scope stays stale and
+      // causes record_scope_denied until forcibly refreshed. Target = the inbox owner (this person, or the
+      // org when a targetAgent is set).
+      const owner = (targetAgent ?? agentAddress) as Address;
+      const via = (String(session.via ?? '').toLowerCase() || 'passkey') as Via;
+      const auth = isKmsVia(via) ? { token: session.token } : undefined;
+      const a = await activateInteractionsIfNeeded(owner, via, auth, true);
+      const b = await activateInboxDeliveryIfNeeded(owner, via, auth, true);
+      if (a.ok && b.ok) setVaultBodies(true);
+      else setError(!a.ok ? a.error : !b.ok ? b.error : 'could not enable messaging');
     } finally { setVaultBusy(false); }
-  }, [session, agentAddress, setError]);
+  }, [session, agentAddress, targetAgent, setError]);
 
   useEffect(() => {
     const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
