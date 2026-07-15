@@ -24,7 +24,10 @@ export default function EnableMessagingPage() {
     if (!session || !agentAddress) { setState('error'); setMsg('Sign in to your Home first, then retry.'); return; }
     let cancelled = false;
     void (async () => {
-      const via = session.via as Via;
+      // Normalize the via: the session stores the display form ('Google'/'YouVersion' from the OAuth
+      // callback), but isKmsVia/signHashFor match lowercase — without this a SOCIAL home falls through to
+      // the passkey signer and (wrongly) prompts a device challenge instead of signing gesture-free via KMS.
+      const via = (String(session.via ?? '').toLowerCase() || 'passkey') as Via;
       const auth = isKmsVia(via) ? { token: session.token } : undefined;
       // Interactions first (the inbox doc plane), then delivery (the body plane). FORCE re-issue both so a
       // grant minted before the current resource scope (which /status can't detect — it reports presence,
