@@ -35,7 +35,7 @@ import {
 } from '@agenticprimitives/fabric/messaging';
 import type { Vault } from '@agenticprimitives/vault';
 
-import { verifyHomeSession } from './custody-oidc.js';
+import { verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
@@ -584,8 +584,16 @@ export class InteractionsDO {
       }
     }
 
-    // ── Skills — caller = broker-verified Home session (any principal kind). ──
-    const gate = await verifyHomeSession(String(body.session ?? ''), this.env);
+    // ── Skills — caller = broker-verified Home session (any principal kind), OR a REGISTERED relying
+    // app's OIDC id_token. A relying app (e.g. uupg) drives these ops directly over the standard a2a
+    // path with the id_token it holds — NOT a Home session (its aud is a client_id, not DEMO_SSO_AUD),
+    // so verifyHomeSession is tried first and verifyRelyingIdToken second. Both resolve to the person's
+    // SA; AUTHORIZATION is still enforced below by the on-chain steward/member gate. ──
+    let gate = await verifyHomeSession(String(body.session ?? ''), this.env);
+    if (!gate.ok) {
+      const relying = await verifyRelyingIdToken(String(body.session ?? ''), this.env);
+      if (relying.ok) gate = relying;
+    }
     if (!gate.ok) return json({ error: gate.error }, gate.status);
     const sessionSa = gate.sa;
     const sessionCaip = gate.caip;
@@ -734,18 +742,21 @@ export class InteractionsDO {
 
       if (op === 'channels.post') {
         const name = await this.memberName(grant, principal, sessionCaip);
-        if (!name) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403); // posting = listing members ONLY
+        // A listed member posts as themselves; the community's STEWARD may also post (they administer it),
+        // authored as "Steward" — mirrors the list/read/create gate and the `you: name ?? 'Steward'` label.
+        const posterSteward = name ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!name && !posterSteward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
           const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
-          // spec 324 §10 — a private topic only admits its own members (the creator is one).
-          if (!canSeeChannel(entry, sessionSa)) return json({ error: 'not a member of this private topic' }, 403);
+          // spec 324 §10 — a private topic only admits its own members (the steward sees all).
+          if (!canSeeChannel(entry, sessionSa, posterSteward)) return json({ error: 'not a member of this private topic' }, 403);
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
-          const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name, bodyText: String(body.bodyText ?? '') });
+          const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
           if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
           await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);

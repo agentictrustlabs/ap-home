@@ -17,7 +17,7 @@
 //     caller can only ask us to act for the agent their session already proves.
 //   - JWKS fetch failure is fail-closed (ADR-0013: no silent fallback).
 
-import { verifyAgentSession, importJwks, type VerifyKey } from '@agenticprimitives/connect';
+import { verifyAgentSession, verifyIdToken, importJwks, type VerifyKey } from '@agenticprimitives/connect';
 import { deriveSubjectSigner, type KmsBackend } from '@agenticprimitives/key-custody';
 import { createKmsViemAccount } from '@agenticprimitives/key-custody/kms-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -202,4 +202,53 @@ export async function verifyHomeSession(
   const sa = v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
   if (!sa) return { ok: false, status: 400, error: 'no SA in session sub' };
   return { ok: true, sa, caip: v.session.sub };
+}
+
+/** Verify a REGISTERED relying app's OIDC id_token (e.g. the uupg tracker driving the org's discussion
+ *  board over the standard a2a path). The Home mints these with `aud=<client_id>` — NOT `DEMO_SSO_AUD`
+ *  — so `verifyHomeSession` rejects them. Here the SIGNATURE against the Home JWKS + the issuer-is-this-
+ *  Home check are the real proof of identity; `aud` is a client_id (accepted as-is, since AUTHORIZATION
+ *  is enforced downstream on-chain by the steward/member gate — the token only asserts *who* the person
+ *  is, and can only ever act as that person). Same registrable-domain issuer rule as sessions. */
+export async function verifyRelyingIdToken(
+  token: string,
+  env: { BROKER_JWKS_URL?: string; BROKER_ISS?: string },
+): Promise<{ ok: true; sa: Address; caip: string } | { ok: false; status: number; error: string }> {
+  if (!env.BROKER_JWKS_URL || !env.BROKER_ISS) return { ok: false, status: 503, error: 'broker gate not configured' };
+  if (!token) return { ok: false, status: 401, error: 'missing session' };
+  let keys: VerifyKey[];
+  try {
+    keys = await brokerKeys(env.BROKER_JWKS_URL);
+  } catch {
+    return { ok: false, status: 503, error: 'broker JWKS unavailable (fail-closed)' };
+  }
+  // Peek iss + aud (unverified), gate iss to THIS Home, THEN verify sig/iss/aud/exp against those values.
+  let iss: string | undefined, aud: string | undefined;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    iss = typeof payload.iss === 'string' ? payload.iss : undefined;
+    aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+  } catch {
+    return { ok: false, status: 401, error: 'unparseable id_token' };
+  }
+  const issRaw = env.BROKER_ISS.replace(/\/$/, '');
+  let base = issRaw.replace(/^https?:\/\//, '').toLowerCase();
+  try {
+    const parts = new URL(issRaw).hostname.toLowerCase().split('.');
+    base = parts.length >= 2 ? parts.slice(-2).join('.') : parts.join('.');
+  } catch { /* keep stripped host */ }
+  const issOk = (v?: string): boolean => {
+    if (!v) return false;
+    try {
+      const h = new URL(v).hostname.toLowerCase();
+      return h === base || (h.endsWith('.' + base) && /^[a-z0-9-]+$/.test(h.slice(0, -(base.length + 1))));
+    } catch { return false; }
+  };
+  if (!issOk(iss) || !aud) return { ok: false, status: 401, error: 'id_token iss/aud not accepted' };
+  const r = await verifyIdToken(token, { keys, expectedIss: iss!, expectedAud: aud });
+  if (!r.ok) return { ok: false, status: 401, error: `invalid id_token: ${r.reason}` };
+  const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
+  const sa = sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
+  if (!sa) return { ok: false, status: 400, error: 'no SA in id_token sub' };
+  return { ok: true, sa, caip: sub };
 }
