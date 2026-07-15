@@ -92,6 +92,15 @@ function redirectForEnrollName(name: string): boolean {
   return true;
 }
 
+function markEnrollChooserDone(enroll: { state?: string; codeChallenge?: string } | null | undefined) {
+  if (!enroll) return;
+  try {
+    sessionStorage.setItem(`ap_chooser:${enroll.state || enroll.codeChallenge}`, '1');
+  } catch {
+    /* storage blocked */
+  }
+}
+
 type View =
   | { k: 'checking' }
   | { k: 'blocked' }
@@ -148,6 +157,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     if (mode !== 'enroll' || !api.enroll || !session) return;
     if (view.k !== 'enroll-entry') return;
     void (async () => {
+      markEnrollChooserDone(api.enroll);
       if (requiresNamedAgent) {
         const profile = await fetchProfile(session.token).catch(() => null);
         const addr = addressOf(profile?.agent);
