@@ -12,7 +12,7 @@ import {
 } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
-import { executeGcpProvision, createGcpRestStepExecutor } from '@agenticprimitives/key-custody/provision-gcp';
+import { executeGcpProvision, createGcpRestStepExecutor, sanitizeKeyId } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import {
   createConsoleAuditSink,
@@ -1850,11 +1850,28 @@ app.get('/custody/vault-key/is-bound', async (c) => {
   return c.json({ ok: true, owner, bound, stale, allowedResources });
 });
 
-app.get('/custody/vault-key/server-info', (c) =>
-  c.json({
+app.get('/custody/vault-key/server-info', (c) => {
+  // spec 253 batching — the DETERMINISTIC per-owner KEK ref, COMPUTED (never minted here) from the same
+  // inputs `provision` uses: projects/<project>/locations/<loc>/keyRings/<ring>/cryptoKeys/<sanitizeKeyId(owner)>.
+  // A device-via onboarding fetches it with ?owner=<sa> to pre-build the vault-key authorization and
+  // pre-approve its digest INSIDE the deploy userOp (no separate bind signature). Same value the provision
+  // call later returns; null when the GCP env is unset ⇒ the client falls back to signing the bind.
+  const owner = (c.req.query('owner') ?? '').trim().toLowerCase();
+  let kmsKeyRef: string | null = null;
+  if (/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+    try {
+      const raw = (c.env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
+      const sa = JSON.parse(raw.startsWith('{') ? raw : atob(raw)) as { project_id?: string };
+      const location = (c.env.GCP_KEK_LOCATION ?? '').trim() || 'us-east1';
+      const keyRing = (c.env.GCP_KEK_KEYRING ?? '').trim() || 'vault-keks';
+      if (sa.project_id) kmsKeyRef = `projects/${sa.project_id}/locations/${location}/keyRings/${keyRing}/cryptoKeys/${sanitizeKeyId(owner)}`;
+    } catch { /* GCP env absent/unparseable → null; client signs the bind the old way */ }
+  }
+  return c.json({
     serverId: VAULT_SERVER_ID,
     vaultId: VAULT_SERVER_ID,
     serverKey: (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim() || '0x0000000000000000000000000000000000000001',
+    kmsKeyRef,
     // `vault:*` authorizes the person's WHOLE own vault-record namespace (impact-profile, jp:adopter,
     // jp:facilitator, gs:offering, …) — relying apps store member-owned records under `vault:<app>:<type>`,
     // and the narrow per-record default broke them (resource_not_authorized → vault_key_unauthorized). The
@@ -1863,8 +1880,8 @@ app.get('/custody/vault-key/server-info', (c) =>
     defaultResources: [RESOURCE_PERSON_PII, RESOURCE_ORG_SENSITIVE, RESOURCE_PROFILE, `${VAULT_RECORD_PREFIX}*`],
     classificationCeiling: 'regulated.high',
     ops: ['read', 'write'],
-  }),
-);
+  });
+});
 
 // POST /custody/vault-key/provision { owner } — provision (idempotent) the owner's per-person
 // symmetric KEK in GCP Cloud KMS and return its resource name (the kmsKeyRef the ceremony binds).
