@@ -35,7 +35,7 @@ import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { writeOrganizationMembership } from '../lib/membership-write';
-import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -165,7 +165,7 @@ export function continueWithYouVersion(preferredName?: string, enrollStashJson?:
  * `activatePersonPlanes`, so nothing changes for them (already zero device prompts). Inert grants
  * (service SA unset) are skipped, same as the per-grant path.
  */
-async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: Hex[]; submit: () => Promise<void> }> {
+async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: Hex[]; vaultFolded: boolean; submit: () => Promise<void> }> {
   const digests: Hex[] = [];
   const posts: Array<() => Promise<void>> = [];
   const low = sa.toLowerCase();
@@ -206,8 +206,51 @@ async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: He
       if (!res.ok || data.ok !== true) throw new Error(data.error ?? `delivery grant store failed (HTTP ${res.status})`);
     });
   }
+  // VAULT-KEY fold (Phase B) — pre-derive the DETERMINISTIC KEK ref from server-info, build the vault-key
+  // authorization as a 0x03 wire + the provision-challenge, and pre-approve BOTH digests in the deploy.
+  // submit() then provisions (proof=0x03) + binds (0x03 wire) with NO separate signature. Skipped (caller
+  // falls back to activateVaultIfNeeded) when server-info has no kmsKeyRef (GCP env unset / demo-mcp not yet
+  // deployed with the deterministic-ref change) — no regression.
+  let vaultFolded = false;
+  try {
+    const info = (await fetch(`/mcp-bind/custody/vault-key/server-info?owner=${low}`).then((r) => r.json())) as {
+      serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
+    };
+    if (info?.kmsKeyRef) {
+      const params: VaultKeyCeremonyParams = {
+        vaultId: 'demo-mcp',
+        kmsKeyRef: info.kmsKeyRef,
+        serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+        allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
+        classificationCeiling: info.classificationCeiling ?? 'regulated.high',
+        ops: info.ops ?? ['read', 'write'],
+      };
+      const vk = buildVaultKeyAuthorization(sa, params);
+      vk.delegation.signature = APPROVED_HASH_SENTINEL;
+      digests.push(vk.digest);
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const provChallenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', low, String(issuedAt)].join('\n')));
+      digests.push(provChallenge);
+      posts.push(async () => {
+        const pr = await fetch('/mcp-bind/custody/vault-key/provision', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ owner: sa, issuedAt, proof: APPROVED_HASH_SENTINEL }),
+        });
+        const pd = (await pr.json().catch(() => ({}))) as { ok?: boolean; error_description?: string; detail?: string };
+        if (!pr.ok || pd.ok !== true) throw new Error(pd.error_description ?? pd.detail ?? `vault provision failed (HTTP ${pr.status})`);
+        const br = await fetch('/mcp-bind/custody/vault-key/bind', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ owner: sa, vaultId: params.vaultId, kmsKeyRef: params.kmsKeyRef, allowedResources: params.allowedResources, classificationCeiling: params.classificationCeiling, ops: params.ops, expiresAt: vk.expiresAt, authorization: toWire(vk.delegation) }),
+        });
+        const bd = (await br.json().catch(() => ({}))) as { ok?: boolean; reason?: string; error?: string };
+        if (!br.ok || bd.ok !== true) throw new Error(bd.reason ?? bd.error ?? `vault-key bind failed (HTTP ${br.status})`);
+      });
+      vaultFolded = true;
+    }
+  } catch (e) { console.warn('[home-create] vault-key fold skipped (falling back to signed bind):', e); vaultFolded = false; }
   return {
     digests,
+    vaultFolded,
     submit: async () => { for (const p of posts) { try { await p(); } catch (e) { console.warn('[home-create] plane wire submit deferred (recover via Enable-messaging):', e); } } },
   };
 }
@@ -294,16 +337,19 @@ export async function secureHome(
     // then bind the vault key. Only the FRESH-EOA deploy honors the callback; a returning EOA agent has no
     // deploy op to batch into, so `batched` stays false and we take the proven per-grant path (no regression).
     let batched = false;
+    let vaultFolded = false;
     const out = await signupWithName(homeLabel(name), 'wallet', undefined, false, async (sa) => {
       batched = true;
-      return buildBatchedPersonPlaneGrants(sa);
+      const g = await buildBatchedPersonPlaneGrants(sa);
+      vaultFolded = g.vaultFolded;
+      return g;
     });
     if (!out.ok) return { ok: false, error: out.error };
-    if (batched) {
+    if (!batched) {
+      await activatePersonPlanes(out.agent, via, auth);
+    } else if (!vaultFolded) {
       try { const bound = await activateVaultIfNeeded(out.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
       catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
-    } else {
-      await activatePersonPlanes(out.agent, via, auth);
     }
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
@@ -322,8 +368,10 @@ export async function secureHome(
     // activateVaultIfNeeded for now (Phase B folds it into the deploy too).
     for (let i = 0; i < 20; i++) { if (await isAgentDeployed(res.agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, 2000)); }
     await planes.submit();
-    try { const bound = await activateVaultIfNeeded(res.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
-    catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
+    if (!planes.vaultFolded) {
+      try { const bound = await activateVaultIfNeeded(res.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
+      catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
+    }
   } else {
     await activatePersonPlanes(res.agent, via, auth);
   }
