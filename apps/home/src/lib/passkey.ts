@@ -128,6 +128,12 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
       // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
       // cleanly overwriting — the stable userHandle is what dedupes.
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      // `hints:['client-device']` biases the OS to CREATE the passkey on THIS device's platform
+      // authenticator (Windows Hello / Touch ID) rather than opening the cross-device "use a phone / QR"
+      // flow first. A soft preference (not authenticatorAttachment:'platform'), so a member without a
+      // platform authenticator can still choose a security key or phone. On Windows this prevents the
+      // recurring "the create dialog defaulted to phone, I couldn't finish, so no passkey was created".
+      ...({ hints: ['client-device'] } as Record<string, unknown>),
       attestation: 'none',
       timeout: 60_000,
     },
