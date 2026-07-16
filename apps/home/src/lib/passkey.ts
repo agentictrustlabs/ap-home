@@ -114,6 +114,7 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   const rpId = window.location.hostname;
   const userId = hexToBytes(keccak256(new TextEncoder().encode(`${rpId}|${label}`))).slice(0, 16);
 
+  try { console.log('[pk-diag] create()', { rpId, label, priorCacheOnThisOrigin: !!localStorage.getItem(STORAGE_KEY) }); } catch { /* */ }
   const credential = (await navigator.credentials.create({
     publicKey: {
       challenge,
@@ -143,6 +144,7 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
     label,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(toStored(passkey)));
+  try { console.log('[pk-diag] create().cached', { rpId, credId: passkey.credentialIdB64.slice(0, 14) }); } catch { /* */ }
   return passkey;
 }
 
@@ -175,6 +177,7 @@ export async function signWithDiscoverablePasskey(
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
+  try { console.log('[pk-diag] signWithDiscoverablePasskey — get() DISCOVERABLE (allowCredentials=[])', { rpId: window.location.hostname, preferLocalDevice: !!opts.preferLocalDevice }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
@@ -223,6 +226,7 @@ export async function connectAssertionDiscoverable(
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
     ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key' }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
+  try { console.log('[pk-diag] connectAssertionDiscoverable — get()', { rpId: window.location.hostname, cachedOnThisOrigin: !!cached, cachedCredId: cached?.credentialIdB64?.slice(0, 14) ?? null, allowCredentials: allowCredentials.length }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
@@ -245,6 +249,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
 }
 
 async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
+  try { console.log('[pk-diag] signAssertion — get() LOCAL (allowCredentials=[cached id])', { rpId: window.location.hostname, credId: bytesToHex(credentialIdBytes).slice(0, 14) }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,

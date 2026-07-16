@@ -437,8 +437,11 @@ export type PasskeyOutcome =
  * assertion with the WebAuthn `client-device` hint so a Windows Hello passkey that exists on this machine
  * can still sign; after that assertion we cache the credential id for the next local-fast call.
  */
-export const passkeySignHash: SignHash = (hash) =>
-  loadPasskey() ? signWithPasskey(hash) : signWithDiscoverablePasskey(hash, undefined, { preferLocalDevice: true });
+export const passkeySignHash: SignHash = (hash) => {
+  const cached = loadPasskey();
+  try { console.log('[pk-diag] passkeySignHash', { rpId: typeof window !== 'undefined' ? window.location.hostname : '?', loadPasskey: !!cached, path: cached ? 'signWithPasskey(local)' : 'signWithDiscoverablePasskey(discoverable)' }); } catch { /* */ }
+  return cached ? signWithPasskey(hash) : signWithDiscoverablePasskey(hash, undefined, { preferLocalDevice: true });
+};
 
 // ── Google × KMS custody (spec 235): the server signs with the per-subject custodian ──
 //
