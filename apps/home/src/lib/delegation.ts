@@ -208,13 +208,15 @@ export const ORG_INVITE_RESOURCE_SCOPE = 'vault:org.invite:*' as const;
  * `mcpServerId` is the demo-mcp server identifier the `DataScopeGrant.server` field binds (the scope
  * applies at that resource server); demo-mcp matches its own id before honoring the grant.
  */
-export async function issueInboxDeliveryDelegation(
+/** Build the unsigned inbox-delivery delegation struct + its digest (shared by the signed and the
+ *  approved-hash variants so their caveats/scope can never drift). Salt is randomized ONCE here, so the
+ *  returned struct is the exact one to put on the wire (the digest must match what the DO recomputes). */
+function buildInboxDeliveryStruct(
   recipient: Address,
   deliveryServiceSA: Address,
   mcpServerId: string,
-  signHash: SignHash,
-  validitySeconds = 60 * 60 * 24 * 365,
-): Promise<Delegation> {
+  validitySeconds: number,
+): { delegation: Delegation; digest: Hex } {
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
@@ -234,10 +236,35 @@ export async function issueInboxDeliveryDelegation(
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
-  const d: Delegation = { delegator: recipient, delegate: deliveryServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
-  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
-  d.signature = await signHash(digest); // recipient's ROOT credential authorizes the delivery service
-  return d;
+  const delegation: Delegation = { delegator: recipient, delegate: deliveryServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
+  return { delegation, digest };
+}
+
+export async function issueInboxDeliveryDelegation(
+  recipient: Address,
+  deliveryServiceSA: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const { delegation, digest } = buildInboxDeliveryStruct(recipient, deliveryServiceSA, mcpServerId, validitySeconds);
+  delegation.signature = await signHash(digest); // recipient's ROOT credential authorizes the delivery service
+  return delegation;
+}
+
+/** spec 253 batching — the inbox-delivery grant WITHOUT an off-chain signature: the recipient (person SA
+ *  being deployed) pre-approves this digest via `approveHash(digest)` batched into its own deploy userOp,
+ *  so the wire validates through the SA's `0x03` approved-hash ERC-1271 branch — no per-grant passkey. */
+export function buildApprovedInboxDeliveryDelegation(
+  recipient: Address,
+  deliveryServiceSA: Address,
+  mcpServerId: string,
+  validitySeconds = 60 * 60 * 24 * 365,
+): { delegation: Delegation; digest: Hex } {
+  const { delegation, digest } = buildInboxDeliveryStruct(recipient, deliveryServiceSA, mcpServerId, validitySeconds);
+  delegation.signature = APPROVED_HASH_SENTINEL; // validated via the SA's approved-hash ERC-1271 branch
+  return { delegation, digest };
 }
 
 /** The vault record holding a member's SHAREABLE profile card — what an org they joined may read
@@ -282,13 +309,12 @@ export const ORG_APPLICATIONS_RESOURCE_SCOPE = 'vault:org.applications' as const
  * DO's storage) — never in app KV, never readable by member/app scopes (a stored wire is a bearer
  * secret under server-mint; spec 322 §2).
  */
-export async function issueInteractionsDelegation(
+function buildInteractionsStruct(
   principal: Address,
   interactionsServiceSA: Address,
   mcpServerId: string,
-  signHash: SignHash,
-  validitySeconds = 60 * 60 * 24 * 365,
-): Promise<Delegation> {
+  validitySeconds: number,
+): { delegation: Delegation; digest: Hex } {
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
@@ -303,10 +329,34 @@ export async function issueInteractionsDelegation(
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
-  const d: Delegation = { delegator: principal, delegate: interactionsServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
-  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
-  d.signature = await signHash(digest); // the steward's credential authorizes the execution point
-  return d;
+  const delegation: Delegation = { delegator: principal, delegate: interactionsServiceSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
+  return { delegation, digest };
+}
+
+export async function issueInteractionsDelegation(
+  principal: Address,
+  interactionsServiceSA: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const { delegation, digest } = buildInteractionsStruct(principal, interactionsServiceSA, mcpServerId, validitySeconds);
+  delegation.signature = await signHash(digest); // the steward's credential authorizes the execution point
+  return delegation;
+}
+
+/** spec 253 batching — the interactions grant as an approved-hash (0x03) wire; the principal pre-approves
+ *  its digest in its deploy userOp, so it needs no per-grant passkey. */
+export function buildApprovedInteractionsDelegation(
+  principal: Address,
+  interactionsServiceSA: Address,
+  mcpServerId: string,
+  validitySeconds = 60 * 60 * 24 * 365,
+): { delegation: Delegation; digest: Hex } {
+  const { delegation, digest } = buildInteractionsStruct(principal, interactionsServiceSA, mcpServerId, validitySeconds);
+  delegation.signature = APPROVED_HASH_SENTINEL;
+  return { delegation, digest };
 }
 
 /** The org's managed profile record (`org:profile` — what OrgDetail's steward edits): the org
