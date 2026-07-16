@@ -123,17 +123,20 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const who = await personFrom(request, env);
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string; visibility?: 'public' | 'private'; members?: string[] }
+    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string; participationPolicy?: 'open' | 'restricted'; visibility?: 'public' | 'private'; members?: string[]; personSA?: string; personName?: string; role?: 'facilitator' | 'contributor' }
     | null;
   const communityId = (body?.communityId ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
 
   const stewardship = await stewardWireFor(env, who.person, communityId);
   if (body?.action === 'create') {
+    // Participation policy (tbox/messaging.ttl): open (every org member participates — derived) or
+    // restricted (invite-only, custodian-created). Legacy `visibility` still accepted from old clients.
+    const restricted = body.participationPolicy === 'restricted' || body.visibility === 'private';
     const r = await callInteractions(env, communityId, 'channels.create', {
       session: who.token, title: body.title ?? '',
-      // spec 324 §10 — public (default) or private-to-selected-members topic.
-      ...(body.visibility === 'private' ? { visibility: 'private', members: Array.isArray(body.members) ? body.members : [] } : {}),
+      participationPolicy: restricted ? 'restricted' : 'open',
+      ...(restricted ? { members: Array.isArray(body.members) ? body.members : [] } : {}),
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
@@ -141,6 +144,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body?.action === 'post') {
     const r = await callInteractions(env, communityId, 'channels.post', {
       session: who.token, channelId: body.channelId ?? '', bodyText: body.bodyText ?? '',
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+  // Topic participation ops — straight pass-through; the DO owns the facilitator/participant gates.
+  if (body?.action === 'participants' || body?.action === 'invite' || body?.action === 'acceptInvite' || body?.action === 'revokeParticipant') {
+    const op = { participants: 'channels.participants', invite: 'channels.invite', acceptInvite: 'channels.acceptInvite', revokeParticipant: 'channels.revokeParticipant' }[body.action]!;
+    const r = await callInteractions(env, communityId, op, {
+      session: who.token, channelId: body.channelId ?? '',
+      ...(body.personSA ? { personSA: body.personSA } : {}),
+      ...(body.personName ? { personName: body.personName } : {}),
+      ...(body.role ? { role: body.role } : {}),
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }

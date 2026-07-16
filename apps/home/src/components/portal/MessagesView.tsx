@@ -22,6 +22,12 @@ import { useAvatar } from './chat/use-avatar';
 const PENDING_STATES = ['submitted', 'triaged'];
 
 function ContextChip({ r, names }: { r: { kind: string; id: string; label?: string }; names?: Record<string, string> }) {
+  if (r.kind === 'discussion-topic') {
+    // Restricted-topic invitation (tbox/messaging.ttl §Topic participation): the id is
+    // `<orgSA>/<topicId>`. "Join discussion" converts the invitation into a DiscussionParticipation
+    // (channels.acceptInvite) and deep-links to the org's Discussions.
+    return <JoinDiscussionChip refId={r.id} label={r.label} names={names} />;
+  }
   if (r.kind === 'org-channels') {
     // Name the ORG on the chip — a thread can carry invites to DIFFERENT orgs (contextRefs union),
     // and generic "Join the organization" chips were indistinguishable.
@@ -40,6 +46,46 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
   return (
     <span className="badge" style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', color: 'var(--color-amber-700)' }} title={`${r.kind}: ${r.id}`}>
       {r.label ?? `${r.kind}:${shortId(r.id)}`}
+    </span>
+  );
+}
+
+function JoinDiscussionChip({ refId, label, names }: { refId: string; label?: string; names?: Record<string, string> }) {
+  const { session } = useSession();
+  const [state, setState] = useState<'idle' | 'busy' | 'joined' | 'error'>('idle');
+  const [note, setNote] = useState<string | null>(null);
+  const [org = '', topicId = ''] = refId.split('/');
+  const orgName = names?.[org.toLowerCase()];
+  const join = useCallback(async () => {
+    if (!session || !org || !topicId) return;
+    setState('busy'); setNote(null);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ action: 'acceptInvite', communityId: org, channelId: topicId }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `join failed (${res.status})`);
+      setState('joined');
+      window.location.href = `/org/${org}/discussions`;
+    } catch (e) {
+      setState('error'); setNote(e instanceof Error ? e.message : String(e));
+    }
+  }, [session, org, topicId]);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+      <button
+        type="button"
+        className="badge"
+        onClick={() => void join()}
+        disabled={state === 'busy' || state === 'joined'}
+        style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', fontWeight: 600, cursor: 'pointer' }}
+        title={`Restricted discussion topic${orgName ? ` in ${orgName}` : ''}`}
+      >
+        {state === 'busy' ? 'Joining…' : state === 'joined' ? 'Joined ✓' : `Join discussion${label ? `: ${label}` : ''} →`}
+      </button>
+      {note && <span style={{ fontSize: '0.72rem', color: 'var(--color-danger)' }}>{note}</span>}
     </span>
   );
 }

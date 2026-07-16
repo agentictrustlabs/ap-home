@@ -24,6 +24,7 @@ import {
   appendBoardPost,
   createBoardChannel,
   canSeeChannel,
+  channelParticipationPolicy,
   canonicalizeMessage,
   createVaultMessageBodyStore,
   isListingCurrent,
@@ -51,6 +52,16 @@ const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 
 const CONVERSATION_INDEX_RESOURCE = 'conversation.index';
 const TOPIC_RESOURCE = (conversationId: string): string => `conversation.topic:${conversationId}`;
 const DIRECTORY_RESOURCE = 'directory.data';
+
+// Topic participation (tbox/messaging.ttl §Topic participation). RESTRICTED topics ASSERT participation:
+// apmsg:DiscussionInvitation rows live in `conversation.topic:invitations`; accepted participations
+// (apmsg:DiscussionParticipation situation projections) in `conversation.topic:participation:<topicId>`.
+// Both deliberately ride the EXISTING `vault:conversation.topic:*` grant scope (anchored prefix match) so
+// no grant re-enable is needed; topic ids are generated `conv_*` so the sub-keys can't collide. OPEN topics
+// NEVER touch these records — participation there is DERIVED from org membership (the directory-listing
+// gate) at read time and MUST NOT be asserted (same doctrine as aporg:memberOf).
+const DISCUSSION_INVITATIONS_RESOURCE = 'conversation.topic:invitations';
+const TOPIC_PARTICIPATION_RESOURCE = (topicId: string): string => `conversation.topic:participation:${topicId}`;
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
@@ -101,6 +112,14 @@ const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timelin
 // artifacts issued BECAUSE of membership; the membership itself is the SituationV2 the provenance points to.
 interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; membershipId?: string; membershipSituationHash?: string; enrollmentDecisionRef?: string; updatedAt: string }
 interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
+
+// apmsg:DiscussionInvitation row (restricted topics only) — a directed proposal, NOT a participation;
+// acceptance converts it into the participation row + members projection update.
+interface DiscussionInvitationRowV1 { id: string; topicId: string; invitedAgent: string; invitedName?: string; invitedBy: string; invitedByName?: string; role: 'facilitator' | 'contributor'; status: 'invited' | 'accepted' | 'declined' | 'revoked'; createdAt: string; decidedAt?: string }
+// apmsg:DiscussionParticipation projection row (restricted topics): personSA + discussion-scoped role +
+// provenance back to the accepted invitation. The descriptor's `members[]` stays the fast-ACL projection
+// of these rows (canSeeChannel); THIS doc is the situation-backed source.
+interface DiscussionParticipationRowV1 { personSA: string; personName?: string; role: 'facilitator' | 'contributor'; situationRef: string; invitationRef: string; acceptedAt: string; status: 'active' | 'revoked'; revokedAt?: string }
 /** Grants LEDGER row (spec 322 W3e §2): hash + metadata ONLY — the wire itself is a bearer secret. */
 interface GrantLedgerRowV1 { hash: string; delegate: string; resources: string[]; storedAt: string }
 
@@ -704,10 +723,12 @@ export class InteractionsDO {
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
-        // spec 324 §10 — a viewer sees public topics + only the private topics they're a member of (steward sees all).
+        // Topic participation: a viewer (an org MEMBER — the gate above) sees every OPEN topic plus only the
+        // RESTRICTED topics they PARTICIPATE in (steward/custodian sees all). Legacy `visibility` records are
+        // mapped to participationPolicy on read (public→open, private→restricted) — lazy, no data migration.
         let wire = index
           .filter((c) => canSeeChannel(c, sessionSa, steward))
-          .map((c) => ({ ...c, messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
+          .map((c) => ({ ...c, participationPolicy: channelParticipationPolicy(c), messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
         if (op === 'channels.read' && typeof body.channelId === 'string') {
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
           wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
@@ -724,16 +745,30 @@ export class InteractionsDO {
         const name = await this.memberName(grant, principal, sessionCaip);
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        // Participation policy: `open` (every org member participates — derived, no stored list) or
+        // `restricted` (invite-only). Legacy callers still say visibility public/private. Any member may
+        // create an OPEN topic; creating a RESTRICTED one is a facilitator act — steward/custodian only.
+        const restricted = body.participationPolicy === 'restricted' || body.visibility === 'private';
+        if (restricted && !steward) return json({ error: 'only the organization custodian may create a restricted topic (facilitators are then invited per topic)' }, 403);
         return this.serialize(async () => { // ARCH-H1 — the conversation.index RMW is a shared-doc write; serialize it too
           const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const r = createBoardChannel(index, {
             contextId: principal, owner: sessionCaip as ChannelV1['descriptor']['owner'], title: String(body.title ?? ''), createdBy: name ?? 'Steward',
-            // spec 324 §10 — public (default) or private-to-a-member-subset; the creator is always a member.
-            visibility: body.visibility === 'private' ? 'private' : 'public',
+            participationPolicy: restricted ? 'restricted' : 'open',
             members: Array.isArray(body.members) ? (body.members as unknown[]).map((m) => String(m)) : [],
             creatorSa: sessionSa,
           });
           if (!r.ok) return json({ error: r.error }, r.error.includes('already exists') ? 409 : 400);
+          if (restricted) {
+            // The creator is the topic's first FACILITATOR — an asserted participation (self-accepted;
+            // the creation ceremony is its own consent). Seeds the situation doc the ops below extend.
+            const now = new Date().toISOString();
+            const rows: DiscussionParticipationRowV1[] = [{
+              personSA: sessionSa.toLowerCase(), ...(name ? { personName: name } : {}), role: 'facilitator',
+              situationRef: `sit_dp_${crypto.randomUUID()}`, invitationRef: 'creator', acceptedAt: now, status: 'active',
+            }];
+            await this.writeDoc(grant, TOPIC_PARTICIPATION_RESOURCE(r.channel.descriptor.id), rows);
+          }
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: r.channel.descriptor.id } });
           await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index); // index holds descriptors only (messages stay [])
           return json({ ok: true, channelId: r.channel.descriptor.id });
@@ -752,8 +787,10 @@ export class InteractionsDO {
           const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
-          // spec 324 §10 — a private topic only admits its own members (the steward sees all).
-          if (!canSeeChannel(entry, sessionSa, posterSteward)) return json({ error: 'not a member of this private topic' }, 403);
+          // Post gate: OPEN topic ⇒ the org-member gate above suffices (participation is derived from
+          // membership). RESTRICTED topic ⇒ only its PARTICIPANTS post — the members[] projection of the
+          // accepted DiscussionParticipation situations (the steward/custodian facilitates every topic).
+          if (!canSeeChannel(entry, sessionSa, posterSteward)) return json({ error: 'not a participant of this restricted topic — ask a facilitator for an invitation' }, 403);
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
           const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
@@ -764,6 +801,103 @@ export class InteractionsDO {
           await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
           await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
           return json({ ok: true, messageId: r.envelope.id });
+        });
+      }
+
+      // ── Topic participation ops (restricted topics; tbox/messaging.ttl §Topic participation) ──
+      if (op === 'channels.participants' || op === 'channels.invite' || op === 'channels.acceptInvite' || op === 'channels.revokeParticipant') {
+        const name = await this.memberName(grant, principal, sessionCaip);
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        const channelId = String(body.channelId ?? '');
+        if (!channelId) return json({ error: 'channelId required' }, 400);
+        const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+        const entry = index.find((c) => c.descriptor.id === channelId);
+        if (!entry) return json({ error: 'unknown channel' }, 404);
+        const policy = channelParticipationPolicy(entry);
+
+        if (op === 'channels.participants') {
+          if (!canSeeChannel(entry, sessionSa, steward)) return json({ error: 'not a participant of this restricted topic' }, 403);
+          if (policy === 'open') {
+            // OPEN ⇒ participation is DERIVED from org membership — render the org directory, never a
+            // stored per-topic list (the aporg:memberOf doctrine).
+            const now = new Date().toISOString();
+            const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => isListingCurrent(l.listing, now));
+            return json({ ok: true, policy, participants: rows.map((l) => ({ personSA: l.listing.subject.toLowerCase().match(/0x[0-9a-f]{40}$/)?.[0] ?? l.listing.subject.toLowerCase(), personName: l.label, role: 'contributor', derived: true })) });
+          }
+          const rows = await this.readDoc<DiscussionParticipationRowV1[]>(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), []);
+          const invites = (await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, [])).filter((i) => i.topicId === channelId && i.status === 'invited');
+          return json({ ok: true, policy, participants: rows.filter((r) => r.status === 'active'), pendingInvites: invites });
+        }
+
+        if (op === 'channels.acceptInvite') {
+          // The INVITEE converts their invitation into a DiscussionParticipation situation. Serialize:
+          // invitations doc + participation doc + descriptor projection are a multi-doc RMW.
+          return this.serialize(async () => {
+            const invites = await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []);
+            const inv = invites.find((i) => i.topicId === channelId && i.invitedAgent.toLowerCase() === sessionSa.toLowerCase() && i.status === 'invited');
+            if (!inv) return json({ error: 'no pending invitation for you on this topic' }, 404);
+            const now = new Date().toISOString();
+            inv.status = 'accepted'; inv.decidedAt = now;
+            const rows = (await this.readDoc<DiscussionParticipationRowV1[]>(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), [])).filter((r) => r.personSA !== sessionSa.toLowerCase() || r.status !== 'active');
+            rows.push({ personSA: sessionSa.toLowerCase(), ...(name ? { personName: name } : inv.invitedName ? { personName: inv.invitedName } : {}), role: inv.role, situationRef: `sit_dp_${crypto.randomUUID()}`, invitationRef: inv.id, acceptedAt: now, status: 'active' });
+            // Refresh the members[] fast-ACL projection on the descriptor from the accepted participations.
+            const fresh = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+            const fe = fresh.find((c) => c.descriptor.id === channelId);
+            if (fe) { fe.members = [...new Set(rows.filter((r) => r.status === 'active').map((r) => r.personSA))]; await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, fresh); }
+            await this.writeDoc(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), rows);
+            await this.writeDoc(grant, DISCUSSION_INVITATIONS_RESOURCE, invites);
+            await audit.write({ id: crypto.randomUUID(), timestamp: now, action: 'interactions.channels.accept-invite', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'discussion-participation', id: `${channelId}:${sessionSa.toLowerCase()}` } });
+            return json({ ok: true, role: inv.role });
+          });
+        }
+
+        // invite + revoke are FACILITATOR acts: the steward/custodian, or an active participant whose
+        // discussion-scoped role is facilitator (the topic creator seeds that on restricted create).
+        if (policy !== 'restricted') return json({ error: 'open topics have no invitations — every organization member already participates' }, 400);
+        const partRows = await this.readDoc<DiscussionParticipationRowV1[]>(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), []);
+        const facilitator = steward || partRows.some((r) => r.personSA === sessionSa.toLowerCase() && r.status === 'active' && r.role === 'facilitator');
+        if (!facilitator) return json({ error: 'only a facilitator of this topic (or the organization custodian) may manage its participants' }, 403);
+
+        if (op === 'channels.invite') {
+          const invitedAgent = String(body.personSA ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(invitedAgent)) return json({ error: 'personSA (0x address) required' }, 400);
+          const role: 'facilitator' | 'contributor' = body.role === 'facilitator' ? 'facilitator' : 'contributor';
+          return this.serialize(async () => {
+            const invites = await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []);
+            if (invites.some((i) => i.topicId === channelId && i.invitedAgent === invitedAgent && i.status === 'invited')) return json({ error: 'an invitation for this person is already pending' }, 409);
+            if (partRows.some((r) => r.personSA === invitedAgent && r.status === 'active')) return json({ error: 'already a participant of this topic' }, 409);
+            const inv: DiscussionInvitationRowV1 = {
+              id: `dinv_${crypto.randomUUID()}`, topicId: channelId, invitedAgent,
+              ...(body.personName ? { invitedName: String(body.personName) } : {}),
+              invitedBy: sessionSa.toLowerCase(), ...(name ? { invitedByName: name } : {}),
+              role, status: 'invited', createdAt: new Date().toISOString(),
+            };
+            invites.push(inv);
+            await this.writeDoc(grant, DISCUSSION_INVITATIONS_RESOURCE, invites.slice(-500));
+            await audit.write({ id: crypto.randomUUID(), timestamp: inv.createdAt, action: 'interactions.channels.invite', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'discussion-invitation', id: inv.id } });
+            // The CALLER sends the invitee's Home-inbox message with the discussion-topic contextRef —
+            // the DO records the invitation artifact only.
+            return json({ ok: true, inviteId: inv.id, topicTitle: entry.title });
+          });
+        }
+
+        // channels.revokeParticipant — facilitator removes a participant (or cancels a pending invite).
+        const personSA = String(body.personSA ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(personSA)) return json({ error: 'personSA (0x address) required' }, 400);
+        return this.serialize(async () => {
+          const now = new Date().toISOString();
+          const rows = await this.readDoc<DiscussionParticipationRowV1[]>(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), []);
+          for (const r of rows) { if (r.personSA === personSA && r.status === 'active') { r.status = 'revoked'; r.revokedAt = now; } }
+          const invites = await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []);
+          for (const i of invites) { if (i.topicId === channelId && i.invitedAgent === personSA && i.status === 'invited') { i.status = 'revoked'; i.decidedAt = now; } }
+          const fresh = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+          const fe = fresh.find((c) => c.descriptor.id === channelId);
+          if (fe) { fe.members = [...new Set(rows.filter((r) => r.status === 'active').map((r) => r.personSA))]; await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, fresh); }
+          await this.writeDoc(grant, TOPIC_PARTICIPATION_RESOURCE(channelId), rows);
+          await this.writeDoc(grant, DISCUSSION_INVITATIONS_RESOURCE, invites);
+          await audit.write({ id: crypto.randomUUID(), timestamp: now, action: 'interactions.channels.revoke-participant', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'discussion-participation', id: `${channelId}:${personSA}` } });
+          return json({ ok: true });
         });
       }
 

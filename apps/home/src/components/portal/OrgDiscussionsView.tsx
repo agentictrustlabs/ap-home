@@ -31,8 +31,12 @@ import { ProfileSheet, type ProfileTarget } from './chat/ProfileSheet';
 import { useAvatar } from './chat/use-avatar';
 
 interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string }
-interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[] }
+// participationPolicy (tbox/messaging.ttl): open — every org MEMBER participates automatically (derived
+// from membership; no stored list); restricted — invite-only, participation asserted per person.
+interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted' }
 interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
+interface ParticipantRow { personSA: string; personName?: string; role: 'facilitator' | 'contributor'; derived?: boolean }
+interface PendingInviteRow { id: string; invitedAgent: string; invitedName?: string; role: 'facilitator' | 'contributor' }
 
 const timeShort = (iso: string): string => {
   const d = new Date(iso);
@@ -73,8 +77,12 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [applied, setApplied] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newPrivate, setNewPrivate] = useState(false);
-  const [newMembers, setNewMembers] = useState<string[]>([]);
+  const [newPolicy, setNewPolicy] = useState<'open' | 'restricted'>('open');
+  // Participants of the ACTIVE restricted topic (asserted DiscussionParticipation projections) +
+  // pending invitations. Open topics never load these — participation is derived from membership.
+  const [participants, setParticipants] = useState<ParticipantRow[] | null>(null);
+  const [pendingInvites, setPendingInvites] = useState<PendingInviteRow[]>([]);
+  const [participantBusy, setParticipantBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
@@ -213,20 +221,87 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       const res = await fetch('/connect/channels', {
         method: 'POST', headers: authed,
         body: JSON.stringify({
-          action: 'create', communityId, title: newTitle.trim(),
-          // spec 324 §10 — public (all members) or private (only the members you pick + you).
-          ...(newPrivate ? { visibility: 'private', members: newMembers } : {}),
+          // Open — every organization member participates automatically. Restricted — invite-only
+          // (custodian-created); participants are then invited per topic.
+          action: 'create', communityId, title: newTitle.trim(), participationPolicy: newPolicy,
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; channelId?: string; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error ?? `create failed (${res.status})`);
-      setNewTitle(''); setCreating(false); setNewPrivate(false); setNewMembers([]);
+      setNewTitle(''); setCreating(false); setNewPolicy('open');
       await load();
       if (body.channelId) setActive(body.channelId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [newTitle, newPrivate, newMembers, communityId, authed, load]);
+  }, [newTitle, newPolicy, communityId, authed, load]);
+
+  // Participants of the active RESTRICTED topic (open topics derive from membership — no fetch).
+  const activePolicy = useMemo(() => {
+    const c = channels?.find((ch) => ch.descriptor.id === active);
+    return c?.participationPolicy ?? 'open';
+  }, [channels, active]);
+
+  const loadParticipants = useCallback(async () => {
+    if (!active || activePolicy !== 'restricted') { setParticipants(null); setPendingInvites([]); return; }
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'participants', communityId, channelId: active }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; participants?: ParticipantRow[]; pendingInvites?: PendingInviteRow[] };
+      if (res.ok && b.ok) { setParticipants(b.participants ?? []); setPendingInvites(b.pendingInvites ?? []); }
+    } catch { /* rail stays empty */ }
+  }, [active, activePolicy, communityId, authed]);
+
+  useEffect(() => { void loadParticipants(); }, [loadParticipants]);
+
+  const inviteParticipant = useCallback(async (personSA: string, personName: string) => {
+    if (!active) return;
+    setParticipantBusy(personSA); setError(null);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'invite', communityId, channelId: active, personSA, personName }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; topicTitle?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `invite failed (${res.status})`);
+      // Deliver the invitation to the person's Home inbox with the discussion-topic contextRef —
+      // Messages renders it as a "Join discussion" chip (acceptInvite).
+      const nameForSend = listings.find((l) => l.listing.subject.toLowerCase().endsWith(personSA.toLowerCase()))?.label;
+      if (nameForSend) {
+        await fetch('/connect/inbox', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({
+            action: 'send', toLabel: nameForSend,
+            bodyText: `You're invited to the restricted discussion topic "${b.topicTitle ?? ''}". Open the chip on this message to join.`,
+            // id carries org + topic (`<orgSA>/<topicId>`) — ContextRefV1 has no extra fields; the
+            // Messages chip splits it to acceptInvite + deep-link.
+            contextRefs: [{ kind: 'discussion-topic', id: `${communityId}/${active}`, label: b.topicTitle ?? 'Join discussion' }],
+          }),
+        }).catch(() => null);
+      }
+      await loadParticipants();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setParticipantBusy(null); }
+  }, [active, communityId, authed, listings, loadParticipants]);
+
+  const revokeParticipant = useCallback(async (personSA: string) => {
+    if (!active) return;
+    setParticipantBusy(personSA); setError(null);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'revokeParticipant', communityId, channelId: active, personSA }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `revoke failed (${res.status})`);
+      await loadParticipants();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setParticipantBusy(null); }
+  }, [active, communityId, authed, loadParticipants]);
 
   const enableOrgVault = useCallback(async () => {
     if (!session || !agentAddress || !DELIVERY_SERVICE_SA) return;
@@ -491,35 +566,23 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') void createChannel(); }}
                 style={{ width: '100%', marginBottom: '0.3rem' }}
               />
-              {/* spec 324 §10 — public (all members) or private (only the members you pick + you). */}
+              {/* Participation policy: OPEN — every organization member participates automatically;
+                  RESTRICTED — invite-only (custodian creates it, then invites participants). */}
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', margin: '0.2rem 0' }}>
-                <input type="checkbox" checked={newPrivate} onChange={(e) => setNewPrivate(e.target.checked)} />
-                Private (only selected members)
+                <input type="radio" name="topic-policy" checked={newPolicy === 'open'} onChange={() => setNewPolicy('open')} />
+                Open — all organization members participate
               </label>
-              {newPrivate && (
-                <div style={{ maxHeight: 130, overflowY: 'auto', border: '1px solid var(--color-border, #e5e7eb)', borderRadius: 6, padding: '0.3rem', marginBottom: '0.3rem' }}>
-                  {listings.filter((l) => l.listing.displayName !== you).length === 0 && (
-                    <p style={{ fontSize: '0.72rem', opacity: 0.6, margin: 0 }}>No other members yet — you can add them later.</p>
-                  )}
-                  {listings.filter((l) => l.listing.displayName !== you).map((l) => {
-                    const sa = (l.listing.subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase();
-                    const checked = newMembers.includes(sa);
-                    return (
-                      <label key={l.listing.subject} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', padding: '0.1rem 0' }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={!sa}
-                          onChange={(e) => setNewMembers((prev) => e.target.checked ? [...prev, sa] : prev.filter((m) => m !== sa))}
-                        />
-                        {l.listing.displayName}
-                      </label>
-                    );
-                  })}
-                </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', margin: '0.2rem 0', opacity: steward ? 1 : 0.5 }}>
+                <input type="radio" name="topic-policy" checked={newPolicy === 'restricted'} disabled={!steward} onChange={() => setNewPolicy('restricted')} />
+                Restricted — invite-only{steward ? '' : ' (custodian only)'}
+              </label>
+              {newPolicy === 'restricted' && (
+                <p style={{ fontSize: '0.72rem', opacity: 0.6, margin: '0.2rem 0' }}>
+                  You&rsquo;ll be its first facilitator — invite participants from the topic&rsquo;s Participants panel after creating it.
+                </p>
               )}
               <button type="button" className="btn" disabled={busy || !newTitle.trim()} onClick={() => void createChannel()}>
-                {newPrivate ? 'Create private topic' : 'Create'}
+                {newPolicy === 'restricted' ? 'Create restricted topic' : 'Create'}
               </button>
             </div>
           )}
@@ -529,8 +592,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               type="button"
               className={`channels-sidebar__item${c.descriptor.id === active ? ' channels-sidebar__item--active' : ''}`}
               onClick={() => setActive(c.descriptor.id)}
+              title={c.participationPolicy === 'restricted' ? 'Restricted topic — invite-only participation' : 'Open topic — all organization members participate'}
             >
-              <span>{c.title}</span>
+              <span>{c.participationPolicy === 'restricted' ? '🔒 ' : ''}{c.title}</span>
               <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: '0.75rem' }}>{c.messages.length}</span>
             </button>
           ))}
@@ -553,7 +617,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 <div>
                   <strong># {channel.title}</strong>
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                    {listings.length} members · {channel.messages.length} messages
+                    {channel.participationPolicy === 'restricted'
+                      ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
+                      : `Open · all ${listings.length} members participate · ${channel.messages.length} messages`}
                   </div>
                 </div>
               </div>
@@ -627,6 +693,65 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
         </div>
 
         <div className="channels-members">
+          {/* Topic participants (restricted topics only). OPEN topics need no panel — every org member
+              participates automatically (the Members directory below IS the participant list). */}
+          {channel && activePolicy === 'restricted' && (() => {
+            const me = (agentAddress ?? '').toLowerCase();
+            const youFacilitator = steward || (participants ?? []).some((p) => p.personSA.toLowerCase() === me && p.role === 'facilitator');
+            const participantSAs = new Set((participants ?? []).map((p) => p.personSA.toLowerCase()));
+            const pendingSAs = new Set(pendingInvites.map((i) => i.invitedAgent.toLowerCase()));
+            const invitable = listings
+              .map((l) => ({ l, sa: (l.listing.subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase() }))
+              .filter(({ sa }) => sa && !participantSAs.has(sa) && !pendingSAs.has(sa));
+            return (
+              <div style={{ marginBottom: '0.9rem' }}>
+                <div className="channels-sidebar__title"><span>Participants · {(participants ?? []).length}</span></div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', padding: '0 0.25rem' }}>
+                  {(participants ?? []).map((p) => (
+                    <div key={p.personSA} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem' }}>
+                      <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <b>{p.personName ?? `${p.personSA.slice(0, 8)}…`}</b>
+                        <span style={{ opacity: 0.55 }}> · {p.role}</span>
+                      </span>
+                      {youFacilitator && p.personSA.toLowerCase() !== me && (
+                        <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} disabled={participantBusy === p.personSA} onClick={() => void revokeParticipant(p.personSA)}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {pendingInvites.map((i) => (
+                    <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', opacity: 0.65 }}>
+                      <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {i.invitedName ?? `${i.invitedAgent.slice(0, 8)}…`} · invited
+                      </span>
+                      {youFacilitator && (
+                        <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} disabled={participantBusy === i.invitedAgent} onClick={() => void revokeParticipant(i.invitedAgent)}>
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {youFacilitator && invitable.length > 0 && (
+                    <div style={{ marginTop: '0.35rem' }}>
+                      <div style={{ fontSize: '0.72rem', opacity: 0.6, marginBottom: '0.2rem' }}>Invite an organization member:</div>
+                      {invitable.map(({ l, sa }) => (
+                        <div key={sa} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', marginBottom: 2 }}>
+                          <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.listing.displayName}</span>
+                          <BusyButton busy={participantBusy === sa} busyLabel="…" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} onClick={() => void inviteParticipant(sa, l.listing.displayName)}>Invite</BusyButton>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+          {channel && activePolicy === 'open' && (
+            <p style={{ fontSize: '0.72rem', opacity: 0.6, padding: '0 0.25rem', margin: '0 0 0.5rem' }}>
+              Open topic — all organization members participate.
+            </p>
+          )}
           <div className="channels-sidebar__title">
             <span>Members · {listings.length}</span>
             <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite">＋</button>
