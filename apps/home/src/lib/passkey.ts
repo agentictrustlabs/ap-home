@@ -7,8 +7,23 @@ import { keccak256 } from 'viem';
 import { parseAttestationObject, buildWebAuthnAssertion } from '@agenticprimitives/connect-auth/passkey';
 import { encodeWebAuthnSignature } from '@agenticprimitives/agent-account';
 import type { Hex } from '@agenticprimitives/types';
+import { CENTRAL_AUTH_DOMAIN } from './domain';
 
 const STORAGE_KEY = 'agenticprimitives:demo-sso:passkey';
+
+/**
+ * The WebAuthn RP id for every passkey ceremony. Onboarding HOPS hosts — a passkey is created on one
+ * origin (the central `impact-agent.me` or a per-user `<name>.impact-agent.me` subdomain) and later signed
+ * with on ANOTHER. A passkey's RP is fixed at creation and a `get()` must use the exact same RP, so scoping
+ * to `window.location.hostname` made the credential unfindable after a host hop → "no passkey available".
+ * Pin the RP to the registrable PARENT domain (`impact-agent.me`) so one passkey works across the apex AND
+ * every subdomain. WebAuthn requires rp.id to be a suffix of the caller origin, so only pin when actually
+ * under that domain; otherwise (localhost / a different whitelabel host) fall back to the current hostname.
+ */
+function passkeyRpId(): string {
+  const host = typeof window !== 'undefined' ? window.location.hostname : CENTRAL_AUTH_DOMAIN;
+  return host === CENTRAL_AUTH_DOMAIN || host.endsWith('.' + CENTRAL_AUTH_DOMAIN) ? CENTRAL_AUTH_DOMAIN : host;
+}
 
 export interface DemoPasskey {
   credentialIdDigest: Hex; // keccak256(credentialId)
@@ -111,10 +126,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   // This is independent of the Smart Agent address: the SA derives from the passkey PUBLIC KEY
   // (credentialIdDigest / x,y) per ADR-0010 — the userHandle NEVER feeds the CREATE2 salt — so a
   // stable handle changes only the OS's credential bookkeeping, not the identity.
-  const rpId = window.location.hostname;
+  const rpId = passkeyRpId();
   const userId = hexToBytes(keccak256(new TextEncoder().encode(`${rpId}|${label}`))).slice(0, 16);
 
-  try { console.log('[pk-diag] create()', { rpId, label, priorCacheOnThisOrigin: !!localStorage.getItem(STORAGE_KEY) }); } catch { /* */ }
+  try { console.log('[pk-diag] create()', { rpId, host: window.location.hostname, label, priorCacheOnThisOrigin: !!localStorage.getItem(STORAGE_KEY) }); } catch { /* */ }
   const credential = (await navigator.credentials.create({
     publicKey: {
       challenge,
@@ -127,12 +142,13 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
       // and (b) name-only / cross-device sign-in can find it (spec 233). We deliberately do NOT set
       // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
       // cleanly overwriting — the stable userHandle is what dedupes.
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
-      // `hints:['client-device']` biases the OS to CREATE the passkey on THIS device's platform
-      // authenticator (Windows Hello / Touch ID) rather than opening the cross-device "use a phone / QR"
-      // flow first. A soft preference (not authenticatorAttachment:'platform'), so a member without a
-      // platform authenticator can still choose a security key or phone. On Windows this prevents the
-      // recurring "the create dialog defaulted to phone, I couldn't finish, so no passkey was created".
+      // authenticatorAttachment:'platform' HARD-restricts creation to THIS device's built-in authenticator
+      // (Windows Hello / Touch ID) — the cross-device "use a phone / QR / security key" options never
+      // appear. Chosen deliberately (2026-07): members kept hitting the phone picker on Windows, couldn't
+      // finish, and got "No passkey created". `hints:['client-device']` reinforces the same bias for
+      // clients that read hints. Tradeoff: a laptop/desktop without a platform authenticator can't enroll
+      // here — acceptable for this flow's audience.
+      authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'required', userVerification: 'required' },
       ...({ hints: ['client-device'] } as Record<string, unknown>),
       attestation: 'none',
       timeout: 60_000,
@@ -183,10 +199,11 @@ export async function signWithDiscoverablePasskey(
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
-  try { console.log('[pk-diag] signWithDiscoverablePasskey — get() DISCOVERABLE (allowCredentials=[])', { rpId: window.location.hostname, preferLocalDevice: !!opts.preferLocalDevice }); } catch { /* */ }
+  try { console.log('[pk-diag] signWithDiscoverablePasskey — get() DISCOVERABLE (allowCredentials=[])', { rpId: passkeyRpId(), host: window.location.hostname, preferLocalDevice: !!opts.preferLocalDevice }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
+      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
       allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
       ...(opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
       userVerification: 'required',
@@ -232,10 +249,11 @@ export async function connectAssertionDiscoverable(
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
     ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key' }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
-  try { console.log('[pk-diag] connectAssertionDiscoverable — get()', { rpId: window.location.hostname, cachedOnThisOrigin: !!cached, cachedCredId: cached?.credentialIdB64?.slice(0, 14) ?? null, allowCredentials: allowCredentials.length }); } catch { /* */ }
+  try { console.log('[pk-diag] connectAssertionDiscoverable — get()', { rpId: passkeyRpId(), host: window.location.hostname, cachedOnThisOrigin: !!cached, cachedCredId: cached?.credentialIdB64?.slice(0, 14) ?? null, allowCredentials: allowCredentials.length }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
+      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
       allowCredentials,
       ...(!cached && opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
       userVerification: 'required',
@@ -255,10 +273,11 @@ async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
 }
 
 async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
-  try { console.log('[pk-diag] signAssertion — get() LOCAL (allowCredentials=[cached id])', { rpId: window.location.hostname, credId: bytesToHex(credentialIdBytes).slice(0, 14) }); } catch { /* */ }
+  try { console.log('[pk-diag] signAssertion — get() LOCAL (allowCredentials=[cached id])', { rpId: passkeyRpId(), host: window.location.hostname, credId: bytesToHex(credentialIdBytes).slice(0, 14) }); } catch { /* */ }
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
+      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
       // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
       // authenticator (Windows Hello). This cached-id path is only reached with a credential this browser
       // just created on THIS device, but WITHOUT these biases Windows intermittently falls back to the
