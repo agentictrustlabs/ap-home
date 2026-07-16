@@ -253,7 +253,13 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
-      allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key' }],
+      // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
+      // authenticator (Windows Hello). This cached-id path is only reached with a credential this browser
+      // just created on THIS device, but WITHOUT these biases Windows intermittently falls back to the
+      // cross-device "use a phone" picker — especially in the seconds after create(), before Windows Hello
+      // has indexed the new credential — and the user (who has no phone flow) hits a NotAllowedError/timeout.
+      allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
+      ...({ hints: ['client-device'] } as Record<string, unknown>),
       userVerification: 'required', // custody-grade signing — demand verification (F9)
       timeout: 60_000,
     },
