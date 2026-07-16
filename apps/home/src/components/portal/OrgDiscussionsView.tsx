@@ -14,10 +14,9 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
-import { DELIVERY_SERVICE_SA, MCP_SERVER_ID } from '../../lib/inbox-delivery';
+import { type DelegationWire } from '../../lib/delegation';
+import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { BusyButton } from '../shared/BusyButton';
-import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import {
   communityAvatarKey,
   personAvatarKey,
@@ -84,10 +83,6 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [pendingInvites, setPendingInvites] = useState<PendingInviteRow[]>([]);
   const [participantBusy, setParticipantBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteQuery, setInviteQuery] = useState('');
-  const [inviteHits, setInviteHits] = useState<AgentSearchHit[] | null>(null);
-  const [inviteSent, setInviteSent] = useState<string | null>(null);
   // Restricted-topic participant invite popover (filterable roster of existing org members).
   const [topicInviteOpen, setTopicInviteOpen] = useState(false);
   const [topicInviteFilter, setTopicInviteFilter] = useState('');
@@ -349,52 +344,6 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [active, communityId, authed, load]);
 
-  const searchInvitees = useCallback(async () => {
-    if (!inviteQuery.trim()) return;
-    setInviteHits(await searchAgentsKb(inviteQuery.trim()).catch(() => []));
-  }, [inviteQuery]);
-
-  const [inviteBusyFor, setInviteBusyFor] = useState<string | null>(null);
-  const invite = useCallback(async (hit: AgentSearchHit) => {
-    if (!session) return;
-    setBusy(true); setInviteBusyFor(hit.name); setError(null); setInviteSent(null);
-    let grantNote = '';
-    try {
-      // spec 321 W2b — same as the org Invite page: pre-sign the org→invitee member-access grant and
-      // store it in the org vault so /connect/org-membership attaches it when they join. Best-effort —
-      // a non-steward's sign fails (only the org's custodian signs AS the org) and the chip still sends.
-      try {
-        const via = resolveVia(homeProfile?.credential, session.via);
-        const sign = await signHashFor(via, org, { token: session.token });
-        const mad = toWire(await issueOrganizationResourceAccessDelegation(org, hit.smartAgent as Address, MCP_SERVER_ID, sign));
-        const gr = await fetch('/connect/org-invite/agent', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),
-        });
-        const gb = (await gr.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!gr.ok || !gb.ok) throw new Error(gb.error ?? `grant store failed (${gr.status})`);
-      } catch (e) {
-        grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
-      }
-      const res = await fetch('/connect/inbox', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({
-          action: 'send',
-          toName: hit.name,
-          bodyText:
-            `You're invited to join this organization's discussions. ` +
-            `Open the invitation chip on this conversation to join — you'll sign a listing you can revoke anytime.`,
-          contextRefs: [{ kind: 'org-channels', id: communityId, label: 'Join the discussion' }],
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || body.ok === false) throw new Error(body.error ?? `invite failed (${res.status})`);
-      setInviteSent((hit.displayName ?? hit.name) + grantNote);
-      setInviteQuery(''); setInviteHits(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); setInviteBusyFor(null); }
-  }, [session, homeProfile?.credential, org, authed, communityId]);
 
   const listingBySubject = useMemo(() => {
     const m = new Map<string, Listing>();
@@ -813,47 +762,21 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               </div>
             );
           })()}
-          {channel && activePolicy === 'open' && (
-            <p style={{ fontSize: '0.72rem', opacity: 0.6, padding: '0 0.25rem', margin: '0 0 0.5rem' }}>
-              Open topic — all organization members participate.
-            </p>
-          )}
-          <div className="channels-sidebar__title">
-            <span>Members · {listings.length}</span>
-            {/* MEMBERSHIP management entry (steward act) — visibly distinct from the topic-invite
-                panel above: this brings a NEW person into the ORGANIZATION, not into a topic. */}
-            {steward && (
-              <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite someone to join this organization (membership)">＋</button>
-            )}
-          </div>
-          {inviteOpen && steward && (
-            <div style={{ margin: '0.25rem 0 0.5rem', padding: '0.4rem 0.25rem', borderLeft: '2px solid var(--color-amber-400, #f59e0b)' }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginBottom: '0.2rem' }}>Organization membership invite</div>
-              <p style={{ fontSize: '0.68rem', opacity: 0.6, margin: '0 0 0.35rem' }}>
-                Invites a person to <b>join this organization</b> (they sign their own revocable listing).
-                For email invites and roster management, use <a href={`/org/${communityId}/members`}>Members</a>.
-              </p>
-              <input
-                placeholder="Find a person…"
-                value={inviteQuery}
-                onChange={(e) => setInviteQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void searchInvitees(); }}
-                style={{ width: '100%', marginBottom: '0.3rem' }}
-              />
-              {inviteHits?.map((h) => (
-                <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: 2 }}>
-                  <div style={{ minWidth: 0, flex: 1, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <b>{h.displayName ?? h.label}</b>
-                  </div>
-                  <BusyButton busy={inviteBusyFor === h.name} busyLabel="Signing…" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite to organization</BusyButton>
-                </div>
-              ))}
-              {inviteSent && <p style={{ fontSize: '0.75rem', color: 'var(--color-sage-700)' }}>Invitation sent to {inviteSent}.</p>}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-            {listings.map((l) => (
-              <div key={l.listing.subject} className="channels-member-row">
+          {/* OPEN topic (or no topic selected) → the participant list IS every org member (participation
+              is derived from membership; nothing to invite here). Restricted topics render their own
+              Participants panel above and do NOT list the whole org. Organization membership management
+              (bringing a NEW person in) lives on the dedicated Members page, not in a discussion topic. */}
+          {activePolicy !== 'restricted' && (
+            <>
+              <div className="channels-sidebar__title"><span>Participants · {listings.length}</span></div>
+              {channel && (
+                <p style={{ fontSize: '0.72rem', opacity: 0.6, padding: '0 0.25rem', margin: '0 0 0.5rem' }}>
+                  Open topic — everyone in the organization participates.
+                </p>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                {listings.map((l) => (
+                  <div key={l.listing.subject} className="channels-member-row">
                 <button
                   type="button"
                   className="channels-member-row__main"
@@ -887,9 +810,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 >
                   ⋯
                 </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
