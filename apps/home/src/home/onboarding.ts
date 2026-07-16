@@ -165,7 +165,11 @@ export function continueWithYouVersion(preferredName?: string, enrollStashJson?:
 async function activatePersonPlanes(owner: Address, via: Via, auth?: Auth): Promise<void> {
   try {
     const bound = await activateVaultIfNeeded(owner, via, auth); // also fires inbox-delivery
-    if (!bound.ok) { console.warn('[home-create] vault key not activated (activate it later from Security):', bound.error); return; }
+    // The interactions (messaging) plane is INDEPENDENT of the vault-key bind — a delegation to the
+    // interactions service SA, not a vault write. A vault-key hiccup must NOT skip it, or the member is
+    // left permanently unable to SEND any person→person DM (send 409s "no interactions grant") with no
+    // recovery but the manual Enable-messaging path. Attempt both; each is best-effort + idempotent.
+    if (!bound.ok) console.warn('[home-create] vault key not activated (activate it later from Security):', bound.error);
     const ix = await activateInteractionsIfNeeded(owner, via, auth);
     if (!ix.ok) console.warn('[home-create] interactions plane not enabled (enable later):', ix.error);
   } catch (e) {
