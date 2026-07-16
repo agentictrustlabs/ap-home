@@ -2334,9 +2334,27 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
     const signature = await sign(userOpHash);
     const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
     const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
-    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    // DEPLOY-RACE RECOVERY (see /custody/oidc/bootstrap): a stale getBytecode pre-check or a concurrent
+    // deploy of this deterministic SA makes the userOp revert AA25/AA10 even though the deploy+claim
+    // effectively already ran. Re-read the code and treat an existing account as success.
+    const deployedNow = async (): Promise<boolean> => {
+      const codeNow = await pub.getBytecode({ address: sa }).catch(() => undefined);
+      return !!codeNow && codeNow !== '0x';
+    };
+    let deployedAddress: Address | undefined; let receipt: { transactionHash: string };
+    try {
+      ({ deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount));
+    } catch (submitErr) {
+      if (await deployedNow()) {
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
+      }
+      throw submitErr;
+    }
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
+      if (await deployedNow()) {
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
+      }
       return c.json(
         {
           ok: false,
@@ -2421,9 +2439,29 @@ app.post('/custody/oidc/bootstrap', async (c) => {
     const signature = await sign(userOpHash);
     const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
     const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
-    const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
+    // DEPLOY-RACE RECOVERY: the getBytecode pre-check can read a stale '0x' (lagging RPC), or a
+    // concurrent/double-submitted bootstrap can deploy this deterministic SA first. Either way the
+    // account then EXISTS, so this deploy userOp reverts with AA25 (nonce mismatch) / AA10 (already
+    // constructed). That's success, not failure — re-read the code and return alreadyDeployed rather
+    // than surfacing a scary handleOps revert to a member who just entered their phone code.
+    const deployedNow = async (): Promise<boolean> => {
+      const codeNow = await pub.getBytecode({ address: sa }).catch(() => undefined);
+      return !!codeNow && codeNow !== '0x';
+    };
+    let deployedAddress: Address | undefined; let receipt: { transactionHash: string };
+    try {
+      ({ deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount));
+    } catch (submitErr) {
+      if (await deployedNow()) {
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
+      }
+      throw submitErr;
+    }
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
+      if (await deployedNow()) {
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
+      }
       return c.json(
         {
           ok: false,
