@@ -38,14 +38,42 @@ export function toOrgLabel(input: string): string {
 const rowSty = (on: boolean): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
-  gap: '.6rem',
+  gap: '.7rem',
   padding: '.6rem .8rem',
   border: `1.5px solid ${on ? 'var(--color-accent, #2563eb)' : 'var(--color-border-strong, #d1d5db)'}`,
-  borderRadius: 10,
-  background: 'var(--color-surface, #fff)',
+  borderRadius: 12,
+  background: on ? 'var(--color-accent-soft, #eff6ff)' : 'var(--color-surface, #fff)',
   cursor: 'pointer',
   textAlign: 'left',
+  position: 'relative',
 });
+
+// Visually-hidden but focusable/announced radio — the whole row is the control.
+const srRadio: CSSProperties = { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' };
+
+const orgHue = (s: string): number => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+};
+
+function OrgAvatar({ name, plus }: { name: string; plus?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 38, height: 38, flex: '0 0 38px', borderRadius: 10,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontWeight: 700, fontSize: '1.05rem',
+        color: plus ? 'var(--color-accent, #2563eb)' : '#fff',
+        background: plus ? 'transparent' : `hsl(${orgHue(name)}, 45%, 48%)`,
+        border: plus ? '1.5px dashed var(--color-accent, #2563eb)' : 'none',
+      }}
+    >
+      {plus ? '+' : (name.replace(/\..*$/, '').slice(0, 1).toUpperCase() || '?')}
+    </span>
+  );
+}
 
 export function OrgChooser({
   token,
@@ -75,7 +103,8 @@ export function OrgChooser({
         // member's custody of it; 'member' links and treasuries are not grantable-from here.
         const stewarded = agents
           .filter((a) => a.kind === 'org' && a.relationship !== 'member' && a.name)
-          .map((a) => ({ agent: a.agent, name: a.name }));
+          .map((a) => ({ agent: a.agent, name: a.name }))
+          .sort((a, b) => a.name.localeCompare(b.name));
         setOrgs(stewarded);
         if (stewarded.length > 0) setSelected(stewarded[0].agent);
       })
@@ -114,25 +143,37 @@ export function OrgChooser({
           listed — you can still create a new one below.
         </p>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem', margin: '1rem 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '.55rem', margin: '1rem 0' }}>
+        {orgs.length > 0 && (
+          <p style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', opacity: 0.55, margin: '0 0 .1rem' }}>
+            Organizations you steward
+          </p>
+        )}
         {orgs.map((o) => {
           const on = selected.toLowerCase() === o.agent.toLowerCase();
           return (
             <label key={o.agent} style={rowSty(on)}>
-              <input type="radio" name="org-choice" checked={on} onChange={() => { setSelected(o.agent); setErr(''); }} />
-              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontWeight: 700 }}>{o.name}</span>
-                <span style={{ fontSize: '.72rem', opacity: 0.65, fontFamily: 'ui-monospace, monospace' }}>
+              <input type="radio" name="org-choice" style={srRadio} checked={on} onChange={() => { setSelected(o.agent); setErr(''); }} />
+              <OrgAvatar name={o.name} />
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+                <span style={{ fontSize: '.72rem', opacity: 0.6, fontFamily: 'ui-monospace, monospace' }}>
                   {o.agent.slice(0, 10)}…{o.agent.slice(-6)}
                 </span>
               </span>
+              {on && <span aria-hidden style={{ color: 'var(--color-accent, #2563eb)', fontWeight: 700, fontSize: '1.1rem' }}>✓</span>}
             </label>
           );
         })}
         {orgs.length > 0 && (
           <label style={rowSty(selected === 'new')}>
-            <input type="radio" name="org-choice" checked={selected === 'new'} onChange={() => { setSelected('new'); setErr(''); }} />
-            <span style={{ fontWeight: 700 }}>Create a new organization</span>
+            <input type="radio" name="org-choice" style={srRadio} checked={selected === 'new'} onChange={() => { setSelected('new'); setErr(''); }} />
+            <OrgAvatar name="+" plus />
+            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+              <span style={{ fontWeight: 700 }}>Create a new organization</span>
+              <span style={{ fontSize: '.72rem', opacity: 0.6 }}>Deploys a new Smart Agent, custodied by you</span>
+            </span>
+            {selected === 'new' && <span aria-hidden style={{ color: 'var(--color-accent, #2563eb)', fontWeight: 700, fontSize: '1.1rem' }}>✓</span>}
           </label>
         )}
         {selected === 'new' && (
