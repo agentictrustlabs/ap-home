@@ -68,6 +68,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [hits, setHits] = useState<AgentSearchHit[] | null>(null);
   const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
   const [composeBody, setComposeBody] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
   const [vaultBodies, setVaultBodies] = useState<boolean | null>(null);
   const [vaultBusy, setVaultBusy] = useState(false);
   const [mobileThread, setMobileThread] = useState(false);
@@ -203,6 +204,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   }, [activeId, view?.summary.unreadTotal]);
 
   const activeDescriptor = activeId ? view?.descriptors[activeId] : undefined;
+  // The conversation SUBJECT (descriptor title, set from the first message's subject; replies inherit it).
+  // titleFor prefers the counterparty name, so surface the subject as the thread-header subtitle.
+  const activeSubject = activeDescriptor?.title && activeId && activeDescriptor.title !== titleFor(activeId) ? activeDescriptor.title : null;
   const canReply = !!activeDescriptor && activeDescriptor.participants.length === 2;
   const activeCase = activeId ? caseFor(activeId) : null;
   const activePending = !!activeCase && PENDING_STATES.includes(activeCase.state);
@@ -227,11 +231,13 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
 
   const sendNew = async (body: string) => {
     if (!recipient || !body.trim()) return;
-    const ok = await post({ action: 'send', toName: recipient.name, bodyText: body }, 'compose');
+    const subject = composeSubject.trim();
+    const ok = await post({ action: 'send', toName: recipient.name, bodyText: body, ...(subject ? { subject } : {}) }, 'compose');
     if (ok) {
       setComposeOpen(false);
       setRecipient(null);
       setComposeBody('');
+      setComposeSubject('');
       setQuery('');
       setHits(null);
       await refresh();
@@ -392,6 +398,12 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 <span>To: <b>{recipient.displayName ?? recipient.name}</b></span>
                 <button type="button" className="ghost" style={{ fontSize: '0.75rem', minHeight: 0, padding: '0.15rem 0.5rem' }} onClick={() => setRecipient(null)}>change</button>
               </div>
+              <input
+                placeholder="Subject (optional)"
+                value={composeSubject}
+                onChange={(e) => setComposeSubject(e.target.value)}
+                style={{ width: '100%', marginBottom: '0.5rem', padding: '0.5rem 0.85rem', border: '1px solid var(--color-border)', borderRadius: 8 }}
+              />
               <MessageComposer
                 value={composeBody}
                 onChange={setComposeBody}
@@ -464,6 +476,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   {view && <ConvAvatar conversationId={activeId} title={titleFor(activeId)} view={view} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="chat-thread-header__title">{titleFor(activeId)}</div>
+                    {activeSubject && (
+                      <div style={{ fontSize: '0.78rem', opacity: 0.65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSubject}</div>
+                    )}
                     <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
                       {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={view?.names} />)}
                     </div>
