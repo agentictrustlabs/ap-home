@@ -291,6 +291,8 @@ export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Prom
     return (h: Hex) => personalSign(addr, h);
   }
   if (isKmsVia(via)) {
+    // [phone-diag] pinpoint the empty-token drop on a fresh phone-home site-login grant (temporary).
+    try { console.log('[phone-diag] signHashFor', JSON.stringify({ via, hasSender: !!sender, hasToken: !!auth?.token, tokenLen: auth?.token?.length ?? 0 })); } catch { /* */ }
     if (!sender || !auth?.token) throw new Error('granting with an OIDC home needs a custody session');
     return googleSignHash(sender, auth.token); // demo-a2a signs with the per-(iss,sub) KMS custodian
   }
@@ -544,6 +546,8 @@ export async function givePermission(
   },
 ): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex }>> {
   try {
+    // [phone-diag] temporary — trace the credential + custody-session at the site-login grant.
+    try { console.log('[phone-diag] givePermission', JSON.stringify({ via, home: home?.address, hasAuthToken: !!auth?.token })); } catch { /* */ }
     const signHash = await signHashFor(via, home.address, auth);
     // B4 — batch the person-SA grants (site + the DEL-001 session leaf) via APPROVED-HASH: build both as
     // `0x03` leaves and pre-approve their digests in ONE userOp on the person SA (one credential prompt),

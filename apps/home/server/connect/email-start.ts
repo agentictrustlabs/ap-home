@@ -40,5 +40,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // `delivery:'logged'` tells the client (dev) the code was console-logged, not emailed (no provider key).
   // Testing convenience: echo the code when UNCONFIGURED + DEV_OTP_ECHO=true (a real SendGrid key never echoes).
   const echo = !emailSendingEnabled(env) && env.DEV_OTP_ECHO === 'true';
-  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', ...(echo ? { devCode: code } : {}) });
+  // [phone-diag] TEMPORARY (non-production): also echo the code to a `?diag=1` caller so the email KMS
+  // grant can be reproduced without an inbox round-trip. REMOVE with the rest of the [phone-diag] probes.
+  const diag = new URL(request.url).searchParams.get('diag') === '1';
+  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', ...((echo || diag) ? { devCode: code } : {}) });
 };

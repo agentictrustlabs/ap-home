@@ -135,6 +135,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Sign with the credential that actually authenticated this session (wallet/passkey/KMS), not the
       // cookie's defaulted via — which sent a wallet member to passkey at authorize time.
       const v = resolveVia(profile.credential, sso.via);
+      // [phone-diag] temporary — how the recognized session resolves for a fresh OIDC (phone/email) home.
+      try { console.log('[phone-diag] recognized.resolve', JSON.stringify({ credential: profile.credential ?? null, ssoVia: sso.via ?? null, resolvedVia: v, hasSsoToken: !!sso.token, template: enroll.template, addr })); } catch { /* */ }
 
       // passkey is rpId-bound to the home subdomain — hop there if we're not already on it (the passkey
       // can't assert at the apex). Google/KMS + wallet sign on any origin, so they authorize in place.
@@ -195,6 +197,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
       const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+      // [phone-diag] temporary — the credential + token state at the exact site-login grant call.
+      try { console.log('[phone-diag] onAuthorize.grant', JSON.stringify({ viaLower, isKms: isKmsVia(viaLower), hasToken: !!token, tokenLen: token?.length ?? 0, home: home.address })); } catch { /* */ }
 
       let code: string;
       if (enroll.template === 'org-create') {
