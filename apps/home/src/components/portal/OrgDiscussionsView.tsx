@@ -88,6 +88,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [inviteQuery, setInviteQuery] = useState('');
   const [inviteHits, setInviteHits] = useState<AgentSearchHit[] | null>(null);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
+  // Restricted-topic participant invite popover (filterable roster of existing org members).
+  const [topicInviteOpen, setTopicInviteOpen] = useState(false);
+  const [topicInviteFilter, setTopicInviteFilter] = useState('');
   const [profile, setProfile] = useState<ProfileTarget | null>(null);
   const [dm, setDm] = useState<{ name: string; label: string; subject?: string } | null>(null);
 
@@ -255,6 +258,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   }, [active, activePolicy, communityId, authed]);
 
   useEffect(() => { void loadParticipants(); }, [loadParticipants]);
+  // Close the participant-invite popover + clear its filter whenever the active topic changes.
+  useEffect(() => { setTopicInviteOpen(false); setTopicInviteFilter(''); }, [active]);
 
   const inviteParticipant = useCallback(async (personSA: string, personName: string) => {
     if (!active) return;
@@ -708,7 +713,12 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             const listingForSa = (sa: string) => listings.find((l) => l.listing.subject.toLowerCase().endsWith(sa.toLowerCase()));
             return (
               <div style={{ marginBottom: '0.9rem' }}>
-                <div className="channels-sidebar__title"><span>Participants · {(participants ?? []).length}</span></div>
+                <div className="channels-sidebar__title">
+                  <span>Participants · {(participants ?? []).length + pendingInvites.length}</span>
+                  {youFacilitator && (
+                    <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} title="Invite a participant to this topic" onClick={() => setTopicInviteOpen((v) => !v)}>＋</button>
+                  )}
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', padding: '0 0.25rem' }}>
                   {(participants ?? []).map((p) => {
                     const pl = listingForSa(p.personSA);
@@ -746,25 +756,60 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                       )}
                     </div>
                   ))}
-                  {youFacilitator && invitable.length > 0 && (
-                    <div style={{ marginTop: '0.35rem' }}>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.6, marginBottom: '0.2rem' }}>Invite an organization member to this topic:</div>
-                      {invitable.map(({ l, sa }) => (
-                        <div key={sa} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', marginBottom: 2 }}>
-                          <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.listing.displayName}</span>
-                          <BusyButton busy={participantBusy === sa} busyLabel="…" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} onClick={() => void inviteParticipant(sa, l.listing.displayName)}>Invite</BusyButton>
-                        </div>
-                      ))}
-                      {/* Boundary: topic invitations select among EXISTING members — bringing a NEW person
-                          into the organization is membership management (Members), never a topic act. */}
-                      <p style={{ fontSize: '0.68rem', opacity: 0.55, margin: '0.3rem 0 0' }}>
-                        Topic invitations are for existing members only. To bring someone new into the
-                        organization, use{' '}
-                        {steward ? <a href={`/org/${communityId}/members`}>Members</a> : 'Members'}.
-                      </p>
-                    </div>
+                  {(participants ?? []).length === 0 && pendingInvites.length === 0 && (
+                    <p style={{ fontSize: '0.75rem', opacity: 0.6, padding: '0.25rem' }}>
+                      No participants yet{youFacilitator ? ' — use ＋ to invite organization members.' : ''}
+                    </p>
                   )}
                 </div>
+
+                {/* Invite popover — filterable roster of EXISTING org members not already participating.
+                    Bringing a NEW person into the organization is membership management (Members), never a
+                    topic act, so this only selects among current members. */}
+                {youFacilitator && topicInviteOpen && (() => {
+                  const q = topicInviteFilter.trim().toLowerCase();
+                  const shown = invitable.filter(({ l }) =>
+                    !q || (l.listing.displayName ?? '').toLowerCase().includes(q) || (l.label ?? '').toLowerCase().includes(q));
+                  return (
+                    <div
+                      role="dialog"
+                      onClick={(e) => { if (e.target === e.currentTarget) setTopicInviteOpen(false); }}
+                      style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,42,.45)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 60, padding: '8vh 1rem' }}
+                    >
+                      <div style={{ background: 'var(--color-surface, #fff)', borderRadius: 14, boxShadow: '0 22px 64px rgba(0,0,0,.32)', width: '100%', maxWidth: 440, maxHeight: '76vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--color-border, #e5e7eb)' }}>
+                          <b>Invite a participant</b>
+                          <button type="button" className="btn" style={{ marginLeft: 'auto', padding: '0 0.5rem', fontSize: '1.1rem', lineHeight: 1 }} title="Close" onClick={() => setTopicInviteOpen(false)}>×</button>
+                        </div>
+                        <div style={{ padding: '0.75rem 1.1rem 0.5rem' }}>
+                          <input
+                            placeholder="Filter members…"
+                            value={topicInviteFilter}
+                            onChange={(e) => setTopicInviteFilter(e.target.value)}
+                            style={{ width: '100%', padding: '0.5rem 0.85rem', border: '1px solid var(--color-border, #e5e7eb)', borderRadius: 999 }}
+                          />
+                          <p style={{ fontSize: '0.7rem', opacity: 0.6, margin: '0.4rem 0 0' }}>
+                            Only current members can be invited to a topic. To add someone new, use{' '}
+                            <a href={`/org/${communityId}/members`}>Members</a>.
+                          </p>
+                        </div>
+                        <div style={{ overflowY: 'auto', padding: '0 0.6rem 0.6rem' }}>
+                          {invitable.length === 0 ? (
+                            <p style={{ fontSize: '0.78rem', opacity: 0.6, padding: '0.5rem' }}>Everyone is already a participant.</p>
+                          ) : shown.length === 0 ? (
+                            <p style={{ fontSize: '0.78rem', opacity: 0.6, padding: '0.5rem' }}>No members match &ldquo;{topicInviteFilter.trim()}&rdquo;.</p>
+                          ) : shown.map(({ l, sa }) => (
+                            <div key={sa} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.4rem', borderBottom: '1px solid var(--color-border, #f1f1f1)' }}>
+                              <MemberAvatar listing={l} />
+                              <span style={{ minWidth: 0, flex: 1, fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.listing.displayName}</span>
+                              <BusyButton busy={participantBusy === sa} busyLabel="…" className="btn-primary" style={{ width: 'auto', padding: '0.2rem 0.7rem', fontSize: '0.75rem' }} onClick={() => void inviteParticipant(sa, l.listing.displayName)}>Invite</BusyButton>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
