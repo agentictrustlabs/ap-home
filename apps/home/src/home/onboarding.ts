@@ -25,6 +25,7 @@ import {
   collectSubscriptions,
   claimName,
   setConnectionInfo,
+  isAgentDeployed,
   AUD,
   type SignHash,
 } from '../connect-client';
@@ -164,6 +165,17 @@ export function continueWithYouVersion(preferredName?: string, enrollStashJson?:
  */
 async function activatePersonPlanes(owner: Address, via: Via, auth?: Auth): Promise<void> {
   try {
+    // DEPLOY-VS-GRANT RACE: every plane grant (vault-key, inbox-delivery, interactions) is verified
+    // on-chain against the principal's SA via ERC-1271. If the deploy userOp hasn't confirmed on the RPC
+    // the InteractionsDO reads, that verification reverts and the grant 403s ("signature failed
+    // verification against the delegator") — leaving the member with NO messaging plane, so they can
+    // neither send nor RECEIVE DMs (a delivered invite silently 409s at the recipient's DO). Wait,
+    // bounded, for the SA to actually be deployed before provisioning. KMS/server-deployed homes pass
+    // this immediately; wallet/passkey homes whose deploy op is still mining wait it out.
+    for (let i = 0; i < 20; i++) {
+      if (await isAgentDeployed(owner).catch(() => false)) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
     const bound = await activateVaultIfNeeded(owner, via, auth); // also fires inbox-delivery
     // The interactions (messaging) plane is INDEPENDENT of the vault-key bind — a delegation to the
     // interactions service SA, not a vault write. A vault-key hiccup must NOT skip it, or the member is

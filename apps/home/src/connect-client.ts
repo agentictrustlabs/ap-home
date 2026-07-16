@@ -701,7 +701,7 @@ async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address> {
  *  RPC hiccup we return false (treat as fresh) — a redundant deploy of an existing SA fails server-side with a
  *  surfaced error, never a silent weaker path (ADR-0013). Deployed ⟺ this EOA custodies it (the address is
  *  derived from custodians=[EOA], so only a deploy under this EOA yields it). */
-async function isAgentDeployed(sa: Address): Promise<boolean> {
+export async function isAgentDeployed(sa: Address): Promise<boolean> {
   try {
     const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
     const code = await pub.getBytecode({ address: sa });
