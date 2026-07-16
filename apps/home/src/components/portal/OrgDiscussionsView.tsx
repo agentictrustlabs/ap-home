@@ -703,23 +703,37 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             const invitable = listings
               .map((l) => ({ l, sa: (l.listing.subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase() }))
               .filter(({ sa }) => sa && !participantSAs.has(sa) && !pendingSAs.has(sa));
+            // A participant's DM target comes from their DIRECTORY listing (label = agent name) —
+            // the participation row only carries a display name.
+            const listingForSa = (sa: string) => listings.find((l) => l.listing.subject.toLowerCase().endsWith(sa.toLowerCase()));
             return (
               <div style={{ marginBottom: '0.9rem' }}>
                 <div className="channels-sidebar__title"><span>Participants · {(participants ?? []).length}</span></div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', padding: '0 0.25rem' }}>
-                  {(participants ?? []).map((p) => (
-                    <div key={p.personSA} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem' }}>
-                      <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <b>{p.personName ?? `${p.personSA.slice(0, 8)}…`}</b>
-                        <span style={{ opacity: 0.55 }}> · {p.role}</span>
-                      </span>
-                      {youFacilitator && p.personSA.toLowerCase() !== me && (
-                        <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} disabled={participantBusy === p.personSA} onClick={() => void revokeParticipant(p.personSA)}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {(participants ?? []).map((p) => {
+                    const pl = listingForSa(p.personSA);
+                    const pName = p.personName ?? pl?.listing.displayName ?? `${p.personSA.slice(0, 8)}…`;
+                    const isMe = p.personSA.toLowerCase() === me;
+                    return (
+                      <div key={p.personSA} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem' }}>
+                        <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <b>{pName}</b>
+                          <span style={{ opacity: 0.55 }}> · {p.role}{isMe ? ' (you)' : ''}</span>
+                        </span>
+                        {/* One-to-one MESSAGING (not discussion): same DM slide-over as the Members rail. */}
+                        {!isMe && pl && (
+                          <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} title={`Message ${pName}`} onClick={() => openDm(pl.listing.displayName, pl.label, pl.listing.subject)}>
+                            ✉
+                          </button>
+                        )}
+                        {youFacilitator && !isMe && (
+                          <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} disabled={participantBusy === p.personSA} onClick={() => void revokeParticipant(p.personSA)}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                   {pendingInvites.map((i) => (
                     <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', opacity: 0.65 }}>
                       <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -734,13 +748,20 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   ))}
                   {youFacilitator && invitable.length > 0 && (
                     <div style={{ marginTop: '0.35rem' }}>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.6, marginBottom: '0.2rem' }}>Invite an organization member:</div>
+                      <div style={{ fontSize: '0.72rem', opacity: 0.6, marginBottom: '0.2rem' }}>Invite an organization member to this topic:</div>
                       {invitable.map(({ l, sa }) => (
                         <div key={sa} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', marginBottom: 2 }}>
                           <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.listing.displayName}</span>
                           <BusyButton busy={participantBusy === sa} busyLabel="…" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} onClick={() => void inviteParticipant(sa, l.listing.displayName)}>Invite</BusyButton>
                         </div>
                       ))}
+                      {/* Boundary: topic invitations select among EXISTING members — bringing a NEW person
+                          into the organization is membership management (Members), never a topic act. */}
+                      <p style={{ fontSize: '0.68rem', opacity: 0.55, margin: '0.3rem 0 0' }}>
+                        Topic invitations are for existing members only. To bring someone new into the
+                        organization, use{' '}
+                        {steward ? <a href={`/org/${communityId}/members`}>Members</a> : 'Members'}.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -754,10 +775,19 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
           )}
           <div className="channels-sidebar__title">
             <span>Members · {listings.length}</span>
-            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite">＋</button>
+            {/* MEMBERSHIP management entry (steward act) — visibly distinct from the topic-invite
+                panel above: this brings a NEW person into the ORGANIZATION, not into a topic. */}
+            {steward && (
+              <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} onClick={() => setInviteOpen((v) => !v)} title="Invite someone to join this organization (membership)">＋</button>
+            )}
           </div>
-          {inviteOpen && (
-            <div style={{ margin: '0.25rem 0 0.5rem', padding: '0 0.25rem' }}>
+          {inviteOpen && steward && (
+            <div style={{ margin: '0.25rem 0 0.5rem', padding: '0.4rem 0.25rem', borderLeft: '2px solid var(--color-amber-400, #f59e0b)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginBottom: '0.2rem' }}>Organization membership invite</div>
+              <p style={{ fontSize: '0.68rem', opacity: 0.6, margin: '0 0 0.35rem' }}>
+                Invites a person to <b>join this organization</b> (they sign their own revocable listing).
+                For email invites and roster management, use <a href={`/org/${communityId}/members`}>Members</a>.
+              </p>
               <input
                 placeholder="Find a person…"
                 value={inviteQuery}
@@ -770,7 +800,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   <div style={{ minWidth: 0, flex: 1, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <b>{h.displayName ?? h.label}</b>
                   </div>
-                  <BusyButton busy={inviteBusyFor === h.name} busyLabel="Signing…" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite</BusyButton>
+                  <BusyButton busy={inviteBusyFor === h.name} busyLabel="Signing…" style={{ padding: '0 0.4rem', fontSize: '0.72rem' }} disabled={busy} onClick={() => void invite(h)}>Invite to organization</BusyButton>
                 </div>
               ))}
               {inviteSent && <p style={{ fontSize: '0.75rem', color: 'var(--color-sage-700)' }}>Invitation sent to {inviteSent}.</p>}

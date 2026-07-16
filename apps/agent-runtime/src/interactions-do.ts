@@ -862,6 +862,13 @@ export class InteractionsDO {
         if (op === 'channels.invite') {
           const invitedAgent = String(body.personSA ?? '').toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(invitedAgent)) return json({ error: 'personSA (0x address) required' }, 400);
+          // Topic invitations select among EXISTING organization members only (a current directory
+          // listing). Bringing a NEW person in is MEMBERSHIP enrollment (spec 324 §12) — never a topic act.
+          const nowInv = new Date().toISOString();
+          const roster = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => isListingCurrent(l.listing, nowInv));
+          if (!roster.some((l) => l.listing.subject.toLowerCase().endsWith(invitedAgent))) {
+            return json({ error: 'topic invitations are for existing organization members only — invite them to the organization first (membership enrollment)' }, 403);
+          }
           const role: 'facilitator' | 'contributor' = body.role === 'facilitator' ? 'facilitator' : 'contributor';
           return this.serialize(async () => {
             const invites = await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []);
