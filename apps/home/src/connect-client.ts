@@ -678,7 +678,7 @@ export function canCheckCustody(via: string | undefined, name: string | null, to
   return isSocialVia(via) ? !!token : !!connectedCredential(via, name);
 }
 
-async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
+export async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Address> {
   const rpIdHash = await derivePasskeyRpIdHash();
   return agentAccountClient().getAddressForAgentAccount({
     custodians: [],
@@ -695,7 +695,7 @@ async function derivePasskeySa(passkey: DemoPasskey, salt: bigint): Promise<Addr
 /** EOA/SIWE-custodied SA address — MUST mirror the server's `/session/deploy` EOA spec
  *  (`custodians: [owner], salt`, mode 0, no passkey) so the predicted address == the
  *  deployed address (else the name-claim `newOwner` orphans). */
-async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address> {
+export async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address> {
   return agentAccountClient().getAddressForAgentAccount({ custodians: [owner], salt });
 }
 
@@ -2161,11 +2161,17 @@ export async function createSecureHomePasskey(name: string): Promise<DemoPasskey
 export async function deployAndClaimAgent(
   passkey: DemoPasskey,
   base: string,
+  extraApproveDigests: Hex[] = [],
 ): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
   const sa = await derivePasskeySa(passkey, 0n);
   const claim = await buildClaimCallData(base, sa);
   if (!claim.ok) return { ok: false, error: claim.error };
-  const dep = await bootstrapWithPasskey(passkey, undefined, claim.callData);
+  // spec 253 batching — fold the person's plane-grant approveHash(digest) calls into the SAME deploy
+  // userOp (deploy + claim + approve-all), so those grants need no separate signature (one passkey prompt).
+  const callData = extraApproveDigests.length
+    ? buildExecuteBatchCallData([...claim.calls, ...extraApproveDigests.map(buildApproveHashCall)])
+    : claim.callData;
+  const dep = await bootstrapWithPasskey(passkey, undefined, callData);
   if (!dep.ok) return { ok: false, error: dep.error };
   return { ok: true, agent: dep.agent, name: claim.name };
 }
