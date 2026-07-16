@@ -2185,6 +2185,10 @@ export async function signupWithName(
   via: 'wallet' | 'passkey',
   onStep?: (s: string) => void,
   signIn = true,
+  /** spec 253 batching (device vias) — given the derived person SA, return the plane-grant digests to
+   *  fold into the deploy userOp + a submit() to hand the pre-approved wires to the DOs after deploy. Only
+   *  the FRESH-EOA deploy path honors it (an existing agent has no deploy op to batch into). */
+  buildExtra?: (sa: Address) => Promise<{ digests: Hex[]; submit: () => Promise<void> }>,
 ): Promise<{ ok: true; token: string; name: string; agent: Address } | { ok: false; error: string }> {
   if (via === 'passkey') {
     onStep?.('Creating your passkey…');
@@ -2234,9 +2238,20 @@ export async function signupWithName(
   // created AND the name claimed in a SINGLE wallet prompt.
   const claim = await buildClaimCallData(base, sa, onStep);
   if (!claim.ok) return { ok: false, error: claim.error };
-  const dep = await bootstrapWithWallet(address, onStep, claim.callData);
+  // spec 253 batching — fold the person's plane-grant approveHash(digest) calls into this deploy userOp,
+  // then submit the pre-approved 0x03 wires once the SA is RPC-visible: deploy + claim + approve-all in
+  // ONE wallet prompt, no per-grant signature.
+  const extra = buildExtra ? await buildExtra(sa) : undefined;
+  const deployCallData = extra && extra.digests.length
+    ? buildExecuteBatchCallData([...claim.calls, ...extra.digests.map(buildApproveHashCall)])
+    : claim.callData;
+  const dep = await bootstrapWithWallet(address, onStep, deployCallData);
   if (!dep.ok) return { ok: false, error: dep.error };
   const agent = dep.agent;
+  if (extra) {
+    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, 2000)); }
+    await extra.submit();
+  }
   // B1 — self-serve `secureHome` passes signIn=false; the session is issued later by openHome, so skip the
   // SIWE here (its token would be unused).
   if (!signIn) return { ok: true, token: '', name: claim.name, agent };

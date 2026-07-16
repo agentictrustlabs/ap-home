@@ -26,6 +26,7 @@ import {
   claimName,
   setConnectionInfo,
   isAgentDeployed,
+  derivePasskeySa,
   AUD,
   type SignHash,
 } from '../connect-client';
@@ -34,7 +35,7 @@ import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { writeOrganizationMembership } from '../lib/membership-write';
-import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -155,6 +156,62 @@ export function continueWithYouVersion(preferredName?: string, enrollStashJson?:
  *   google  → handled by the server (the per-subject KMS custodian signs) — wired in spec 235.
  */
 /**
+ * Device-via (passkey/wallet) fast path — build the person's interactions + inbox-delivery grants as
+ * `0x03` approved-hash wires so their digests can be pre-approved INSIDE the deploy userOp (spec 253),
+ * exactly like org-create batches its outbound grants. Returns the digests to fold into the deploy +
+ * `submit()` that hands the pre-approved wires to the DOs AFTER the deploy is RPC-visible. This removes
+ * TWO device signatures (interactions + delivery) — they ride the single deploy prompt instead. KMS vias
+ * (google/youversion/email/phone) NEVER take this path — they stay on the silent server-signed
+ * `activatePersonPlanes`, so nothing changes for them (already zero device prompts). Inert grants
+ * (service SA unset) are skipped, same as the per-grant path.
+ */
+async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: Hex[]; submit: () => Promise<void> }> {
+  const digests: Hex[] = [];
+  const posts: Array<() => Promise<void>> = [];
+  const low = sa.toLowerCase();
+  if (INTERACTIONS_SERVICE_SA) {
+    const ix = buildApprovedInteractionsDelegation(sa, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID);
+    digests.push(ix.digest);
+    let leafWire: DelegationWire | undefined;
+    try {
+      const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
+      if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
+        const leaf = buildApprovedSessionDelegation(sa, sk.address as Address);
+        digests.push(leaf.digest);
+        leafWire = toWire(leaf.delegation);
+      }
+    } catch { /* no interactions-session key → DO uses the server-mint bridge; the grant still lands */ }
+    posts.push(async () => {
+      await ensureCsrfToken();
+      const res = await fetch(`/a2a/interactions/${low}/grant`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ delegation: toWire(ix.delegation), ...(leafWire ? { sessionLeaf: leafWire } : {}) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || data.ok !== true) throw new Error(data.error ?? `interactions grant store failed (HTTP ${res.status})`);
+    });
+  }
+  if (DELIVERY_SERVICE_SA) {
+    const dl = buildApprovedInboxDeliveryDelegation(sa, DELIVERY_SERVICE_SA, MCP_SERVER_ID);
+    digests.push(dl.digest);
+    posts.push(async () => {
+      const res = await fetch(`/a2a/interactions/${low}/grant.delivery.put`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ delegation: toWire(dl.delegation) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || data.ok !== true) throw new Error(data.error ?? `delivery grant store failed (HTTP ${res.status})`);
+    });
+  }
+  return {
+    digests,
+    submit: async () => { for (const p of posts) { try { await p(); } catch (e) { console.warn('[home-create] plane wire submit deferred (recover via Enable-messaging):', e); } } },
+  };
+}
+/**
  * spec 323 — front-load EVERY person-plane capability at home creation, so the member never meets a
  * cold "activate your vault key / enable storage" prompt later (profile save, inbox, channels all
  * need these). Vault-key bind + inbox-delivery + interactions plane, in order. KMS family
@@ -233,15 +290,43 @@ export async function secureHome(
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (via === 'wallet') {
-    const out = await signupWithName(homeLabel(name), 'wallet', undefined, false);
+    // WALLET fast path — batch interactions + inbox-delivery into the deploy userOp (one wallet prompt),
+    // then bind the vault key. Only the FRESH-EOA deploy honors the callback; a returning EOA agent has no
+    // deploy op to batch into, so `batched` stays false and we take the proven per-grant path (no regression).
+    let batched = false;
+    const out = await signupWithName(homeLabel(name), 'wallet', undefined, false, async (sa) => {
+      batched = true;
+      return buildBatchedPersonPlaneGrants(sa);
+    });
     if (!out.ok) return { ok: false, error: out.error };
-    await activatePersonPlanes(out.agent, via, auth);
+    if (batched) {
+      try { const bound = await activateVaultIfNeeded(out.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
+      catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
+    } else {
+      await activatePersonPlanes(out.agent, via, auth);
+    }
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (!key) return { ok: false, error: 'no key for this device' };
-  const res = await deployAndClaimAgent(key, homeLabel(name));
+  // PASSKEY fast path — pre-derive the SA, build interactions + inbox-delivery as 0x03 wires, and
+  // deploy + claim + approve ALL their digests in ONE userOp (one passkey prompt) instead of signing each
+  // grant separately. Then hand the pre-approved wires to the DOs (no prompt) and bind the vault key. If
+  // the SA can't be pre-derived, fall back to the proven per-grant path (no regression).
+  const sa = await derivePasskeySa(key, 0n).catch(() => null);
+  const planes = sa ? await buildBatchedPersonPlaneGrants(sa).catch(() => null) : null;
+  const res = await deployAndClaimAgent(key, homeLabel(name), planes?.digests ?? []);
   if (!res.ok) return { ok: false, error: res.error };
-  await activatePersonPlanes(res.agent, via, auth);
+  if (planes && sa && res.agent.toLowerCase() === sa.toLowerCase()) {
+    // Wait for the deploy to be RPC-visible so the DOs can verify the 0x03 wires against the approved
+    // hashes set INSIDE the deploy batch, then hand them over (no signature). Vault-key still binds via
+    // activateVaultIfNeeded for now (Phase B folds it into the deploy too).
+    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(res.agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, 2000)); }
+    await planes.submit();
+    try { const bound = await activateVaultIfNeeded(res.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
+    catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
+  } else {
+    await activatePersonPlanes(res.agent, via, auth);
+  }
   return { ok: true, home: { address: res.agent, name: res.name } };
 }
 
