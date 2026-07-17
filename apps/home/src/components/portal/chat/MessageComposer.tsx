@@ -12,6 +12,7 @@ export function MessageComposer({
   disabled,
   busy,
   placeholder = 'Message…',
+  rows = 1,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -19,6 +20,8 @@ export function MessageComposer({
   disabled?: boolean;
   busy?: boolean;
   placeholder?: string;
+  /** Composer height in text lines (Enter still sends; Shift+Enter for a newline). */
+  rows?: number;
 }) {
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -60,7 +63,7 @@ export function MessageComposer({
           e.target.value = '';
         }} />
         <textarea
-          rows={1}
+          rows={rows}
           value={value}
           disabled={disabled}
           placeholder={placeholder}

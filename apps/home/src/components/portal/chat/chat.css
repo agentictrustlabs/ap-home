@@ -282,7 +282,7 @@
   font-family: inherit;
   resize: none;
   line-height: 1.35;
-  max-height: 120px;
+  max-height: 168px;
   min-height: 22px;
 }
 
@@ -333,10 +333,12 @@
   box-shadow: none;
 }
 
-/* Channels 3-column layout */
+/* Channels 3-column layout — fills the viewport below the portal chrome (topbar + section head),
+   so the thread pane gets the whole screen; columns scroll internally. */
 .channels-layout {
   display: flex;
   gap: 0;
+  height: calc(100dvh - 200px);
   min-height: 520px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-12);
@@ -730,6 +732,7 @@
 @media (max-width: 960px) {
   .channels-layout {
     flex-direction: column;
+    height: auto; /* stacked columns size themselves; a fixed viewport height would cramp the feed */
   }
   .channels-sidebar,
   .channels-members {

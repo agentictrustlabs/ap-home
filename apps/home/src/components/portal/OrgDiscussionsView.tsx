@@ -681,6 +681,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 onSend={postMessage}
                 disabled={orgVault === false}
                 busy={busy}
+                rows={3}
                 placeholder={orgVault === false
                   ? 'Enable discussion storage to post'
                   : channel.assistant?.trigger === 'mention' && channel.assistant.mentionHandle
