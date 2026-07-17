@@ -16,7 +16,8 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { fetchProfile, listManagedAgents } from '../../connect-client';
@@ -269,8 +270,12 @@ export function OnboardingJourney({
       // `existingAgent` avoids a wasted re-auth for first-run x402-pay connects. openHome here is
       // wallet/passkey only; SOCIAL (KMS) members connect through RecognizedEnroll (which already has a
       // session token + charges via signHashFor — all custodians).
-      if (api.enroll.template === 'x402-pay' && pc && existingAgent && (via === 'passkey' || via === 'wallet')) {
-        const opened = await openHome(home.name, via);
+      if (api.enroll.template === 'x402-pay' && pc && existingAgent && (via === 'passkey' || via === 'wallet' || isKmsVia(via))) {
+        // wallet/passkey re-open the home for a fresh token; a social/KMS member reuses the
+        // cross-subdomain SSO session token (openHome is wallet/passkey-only).
+        const opened = isKmsVia(via)
+          ? (() => { const sso = readSsoCookie(); return sso?.token ? ({ ok: true as const, token: sso.token }) : ({ ok: false as const }); })()
+          : await openHome(home.name, via as 'passkey' | 'wallet');
         if (opened.ok) {
           const treasury = (await listManagedAgents(opened.token)).find((a) => a.kind === 'person-treasury');
           treasuryAddr = (treasury?.agent as Address) ?? null;
@@ -296,7 +301,12 @@ export function OnboardingJourney({
       }
       // spec 270 v4 W2 — sign the DEL-001 leaf for the relying app's session-key address (from the
       // /authorize params) + submit it alongside the grant; /token returns it to the relying app.
-      const granted = await givePermission(home, delegate, via, undefined, api.enroll?.sessionKey, payment);
+      // A social/KMS member who lands in the journey (recognition missed — e.g. the session was
+      // cleared by a forced-chooser ceremony) still needs a custody session for the server-side KMS
+      // signer: recover the home-session token from the cross-subdomain SSO cookie. Without it,
+      // signHashFor fails closed ('granting with an OIDC home needs a custody session').
+      const kmsAuth = isKmsVia(via) ? (() => { const sso = readSsoCookie(); return sso?.token ? { token: sso.token } : undefined; })() : undefined;
+      const granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
       // spec 278 — also turn on the member's encrypted vault while enrolling (skipped if already
       // bound, so returning members aren't re-prompted). Best-effort: a vault hiccup must NOT block

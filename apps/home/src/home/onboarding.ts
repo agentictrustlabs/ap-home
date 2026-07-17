@@ -762,7 +762,16 @@ export async function givePermission(
     }
     return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'could not grant permission' };
+    // Surface the REAL failure. Wallet providers (EIP-1193) and some libs throw plain objects/strings
+    // that fail `instanceof Error`, which used to collapse into an unactionable 'could not grant
+    // permission'. Serialize whatever was thrown, and keep the full object in the console.
+    console.error('[givePermission] grant failed:', e);
+    const msg =
+      e instanceof Error ? e.message
+      : typeof e === 'string' ? e
+      : (e && typeof e === 'object' && 'message' in e && typeof (e as { message?: unknown }).message === 'string') ? (e as { message: string }).message
+      : (() => { try { return `could not grant permission: ${JSON.stringify(e)}`; } catch { return 'could not grant permission'; } })();
+    return { ok: false, error: msg };
   }
 }
 
