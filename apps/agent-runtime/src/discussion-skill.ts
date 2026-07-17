@@ -39,6 +39,8 @@ export interface DiscussionIo {
 /** What `internal.channels.read` returns (the slice the goal-context builder needs). */
 interface TopicReadResult {
   messages?: Array<{ authorName?: string; actor?: string; bodyText?: string }>;
+  /** spec 327 §4b — the org's steward-authored assistant playbook (SKILL.md projection), if any. */
+  skillMarkdown?: string;
 }
 
 export const DISCUSSION_TOOLS: ToolSpec[] = [
@@ -49,11 +51,20 @@ export const DISCUSSION_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** The discussion turn's PLANNING contract: one tool, one call, the reply is the arguments. */
-const DISCUSSION_PLANNER_SYSTEM =
-  "You compose the reply for an organization's discussion-board assistant. Call post_topic_message " +
-  'exactly once, with the complete reply text as bodyText. Write the reply directly from the goal ' +
-  'and the recent-messages context it contains. Never answer in prose.';
+/** The default playbook (spec 327 §4b) — used when the org's steward hasn't authored one. A config
+ *  default, not a fallback mechanism: the load path is one read; absent means this constant. */
+const DEFAULT_ASSISTANT_SKILL_MD =
+  "You are the organization's discussion-board assistant. Be concise, warm, and concrete; answer " +
+  'the question that was actually asked, ground your reply in the recent topic messages when they ' +
+  "are relevant, and say plainly when something needs a human steward's follow-up.";
+
+/** The NON-NEGOTIABLE tool contract, appended AFTER the playbook. The must-post guarantee is
+ *  structural anyway (single tool + tool_choice any) — this line keeps the instructions coherent
+ *  no matter what the steward wrote above it. */
+const DISCUSSION_CONTRACT =
+  '\n\nTool contract (always applies): call post_topic_message exactly once, with the complete ' +
+  'reply text as bodyText. Write the reply directly from the goal and the recent-messages context ' +
+  'it contains. Never answer in prose.';
 
 /** Bound the context embedded in the goal (the planner turn is small — 1024 max_tokens out). */
 const CONTEXT_MESSAGES = 8;
@@ -74,7 +85,22 @@ export async function handleDiscussionRespond(
   input: DiscussionRespondInput,
   io: DiscussionIo,
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
-  const { planner, kind } = selectPlanner(env, { systemPrompt: DISCUSSION_PLANNER_SYSTEM });
+  // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
+  // not authority and not a second mechanism: a failed read just means the goal carries only the
+  // trigger message and the default playbook. Also carries the org's steward-authored PLAYBOOK
+  // (spec 327 §4b), which becomes the planner's system prompt with the tool contract appended.
+  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  let topicContext = '';
+  let playbook = DEFAULT_ASSISTANT_SKILL_MD;
+  if (llmConfigured) {
+    try {
+      const read = (await io.readTopic()) as TopicReadResult;
+      topicContext = contextLines(read);
+      if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
+    } catch { /* trigger-only context + default playbook */ }
+  }
+
+  const { planner, kind } = selectPlanner(env, { systemPrompt: playbook + DISCUSSION_CONTRACT });
   // The deterministic turn (no LLM configured): one template reply acknowledging the trigger.
   // Sufficient for e2e verification without a model key.
   const deterministic: Planner = createRuleBasedPlanner([
@@ -85,16 +111,6 @@ export async function handleDiscussionRespond(
     },
   ]);
   const effective = kind === 'anthropic' ? planner : deterministic;
-
-  // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
-  // not authority and not a second mechanism: a failed read just means the goal carries only the
-  // trigger message.
-  let topicContext = '';
-  if (kind === 'anthropic') {
-    try {
-      topicContext = contextLines((await io.readTopic()) as TopicReadResult);
-    } catch { /* trigger-only context */ }
-  }
 
   let posted = false;
   let messageId: string | undefined;

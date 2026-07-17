@@ -352,6 +352,39 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [active, communityId, authed, load, channels]);
 
+  // spec 327 §4b — the steward-authored assistant PLAYBOOK (SKILL.md projection): org-level
+  // markdown that becomes the assistant's system prompt. Loaded on opening the editor.
+  const [skillOpen, setSkillOpen] = useState(false);
+  const [skillText, setSkillText] = useState('');
+  const [skillBusy, setSkillBusy] = useState(false);
+  const openSkillEditor = useCallback(async () => {
+    setSkillOpen((o) => !o);
+    if (skillOpen) return; // just closed
+    setSkillBusy(true);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'assistantSkillGet', communityId }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; skill?: { markdown?: string } | null };
+      if (res.ok && b.ok) setSkillText(b.skill?.markdown ?? '');
+    } catch { /* editor opens empty */ } finally { setSkillBusy(false); }
+  }, [skillOpen, communityId, authed]);
+  const saveSkill = useCallback(async () => {
+    setSkillBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: 'assistantSkillPut', communityId, markdown: skillText }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
+      setSkillOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSkillBusy(false); }
+  }, [communityId, authed, skillText]);
+
   // spec 327 — steward toggle: enable/disable the org's own assistant on the ACTIVE topic.
   const [assistantBusy, setAssistantBusy] = useState(false);
   const toggleAssistant = useCallback(async () => {
@@ -605,20 +638,52 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   </div>
                 </div>
                 {steward && (
-                  <BusyButton
-                    busy={assistantBusy}
-                    busyLabel={channel.assistant ? 'Disabling assistant…' : 'Enabling assistant…'}
-                    onClick={() => void toggleAssistant()}
-                    className="manage-btn manage-btn--ghost"
-                    style={{ marginLeft: 'auto' }}
-                    title={channel.assistant
-                      ? 'Disable the organization assistant in this topic'
-                      : 'Let the organization’s own agent reply when it is @-mentioned in this topic'}
-                  >
-                    {channel.assistant ? '🤖 Assistant on' : '🤖 Enable assistant'}
-                  </BusyButton>
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.4rem' }}>
+                    <BusyButton
+                      busy={assistantBusy}
+                      busyLabel={channel.assistant ? 'Disabling assistant…' : 'Enabling assistant…'}
+                      onClick={() => void toggleAssistant()}
+                      className="manage-btn manage-btn--ghost"
+                      title={channel.assistant
+                        ? 'Disable the organization assistant in this topic'
+                        : 'Let the organization’s own agent reply when it is @-mentioned in this topic'}
+                    >
+                      {channel.assistant ? '🤖 Assistant on' : '🤖 Enable assistant'}
+                    </BusyButton>
+                    <BusyButton
+                      busy={skillBusy && !skillOpen}
+                      onClick={() => void openSkillEditor()}
+                      className="manage-btn manage-btn--ghost"
+                      title="Edit the assistant's instructions (SKILL.md playbook — shapes every reply the assistant writes for this organization)"
+                    >
+                      📝 Instructions
+                    </BusyButton>
+                  </span>
                 )}
               </div>
+
+              {skillOpen && (
+                <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-raised)' }}>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
+                    Assistant instructions (markdown, applies to every topic in this organization; the reply
+                    contract — one reply per mention — always applies regardless).
+                  </div>
+                  <textarea
+                    value={skillText}
+                    onChange={(e) => setSkillText(e.target.value)}
+                    rows={8}
+                    maxLength={8192}
+                    placeholder={'# Assistant playbook\n\nDescribe how the assistant should reply: tone, what it knows about this organization, what to defer to stewards…'}
+                    style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface)', resize: 'vertical' }}
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', justifyContent: 'flex-end' }}>
+                    <button type="button" className="manage-btn manage-btn--ghost" onClick={() => setSkillOpen(false)}>Cancel</button>
+                    <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="manage-btn">
+                      Save instructions
+                    </BusyButton>
+                  </div>
+                </div>
+              )}
 
               <div className="chat-thread-body" style={{ flex: 1 }}>
                 {channel.messages.map((m, idx) => {

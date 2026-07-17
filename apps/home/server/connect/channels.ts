@@ -147,6 +147,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     return jsonCors(r.body, request, r.status);
   }
+  // Assistant playbook (spec 327 §4b, SKILL.md projection) — steward-only authoring pass-through.
+  if (body?.action === 'assistantSkillGet' || body?.action === 'assistantSkillPut') {
+    const r = await callInteractions(env, communityId, body.action === 'assistantSkillGet' ? 'channels.assistantSkill.get' : 'channels.assistantSkill.put', {
+      session: who.token,
+      ...(body.action === 'assistantSkillPut' ? { markdown: (body as { markdown?: string }).markdown ?? '' } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
   // Org-assistant enablement (spec 327) — steward-only; the DO owns the gate + name capture.
   if (body?.action === 'assistantEnable' || body?.action === 'assistantDisable') {
     const r = await callInteractions(env, communityId, body.action === 'assistantEnable' ? 'channels.assistantEnable' : 'channels.assistantDisable', {

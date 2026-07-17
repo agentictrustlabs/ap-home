@@ -68,6 +68,15 @@ const DIRECTORY_RESOURCE = 'directory.data';
 const DISCUSSION_INVITATIONS_RESOURCE = 'conversation.topic:invitations';
 const TOPIC_PARTICIPATION_RESOURCE = (topicId: string): string => `conversation.topic:participation:${topicId}`;
 
+// spec 327 §4b — the org's ASSISTANT PLAYBOOK: a steward-authored Agent Skill package (SKILL.md
+// projection, ADR-0051 vocabulary) whose markdown becomes the LLM planner's system prompt for the
+// discussion turn. ONE org-level doc, deliberately keyed under the `conversation.topic:` namespace
+// so it rides the EXISTING `vault:conversation.topic:*` grant scope (the invitations/participation
+// carve) — no grant re-enable. Steward-gated authoring; the harness reads it marker-gated.
+const ASSISTANT_SKILL_RESOURCE = 'conversation.topic:assistant-skill';
+const ASSISTANT_SKILL_MAX_CHARS = 8192;
+interface AssistantSkillDocV1 { version: 'ap.assistant-skill.v1'; markdown: string; updatedBy: string; updatedAt: string }
+
 // spec 327 — org-assistant dispatch bounds. Per-topic fixed window in DO storage: member-driven
 // mention storms are bounded; drops are audited (`interactions.assistant.rateLimited`), never queued.
 const ASSISTANT_RATE_KEY = (topicId: string): string => `assistant.rate:${topicId}`;
@@ -589,7 +598,10 @@ export class InteractionsDO {
             try { text = new TextDecoder().decode(await store.loadBody(m.envelope)).slice(0, ASSISTANT_BODY_CLIP); } catch { /* fail-closed omit body */ }
             return { id: m.envelope.id, from: m.envelope.from, authorName: m.authorName, ...(m.actor ? { actor: m.actor } : {}), createdAt: m.envelope.createdAt, bodyText: text };
           }));
-          return json({ ok: true, title: entry.title, messages: rows });
+          // spec 327 §4b — the assistant's context read also carries the org playbook (one round trip;
+          // absent ⇒ the turn uses the built-in default playbook — a config default, not a fallback).
+          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, title: entry.title, messages: rows, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });
         }
         if (op === 'internal.channels.post') {
           // The assistant's reply write (spec 327 §5). `from`/`actor` are PINNED server-side to the
@@ -904,6 +916,24 @@ export class InteractionsDO {
           }
           return json({ ok: true, messageId: r.envelope.id });
         });
+      }
+
+      // ── spec 327 §4b — the org's assistant PLAYBOOK (Agent Skill package / SKILL.md projection):
+      //    steward-authored markdown that becomes the LLM planner's system prompt. Org-level (one doc,
+      //    all topics); the must-post contract stays STRUCTURAL (single tool) regardless of its text. ──
+      if (op === 'channels.assistantSkill.get' || op === 'channels.assistantSkill.put') {
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the organization custodian may author the assistant playbook' }, 403);
+        if (op === 'channels.assistantSkill.get') {
+          const doc = await this.readDoc<AssistantSkillDocV1 | null>(grant, ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, skill: doc });
+        }
+        const markdown = String(body.markdown ?? '');
+        if (markdown.length > ASSISTANT_SKILL_MAX_CHARS) return json({ error: `playbook too long (max ${ASSISTANT_SKILL_MAX_CHARS} chars)` }, 400);
+        const doc: AssistantSkillDocV1 = { version: 'ap.assistant-skill.v1', markdown, updatedBy: sessionSa.toLowerCase(), updatedAt: new Date().toISOString() };
+        await audit.write({ id: crypto.randomUUID(), timestamp: doc.updatedAt, action: 'interactions.channels.assistantSkillPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'assistant-skill', id: principal } });
+        await this.writeDoc(grant, ASSISTANT_SKILL_RESOURCE, doc);
+        return json({ ok: true });
       }
 
       // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──
