@@ -161,6 +161,22 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // New City AI family/advisor portal (newcitycase repo, apps/portal) — wealth reporting on the
+    // substrate; site-login only. Local dev/e2e shares port 8798 with org-site (distinct client_id,
+    // so no ambiguity — the RP always sends its own client_id). Delegate is the shared demo
+    // delegate SA for now; replace when the portal mints its own service SA.
+    {
+      client_id: 'newcity-portal',
+      name: 'New City AI Portal',
+      redirect_uris: [
+        'https://newcity-portal.richardpedersen3.workers.dev/',
+        'http://127.0.0.1:8798/',
+        'http://localhost:8798/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
