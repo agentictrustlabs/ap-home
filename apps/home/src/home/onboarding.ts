@@ -234,7 +234,10 @@ async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: He
       posts.push(async () => {
         const pr = await fetch('/mcp-bind/custody/vault-key/provision', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ owner: sa, issuedAt, proof: APPROVED_HASH_SENTINEL }),
+          // owner MUST be lowercase to match the deterministic kmsKeyRef server-info computed (also from the
+          // lowercase owner). executeGcpProvision mints the KEK at sanitizeKeyId(owner) — a checksummed `sa`
+          // here would mint a MIXED-CASE key path while the binding stores the lowercase one → vault ops 404.
+          body: JSON.stringify({ owner: low, issuedAt, proof: APPROVED_HASH_SENTINEL }),
         });
         const pd = (await pr.json().catch(() => ({}))) as { ok?: boolean; error_description?: string; detail?: string };
         if (!pr.ok || pd.ok !== true) throw new Error(pd.error_description ?? pd.detail ?? `vault provision failed (HTTP ${pr.status})`);
