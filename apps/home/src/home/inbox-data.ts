@@ -110,6 +110,8 @@ export interface InboxView {
       contextRefs?: ContextRefV1[];
       signatureSigner?: string;
       createdAt: string;
+      /** spec 328 / spec 324 §9 — acting-agent provenance; drives the "agent" chip. */
+      actor?: string;
     }
   >;
 }
@@ -171,6 +173,7 @@ export async function readInboxView(kv: KV, person: string, bodyStore?: MessageB
       contextRefs: e.contextRefs,
       signatureSigner: e.signature?.signer,
       createdAt: e.createdAt,
+      ...(e.actor ? { actor: e.actor } : {}),
     };
   }
   const descriptors: InboxView['descriptors'] = {};

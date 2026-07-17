@@ -23,19 +23,26 @@ import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCE
 import {
   appendBoardPost,
   assistantTrigger,
+  buildAssistantInboxReply,
   createBoardChannel,
   canSeeChannel,
   channelParticipationPolicy,
   canonicalizeMessage,
   createVaultMessageBodyStore,
+  fixedWindowAllow,
+  inboxAssistantTrigger,
   isListingCurrent,
   setTopicAssistant,
   sha256Hex32,
   validateDirectoryListing,
   type ChannelMessageEntryV1,
   type ChannelV1,
+  type ConversationDescriptorV1,
   type DirectoryListingV1,
+  type FixedWindowState,
   type MessageEnvelopeV1,
+  type MessageEventV1,
+  type PersonAssistantV1,
   type TopicAssistantV1,
 } from '@agenticprimitives/fabric/messaging';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -85,6 +92,26 @@ const ASSISTANT_RATE_MAX = 6;
 /** Context bound for the assistant's topic reads (spec 327 §4). */
 const ASSISTANT_READ_LIMIT = 20;
 const ASSISTANT_BODY_CLIP = 2000;
+
+// ── spec 328 — the PERSON inbox auto-reply assistant (the person twin of spec 327). ──
+// Config + playbook are VAULT records, deliberately keyed under `conversation.topic:` so they ride
+// the EXISTING `vault:conversation.topic:*` grant scope (the 327 §4b carve) — no grant re-enable.
+const PERSON_ASSISTANT_RESOURCE = 'conversation.topic:person-assistant';
+const PERSON_ASSISTANT_SKILL_RESOURCE = 'conversation.topic:person-assistant-skill';
+/** DO-storage gate flag — a CACHE of the canonical vault record's `enabled`, maintained ONLY by
+ *  the enable/disable ops (single writer), so disabled inboxes exit every scan in O(1) with no
+ *  vault read. The canonical record is re-read before any dispatch AND at the write (§5). */
+const INBOX_ASSISTANT_FLAG_KEY = 'assistant.inbox.on';
+/** Seen ledger — envelope ids already scanned (bounded ring). Both commit paths (internal.deliver
+ *  and the Home's whole-doc inbox.put) diff against it; first sight SEEDS without dispatching so
+ *  history/replays never trigger. */
+const INBOX_ASSISTANT_SEEN_KEY = 'assistant.inbox.seen';
+const INBOX_ASSISTANT_SEEN_CAP = 300;
+const INBOX_ASSISTANT_RATE_KEY = (conversationId: string): string => `assistant.rate:inbox:${conversationId}`;
+/** Bound dispatches per scan — a whole-doc put can carry several new envelopes at once. */
+const INBOX_ASSISTANT_MAX_PER_SCAN = 2;
+/** Context bound for the assistant's conversation reads (spec 328 §4). */
+const INBOX_ASSISTANT_READ_LIMIT = 8;
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
@@ -221,6 +248,71 @@ export class InteractionsDO {
       await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatch', outcome: 'success', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId } });
     })().catch((e) => {
       void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+    });
+  }
+
+  /** spec 328 §3 — post-commit person-inbox assistant scan. Called (fire-and-forget) after ANY
+   *  inbox.data commit — the in-Worker a2a merge (`internal.deliver`) and the Home's whole-doc
+   *  write (`inbox.put`) — so every ingress triggers identically. The seen-ledger RMW rides the
+   *  DO's single-writer mutex (queued, never awaited by the caller — the caller may itself hold
+   *  the mutex); the trigger evaluation + dispatch run off the lock. Every drop/failure is
+   *  AUDITED and DROPPED (ADR-0013): no retry, no queue, no effect on the committed delivery. */
+  private queueInboxAssistantScan(principal: string, envelopes: MessageEnvelopeV1[]): void {
+    const audit = buildAuditSink(this.env);
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) return;
+    void this.serialize<MessageEnvelopeV1[]>(async () => {
+      if (!(await this.state.storage.get(INBOX_ASSISTANT_FLAG_KEY))) return [];
+      const seen = (await this.state.storage.get(INBOX_ASSISTANT_SEEN_KEY)) as string[] | undefined;
+      const ids = envelopes.map((e) => e.id);
+      if (!seen) {
+        // First sight (enable seeds explicitly; this covers a DO-storage reset): SEED, never dispatch.
+        await this.state.storage.put(INBOX_ASSISTANT_SEEN_KEY, ids.slice(-INBOX_ASSISTANT_SEEN_CAP));
+        return [];
+      }
+      const seenSet = new Set(seen);
+      const fresh = envelopes.filter((e) => !seenSet.has(e.id));
+      if (fresh.length === 0) return [];
+      await this.state.storage.put(INBOX_ASSISTANT_SEEN_KEY, [...seen, ...fresh.map((e) => e.id)].slice(-INBOX_ASSISTANT_SEEN_CAP));
+      return fresh;
+    }).then(async (fresh) => {
+      if (fresh.length === 0) return;
+      // Canonical enablement + config: the VAULT record (the flag above is only the O(1) gate cache).
+      const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      const g = st.grant;
+      if (!g) return;
+      const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
+      const now = Date.now();
+      const candidates = fresh.filter((e) => inboxAssistantTrigger(cfg, e, principal, now)).slice(0, INBOX_ASSISTANT_MAX_PER_SCAN);
+      for (const envelope of candidates) {
+        const rateKey = INBOX_ASSISTANT_RATE_KEY(envelope.conversationId);
+        const prev = (await this.state.storage.get(rateKey)) as FixedWindowState | undefined;
+        const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ASSISTANT_RATE_WINDOW_MS, max: ASSISTANT_RATE_MAX });
+        if (!rate.allowed) {
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inboxAssistant.rateLimited', outcome: 'denied', actor: { type: 'service', id: principal }, subject: { type: 'conversation', id: envelope.conversationId } });
+          continue;
+        }
+        await this.state.storage.put(rateKey, rate.next);
+        try {
+          const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
+          const resp = await stub.fetch(new Request(`https://do/internal/inbox-respond?agent=${principal}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+            body: JSON.stringify({
+              principal, conversationId: envelope.conversationId, messageId: envelope.id,
+              senderCaip: envelope.from, ...(envelope.subject ? { subject: envelope.subject } : {}),
+              displayName: cfg?.displayName ?? '',
+            }),
+          }));
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!resp.ok || out.ok === false) throw new Error(out.error ?? `inbox assistant respond failed (${resp.status})`);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inboxAssistant.dispatch', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'conversation', id: envelope.conversationId } });
+        } catch (e) {
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inboxAssistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'conversation', id: envelope.conversationId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+        }
+      }
+    }).catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inboxAssistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'inbox', id: principal }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
     });
   }
 
@@ -533,7 +625,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -562,6 +654,11 @@ export class InteractionsDO {
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
           await this.writeDoc(g, INBOX_RESOURCE, body.doc);
+          // spec 328 §3 — post-commit assistant scan (the HOME ingress: the two-party send/deliver
+          // orchestration lands here as a whole-doc write). Fire-and-forget; the seen-ledger diff
+          // finds what's new. Never affects this response.
+          const scanEnvs = (body.doc as { envelopes?: MessageEnvelopeV1[] } | null)?.envelopes;
+          if (Array.isArray(scanEnvs)) this.queueInboxAssistantScan(principal, scanEnvs);
           return json({ ok: true });
         }
         if (op === 'applications.get') {
@@ -627,6 +724,84 @@ export class InteractionsDO {
             await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
             await this.writeDoc(g, TOPIC_RESOURCE(channelId), composed[0]!.messages);
             return json({ ok: true, messageId: r.envelope.id });
+          });
+        }
+        // ── spec 328 — the person-inbox assistant's two internal ops (in-Worker marker only). ──
+        if (op === 'internal.inbox.read') {
+          // Bounded conversation context for the assistant turn: last N envelopes + clipped
+          // decoded bodies, plus the owner's playbook (one round trip — the 327 §4b pattern).
+          const conversationId = String(body.conversationId ?? '');
+          if (!conversationId) return json({ error: 'conversationId required' }, 400);
+          const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
+          if (!cfg?.enabled) return json({ error: 'assistant is not enabled for this inbox' }, 409);
+          const doc = await this.readDoc<{ envelopes?: MessageEnvelopeV1[] }>(g, INBOX_RESOURCE, {});
+          const rows = (doc.envelopes ?? []).filter((e) => e.conversationId === conversationId).slice(-INBOX_ASSISTANT_READ_LIMIT);
+          const messages = await Promise.all(rows.map(async (e) => {
+            let text = '';
+            if (e.body?.resource?.startsWith(DM_BODY_PREFIX)) {
+              try {
+                const r = await this.vaultFor(g).read<{ b64?: string }>({ owner: '', resource: e.body.resource });
+                if (r?.data?.b64) text = new TextDecoder().decode(Uint8Array.from(atob(r.data.b64), (c) => c.charCodeAt(0))).slice(0, ASSISTANT_BODY_CLIP);
+              } catch { /* fail-closed omit body */ }
+            }
+            const fromAddr = (String(e.from).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+            return { id: e.id, from: e.from, mine: fromAddr === principal, ...(e.actor ? { actor: e.actor } : {}), createdAt: e.createdAt, bodyText: text };
+          }));
+          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, PERSON_ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, displayName: cfg.displayName, messages, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });
+        }
+        if (op === 'internal.inbox.post') {
+          // The assistant's reply write (spec 328 §5). `from`/`actor` are PINNED server-side to
+          // the person principal (buildAssistantInboxReply); the caller supplies only
+          // { conversationId, bodyText } — it cannot author as anyone, and the counterparty comes
+          // from the OWNER'S OWN two-party descriptor, never the wire. Counterparty copy FIRST,
+          // fail-closed; disable wins races (config re-read here).
+          const conversationId = String(body.conversationId ?? '');
+          const bodyText = String(body.bodyText ?? '').trim();
+          if (!conversationId || !bodyText) return json({ error: 'conversationId + bodyText required' }, 400);
+          const audit = buildAuditSink(this.env);
+          const internalSecret = this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '';
+          return this.serialize(async () => { // ARCH-H1 — same single-writer merge as every inbox mutation
+            const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
+            if (!cfg?.enabled) return json({ error: 'assistant is not enabled for this inbox' }, 409);
+            const dg = st0.deliveryGrant;
+            if (!dg) return json({ error: 'no delivery grant — enable inbox delivery for this agent first' }, 409);
+            const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
+            const personCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as MessageEnvelopeV1['from'];
+            const built = await buildAssistantInboxReply(doc.conversations as ConversationDescriptorV1[] | undefined, { principal: personCaip, conversationId, bodyText });
+            if (!built.ok) return json({ error: built.error }, 409);
+            const { envelope, counterpartyAddr, bodyBytes } = built;
+            // Counterparty copy FIRST, fail-closed (the sendFromInbox "recipient side first" rule):
+            // the counterparty's DO performs both admissions with ITS OWN held wires — exactly the
+            // pair of calls the a2a messaging.deliver skill makes. Their internal.deliver runs
+            // THEIR assistant scan, which skips this envelope (actor set — loop closed).
+            let bin = '';
+            for (const b of bodyBytes) bin += String.fromCharCode(b);
+            const stored = { b64: btoa(bin), contentType: 'text/plain', bodyHash: envelope.bodyHash };
+            const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(counterpartyAddr));
+            const callOther = async (cop: string, payload: unknown): Promise<void> => {
+              const resp = await stub.fetch(new Request(`https://do/interactions/${counterpartyAddr}/${cop}`, {
+                method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': internalSecret }, body: JSON.stringify(payload),
+              }));
+              const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+              if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${cop} failed (${resp.status})`);
+            };
+            await callOther('internal.dm.body.put', { resource: envelope.body.resource, data: stored });
+            await callOther('internal.deliver', { envelope });
+            // Own copy: body under the person's OWN delivery wire; envelope + 'sent' event under
+            // the interactions grant (the sender's-copy half of sendFromInbox).
+            await this.vaultFor(dg).write({ owner: '', resource: envelope.body.resource, data: stored, classification: 'internal' } as never);
+            const envs = (doc.envelopes as MessageEnvelopeV1[] | undefined) ?? [];
+            doc.envelopes = [...envs, envelope];
+            const sent: MessageEventV1 = { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'sent', at: envelope.createdAt };
+            doc.events = [...((doc.events as unknown[] | undefined) ?? []), sent];
+            await audit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.inboxAssistant.post', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'message', id: envelope.id } });
+            await this.writeDoc(g, INBOX_RESOURCE, doc);
+            // Mark the reply seen — a later whole-doc diff never re-presents it (its actor marker
+            // would skip anyway; this keeps the ledger honest).
+            const seen = (await this.state.storage.get(INBOX_ASSISTANT_SEEN_KEY)) as string[] | undefined;
+            if (seen) await this.state.storage.put(INBOX_ASSISTANT_SEEN_KEY, [...seen, envelope.id].slice(-INBOX_ASSISTANT_SEEN_CAP));
+            return json({ ok: true, messageId: envelope.id });
           });
         }
         if (op === 'invite.get' || op === 'invite.put') {
@@ -704,6 +879,9 @@ export class InteractionsDO {
               { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'delivered', at: new Date().toISOString() },
             ];
             await this.writeDoc(g, INBOX_RESOURCE, doc);
+            // spec 328 §3 — post-commit assistant scan (the A2A ingress). Queued behind this
+            // serialize slot, NOT awaited (we hold the mutex); never affects this response.
+            this.queueInboxAssistantScan(principal, doc.envelopes as MessageEnvelopeV1[]);
           }
           return json({ ok: true, messageId: envelope.id });
         });
@@ -1142,6 +1320,64 @@ export class InteractionsDO {
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.member-profile.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'member-profile', id: org } });
         await this.writeDoc(grant, MEMBER_PROFILE_RESOURCE(org), profile);
         return json({ ok: true });
+      }
+
+      // ── spec 328 — the person's auto-reply inbox assistant (owner-controlled; STRICTLY self:
+      //    an org steward or relying app cannot enable someone's assistant). Config + playbook are
+      //    vault records under the existing `conversation.topic:*` scope; the DO keeps only the
+      //    O(1) gate flag + the seen ledger (caches/dedup, never the source of truth). ──
+      if (op === 'inbox.assistantGet' || op === 'inbox.assistantEnable' || op === 'inbox.assistantDisable' || op === 'inbox.assistantSkill.get' || op === 'inbox.assistantSkill.put') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'the inbox assistant belongs to the principal — self access only' }, 403);
+        if (op === 'inbox.assistantGet') {
+          const cfg = await this.readDoc<PersonAssistantV1 | null>(grant, PERSON_ASSISTANT_RESOURCE, null);
+          const skill = await this.readDoc<AssistantSkillDocV1 | null>(grant, PERSON_ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, assistant: cfg, skill });
+        }
+        if (op === 'inbox.assistantSkill.get') {
+          const doc = await this.readDoc<AssistantSkillDocV1 | null>(grant, PERSON_ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, skill: doc });
+        }
+        if (op === 'inbox.assistantSkill.put') {
+          const markdown = String(body.markdown ?? '');
+          if (markdown.length > ASSISTANT_SKILL_MAX_CHARS) return json({ error: `playbook too long (max ${ASSISTANT_SKILL_MAX_CHARS} chars)` }, 400);
+          const doc: AssistantSkillDocV1 = { version: 'ap.assistant-skill.v1', markdown, updatedBy: sessionSa.toLowerCase(), updatedAt: new Date().toISOString() };
+          await audit.write({ id: crypto.randomUUID(), timestamp: doc.updatedAt, action: 'interactions.inbox.assistantSkillPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'assistant-skill', id: principal } });
+          await this.writeDoc(grant, PERSON_ASSISTANT_SKILL_RESOURCE, doc);
+          return json({ ok: true });
+        }
+        if (op === 'inbox.assistantDisable') {
+          const cfg = await this.readDoc<PersonAssistantV1 | null>(grant, PERSON_ASSISTANT_RESOURCE, null);
+          if (cfg) await this.writeDoc(grant, PERSON_ASSISTANT_RESOURCE, { ...cfg, enabled: false });
+          await this.state.storage.delete(INBOX_ASSISTANT_FLAG_KEY);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inbox.assistantDisable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'inbox', id: principal } });
+          return json({ ok: true });
+        }
+        // inbox.assistantEnable — capture the person's primary name ONCE at enable time (ADR-0012:
+        // one reverseResolve view call; re-enabling refreshes after a name rotation). A resolver
+        // failure fails the ceremony closed — never a silently nameless assistant (ADR-0013).
+        let primaryName: string | null = null;
+        if (this.env.RPC_URL && this.env.AGENT_NAME_REGISTRY && this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
+          try {
+            primaryName = await new AgentNamingClient({
+              rpcUrl: this.env.RPC_URL,
+              chainId: Number(this.env.CHAIN_ID ?? 84532),
+              registry: this.env.AGENT_NAME_REGISTRY as Address,
+              universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+            }).reverseResolve(principal as Address);
+          } catch (e) {
+            return json({ error: `could not resolve your primary name: ${e instanceof Error ? e.message : String(e)}` }, 502);
+          }
+        }
+        const displayName = primaryName ?? String(body.displayName ?? '').trim();
+        if (!displayName) return json({ error: 'you have no primary name to reply as — claim a name first, or supply a displayName' }, 409);
+        const cfg: PersonAssistantV1 = { version: 'ap.person-assistant.v1', enabled: true, trigger: 'all', displayName, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
+        // Seed the seen ledger from the CURRENT inbox so pre-enable history NEVER triggers (§3).
+        const inboxDoc = await this.readDoc<{ envelopes?: MessageEnvelopeV1[] }>(grant, INBOX_RESOURCE, {});
+        await this.state.storage.put(INBOX_ASSISTANT_SEEN_KEY, ((inboxDoc.envelopes ?? []).map((e) => e.id)).slice(-INBOX_ASSISTANT_SEEN_CAP));
+        await audit.write({ id: crypto.randomUUID(), timestamp: cfg.enabledAt, action: 'interactions.inbox.assistantEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'inbox', id: principal } });
+        await this.writeDoc(grant, PERSON_ASSISTANT_RESOURCE, cfg);
+        await this.state.storage.put(INBOX_ASSISTANT_FLAG_KEY, true); // gate cache LAST — never flags an unwritten config
+        return json({ ok: true, assistant: cfg });
       }
 
       // ── Owner-own capability records (spec 323 W2) — STRICTLY self; whitelisted recordType. ──

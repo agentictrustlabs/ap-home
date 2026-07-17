@@ -22,6 +22,8 @@ export interface EnvelopeMeta {
   contextRefs?: ContextRefV1[];
   signatureSigner?: string;
   createdAt: string;
+  /** spec 328 / spec 324 §9 — acting-agent provenance (assistant-authored ⇒ "agent" chip). */
+  actor?: string;
 }
 
 export interface InboxView {

@@ -13,6 +13,7 @@ import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
 import { AvatarUpload } from './chat/AvatarUpload';
+import { BusyButton } from '../shared/BusyButton';
 import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
@@ -119,6 +120,62 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [vaultBusy, setVaultBusy] = useState(false);
   const [mobileThread, setMobileThread] = useState(false);
   const [railFilter, setRailFilter] = useState('');
+
+  // spec 328 — the owner's auto-reply assistant (person inbox only; never managed `?agent=`
+  // inboxes). State + toggle + playbook editor mirror OrgDiscussionsView's spec-327 controls.
+  const [assistant, setAssistant] = useState<{ enabled: boolean; displayName?: string } | null>(null);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
+  const [skillText, setSkillText] = useState('');
+  const [skillBusy, setSkillBusy] = useState(false);
+  const authedHeaders = useMemo(
+    () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
+    [session],
+  );
+  useEffect(() => {
+    if (!session || targetAgent || !authedHeaders) return;
+    let cancelled = false;
+    void fetch('/connect/inbox-assistant', { headers: authedHeaders })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; assistant?: { enabled?: boolean; displayName?: string } | null; skill?: { markdown?: string } | null }) => {
+        if (cancelled || !d.ok) return;
+        setAssistant({ enabled: d.assistant?.enabled === true, displayName: d.assistant?.displayName });
+        setSkillText(d.skill?.markdown ?? '');
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [session, targetAgent, authedHeaders]);
+  const toggleAssistant = useCallback(async () => {
+    if (!authedHeaders) return;
+    const enabled = assistant?.enabled === true;
+    setAssistantBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/inbox-assistant', {
+        method: 'POST', headers: authedHeaders,
+        body: JSON.stringify({ action: enabled ? 'disable' : 'enable' }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; assistant?: { displayName?: string } };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `assistant ${enabled ? 'disable' : 'enable'} failed (${res.status})`);
+      setAssistant({ enabled: !enabled, displayName: b.assistant?.displayName ?? assistant?.displayName });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setAssistantBusy(false); }
+  }, [assistant, authedHeaders, setError]);
+  const saveSkill = useCallback(async () => {
+    if (!authedHeaders) return;
+    setSkillBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/inbox-assistant', {
+        method: 'POST', headers: authedHeaders,
+        body: JSON.stringify({ action: 'skillPut', markdown: skillText }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
+      setSkillOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSkillBusy(false); }
+  }, [authedHeaders, skillText, setError]);
 
   useEffect(() => {
     if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
@@ -409,7 +466,57 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         <button type="button" className="ghost" onClick={() => { setComposeOpen((v) => !v); setHits(null); }}>
           {composeOpen ? 'Close' : 'New message'}
         </button>
+        {!targetAgent && assistant !== null && (
+          <span style={{ display: 'inline-flex', gap: '0.4rem' }}>
+            {/* spec 328 — icon-only assistant controls (the spec-327 topic-header pattern). */}
+            <BusyButton
+              busy={assistantBusy}
+              busyLabel="…"
+              onClick={() => void toggleAssistant()}
+              className="ghost"
+              aria-label={assistant.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
+              aria-pressed={assistant.enabled}
+              style={assistant.enabled ? undefined : { opacity: 0.45 }}
+              title={assistant.enabled
+                ? `Auto-reply assistant on${assistant.displayName ? ` (replies as ${assistant.displayName})` : ''} — click to disable`
+                : 'Let your own agent auto-reply to new 1:1 messages while you are away'}
+            >
+              🤖
+            </BusyButton>
+            <BusyButton
+              busy={skillBusy && !skillOpen}
+              onClick={() => setSkillOpen((o) => !o)}
+              className="ghost"
+              aria-label="Assistant instructions"
+              title="Assistant instructions (SKILL.md playbook — shapes every auto-reply your agent writes)"
+            >
+              📝
+            </BusyButton>
+          </span>
+        )}
       </div>
+
+      {skillOpen && !targetAgent && (
+        <div style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface-raised, #fff)', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
+            Assistant instructions (markdown; the reply contract — one reply per message — always applies regardless).
+          </div>
+          <textarea
+            value={skillText}
+            onChange={(e) => setSkillText(e.target.value)}
+            rows={8}
+            maxLength={8192}
+            placeholder={'# Assistant playbook\n\nDescribe how your assistant should reply: tone, what it may say on your behalf, what to defer to you…'}
+            style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', justifyContent: 'flex-end' }}>
+            <button type="button" className="ghost" onClick={() => setSkillOpen(false)}>Cancel</button>
+            <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="btn">
+              Save instructions
+            </BusyButton>
+          </div>
+        </div>
+      )}
 
       {composeOpen && (
         <div style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
@@ -549,16 +656,28 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     const next = thread[idx + 1];
                     const firstOfGroup = !prev || (prev.folder === 'sent') !== mine;
                     const lastOfGroup = !next || (next.folder === 'sent') !== mine;
+                    // spec 328 — acting-agent provenance chip: theirs-side assistant replies show
+                    // the author + "agent" chip; own-side assistant copies get a small caption.
+                    const agentAuthored = !!meta?.actor;
                     return (
-                      <MessageBubble
-                        key={i.messageId}
-                        mine={mine}
-                        body={view?.bodies[i.messageId]}
-                        time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        verified={!!meta?.signatureSigner}
-                        firstOfGroup={firstOfGroup}
-                        lastOfGroup={lastOfGroup}
-                      />
+                      <div key={i.messageId}>
+                        {agentAuthored && mine && firstOfGroup && (
+                          <div style={{ textAlign: 'right', fontSize: '0.68rem', opacity: 0.6, margin: '0.15rem 0.5rem 0.1rem 0' }}>
+                            🤖 sent by your assistant
+                          </div>
+                        )}
+                        <MessageBubble
+                          mine={mine}
+                          body={view?.bodies[i.messageId]}
+                          time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          verified={!!meta?.signatureSigner}
+                          {...(agentAuthored && !mine
+                            ? { showAuthor: true, authorName: meta ? agentLabel(meta.from, view?.names) : 'agent', authorBadge: 'agent' }
+                            : {})}
+                          firstOfGroup={firstOfGroup}
+                          lastOfGroup={lastOfGroup}
+                        />
+                      </div>
                     );
                   })}
                 </div>

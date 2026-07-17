@@ -33,6 +33,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
 import { handleDiscussionRespond, type DiscussionRespondInput } from './discussion-skill.js';
+import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
@@ -305,6 +306,41 @@ export class A2aTaskDO {
         });
         if (turn.result.outcome !== 'completed' || !turn.posted) {
           return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without posting a reply', plannerKind: turn.plannerKind }, { status: 502 });
+        }
+        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      }
+    }
+    // ── spec 328 §4 — the person-inbox auto-reply turn (`inbox.respond`). IN-WORKER ONLY:
+    // dispatched by the person's InteractionsDO after a triggering 1:1 delivery, gated by the
+    // ARCH-H2 internal marker. Deliberately NOT an A2A skill on the public card — its
+    // authorization model is "the person's own substrate observed a triggering delivery", so a
+    // public `message/send` can never reach it (fail-closed by path, exactly like spec 327's
+    // /internal/discussion-respond above).
+    if (url.pathname === '/internal/inbox-respond') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as InboxRespondInput | null;
+      if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !p.conversationId) {
+        return Response.json({ ok: false, error: 'principal + conversationId required' }, { status: 400 });
+      }
+      const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(p.principal.toLowerCase()));
+      const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
+        const resp = await stub.fetch(new Request(`https://do/interactions/${p.principal.toLowerCase()}/${op}`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+        return out;
+      };
+      try {
+        const turn = await handleInboxRespond(this.env, p, {
+          readConversation: () => call('internal.inbox.read', { conversationId: p.conversationId }),
+          post: async (bodyText) => (await call('internal.inbox.post', { conversationId: p.conversationId, bodyText })) as { messageId?: string },
+        });
+        if (turn.result.outcome !== 'completed' || !turn.posted) {
+          return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without sending a reply', plannerKind: turn.plannerKind }, { status: 502 });
         }
         return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind });
       } catch (e) {
