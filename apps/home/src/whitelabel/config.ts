@@ -134,7 +134,15 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'uupg-tracker',
       name: 'UUPG+ Tracker',
-      redirect_uris: ['https://uupg.richardpedersen3.workers.dev/', 'http://127.0.0.1:8797/', 'http://localhost:8797/'],
+      redirect_uris: [
+        'https://uupg.richardpedersen3.workers.dev/',
+        // verifiable-content-demo apps/demo-uupg (the original) — repointed onto this broker.
+        'https://demo-uupg-production.richardpedersen3.workers.dev/',
+        'https://demo-uupg.richardpedersen3.workers.dev/',
+        'https://demo-uupg-production.global-church.workers.dev/',
+        'http://127.0.0.1:8797/',
+        'http://localhost:8797/',
+      ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
