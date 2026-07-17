@@ -19,8 +19,14 @@ const STORAGE_KEY = 'agenticprimitives:demo-sso:passkey';
  * Pin the RP to the registrable PARENT domain (`impact-agent.me`) so one passkey works across the apex AND
  * every subdomain. WebAuthn requires rp.id to be a suffix of the caller origin, so only pin when actually
  * under that domain; otherwise (localhost / a different whitelabel host) fall back to the current hostname.
+ *
+ * COUPLING (do not diverge): the on-chain verifier pins each assertion's `authenticatorData.rpIdHash` to the
+ * SA's stored rpIdHash (WebAuthnLib `_checkAuthData`), and that stored value is `sha256` of whatever RP the
+ * credential was created under. So `connect-client.ts derivePasskeyRpIdHash` MUST hash THIS exact value
+ * (`sha256(passkeyRpId())`) — hashing a different host (e.g. the subdomain) makes every passkey signature
+ * fail verification even though the ceremony and address derivation look fine. Exported for that reason.
  */
-function passkeyRpId(): string {
+export function passkeyRpId(): string {
   const host = typeof window !== 'undefined' ? window.location.hostname : CENTRAL_AUTH_DOMAIN;
   return host === CENTRAL_AUTH_DOMAIN || host.endsWith('.' + CENTRAL_AUTH_DOMAIN) ? CENTRAL_AUTH_DOMAIN : host;
 }

@@ -31,7 +31,7 @@ import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
-import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, type DemoPasskey } from './lib/passkey';
+import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
@@ -574,23 +574,25 @@ export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOut
 // newOwner) — derived deterministically from the passkey + salt (a factory view, no signature).
 
 /** Deterministic passkey-direct SA address (mode 0, no custodians, the passkey, given salt). */
-/** SHA-256 of `window.location.hostname` as a 32-byte hex string. The on-chain
- *  factory mixes `rpIdHash` into the CREATE2 salt for passkey-direct SAs, so
- *  predicting the SA address client-side MUST use the SAME value the server uses
- *  for the deploy userOp. The server defaults to `sha256(originHostname)` when
- *  the client doesn't pass an `rpIdHash` — historically the client passed
- *  nothing, the prediction used `ZERO_BYTES32`, and the deploy used
- *  `sha256(hostname)` → derived address mismatch → register fired on the
- *  predicted address while the deploy created an SA at a different address
- *  (orphan registry entry root cause, live-debug 2026-06-01).
+/** SHA-256 of the passkey RP id as a 32-byte hex string. This value is TWO things at once and both
+ *  demand it equal `sha256(passkeyRpId())`:
  *
- *  By passing this value on every prediction AND every deploy POST body, both
- *  computations use the same `rpIdHash` and the SA address that gets registered
- *  is the SA address that actually deploys. (No fallback — ADR-0013 single
- *  mechanism: one consistent value end-to-end.) */
+ *  1. CREATE2 salt input. The on-chain factory mixes `rpIdHash` into the passkey-direct SA salt, so
+ *     predicting the SA address client-side MUST use the SAME value the deploy userOp uses. The client
+ *     passes this on every prediction AND every deploy/register POST body so both computations agree and
+ *     the registered address is the deployed address (orphan-registry root cause, live-debug 2026-06-01).
+ *
+ *  2. The SA's STORED rpIdHash. The account persists it and, on every passkey assertion, the verifier
+ *     pins `authenticatorData.rpIdHash == stored` (WebAuthnLib `_checkAuthData`). The authenticator sets
+ *     that assertion field to `sha256(rp.id)` where `rp.id = passkeyRpId()` (the parent domain). So this
+ *     MUST hash `passkeyRpId()`, NOT `window.location.hostname` — hashing the subdomain while the
+ *     credential RP is the pinned parent made every signature fail verification (verdict 2026-07-16).
+ *
+ *  `passkeyRpId()` already carries the SSR/localhost/whitelabel fallbacks, so hashing it is correct on
+ *  every host. (No fallback — ADR-0013 single mechanism: one consistent value end-to-end.) */
 async function derivePasskeyRpIdHash(): Promise<Hex> {
-  const hostname = typeof window !== 'undefined' ? window.location.hostname : 'impact-agent.me';
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hostname));
+  const rpId = passkeyRpId();
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rpId));
   const arr = Array.from(new Uint8Array(buf));
   return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
 }
@@ -857,7 +859,7 @@ export async function bootstrapWithPasskey(
 ): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
   await ensureCsrfToken();
   onStep?.('Preparing your workspace…');
-  // `rpIdHash` MUST match the value used in `derivePasskeySa` (sha256(hostname)).
+  // `rpIdHash` MUST match the value used in `derivePasskeySa` (sha256(passkeyRpId())).
   // The server's `/session/deploy` accepts an explicit `rpIdHash`; passing it
   // here removes the server's Origin-based fallback path so both sides use the
   // same value end-to-end (closes the orphan-registry root cause 2026-06-01).
@@ -1086,7 +1088,7 @@ export async function createChildAgentForSite(
     if (!pk) return { ok: false, error: 'Your central-auth passkey isn’t on this device — sign in to Agentic Connect first.' };
     childAgent = await derivePasskeySa(pk, salt);
     signHash = passkeySignHash;
-    // rpIdHash MUST match derivePasskeySa (sha256(hostname)) — passed explicitly so the server doesn't fall
+    // rpIdHash MUST match derivePasskeySa (sha256(passkeyRpId())) — passed explicitly so the server doesn't fall
     // back to Origin derivation (orphan-registry root cause, live-debug 2026-06-01).
     const rpIdHash = await derivePasskeyRpIdHash();
     deployBody = {
@@ -1297,7 +1299,7 @@ export async function createManagedAgent(
     if (!pk) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
     child = await derivePasskeySa(pk, salt);
     signHash = passkeySignHash;
-    const rpIdHash = await derivePasskeyRpIdHash(); // MUST match derivePasskeySa (sha256(hostname)).
+    const rpIdHash = await derivePasskeyRpIdHash(); // MUST match derivePasskeySa (sha256(passkeyRpId())).
     deployBody = {
       initMethod: 'passkey',
       credentialIdDigest: pk.credentialIdDigest,
@@ -1869,7 +1871,7 @@ export async function addPasskeyCredential(
   onStep?.('Creating the passkey to add…');
   const pk = await registerPasskey(`${personAgent.slice(0, 8)}… passkey`); // fresh passkey, stored on this device
 
-  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(passkeyRpId()))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
@@ -1897,7 +1899,7 @@ export async function enrollSitePasskey(
   const r = await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`);
   const info = (await r.json()) as { exists?: boolean; name?: string; agent?: Address };
   if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
-  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(passkeyRpId()))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
@@ -2006,7 +2008,7 @@ export async function addThisDevicePasskey(
   if (!info.exists || !info.agent) return { ok: false, error: `no agent named ${name}` };
   onStep?.('Creating a passkey on this device…');
   const pk = await registerPasskey(`${name} (this device)`);
-  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(hostname))
+  const rpIdHash = await derivePasskeyRpIdHash(); // must match the value used at registration (sha256(passkeyRpId()))
   const inner = encodeFunctionData({
     abi: ADD_PASSKEY_ABI,
     functionName: 'addPasskey',
