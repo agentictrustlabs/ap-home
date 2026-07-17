@@ -1,5 +1,19 @@
 # @agenticprimitives-demo/mcp
 
+## 0.0.2-alpha.16
+
+### Patch Changes
+
+- Updated dependencies [77acde0]
+  - @agenticprimitives/agent-naming@1.0.0-alpha.18
+  - @agenticprimitives/delegation@1.0.0-alpha.18
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.18
+  - @agenticprimitives/types@1.0.0-alpha.18
+  - @agenticprimitives/audit@1.0.0-alpha.18
+  - @agenticprimitives/key-custody@1.0.0-alpha.18
+  - @agenticprimitives/tool-policy@1.0.0-alpha.18
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.15
+
 ## 0.0.2-alpha.15
 
 ### Patch Changes
