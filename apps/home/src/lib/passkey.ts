@@ -35,17 +35,20 @@ export function passkeyRpId(): string {
 }
 
 /**
- * TEMPORARY TEST DEFAULT (2026-07-17): route every passkey ceremony to a PHONE (the cross-device
- * "hybrid" QR flow — iPhone/Android) instead of the local platform authenticator. The operator's
- * Windows Hello store is polluted with ~1000 test passkeys, is not listed in Settings, and can't be
- * selectively cleared — this bypasses it entirely so the phone's authenticator holds the credential.
- * To restore the local-device default flip these back to: attachment 'platform', transports
- * ['internal'], hints ['client-device'] (see git history for the rationale of that default —
- * Windows members kept landing in the phone picker and couldn't finish).
+ * TEMPORARY TEST DEFAULT (2026-07-17): CHOICE MODE — no authenticator restriction on any ceremony.
+ * The OS shows its full picker (Windows Hello / iPhone / security key) at create AND at sign, and
+ * routes each signature to wherever the credential actually lives. Chosen after the phone-forced
+ * mode (`'cross-platform'`/`['hybrid']`) proved it strands a Hello-created key: the sign step
+ * jumped straight to the phone QR with no way to pick the local device.
+ * Other modes, for reference:
+ *  - local-device (the pre-test shipped default): 'platform' / ['internal'] / ['client-device'] —
+ *    exists because Windows members stranded in the phone picker; restore once testing concludes.
+ *  - phone-forced: 'cross-platform' / ['hybrid'] / ['hybrid'] — bypasses a polluted Hello store.
+ * `undefined` means "omit the field" — each is conditionally spread at its use site.
  */
-const PASSKEY_ATTACHMENT: AuthenticatorAttachment = 'cross-platform';
-const PASSKEY_TRANSPORTS = ['hybrid' as AuthenticatorTransport];
-const PASSKEY_HINTS = ['hybrid'];
+const PASSKEY_ATTACHMENT: AuthenticatorAttachment | undefined = undefined;
+const PASSKEY_TRANSPORTS: AuthenticatorTransport[] | undefined = undefined;
+const PASSKEY_HINTS: string[] | undefined = undefined;
 
 export interface DemoPasskey {
   credentialIdDigest: Hex; // keccak256(credentialId)
@@ -163,10 +166,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
       // and (b) name-only / cross-device sign-in can find it (spec 233). We deliberately do NOT set
       // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
       // cleanly overwriting — the stable userHandle is what dedupes.
-      // Attachment/hints come from the PASSKEY_* test constants above (currently the phone/hybrid
-      // flow; the shipped default is 'platform' + 'client-device' — see that comment block).
-      authenticatorSelection: { authenticatorAttachment: PASSKEY_ATTACHMENT, residentKey: 'required', userVerification: 'required' },
-      ...({ hints: PASSKEY_HINTS } as Record<string, unknown>),
+      // Attachment/hints come from the PASSKEY_* test constants above (currently CHOICE MODE —
+      // both omitted, the OS offers every authenticator; see that comment block for the modes).
+      authenticatorSelection: { ...(PASSKEY_ATTACHMENT && { authenticatorAttachment: PASSKEY_ATTACHMENT }), residentKey: 'required', userVerification: 'required' },
+      ...(PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       attestation: 'none',
       timeout: 60_000,
     },
@@ -224,7 +227,7 @@ export async function signWithDiscoverablePasskey(
       challenge: hexToBytes(digest) as BufferSource,
       rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
       allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
-      ...(opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
+      ...(opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
@@ -262,18 +265,17 @@ export async function connectAssertionDiscoverable(
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
-  // Descriptor transports come from the PASSKEY_* test constants (currently phone/hybrid). The shipped
-  // default is NO transports on the descriptor: listing 'hybrid' makes Windows offer the cross-device
-  // "use a phone" flow, which the local-first default avoids — under the phone-test default we want it.
+  // Descriptor transports come from the PASSKEY_* test constants (currently CHOICE MODE — omitted, so
+  // the platform routes to wherever the credential lives and offers the full chooser when unsure).
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
-    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', transports: PASSKEY_TRANSPORTS }]
+    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', ...(PASSKEY_TRANSPORTS && { transports: PASSKEY_TRANSPORTS }) }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
       rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
       allowCredentials,
-      ...(!cached && opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
+      ...(!cached && opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
@@ -331,10 +333,10 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
         publicKey: {
           challenge: hexToBytes(digest) as BufferSource,
           rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
-          // Transports/hints from the PASSKEY_* test constants (currently phone/hybrid; the shipped
-          // default 'internal' + 'client-device' keeps Windows on the LOCAL authenticator).
-          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: PASSKEY_TRANSPORTS }],
-          ...({ hints: PASSKEY_HINTS } as Record<string, unknown>),
+          // Transports/hints from the PASSKEY_* test constants (currently CHOICE MODE — omitted, so
+          // the platform routes to wherever the credential lives: Hello PIN or phone QR).
+          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', ...(PASSKEY_TRANSPORTS && { transports: PASSKEY_TRANSPORTS }) }],
+          ...(PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
           userVerification: 'required', // custody-grade signing — demand verification (F9)
           timeout: 60_000,
         },
