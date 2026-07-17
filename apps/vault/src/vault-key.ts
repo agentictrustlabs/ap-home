@@ -358,10 +358,6 @@ export async function verifyAndStoreBinding(
     },
     now: new Date(),
   });
-  // [vk-diag] the bind's own verify uses the hash-match fast path (candidate hash == presented), so a
-  // failure here is a caveat/scope mismatch, not the 0x03 signature. Log the sig shape + reason.
-  const sig = String((input.authorization as { signature?: string }).signature ?? '');
-  console.log('[vk-diag] bind-verify', { owner: input.owner, ok: verdict.ok, reason: verdict.ok ? undefined : (verdict as { reason?: string }).reason, sigLen: sig.length, sig: sig.slice(0, 8), kmsKeyRefTail: input.kmsKeyRef?.slice(-24) });
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
 
   await putVaultKeyBindingRow(env.DB, {

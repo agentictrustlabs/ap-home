@@ -439,7 +439,6 @@ export type PasskeyOutcome =
  */
 export const passkeySignHash: SignHash = (hash) => {
   const cached = loadPasskey();
-  try { console.log('[pk-diag] passkeySignHash', { rpId: typeof window !== 'undefined' ? window.location.hostname : '?', loadPasskey: !!cached, path: cached ? 'signWithPasskey(local)' : 'signWithDiscoverablePasskey(discoverable)' }); } catch { /* */ }
   return cached ? signWithPasskey(hash) : signWithDiscoverablePasskey(hash, undefined, { preferLocalDevice: true });
 };
 

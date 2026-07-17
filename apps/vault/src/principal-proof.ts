@@ -82,10 +82,6 @@ async function verifyControlProofHash(
   if (!proof || !/^0x[0-9a-fA-F]+$/.test(proof)) return { ok: false, reason: 'principal_proof_required' };
   const client = createPublicClient({ transport: http(env.RPC_URL) });
   let valid = false;
-  // [vk-diag] pinpoint the 0x03 approved-hash provision-proof failure: is the just-deployed account
-  // visible on DEMO-MCP's RPC (hasCode), and does the validator accept the sentinel?
-  let hasCode = false;
-  try { const code = await client.getBytecode({ address: signer as Address }); hasCode = !!code && code !== '0x'; } catch { /* */ }
   try {
     valid = (await client.readContract({
       address: usv as Address,
@@ -93,11 +89,9 @@ async function verifyControlProofHash(
       functionName: 'isValidSig',
       args: [signer as Address, hash, proof as `0x${string}`],
     })) as boolean;
-  } catch (e) {
-    console.log('[vk-diag] control-proof REVERT', { signer, hash: hash.slice(0, 14), proofLen: proof.length, proof: proof.slice(0, 8), hasCode, usv, err: e instanceof Error ? e.message.slice(0, 140) : String(e).slice(0, 140) });
+  } catch {
     return { ok: false, reason: 'proof_verification_error' };
   }
-  console.log('[vk-diag] control-proof', { signer, hash: hash.slice(0, 14), proofLen: proof.length, proof: proof.slice(0, 8), hasCode, valid });
   return valid ? { ok: true } : { ok: false, reason: 'proof_invalid' };
 }
 
