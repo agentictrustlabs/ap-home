@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, resolveVia, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
@@ -294,6 +294,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // the connect — the delegation is already minted, and /vault-key + the journey remain as a re-bind path).
       try { await activateVaultIfNeeded(home.address, viaLower, isKmsVia(viaLower) ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
+      // spec 280 carve-out — self-heal the published connection KIND on every successful social connect
+      // (idempotent, gasless, kind-only) so a named social home stops being EOA-ambiguous at re-entry.
+      if (isKmsVia(viaLower)) void publishSocialConnectionKindIfNeeded(home.address, home.name, viaLower, { token });
       // Refresh the cross-subdomain session + FedCM signal (the member is still signed in here).
       setSsoCookie(token, viaLower);
       setFedcmLoginStatus('logged-in');

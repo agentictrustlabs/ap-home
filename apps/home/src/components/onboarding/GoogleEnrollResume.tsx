@@ -7,7 +7,7 @@
 // (4) deliver the authorization code back to the relying app — popup postMessage or redirect,
 // exactly as the in-page flow would. This is what lets "Continue with Google" return to demo-org.
 import { useEffect, useRef, useState } from 'react';
-import { secureHome, secureHomeNoName, givePermission, activateVaultIfNeeded } from '../../home/onboarding';
+import { secureHome, secureHomeNoName, givePermission, activateVaultIfNeeded, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
@@ -172,6 +172,11 @@ export function GoogleEnrollResume() {
       // spec 278 — turn on the member's encrypted vault during enroll (Google signs via KMS, no
       // gesture; skipped if already bound). Best-effort — must not block the connect.
       try { await activateVaultIfNeeded(home.address, 'google', { token }); } catch { /* non-fatal */ }
+      // spec 280 carve-out — self-heal the published connection KIND on every successful social
+      // connect (idempotent, gasless, kind-only). Without it a named social home is ambiguous
+      // on-chain (C_sub looks like an EOA) and re-entry shows the credential chooser instead of
+      // routing straight through the provider.
+      void publishSocialConnectionKindIfNeeded(home.address, home.name, 'google', { token });
       const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
