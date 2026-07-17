@@ -50,12 +50,23 @@ const PASSKEY_ATTACHMENT: AuthenticatorAttachment | undefined = undefined;
 const PASSKEY_TRANSPORTS: AuthenticatorTransport[] | undefined = undefined;
 const PASSKEY_HINTS: string[] | undefined = undefined;
 
+// [pk-probe] TEMPORARY: which build is this tab actually running? A tab opened before a Vercel
+// deploy keeps its OLD chunks until reload — this line in the console settles it instantly.
+const PK_PROBE_BUILD = 'created-transports v2 (2026-07-17)';
+try { console.log('[pk-probe] module', { build: PK_PROBE_BUILD }); } catch { /* */ }
+
 export interface DemoPasskey {
   credentialIdDigest: Hex; // keccak256(credentialId)
   credentialIdB64: string;
   pubKeyX: bigint;
   pubKeyY: bigint;
   label: string;
+  /** `getTransports()` captured at REGISTRATION — where the credential actually lives (['internal'] =
+   *  this device's Hello/TouchID, incl. 'hybrid' = a phone). Replayed on every sign's allowCredentials
+   *  (the WebAuthn-spec-intended use) so the platform looks in the RIGHT place: a Hello key gets a
+   *  local-only lookup (fast fail → the indexing-race retry loop works), a phone key goes straight to
+   *  the QR — no forcing either way. Absent on records cached from an assertion (get() can't report it). */
+  transports?: string[];
 }
 
 interface StoredPasskey {
@@ -64,6 +75,7 @@ interface StoredPasskey {
   pubKeyX?: string;
   pubKeyY?: string;
   label: string;
+  transports?: string[];
 }
 
 const toStored = (p: DemoPasskey): StoredPasskey => ({
@@ -72,6 +84,7 @@ const toStored = (p: DemoPasskey): StoredPasskey => ({
   pubKeyX: p.pubKeyX.toString(),
   pubKeyY: p.pubKeyY.toString(),
   label: p.label,
+  ...(p.transports?.length ? { transports: p.transports } : {}),
 });
 const fromStored = (s: StoredPasskey): DemoPasskey => ({
   credentialIdDigest: s.credentialIdDigest,
@@ -79,6 +92,7 @@ const fromStored = (s: StoredPasskey): DemoPasskey => ({
   pubKeyX: BigInt(s.pubKeyX ?? '0'),
   pubKeyY: BigInt(s.pubKeyY ?? '0'),
   label: s.label,
+  ...(s.transports?.length ? { transports: s.transports } : {}),
 });
 
 export function loadPasskey(): DemoPasskey | null {
@@ -110,12 +124,17 @@ function b64uEncode(bytes: Uint8Array): string {
 
 function cacheAssertionCredential(rawId: ArrayBuffer, label = ''): Hex {
   const bytes = new Uint8Array(rawId);
+  const credentialIdB64 = b64uEncode(bytes);
   const credentialIdDigest = keccak256(bytesToHex(bytes));
+  // Same credential already cached (e.g. from registration)? Keep that record — it carries the
+  // pubkey + created-transports an assertion response can't provide; overwriting would lose them.
+  const existing = loadPasskey();
+  if (existing?.credentialIdB64 === credentialIdB64) return credentialIdDigest;
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
       credentialIdDigest,
-      credentialIdB64: b64uEncode(bytes),
+      credentialIdB64,
       label,
     } satisfies StoredPasskey),
   );
@@ -178,12 +197,14 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
 
   const response = credential.response as AuthenticatorAttestationResponse;
   const parsed = parseAttestationObject(new Uint8Array(response.attestationObject));
+  const createdTransports = response.getTransports?.() ?? [];
   const passkey: DemoPasskey = {
     credentialIdDigest: keccak256(bytesToHex(parsed.credentialId)),
     credentialIdB64: parsed.credentialIdBase64Url,
     pubKeyX: parsed.pubKeyX,
     pubKeyY: parsed.pubKeyY,
     label,
+    ...(createdTransports.length ? { transports: createdTransports } : {}),
   };
   // [pk-probe] TEMPORARY: where did the credential actually land? attachment='cross-platform' or
   // transports incl. 'hybrid' ⇒ it was saved to a PHONE/security key, so the platform-only deploy get()
@@ -200,7 +221,7 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
 export async function signWithPasskey(digest: Hex, opts: SignAssertionOpts = {}): Promise<Hex> {
   const passkey = loadPasskey();
   if (!passkey) throw new Error('signWithPasskey: no registered passkey');
-  return signAssertion(digest, b64uDecode(passkey.credentialIdB64), opts);
+  return signAssertion(digest, b64uDecode(passkey.credentialIdB64), { transports: passkey.transports, ...opts });
 }
 
 /** Sign a 32-byte digest via a DISCOVERABLE passkey (spec 233, Mechanism A) —
@@ -265,10 +286,12 @@ export async function connectAssertionDiscoverable(
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
-  // Descriptor transports come from the PASSKEY_* test constants (currently CHOICE MODE — omitted, so
-  // the platform routes to wherever the credential lives and offers the full chooser when unsure).
+  // Descriptor transports: the credential's registration-time getTransports when the cache carries it
+  // (targets the store the credential actually lives in), else the PASSKEY_* fallback (choice mode:
+  // omitted — the platform routes freely and offers the full chooser when unsure).
+  const cachedTransports = (cached?.transports?.length ? cached.transports : PASSKEY_TRANSPORTS) as AuthenticatorTransport[] | undefined;
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
-    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', ...(PASSKEY_TRANSPORTS && { transports: PASSKEY_TRANSPORTS }) }]
+    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', ...(cachedTransports?.length ? { transports: cachedTransports } : {}) }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
   const credential = (await navigator.credentials.get({
     publicKey: {
@@ -299,6 +322,9 @@ export interface SignAssertionOpts {
   justCreated?: boolean;
   /** Surface retry progress to the UI (e.g. the onboarding busy line). */
   onRetry?: (msg: string) => void;
+  /** The credential's REGISTRATION-time `getTransports()` (see DemoPasskey.transports). When present
+   *  the lookup targets where the credential actually lives; when absent the PASSKEY_* fallback applies. */
+  transports?: string[];
 }
 
 const JUST_CREATED_GUIDANCE =
@@ -320,11 +346,16 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
   //     In the `justCreated` window a cancel is unlikely (the user pressed Approve a second earlier), so
   //     we re-prompt ONCE after a pause, then stop and explain — never an endless prompt loop.
   const { justCreated = false, onRetry } = opts;
-  const fastDelays = justCreated ? [500, 1000, 2000, 3000, 4000] : [350, 700, 1050]; // ms before retry N+1
+  const fastDelays = justCreated ? [500, 1000, 2000, 3000, 4000, 5000] : [350, 700, 1050]; // ms before retry N+1
   let slowRetried = false;
+  // Target the lookup at where the credential LIVES (registration-time getTransports) — a Hello key
+  // stays a local-only search (fast fail → retries ride out the indexing race instead of Windows
+  // re-routing to the phone QR), a phone key goes straight to hybrid. PASSKEY_* is only the fallback
+  // for records cached from an assertion (no transport info).
+  const transports = (opts.transports?.length ? opts.transports : PASSKEY_TRANSPORTS) as AuthenticatorTransport[] | undefined;
   // [pk-probe] TEMPORARY: what is the deploy get() asking for? reqCredId must equal the [pk-probe] created
   // credId (else loadPasskey returned a STALE cache); rpId must equal the create rpId.
-  try { console.log('[pk-probe] signAssertion get()', { rpId: passkeyRpId(), host: window.location.hostname, reqCredId: bytesToHex(credentialIdBytes).slice(0, 18), justCreated }); } catch { /* */ }
+  try { console.log('[pk-probe] signAssertion get()', { rpId: passkeyRpId(), host: window.location.hostname, reqCredId: bytesToHex(credentialIdBytes).slice(0, 18), justCreated, transports }); } catch { /* */ }
   for (let attempt = 0; ; attempt++) {
     const startedAt = Date.now();
     let credential: PublicKeyCredential | null;
@@ -333,9 +364,7 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
         publicKey: {
           challenge: hexToBytes(digest) as BufferSource,
           rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
-          // Transports/hints from the PASSKEY_* test constants (currently CHOICE MODE — omitted, so
-          // the platform routes to wherever the credential lives: Hello PIN or phone QR).
-          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', ...(PASSKEY_TRANSPORTS && { transports: PASSKEY_TRANSPORTS }) }],
+          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', ...(transports?.length ? { transports } : {}) }],
           ...(PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
           userVerification: 'required', // custody-grade signing — demand verification (F9)
           timeout: 60_000,
