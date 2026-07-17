@@ -18,6 +18,10 @@ proxies selected MCP requests during local demos.
   standard `message/send`; the skill delegation-authorizes it, then admits DIRECTLY into the recipient's
   **vault** inbox (`message.body:<id>` + `inbox.data`, via `ctx.delegation`) — no Home callback. A message
   is never authority (ADR-0041).
+- The **org-assistant turn** (spec 327, 318 §8.1): `InteractionsDO.channels.post` detects a topic
+  @-mention → in-Worker dispatch to the org's `A2aTaskDO` `/internal/discussion-respond` (marker-gated,
+  NOT on the agent card) → `src/discussion-skill.ts` runs the shared loop → reply lands via
+  `internal.channels.post`, `from`/`actor` pinned to the org SA.
 
 ## What this app does not own
 

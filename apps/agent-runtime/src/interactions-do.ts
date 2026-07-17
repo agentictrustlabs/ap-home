@@ -22,21 +22,26 @@ import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
 import {
   appendBoardPost,
+  assistantTrigger,
   createBoardChannel,
   canSeeChannel,
   channelParticipationPolicy,
   canonicalizeMessage,
   createVaultMessageBodyStore,
   isListingCurrent,
+  setTopicAssistant,
   sha256Hex32,
   validateDirectoryListing,
+  type ChannelMessageEntryV1,
   type ChannelV1,
   type DirectoryListingV1,
   type MessageEnvelopeV1,
+  type TopicAssistantV1,
 } from '@agenticprimitives/fabric/messaging';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
 
-import { verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
+import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
@@ -62,6 +67,15 @@ const DIRECTORY_RESOURCE = 'directory.data';
 // gate) at read time and MUST NOT be asserted (same doctrine as aporg:memberOf).
 const DISCUSSION_INVITATIONS_RESOURCE = 'conversation.topic:invitations';
 const TOPIC_PARTICIPATION_RESOURCE = (topicId: string): string => `conversation.topic:participation:${topicId}`;
+
+// spec 327 — org-assistant dispatch bounds. Per-topic fixed window in DO storage: member-driven
+// mention storms are bounded; drops are audited (`interactions.assistant.rateLimited`), never queued.
+const ASSISTANT_RATE_KEY = (topicId: string): string => `assistant.rate:${topicId}`;
+const ASSISTANT_RATE_WINDOW_MS = 10 * 60_000;
+const ASSISTANT_RATE_MAX = 6;
+/** Context bound for the assistant's topic reads (spec 327 §4). */
+const ASSISTANT_READ_LIMIT = 20;
+const ASSISTANT_BODY_CLIP = 2000;
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
@@ -161,6 +175,44 @@ export class InteractionsDO {
 
   private pub() {
     return createPublicClient({ chain: baseSepolia, transport: http(this.env.RPC_URL) });
+  }
+
+  /** spec 327 §3 — post-commit org-assistant dispatch. Fire-and-forget (the member's post already
+   *  committed; a DO stays alive while work is pending): per-topic fixed-window rate limit, then an
+   *  in-Worker call to the org's OWN A2aTaskDO (`/internal/discussion-respond`, the 318 §8.1
+   *  intent-native gateway) carrying the ARCH-H2 internal marker. Every drop/failure is AUDITED and
+   *  DROPPED — no retry into another mechanism (ADR-0013), no queue, no effect on the human post. */
+  private dispatchAssistant(opts: { entry: ChannelV1; channelId: string; principal: string; triggerAuthor: string; triggerBody: string }): void {
+    const assistant = opts.entry.assistant;
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!assistant || !secret) return;
+    const audit = buildAuditSink(this.env);
+    void (async () => {
+      const key = ASSISTANT_RATE_KEY(opts.channelId);
+      const now = Date.now();
+      const rate = ((await this.state.storage.get(key)) ?? { windowStart: now, count: 0 }) as { windowStart: number; count: number };
+      const inWindow = now - rate.windowStart < ASSISTANT_RATE_WINDOW_MS;
+      if (inWindow && rate.count >= ASSISTANT_RATE_MAX) {
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.rateLimited', outcome: 'denied', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId } });
+        return;
+      }
+      await this.state.storage.put(key, inWindow ? { windowStart: rate.windowStart, count: rate.count + 1 } : { windowStart: now, count: 1 });
+      const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(opts.principal));
+      const resp = await stub.fetch(new Request(`https://do/internal/discussion-respond?agent=${opts.principal}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        body: JSON.stringify({
+          principal: opts.principal, channelId: opts.channelId, topicTitle: opts.entry.title,
+          trigger: assistant.trigger, displayName: assistant.displayName, mentionHandle: assistant.mentionHandle,
+          triggerAuthor: opts.triggerAuthor, triggerBody: opts.triggerBody,
+        }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!resp.ok || out.ok === false) throw new Error(out.error ?? `assistant respond failed (${resp.status})`);
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatch', outcome: 'success', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId } });
+    })().catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+    });
   }
 
   private async erc1271(account: Address, digest: Hex, signature: Hex): Promise<boolean> {
@@ -472,12 +524,12 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
-      // are in-Worker (a2a deliver skill) → no external gate.
+      // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
       const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
-      if (op === 'internal.deliver' || op === 'internal.dm.body.put') {
+      if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
         // Require an internal marker only in-Worker callers can supply (the bridge secret, shared by
         // co-resident DOs in this Worker). Any other path reaching internal.* fails closed.
@@ -519,6 +571,51 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        // ── spec 327 — the org-assistant pipeline's two internal ops (in-Worker marker only). ──
+        if (op === 'internal.channels.read') {
+          // Bounded topic context for the assistant turn: last N entries + clipped bodies. Same
+          // storage path as the session-gated channels.read; reachable ONLY via the internal marker.
+          const channelId = String(body.channelId ?? '');
+          if (!channelId) return json({ error: 'channelId required' }, 400);
+          const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
+          const entry = index.find((c) => c.descriptor.id === channelId);
+          if (!entry) return json({ error: 'unknown channel' }, 404);
+          const limit = Math.min(Math.max(Number(body.limit ?? ASSISTANT_READ_LIMIT) || ASSISTANT_READ_LIMIT, 1), ASSISTANT_READ_LIMIT);
+          const messages = (await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), [])).slice(-limit);
+          const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
+          const rows = await Promise.all(messages.map(async (m) => {
+            let text = '';
+            try { text = new TextDecoder().decode(await store.loadBody(m.envelope)).slice(0, ASSISTANT_BODY_CLIP); } catch { /* fail-closed omit body */ }
+            return { id: m.envelope.id, from: m.envelope.from, authorName: m.authorName, ...(m.actor ? { actor: m.actor } : {}), createdAt: m.envelope.createdAt, bodyText: text };
+          }));
+          return json({ ok: true, title: entry.title, messages: rows });
+        }
+        if (op === 'internal.channels.post') {
+          // The assistant's reply write (spec 327 §5). `from`/`actor` are PINNED server-side to the
+          // org principal — the caller supplies only { channelId, bodyText }; it cannot author as
+          // anyone. Disable wins races: a reply landing after the steward disables is rejected.
+          const channelId = String(body.channelId ?? '');
+          const bodyText = String(body.bodyText ?? '').trim();
+          if (!channelId || !bodyText) return json({ error: 'channelId + bodyText required' }, 400);
+          const audit = buildAuditSink(this.env);
+          return this.serialize(async () => { // ARCH-H1 — same single-writer append as every board post
+            const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
+            const entry = index.find((c) => c.descriptor.id === channelId);
+            if (!entry) return json({ error: 'unknown channel' }, 404);
+            const assistant = entry.assistant;
+            if (!assistant) return json({ error: 'assistant is not enabled on this topic' }, 409);
+            const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as MessageEnvelopeV1['from'];
+            const messages = await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []);
+            const composed: ChannelV1[] = [{ ...entry, messages }];
+            const r = await appendBoardPost(composed, { channelId, from: orgCaip, authorName: assistant.displayName, bodyText, actor: orgCaip });
+            if (!r.ok) return json({ error: r.error }, 400);
+            await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.assistantPost', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'channel-post', id: r.envelope.id } });
+            const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
+            await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
+            await this.writeDoc(g, TOPIC_RESOURCE(channelId), composed[0]!.messages);
+            return json({ ok: true, messageId: r.envelope.id });
+          });
         }
         if (op === 'invite.get' || op === 'invite.put') {
           // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
@@ -800,7 +897,59 @@ export class InteractionsDO {
           // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
           await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
           await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
+          // spec 327 §3 — post-commit assistant trigger: fire-and-forget AFTER the member's post is
+          // durable; a failed/limited dispatch is audited + dropped, never affecting this response.
+          if (assistantTrigger(entry, { from: sessionCaip as MessageEnvelopeV1['from'], bodyText: String(body.bodyText ?? '') })) {
+            this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerBody: String(body.bodyText ?? '').trim() });
+          }
           return json({ ok: true, messageId: r.envelope.id });
+        });
+      }
+
+      // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──
+      if (op === 'channels.assistantEnable' || op === 'channels.assistantDisable') {
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the organization custodian may manage the topic assistant' }, 403);
+        const channelId = String(body.channelId ?? '');
+        if (!channelId) return json({ error: 'channelId required' }, 400);
+        if (op === 'channels.assistantDisable') {
+          return this.serialize(async () => { // conversation.index RMW — same single-writer rule as create
+            const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+            const r = setTopicAssistant(index, channelId, undefined);
+            if (!r.ok) return json({ error: r.error }, 404);
+            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.assistantDisable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
+            await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
+            return json({ ok: true });
+          });
+        }
+        const trigger: TopicAssistantV1['trigger'] = body.trigger === 'all' ? 'all' : 'mention';
+        // Capture the org's primary name ONCE at enable time (ADR-0012: one reverseResolveString view
+        // call; re-enabling refreshes after a name rotation). A resolver failure fails the ceremony
+        // closed — it never silently enables a nameless assistant (ADR-0013).
+        let primaryName: string | null = null;
+        if (this.env.RPC_URL && this.env.AGENT_NAME_REGISTRY && this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
+          try {
+            primaryName = await new AgentNamingClient({
+              rpcUrl: this.env.RPC_URL,
+              chainId: Number(this.env.CHAIN_ID ?? 84532),
+              registry: this.env.AGENT_NAME_REGISTRY as Address,
+              universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+            }).reverseResolve(principal as Address);
+          } catch (e) {
+            return json({ error: `could not resolve the organization's primary name: ${e instanceof Error ? e.message : String(e)}` }, 502);
+          }
+        }
+        const mentionHandle = primaryName ? (primaryName.split('.')[0] ?? '').toLowerCase() : '';
+        const displayName = primaryName ?? String(body.displayName ?? '').trim();
+        if (trigger === 'mention' && !mentionHandle) return json({ error: 'this organization has no primary name to mention — set one first, or enable the assistant with trigger "all"' }, 409);
+        if (!displayName) return json({ error: 'displayName required when the organization has no primary name' }, 400);
+        return this.serialize(async () => {
+          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+          const r = setTopicAssistant(index, channelId, { trigger, mentionHandle, displayName, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() });
+          if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.assistantEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
+          await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
+          return json({ ok: true, assistant: r.channel.assistant });
         });
       }
 

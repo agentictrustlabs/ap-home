@@ -32,6 +32,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
+import { handleDiscussionRespond, type DiscussionRespondInput } from './discussion-skill.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
@@ -276,6 +277,40 @@ export class A2aTaskDO {
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    // ── spec 327 §4 — the org-assistant turn (`discussion.respond`). IN-WORKER ONLY: dispatched by
+    // the org's InteractionsDO after a triggering topic post, gated by the ARCH-H2 internal marker.
+    // Deliberately NOT an A2A skill on the public card — its authorization model is "the org's own
+    // substrate observed a triggering post", not a caller delegation, so a public `message/send`
+    // can never reach it (fail-closed by path: the JSON-RPC dispatcher below has no such method).
+    if (url.pathname === '/internal/discussion-respond') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;
+      if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !p.channelId) {
+        return Response.json({ ok: false, error: 'principal + channelId required' }, { status: 400 });
+      }
+      const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(p.principal.toLowerCase()));
+      const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
+        const resp = await stub.fetch(new Request(`https://do/interactions/${p.principal.toLowerCase()}/${op}`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+        return out;
+      };
+      try {
+        const turn = await handleDiscussionRespond(this.env, p, {
+          readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
+          post: async (bodyText) => (await call('internal.channels.post', { channelId: p.channelId, bodyText })) as { messageId?: string },
+        });
+        if (turn.result.outcome !== 'completed' || !turn.posted) {
+          return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without posting a reply', plannerKind: turn.plannerKind }, { status: 502 });
+        }
+        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      }
+    }
     const agentSA = (url.searchParams.get('agent') ?? (await this.state.storage.get<string>(AGENT_SA_KEY))) as Address | null;
     if (!agentSA) return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'agent not bound to this task store' } }, { status: 400 });
     await this.state.storage.put(AGENT_SA_KEY, agentSA); // remember for alarm() rehydration

@@ -123,7 +123,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const who = await personFrom(request, env);
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string; participationPolicy?: 'open' | 'restricted'; visibility?: 'public' | 'private'; members?: string[]; personSA?: string; personName?: string; role?: 'facilitator' | 'contributor' }
+    | { action?: string; communityId?: string; channelId?: string; title?: string; bodyText?: string; participationPolicy?: 'open' | 'restricted'; visibility?: 'public' | 'private'; members?: string[]; personSA?: string; personName?: string; role?: 'facilitator' | 'contributor'; trigger?: 'mention' | 'all'; displayName?: string }
     | null;
   const communityId = (body?.communityId ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
@@ -144,6 +144,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body?.action === 'post') {
     const r = await callInteractions(env, communityId, 'channels.post', {
       session: who.token, channelId: body.channelId ?? '', bodyText: body.bodyText ?? '',
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+  // Org-assistant enablement (spec 327) — steward-only; the DO owns the gate + name capture.
+  if (body?.action === 'assistantEnable' || body?.action === 'assistantDisable') {
+    const r = await callInteractions(env, communityId, body.action === 'assistantEnable' ? 'channels.assistantEnable' : 'channels.assistantDisable', {
+      session: who.token, channelId: body.channelId ?? '',
+      ...(body.action === 'assistantEnable' ? { trigger: body.trigger === 'all' ? 'all' : 'mention', ...(body.displayName ? { displayName: body.displayName } : {}) } : {}),
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }

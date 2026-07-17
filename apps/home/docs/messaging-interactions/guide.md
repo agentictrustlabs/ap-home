@@ -112,6 +112,25 @@ machine** enforces the role (a session cannot approve a case it is not the respo
 lifecycle facts — **a message is never authority**; issuance routes through `delegation`/`entitlements`/VC
 packages and comes back as an `AuthorityRef` on the case.
 
+## The org assistant in discussion topics (spec 327)
+
+An org steward can enable the **organization's own agent** on a discussion topic (the 🤖 toggle in
+the topic header). This is 318 §8.1's "the org being agentic" — the author is the **Org SA itself**
+(ADR-0010), never a bot account or a Service participant; third-party bots stay a separate,
+fabric-wave concern (318 C4).
+
+Flow: a member posts `@<orgname> …` → `InteractionsDO.channels.post` evaluates the trigger
+**post-commit, server-side** (the UI never detects or orchestrates — ADR-0044), rate-limits
+(6/topic/10min), and fire-and-forgets an in-Worker, marker-gated call to the org's own `A2aTaskDO`
+(`/internal/discussion-respond` — not on the public agent card). The turn runs the shared Ring-0
+loop (`discussion-skill.ts`): Anthropic planner when configured, else a deterministic template
+reply. The reply lands via `internal.channels.post` with `from`/`actor` **pinned to the org SA**
+and `authorName` = the org's primary name (captured at enable time via one `reverseResolveString`),
+riding the org's existing interactions grant — **no new grants, scopes, or secrets**. The UI badges
+`actor`-marked entries "agent". Every dispatch/drop/reply is audited
+(`interactions.assistant.*` / `interactions.channels.assistantPost`); failures are dropped, never
+retried into another mechanism (ADR-0013), and never touch the member's own post.
+
 ## Where this is going (spec 316 target)
 
 Today's demo topology (both parties on one Home, KV doc per person, 5s poll) is the app-layer stand-in

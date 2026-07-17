@@ -29,10 +29,12 @@ import { DmSlideOver } from './chat/DmSlideOver';
 import { ProfileSheet, type ProfileTarget } from './chat/ProfileSheet';
 import { useAvatar } from './chat/use-avatar';
 
-interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string }
+// `actor` (spec 327 / spec 324 §9): acting-agent provenance — set on org-assistant posts; drives the "agent" badge.
+interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string; actor?: string }
 // participationPolicy (tbox/messaging.ttl): open — every org MEMBER participates automatically (derived
 // from membership; no stored list); restricted — invite-only, participation asserted per person.
-interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted' }
+// assistant (spec 327): steward-enabled org-assistant participation on this topic.
+interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted'; assistant?: { trigger: 'mention' | 'all'; mentionHandle: string; displayName: string } }
 interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
 interface ParticipantRow { personSA: string; personName?: string; role: 'facilitator' | 'contributor'; derived?: boolean }
 interface PendingInviteRow { id: string; invitedAgent: string; invitedName?: string; role: 'facilitator' | 'contributor' }
@@ -339,10 +341,35 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       if (!res.ok || !out.ok) throw new Error(out.error ?? `post failed (${res.status})`);
       setDraft('');
       await load();
+      // spec 327 — the reply arrives asynchronously (the org's own agent posts it server-side).
+      // Bounded cosmetic follow-up polls so it appears without a manual reload; detection stays
+      // entirely server-side — this only refreshes the view when a reply is plausibly coming.
+      const a = channels?.find((c) => c.descriptor.id === active)?.assistant;
+      const mentioned = a && (a.trigger === 'all' || (a.mentionHandle && new RegExp(`@${a.mentionHandle}\\b`, 'i').test(body)));
+      if (mentioned) { setTimeout(() => void load(), 3500); setTimeout(() => void load(), 8000); }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [active, communityId, authed, load]);
+  }, [active, communityId, authed, load, channels]);
+
+  // spec 327 — steward toggle: enable/disable the org's own assistant on the ACTIVE topic.
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const toggleAssistant = useCallback(async () => {
+    if (!active) return;
+    const enabled = !!channels?.find((c) => c.descriptor.id === active)?.assistant;
+    setAssistantBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/channels', {
+        method: 'POST', headers: authed,
+        body: JSON.stringify({ action: enabled ? 'assistantDisable' : 'assistantEnable', communityId, channelId: active, trigger: 'mention' }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `assistant ${enabled ? 'disable' : 'enable'} failed (${res.status})`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setAssistantBusy(false); }
+  }, [active, channels, communityId, authed, load]);
 
 
   const listingBySubject = useMemo(() => {
@@ -574,8 +601,23 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
                       : `Open · all ${listings.length} members participate · ${channel.messages.length} messages`}
+                    {channel.assistant && ` · 🤖 ${channel.assistant.displayName}${channel.assistant.trigger === 'mention' ? ` answers @${channel.assistant.mentionHandle}` : ' answers every post'}`}
                   </div>
                 </div>
+                {steward && (
+                  <BusyButton
+                    busy={assistantBusy}
+                    busyLabel={channel.assistant ? 'Disabling assistant…' : 'Enabling assistant…'}
+                    onClick={() => void toggleAssistant()}
+                    className="manage-btn manage-btn--ghost"
+                    style={{ marginLeft: 'auto' }}
+                    title={channel.assistant
+                      ? 'Disable the organization assistant in this topic'
+                      : 'Let the organization’s own agent reply when it is @-mentioned in this topic'}
+                  >
+                    {channel.assistant ? '🤖 Assistant on' : '🤖 Enable assistant'}
+                  </BusyButton>
+                )}
               </div>
 
               <div className="chat-thread-body" style={{ flex: 1 }}>
@@ -617,6 +659,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                         body={bodies[m.envelope.id]}
                         time={timeShort(m.envelope.createdAt)}
                         authorName={m.authorName}
+                        authorBadge={m.actor ? 'agent' : undefined}
                         showAuthor={!mine}
                         firstOfGroup={firstOfGroup}
                         lastOfGroup={lastOfGroup}
@@ -638,7 +681,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 onSend={postMessage}
                 disabled={orgVault === false}
                 busy={busy}
-                placeholder={orgVault === false ? 'Enable discussion storage to post' : `Message # ${channel.title}`}
+                placeholder={orgVault === false
+                  ? 'Enable discussion storage to post'
+                  : channel.assistant?.trigger === 'mention' && channel.assistant.mentionHandle
+                    ? `Message # ${channel.title} — @${channel.assistant.mentionHandle} to ask the assistant`
+                    : `Message # ${channel.title}`}
               />
             </>
           ) : (
