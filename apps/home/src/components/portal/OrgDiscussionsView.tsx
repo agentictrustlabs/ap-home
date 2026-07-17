@@ -634,29 +634,40 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
                       : `Open · all ${listings.length} members participate · ${channel.messages.length} messages`}
-                    {channel.assistant && ` · 🤖 ${channel.assistant.displayName}${channel.assistant.trigger === 'mention' ? ` answers @${channel.assistant.mentionHandle}` : ' answers every post'}`}
+                    {channel.assistant && (
+                      <span
+                        title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @${channel.assistant.mentionHandle}` : 'answers every post'}`}
+                      >
+                        {channel.assistant.trigger === 'mention' ? ` · 🤖 @${channel.assistant.mentionHandle}` : ' · 🤖 auto'}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {steward && (
                   <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.4rem' }}>
+                    {/* Icon-only controls — the labels were eating the header row; full text lives in title/aria. */}
                     <BusyButton
                       busy={assistantBusy}
-                      busyLabel={channel.assistant ? 'Disabling assistant…' : 'Enabling assistant…'}
+                      busyLabel="…"
                       onClick={() => void toggleAssistant()}
                       className="manage-btn manage-btn--ghost"
+                      aria-label={channel.assistant ? 'Assistant on — disable' : 'Enable assistant'}
+                      aria-pressed={Boolean(channel.assistant)}
+                      style={channel.assistant ? undefined : { opacity: 0.45 }}
                       title={channel.assistant
-                        ? 'Disable the organization assistant in this topic'
+                        ? 'Assistant on — click to disable it in this topic'
                         : 'Let the organization’s own agent reply when it is @-mentioned in this topic'}
                     >
-                      {channel.assistant ? '🤖 Assistant on' : '🤖 Enable assistant'}
+                      🤖
                     </BusyButton>
                     <BusyButton
                       busy={skillBusy && !skillOpen}
                       onClick={() => void openSkillEditor()}
                       className="manage-btn manage-btn--ghost"
-                      title="Edit the assistant's instructions (SKILL.md playbook — shapes every reply the assistant writes for this organization)"
+                      aria-label="Assistant instructions"
+                      title="Assistant instructions (SKILL.md playbook — shapes every reply the assistant writes for this organization)"
                     >
-                      📝 Instructions
+                      📝
                     </BusyButton>
                   </span>
                 )}

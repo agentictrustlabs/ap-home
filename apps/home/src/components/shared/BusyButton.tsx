@@ -14,6 +14,8 @@ export function BusyButton({
   disabled,
   onClick,
   title,
+  'aria-label': ariaLabel,
+  'aria-pressed': ariaPressed,
 }: {
   busy: boolean;
   /** Label while busy (defaults to children). Name the work: "Sending…", "Signing…". */
@@ -24,6 +26,8 @@ export function BusyButton({
   disabled?: boolean;
   onClick: () => void;
   title?: string;
+  'aria-label'?: string;
+  'aria-pressed'?: boolean;
 }) {
   return (
     <button
@@ -32,6 +36,8 @@ export function BusyButton({
       style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', ...style }}
       disabled={busy || disabled}
       aria-busy={busy}
+      aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
       onClick={onClick}
       title={title}
     >
