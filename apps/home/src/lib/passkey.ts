@@ -170,6 +170,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
     pubKeyY: parsed.pubKeyY,
     label,
   };
+  // [pk-probe] TEMPORARY: where did the credential actually land? attachment='cross-platform' or
+  // transports incl. 'hybrid' ⇒ it was saved to a PHONE/security key, so the platform-only deploy get()
+  // can never find it → "No passkeys available". 'platform'/'internal' ⇒ Windows Hello (expected).
+  try { console.log('[pk-probe] created', { attachment: credential.authenticatorAttachment, transports: (response as AuthenticatorAttestationResponse).getTransports?.() ?? null, rpId, host: window.location.hostname, credId: passkey.credentialIdB64.slice(0, 16) }); } catch { /* */ }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(toStored(passkey)));
   return passkey;
 }
@@ -282,6 +286,9 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
   // human could see and dismiss the sheet, so a quick failure is the race, NOT a deliberate cancel/decline
   // (which only arrives after the user interacts). A slow NotAllowedError, a cancel, or any other error
   // propagates at once, so we never re-prompt someone who declined.
+  // [pk-probe] TEMPORARY: what is the deploy get() asking for? reqCredId must equal the [pk-probe] created
+  // credId (else loadPasskey returned a STALE cache); rpId must equal the create rpId.
+  try { console.log('[pk-probe] signAssertion get()', { rpId: passkeyRpId(), host: window.location.hostname, reqCredId: bytesToHex(credentialIdBytes).slice(0, 18) }); } catch { /* */ }
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt)); // 0, 350, 700, 1050ms
@@ -302,6 +309,9 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
       })) as PublicKeyCredential | null;
     } catch (e) {
       lastErr = e;
+      // [pk-probe] TEMPORARY: exact failure shape. errName='NotAllowedError' + fast elapsed ⇒ indexing race
+      // (retried); + slow elapsed ⇒ authenticator genuinely has no matching credential (phone/wrong RP).
+      try { console.log('[pk-probe] signAssertion FAIL', { attempt, errName: e instanceof Error ? e.name : String(e), errMsg: e instanceof Error ? e.message.slice(0, 90) : '', elapsedMs: Date.now() - startedAt }); } catch { /* */ }
       if (e instanceof DOMException && e.name === 'NotAllowedError' && Date.now() - startedAt < 900 && attempt < 3) continue;
       throw e;
     }
