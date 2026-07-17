@@ -402,9 +402,26 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
 function signAssertionFromCredential(credential: PublicKeyCredential): Hex {
   const credentialIdBytes = new Uint8Array(credential.rawId);
   const response = credential.response as AuthenticatorAssertionResponse;
+  const authenticatorData = new Uint8Array(response.authenticatorData);
+  // PRE-FLIGHT the on-chain UV gate (WebAuthnLib `requireUv`, audit F9): every custody signature
+  // must carry the User-Verified flag (bit 0x04 of authData[32]). Some passkey providers violate the
+  // spec and return UV=0 despite `userVerification:'required'` (seen live 2026-07-17: the Windows
+  // Microsoft-account SYNCED passkey store via Edge, flags 0x19 = UP+BE+BS, no UV) — the chain would
+  // reject that as an opaque AA24 after gas estimation, so fail HERE with the real reason instead.
+  // This is an early mirror of the contract's check, not a second mechanism — the chain still enforces.
+  const flags = authenticatorData.length > 32 ? (authenticatorData[32] ?? 0) : 0;
+  try { console.log('[pk-probe] assertion flags', { flags: `0x${flags.toString(16)}`, uv: (flags & 0x04) !== 0, backedUp: (flags & 0x10) !== 0 }); } catch { /* */ }
+  if ((flags & 0x04) === 0) {
+    throw new Error(
+      'Your passkey provider skipped user verification (no PIN/biometric attested in the signature), ' +
+        'which custody-grade signing requires — this signature would be rejected on-chain. This is a ' +
+        'known issue with Microsoft-account SYNCED passkeys on Windows. Use a phone passkey, or a ' +
+        'device whose local authenticator (Windows Hello with PIN/biometric, Touch ID) holds the key.',
+    );
+  }
   const assertion = buildWebAuthnAssertion({
     credentialIdBytes,
-    authenticatorData: new Uint8Array(response.authenticatorData),
+    authenticatorData,
     clientDataJSON: new Uint8Array(response.clientDataJSON),
     derSignature: new Uint8Array(response.signature),
   });
