@@ -275,29 +275,46 @@ async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
 }
 
 async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
-  const credential = (await navigator.credentials.get({
-    publicKey: {
-      challenge: hexToBytes(digest) as BufferSource,
-      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
-      // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
-      // authenticator (Windows Hello). This cached-id path is only reached with a credential this browser
-      // just created on THIS device, but WITHOUT these biases Windows intermittently falls back to the
-      // cross-device "use a phone" picker — especially in the seconds after create(), before Windows Hello
-      // has indexed the new credential — and the user (who has no phone flow) hits a NotAllowedError/timeout.
-      allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
-      ...({ hints: ['client-device'] } as Record<string, unknown>),
-      userVerification: 'required', // custody-grade signing — demand verification (F9)
-      timeout: 60_000,
-    },
-  })) as PublicKeyCredential | null;
-  if (!credential) throw new Error('passkey signing cancelled');
-  // SEC-015 defensive: even with allowCredentials, verify the rawId matches what we
-  // asked for. Catches a platform that would (incorrectly) ignore the allowlist.
-  const offered = new Uint8Array(credential.rawId);
-  if (offered.length !== credentialIdBytes.length || !offered.every((b, i) => b === credentialIdBytes[i])) {
-    throw new Error('passkey offered by the platform does not match the registered credential (SEC-015)');
+  // Windows Hello post-create indexing race (the top cause of "No passkeys available" on the onboarding
+  // "Approve my setup" step): this cached-id get() runs seconds after create(), and the platform can throw
+  // NotAllowedError before it has indexed the just-made credential. Retry a FAST NotAllowedError with
+  // backoff — the authenticator reports "no matching credential" in well under a second, faster than any
+  // human could see and dismiss the sheet, so a quick failure is the race, NOT a deliberate cancel/decline
+  // (which only arrives after the user interacts). A slow NotAllowedError, a cancel, or any other error
+  // propagates at once, so we never re-prompt someone who declined.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt)); // 0, 350, 700, 1050ms
+    const startedAt = Date.now();
+    let credential: PublicKeyCredential | null;
+    try {
+      credential = (await navigator.credentials.get({
+        publicKey: {
+          challenge: hexToBytes(digest) as BufferSource,
+          rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
+          // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
+          // authenticator (Windows Hello) rather than the cross-device "use a phone" picker.
+          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
+          ...({ hints: ['client-device'] } as Record<string, unknown>),
+          userVerification: 'required', // custody-grade signing — demand verification (F9)
+          timeout: 60_000,
+        },
+      })) as PublicKeyCredential | null;
+    } catch (e) {
+      lastErr = e;
+      if (e instanceof DOMException && e.name === 'NotAllowedError' && Date.now() - startedAt < 900 && attempt < 3) continue;
+      throw e;
+    }
+    if (!credential) throw new Error('passkey signing cancelled');
+    // SEC-015 defensive: even with allowCredentials, verify the rawId matches what we
+    // asked for. Catches a platform that would (incorrectly) ignore the allowlist.
+    const offered = new Uint8Array(credential.rawId);
+    if (offered.length !== credentialIdBytes.length || !offered.every((b, i) => b === credentialIdBytes[i])) {
+      throw new Error('passkey offered by the platform does not match the registered credential (SEC-015)');
+    }
+    return signAssertionFromCredential(credential);
   }
-  return signAssertionFromCredential(credential);
+  throw lastErr;
 }
 
 function signAssertionFromCredential(credential: PublicKeyCredential): Hex {
