@@ -12,23 +12,26 @@ import { CENTRAL_AUTH_DOMAIN } from './domain';
 const STORAGE_KEY = 'agenticprimitives:demo-sso:passkey';
 
 /**
- * The WebAuthn RP id for every passkey ceremony. Onboarding HOPS hosts — a passkey is created on one
- * origin (the central `impact-agent.me` or a per-user `<name>.impact-agent.me` subdomain) and later signed
- * with on ANOTHER. A passkey's RP is fixed at creation and a `get()` must use the exact same RP, so scoping
- * to `window.location.hostname` made the credential unfindable after a host hop → "no passkey available".
- * Pin the RP to the registrable PARENT domain (`impact-agent.me`) so one passkey works across the apex AND
- * every subdomain. WebAuthn requires rp.id to be a suffix of the caller origin, so only pin when actually
- * under that domain; otherwise (localhost / a different whitelabel host) fall back to the current hostname.
+ * The WebAuthn RP id for every passkey ceremony: the CURRENT hostname — passkeys are SUBDOMAIN-ISOLATED
+ * (spec 229 P5). Each `<label>.impact-agent.me` home scopes its ROOT passkey to its OWN subdomain, so
+ * different subdomains hold (and trigger) different passkeys, the phone's consent sheet names the
+ * subdomain the member is actually signing into, and one subdomain's page can never request another
+ * subdomain's credential.
+ *
+ * DISCIPLINE this requires (the reason a 2026-07-16 pin-to-parent detour existed and was reverted):
+ * a credential is findable ONLY under the exact RP it was created with, so every create() AND every
+ * get() must run on the origin whose hostname IS that RP. Flows hop to the home subdomain BEFORE any
+ * ceremony (`redirectForPasskey` / `redirectForEnrollName`) and never sign after hopping elsewhere.
+ * The apex entry can't discover subdomain credentials — it routes by NAME, then hops.
  *
  * COUPLING (do not diverge): the on-chain verifier pins each assertion's `authenticatorData.rpIdHash` to the
  * SA's stored rpIdHash (WebAuthnLib `_checkAuthData`), and that stored value is `sha256` of whatever RP the
  * credential was created under. So `connect-client.ts derivePasskeyRpIdHash` MUST hash THIS exact value
- * (`sha256(passkeyRpId())`) — hashing a different host (e.g. the subdomain) makes every passkey signature
- * fail verification even though the ceremony and address derivation look fine. Exported for that reason.
+ * (`sha256(passkeyRpId())`) — hashing a different host makes every passkey signature fail verification
+ * even though the ceremony and address derivation look fine. Exported for that reason.
  */
 export function passkeyRpId(): string {
-  const host = typeof window !== 'undefined' ? window.location.hostname : CENTRAL_AUTH_DOMAIN;
-  return host === CENTRAL_AUTH_DOMAIN || host.endsWith('.' + CENTRAL_AUTH_DOMAIN) ? CENTRAL_AUTH_DOMAIN : host;
+  return typeof window !== 'undefined' ? window.location.hostname : CENTRAL_AUTH_DOMAIN;
 }
 
 /**
@@ -219,7 +222,7 @@ export async function signWithDiscoverablePasskey(
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
-      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
+      rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
       allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
       ...(opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
@@ -268,7 +271,7 @@ export async function connectAssertionDiscoverable(
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
-      rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
+      rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
       allowCredentials,
       ...(!cached && opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
@@ -327,7 +330,7 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
       credential = (await navigator.credentials.get({
         publicKey: {
           challenge: hexToBytes(digest) as BufferSource,
-          rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
+          rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
           // Transports/hints from the PASSKEY_* test constants (currently phone/hybrid; the shipped
           // default 'internal' + 'client-device' keeps Windows on the LOCAL authenticator).
           allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: PASSKEY_TRANSPORTS }],

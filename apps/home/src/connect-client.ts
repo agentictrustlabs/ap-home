@@ -584,9 +584,10 @@ export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOut
  *
  *  2. The SA's STORED rpIdHash. The account persists it and, on every passkey assertion, the verifier
  *     pins `authenticatorData.rpIdHash == stored` (WebAuthnLib `_checkAuthData`). The authenticator sets
- *     that assertion field to `sha256(rp.id)` where `rp.id = passkeyRpId()` (the parent domain). So this
- *     MUST hash `passkeyRpId()`, NOT `window.location.hostname` — hashing the subdomain while the
- *     credential RP is the pinned parent made every signature fail verification (verdict 2026-07-16).
+ *     that assertion field to `sha256(rp.id)` where `rp.id = passkeyRpId()` (the home SUBDOMAIN —
+ *     spec 229 P5 subdomain isolation). So this MUST hash `passkeyRpId()` and the ceremony MUST run on
+ *     the home's own origin: signing from a different host changes the RP and fails verification
+ *     (that mismatch, in the brief 2026-07-16 pin-to-parent detour, rejected every signature).
  *
  *  `passkeyRpId()` already carries the SSR/localhost/whitelabel fallbacks, so hashing it is correct on
  *  every host. (No fallback — ADR-0013 single mechanism: one consistent value end-to-end.) */
