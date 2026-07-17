@@ -87,6 +87,12 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
+# ADR-0044 / spec 327 — the Ring-0 orchestration loop plans with the Anthropic LLM planner when BOTH
+# this mode flag AND the ANTHROPIC_API_KEY secret are present (selectPlanner requires both — with the
+# secret absent the deterministic rule-based planner runs, a config choice, not a fallback). Committed
+# here (not a --var) so it survives targeted deploys. Key: `wrangler secret put ANTHROPIC_API_KEY
+# --env production`. Optional ORCHESTRATION_MODEL overrides the planner default model.
+ORCHESTRATION_LLM = "anthropic"
 # CRIT-2 (audit 2026-07-13) — server-mint RETIRED: DEMO_ALLOW_SERVER_MINT is removed entirely (the
 # callMcpToolViaDelegation path is deleted). Every vault path client-mints — interactions/messaging via
 # the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation proof, the A2aTaskDO seams +
