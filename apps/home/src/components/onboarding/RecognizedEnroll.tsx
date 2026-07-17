@@ -120,6 +120,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       const addr = addressOf(profile?.agent);
       // A valid, DEPLOYED member is required to authorize a delegation; anything else → sign in fresh.
       if (!profile || !addr || profile.deployed === false) return onUnrecognized();
+      // ENFORCE the pin: a PINNED connect (agent_name set) is exempt from the forced chooser precisely
+      // BECAUSE it names its identity — so the active session MUST actually be that identity. A different
+      // leftover session (e.g. a wallet owner-identity from a signer ceremony) must never silently
+      // authorize — or sign — for the pinned home (it would flip the relying app's identity AND route
+      // signing to the wrong custodian, e.g. MetaMask for a Google home). Mismatch → re-choose credentials.
+      const pinned = nameLabel(enroll.name ?? '');
+      if (pinned && nameLabel(profile.name ?? '') !== pinned) {
+        console.warn('[connect] pinned identity ≠ active session — re-choosing credentials', { pinned, session: profile.name });
+        clearSsoCookie();
+        return onUnrecognized();
+      }
       // BIND the owner-op to the owner the relying app authenticated: the home session's SA MUST equal the
       // `collectToken` subject. Otherwise a relying app could start an owner-op for a DIFFERENT owner than
       // the one it authenticated. Mismatch → reject (the user must sign in as the named owner / decline).
