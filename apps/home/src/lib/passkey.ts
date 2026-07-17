@@ -299,14 +299,13 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
         publicKey: {
           challenge: hexToBytes(digest) as BufferSource,
           rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
-          // Just the credential id, NO `transports` — MATCHING the working connectAssertionDiscoverable
-          // path. Passing `transports:['internal']` intermittently makes Windows Hello FAIL to find a
-          // credential it JUST created: get() → NotAllowedError "No passkeys available" after ~2s even
-          // though the credential is platform/internal and the id + rpId match (confirmed via [pk-probe]
-          // 2026-07-16: attachment=platform, transports=[internal], reqCredId == created credId, yet
-          // NotAllowedError@1864ms). `hints:['client-device']` alone keeps the ceremony on the local
-          // authenticator without the over-restrictive transport filter.
-          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key' }],
+          // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
+          // authenticator (Windows Hello) instead of the cross-device "use a phone" picker. NOTE: if the
+          // credential can't be found even WITH this (get() → NotAllowedError / the OS chooser offers only
+          // iPhone+Security-key with no local passkey listed) despite create() reporting attachment=platform,
+          // that's a Windows Hello STORE problem (credential created but not retained/retrievable), not this
+          // filter — dropping transports just surfaces it as the phone picker instead of "No passkeys available".
+          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
           ...({ hints: ['client-device'] } as Record<string, unknown>),
           userVerification: 'required', // custody-grade signing — demand verification (F9)
           timeout: 60_000,
