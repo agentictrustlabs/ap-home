@@ -90,13 +90,17 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 /** The env subset the planner selection needs. */
 export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL'>;
 
-/** Select the planner per env: the Anthropic LLM planner when explicitly enabled + keyed, else deterministic. */
-export function selectPlanner(env: PlannerEnv): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
+/** Select the planner per env: the Anthropic LLM planner when explicitly enabled + keyed, else deterministic.
+ *  `opts.systemPrompt` overrides the LLM planner's system prompt for turns whose contract differs from the
+ *  default single-tool selection job (spec 327: the discussion turn MUST post) — ignored on rule-based. */
+export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string }): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
   if (env.ORCHESTRATION_LLM === 'anthropic' && env.ANTHROPIC_API_KEY) {
     const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY });
-    const planner = env.ORCHESTRATION_MODEL
-      ? createAnthropicPlanner({ client, model: env.ORCHESTRATION_MODEL })
-      : createAnthropicPlanner({ client });
+    const planner = createAnthropicPlanner({
+      client,
+      ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+    });
     return { planner, kind: 'anthropic' };
   }
   return { planner: RULE_BASED_PLANNER, kind: 'rule-based' };

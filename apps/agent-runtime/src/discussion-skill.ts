@@ -40,12 +40,22 @@ export const DISCUSSION_TOOLS: ToolSpec[] = [
   },
 ];
 
+/** The discussion turn's PLANNING contract (spec 327 §4). The shared default prompt says "choose the
+ *  single tool", which lets the model plan a context READ and stop — completing without ever posting
+ *  (the invoker then fails the turn closed: "completed without posting a reply", 2026-07-17 prod
+ *  finding). This prompt makes the post mandatory; the read stays optional and BEFORE it. */
+const DISCUSSION_PLANNER_SYSTEM =
+  "You compose the reply for an organization's discussion-board assistant. You MUST call " +
+  'post_topic_message exactly once, with the complete reply text as bodyText — a turn that never ' +
+  'posts is a failure. You may also call read_topic_messages before it (in the same plan) when more ' +
+  'context would genuinely help. You may ONLY use the provided tools; never answer in prose.';
+
 export async function handleDiscussionRespond(
   env: PlannerEnv,
   input: DiscussionRespondInput,
   io: DiscussionIo,
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
-  const { planner, kind } = selectPlanner(env);
+  const { planner, kind } = selectPlanner(env, { systemPrompt: DISCUSSION_PLANNER_SYSTEM });
   // The deterministic turn (no LLM configured): read for the audit trail's sake is skipped — one
   // template reply acknowledging the trigger. Sufficient for e2e verification without a model key.
   const deterministic: Planner = createRuleBasedPlanner([
@@ -76,7 +86,8 @@ export async function handleDiscussionRespond(
   const goal =
     `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
     `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
-    `If more context would help, read the recent topic messages first; then post exactly one concise, helpful reply as the organization.`;
+    `Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText); ` +
+    `optionally read the recent topic messages first if more context would genuinely help.`;
 
   const result = await runIntent(
     { goal, context: { principal: input.principal, channelId: input.channelId } },
