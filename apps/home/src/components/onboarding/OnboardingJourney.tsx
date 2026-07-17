@@ -132,7 +132,7 @@ export function OnboardingJourney({
     setSecuringMsg(`Founding ${base} as your home and registering your name in the ${community}…`);
     setScreen('securing');
     try {
-      const res = await secureHome(key, name, 'passkey');
+      const res = await secureHome(key, name, 'passkey', undefined, setSecuringMsg);
       if (!res.ok) return fail(res.error, 'key-ready');
       setHome(res.home);
       setScreen('receipts');

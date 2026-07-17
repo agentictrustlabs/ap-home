@@ -182,10 +182,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
  *  Uses the localStorage-cached credential (allowCredentials). Kept for flows
  *  that already hold the local passkey; prefer the discoverable variant for
  *  cross-device sign-in (spec 233). */
-export async function signWithPasskey(digest: Hex): Promise<Hex> {
+export async function signWithPasskey(digest: Hex, opts: SignAssertionOpts = {}): Promise<Hex> {
   const passkey = loadPasskey();
   if (!passkey) throw new Error('signWithPasskey: no registered passkey');
-  return signAssertion(digest, b64uDecode(passkey.credentialIdB64));
+  return signAssertion(digest, b64uDecode(passkey.credentialIdB64), opts);
 }
 
 /** Sign a 32-byte digest via a DISCOVERABLE passkey (spec 233, Mechanism A) —
@@ -278,20 +278,40 @@ async function sha256Hex(bytes: Uint8Array): Promise<Hex> {
   return hex as Hex;
 }
 
-async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promise<Hex> {
+export interface SignAssertionOpts {
+  /** The credential was created moments ago (onboarding deploy sign). Widens the Windows Hello
+   *  indexing-race handling: longer fast-retry budget, ONE patient retry after a user-dismissed
+   *  "No passkeys available" sheet, and a guided (retry-and-it-works) message on final failure. */
+  justCreated?: boolean;
+  /** Surface retry progress to the UI (e.g. the onboarding busy line). */
+  onRetry?: (msg: string) => void;
+}
+
+const JUST_CREATED_GUIDANCE =
+  "Your device didn't offer your new key — Windows can take a few seconds to finish saving a " +
+  'just-created passkey. Your key was created and nothing was lost. Press Try again, then ' +
+  'Approve — after this short wait the key is offered. (If you cancelled the prompt on purpose, ' +
+  'just continue when ready.)';
+
+async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: SignAssertionOpts = {}): Promise<Hex> {
   // Windows Hello post-create indexing race (the top cause of "No passkeys available" on the onboarding
-  // "Approve my setup" step): this cached-id get() runs seconds after create(), and the platform can throw
-  // NotAllowedError before it has indexed the just-made credential. Retry a FAST NotAllowedError with
-  // backoff — the authenticator reports "no matching credential" in well under a second, faster than any
-  // human could see and dismiss the sheet, so a quick failure is the race, NOT a deliberate cancel/decline
-  // (which only arrives after the user interacts). A slow NotAllowedError, a cancel, or any other error
-  // propagates at once, so we never re-prompt someone who declined.
+  // "Approve my setup" step): this cached-id get() runs seconds after create(), and the platform can fail
+  // with NotAllowedError before it has indexed the just-made credential. Live-confirmed 2026-07-16: the
+  // SAME get() succeeds when manually retried a few moments later, so the credential IS retained — this is
+  // purely a settle-time race. Two failure shapes:
+  //   • FAST NotAllowedError (<900ms, no UI shown) — unambiguous race; retried with backoff.
+  //   • SLOW NotAllowedError — EITHER the user dismissed Windows' own "No passkeys available" sheet
+  //     (the race, surfaced as OS UI) OR a deliberate cancel of the verification prompt. The two are
+  //     indistinguishable (privacy-uniform error). Outside onboarding we honor it as a cancel at once.
+  //     In the `justCreated` window a cancel is unlikely (the user pressed Approve a second earlier), so
+  //     we re-prompt ONCE after a pause, then stop and explain — never an endless prompt loop.
+  const { justCreated = false, onRetry } = opts;
+  const fastDelays = justCreated ? [500, 1000, 2000, 3000, 4000] : [350, 700, 1050]; // ms before retry N+1
+  let slowRetried = false;
   // [pk-probe] TEMPORARY: what is the deploy get() asking for? reqCredId must equal the [pk-probe] created
   // credId (else loadPasskey returned a STALE cache); rpId must equal the create rpId.
-  try { console.log('[pk-probe] signAssertion get()', { rpId: passkeyRpId(), host: window.location.hostname, reqCredId: bytesToHex(credentialIdBytes).slice(0, 18) }); } catch { /* */ }
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt)); // 0, 350, 700, 1050ms
+  try { console.log('[pk-probe] signAssertion get()', { rpId: passkeyRpId(), host: window.location.hostname, reqCredId: bytesToHex(credentialIdBytes).slice(0, 18), justCreated }); } catch { /* */ }
+  for (let attempt = 0; ; attempt++) {
     const startedAt = Date.now();
     let credential: PublicKeyCredential | null;
     try {
@@ -300,11 +320,7 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
           challenge: hexToBytes(digest) as BufferSource,
           rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
           // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
-          // authenticator (Windows Hello) instead of the cross-device "use a phone" picker. NOTE: if the
-          // credential can't be found even WITH this (get() → NotAllowedError / the OS chooser offers only
-          // iPhone+Security-key with no local passkey listed) despite create() reporting attachment=platform,
-          // that's a Windows Hello STORE problem (credential created but not retained/retrievable), not this
-          // filter — dropping transports just surfaces it as the phone picker instead of "No passkeys available".
+          // authenticator (Windows Hello) instead of the cross-device "use a phone" picker.
           allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
           ...({ hints: ['client-device'] } as Record<string, unknown>),
           userVerification: 'required', // custody-grade signing — demand verification (F9)
@@ -312,11 +328,21 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
         },
       })) as PublicKeyCredential | null;
     } catch (e) {
-      lastErr = e;
       // [pk-probe] TEMPORARY: exact failure shape. errName='NotAllowedError' + fast elapsed ⇒ indexing race
-      // (retried); + slow elapsed ⇒ authenticator genuinely has no matching credential (phone/wrong RP).
-      try { console.log('[pk-probe] signAssertion FAIL', { attempt, errName: e instanceof Error ? e.name : String(e), errMsg: e instanceof Error ? e.message.slice(0, 90) : '', elapsedMs: Date.now() - startedAt }); } catch { /* */ }
-      if (e instanceof DOMException && e.name === 'NotAllowedError' && Date.now() - startedAt < 900 && attempt < 3) continue;
+      // (retried); + slow elapsed ⇒ the OS sheet was shown and dismissed (retried once when justCreated).
+      try { console.log('[pk-probe] signAssertion FAIL', { attempt, errName: e instanceof Error ? e.name : String(e), errMsg: e instanceof Error ? e.message.slice(0, 90) : '', elapsedMs: Date.now() - startedAt, justCreated, slowRetried }); } catch { /* */ }
+      const notAllowed = e instanceof DOMException && e.name === 'NotAllowedError';
+      if (notAllowed && Date.now() - startedAt < 900 && attempt < fastDelays.length) {
+        await new Promise((r) => setTimeout(r, fastDelays[attempt]));
+        continue;
+      }
+      if (notAllowed && justCreated && !slowRetried) {
+        slowRetried = true;
+        onRetry?.('Your device is still saving your new key — asking again in a moment…');
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      if (notAllowed && justCreated) throw new Error(JUST_CREATED_GUIDANCE);
       throw e;
     }
     if (!credential) throw new Error('passkey signing cancelled');
@@ -328,7 +354,6 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array): Promis
     }
     return signAssertionFromCredential(credential);
   }
-  throw lastErr;
 }
 
 function signAssertionFromCredential(credential: PublicKeyCredential): Hex {

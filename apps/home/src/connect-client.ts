@@ -883,7 +883,9 @@ export async function bootstrapWithPasskey(
     return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
   }
   onStep?.('Confirm with your device…');
-  const signature = await signWithPasskey(built.userOpHash);
+  // `justCreated`: this sign runs moments after registerPasskey — arm the Windows Hello
+  // indexing-race handling (patient retries + guided failure) in signAssertion.
+  const signature = await signWithPasskey(built.userOpHash, { justCreated: true, onRetry: onStep });
   onStep?.('Securing on the network…');
   const submitRes = await fetch('/a2a/session/deploy/submit', {
     method: 'POST',
@@ -2176,6 +2178,7 @@ export async function deployAndClaimAgent(
   passkey: DemoPasskey,
   base: string,
   extraApproveDigests: Hex[] = [],
+  onStep?: (s: string) => void,
 ): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
   const sa = await derivePasskeySa(passkey, 0n);
   const claim = await buildClaimCallData(base, sa);
@@ -2185,7 +2188,7 @@ export async function deployAndClaimAgent(
   const callData = extraApproveDigests.length
     ? buildExecuteBatchCallData([...claim.calls, ...extraApproveDigests.map(buildApproveHashCall)])
     : claim.callData;
-  const dep = await bootstrapWithPasskey(passkey, undefined, callData);
+  const dep = await bootstrapWithPasskey(passkey, onStep, callData);
   if (!dep.ok) return { ok: false, error: dep.error };
   return { ok: true, agent: dep.agent, name: claim.name };
 }

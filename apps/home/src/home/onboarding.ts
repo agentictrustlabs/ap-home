@@ -326,6 +326,7 @@ export async function secureHome(
   name: string,
   via: Via = 'passkey',
   auth?: Auth,
+  onStep?: (s: string) => void,
 ): Promise<Result<{ home: Home }>> {
   if (via === 'google') {
     // Server custody: demo-a2a derives C_sub + deploys + claims, gated by the custody session.
@@ -363,7 +364,7 @@ export async function secureHome(
   // the SA can't be pre-derived, fall back to the proven per-grant path (no regression).
   const sa = await derivePasskeySa(key, 0n).catch(() => null);
   const planes = sa ? await buildBatchedPersonPlaneGrants(sa).catch(() => null) : null;
-  const res = await deployAndClaimAgent(key, homeLabel(name), planes?.digests ?? []);
+  const res = await deployAndClaimAgent(key, homeLabel(name), planes?.digests ?? [], onStep);
   if (!res.ok) return { ok: false, error: res.error };
   if (planes && sa && res.agent.toLowerCase() === sa.toLowerCase()) {
     // Wait for the deploy to be RPC-visible so the DOs can verify the 0x03 wires against the approved
