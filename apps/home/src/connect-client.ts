@@ -31,7 +31,7 @@ import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
-import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, type DemoPasskey } from './lib/passkey';
+import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
@@ -536,7 +536,20 @@ export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOut
     passkey = await registerPasskey('Agentic Connect passkey');
   }
   const { challenge } = (await (await fetch('/connect/passkey-challenge')).json()) as { challenge: Hex };
-  const signature = await signWithPasskey(challenge);
+  let signature: Hex;
+  try {
+    signature = await signWithPasskey(challenge);
+  } catch (e) {
+    // The cached credential id is present in THIS origin's localStorage but no longer usable on the
+    // device's authenticator (rotated/cleared Windows Hello, a different device, or the user dismissing
+    // the native sheet). The platform throws NotAllowedError "No passkeys available". For a login probe
+    // (registerIfMissing=false) that's not a hard failure — it means "no passkey resolves here": forget
+    // the stale cache and report rejected so the caller falls through to the name/bootstrap path (the
+    // person's own-subdomain ceremony) instead of dead-ending on the error. A register flow still throws.
+    const noCredential = e instanceof DOMException ? e.name === 'NotAllowedError' : /not allowed|no passkey|timed out/i.test(e instanceof Error ? e.message : String(e));
+    if (!registerIfMissing && noCredential) { clearPasskey(); return { status: 'rejected', reason: 'stale passkey cache' }; }
+    throw e;
+  }
   const r = await fetch('/connect/passkey', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
