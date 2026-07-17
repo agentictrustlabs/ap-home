@@ -31,6 +31,19 @@ export function passkeyRpId(): string {
   return host === CENTRAL_AUTH_DOMAIN || host.endsWith('.' + CENTRAL_AUTH_DOMAIN) ? CENTRAL_AUTH_DOMAIN : host;
 }
 
+/**
+ * TEMPORARY TEST DEFAULT (2026-07-17): route every passkey ceremony to a PHONE (the cross-device
+ * "hybrid" QR flow — iPhone/Android) instead of the local platform authenticator. The operator's
+ * Windows Hello store is polluted with ~1000 test passkeys, is not listed in Settings, and can't be
+ * selectively cleared — this bypasses it entirely so the phone's authenticator holds the credential.
+ * To restore the local-device default flip these back to: attachment 'platform', transports
+ * ['internal'], hints ['client-device'] (see git history for the rationale of that default —
+ * Windows members kept landing in the phone picker and couldn't finish).
+ */
+const PASSKEY_ATTACHMENT: AuthenticatorAttachment = 'cross-platform';
+const PASSKEY_TRANSPORTS = ['hybrid' as AuthenticatorTransport];
+const PASSKEY_HINTS = ['hybrid'];
+
 export interface DemoPasskey {
   credentialIdDigest: Hex; // keccak256(credentialId)
   credentialIdB64: string;
@@ -147,14 +160,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
       // and (b) name-only / cross-device sign-in can find it (spec 233). We deliberately do NOT set
       // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
       // cleanly overwriting — the stable userHandle is what dedupes.
-      // authenticatorAttachment:'platform' HARD-restricts creation to THIS device's built-in authenticator
-      // (Windows Hello / Touch ID) — the cross-device "use a phone / QR / security key" options never
-      // appear. Chosen deliberately (2026-07): members kept hitting the phone picker on Windows, couldn't
-      // finish, and got "No passkey created". `hints:['client-device']` reinforces the same bias for
-      // clients that read hints. Tradeoff: a laptop/desktop without a platform authenticator can't enroll
-      // here — acceptable for this flow's audience.
-      authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'required', userVerification: 'required' },
-      ...({ hints: ['client-device'] } as Record<string, unknown>),
+      // Attachment/hints come from the PASSKEY_* test constants above (currently the phone/hybrid
+      // flow; the shipped default is 'platform' + 'client-device' — see that comment block).
+      authenticatorSelection: { authenticatorAttachment: PASSKEY_ATTACHMENT, residentKey: 'required', userVerification: 'required' },
+      ...({ hints: PASSKEY_HINTS } as Record<string, unknown>),
       attestation: 'none',
       timeout: 60_000,
     },
@@ -212,7 +221,7 @@ export async function signWithDiscoverablePasskey(
       challenge: hexToBytes(digest) as BufferSource,
       rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
       allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
-      ...(opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
+      ...(opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
@@ -250,18 +259,18 @@ export async function connectAssertionDiscoverable(
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
   const cached = loadPasskey();
-  // NO `transports` on the descriptor (matches the old local-first signAssertion): listing 'hybrid'
-  // makes Windows offer the cross-device "use a phone" flow — exactly what we're avoiding. With just the
-  // credential id, the platform uses the LOCAL authenticator (Windows Hello / Touch ID) directly.
+  // Descriptor transports come from the PASSKEY_* test constants (currently phone/hybrid). The shipped
+  // default is NO transports on the descriptor: listing 'hybrid' makes Windows offer the cross-device
+  // "use a phone" flow, which the local-first default avoids — under the phone-test default we want it.
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
-    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key' }]
+    ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', transports: PASSKEY_TRANSPORTS }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: hexToBytes(digest) as BufferSource,
       rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
       allowCredentials,
-      ...(!cached && opts.preferLocalDevice ? ({ hints: ['client-device'] } as Record<string, unknown>) : {}),
+      ...(!cached && opts.preferLocalDevice ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
       userVerification: 'required',
       timeout: 60_000,
     },
@@ -319,10 +328,10 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
         publicKey: {
           challenge: hexToBytes(digest) as BufferSource,
           rpId: passkeyRpId(), // pin to the parent domain so a host hop can't hide the credential
-          // `transports:['internal']` + `hints:['client-device']` keep Windows on the LOCAL platform
-          // authenticator (Windows Hello) instead of the cross-device "use a phone" picker.
-          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: ['internal'] }],
-          ...({ hints: ['client-device'] } as Record<string, unknown>),
+          // Transports/hints from the PASSKEY_* test constants (currently phone/hybrid; the shipped
+          // default 'internal' + 'client-device' keeps Windows on the LOCAL authenticator).
+          allowCredentials: [{ id: credentialIdBytes as BufferSource, type: 'public-key', transports: PASSKEY_TRANSPORTS }],
+          ...({ hints: PASSKEY_HINTS } as Record<string, unknown>),
           userVerification: 'required', // custody-grade signing — demand verification (F9)
           timeout: 60_000,
         },
