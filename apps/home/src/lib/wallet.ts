@@ -30,7 +30,30 @@ export function hasWallet(): boolean {
  *  expose the RIGHT account. Callers that sign FOR A SPECIFIC HOME should pick the connected account that
  *  custodies it (not just [0] — eth_requestAccounts returns the active account first, which may be another
  *  home's custodian like the platform deployer). */
+/** Fast, UI-less liveness probe of the injected provider. A healthy wallet answers `eth_chainId`
+ *  instantly even when locked. A ZOMBIE provider — the extension's inpage.js is injected but its
+ *  background is unreachable (disabled, mid-update, crashed; MetaMask logs 'Failed to connect to
+ *  MetaMask' internally) — hangs or rejects. Without this, the awaited `eth_requestAccounts` never
+ *  settles and the securing screen spins forever (live Edge finding 2026-07-17). Not a fallback
+ *  (ADR-0013): a failed probe REJECTS the connect with the real reason; nothing else is tried. */
+async function assertProviderResponsive(eth: Eip1193): Promise<void> {
+  try {
+    await Promise.race([
+      eth.request({ method: 'eth_chainId' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('wallet-probe-timeout')), 3000)),
+    ]);
+  } catch {
+    throw new Error(
+      "Your wallet extension isn't responding — it may be disabled, mid-update, or crashed. " +
+        'Check that MetaMask (or your wallet) is enabled in this browser, restart the browser, and try again.',
+    );
+  }
+}
+
 export async function connectWalletAccounts(forceSelect = false, restrictTo?: Address): Promise<Address[]> {
+  // Probe only the real injected provider — the remote-persona signer is an opener bridge with its
+  // own failure story (and may not serve eth_chainId).
+  if (!remoteSignerActive()) await assertProviderResponsive(provider());
   if (forceSelect) {
     // restrictTo (EIP-2255 caveat): when we KNOW the account that custodies this home (remembered from a
     // prior sign-in — see remember/recallHomeEoa), ask MetaMask to default the picker to JUST that account
