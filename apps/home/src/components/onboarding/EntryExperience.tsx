@@ -218,6 +218,16 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
+      // A PINNED connect from an ALREADY-authenticated member one-taps: route to the recognized
+      // ceremony, which ENFORCES the pin (session = pinned identity → straight to consent; a
+      // different leftover session → cleared + credential chooser). Recognition was previously only
+      // checked for NAMELESS enrolls, so pinned connects always fell through to name resolution —
+      // which cannot one-tap (and for an EOA-ambiguous home showed the credential entry every time).
+      // org-create keeps its dedicated named flow below.
+      if (api.enroll!.template !== 'org-create' && readSsoCookie()) {
+        setView({ k: 'enroll-recognized' });
+        return;
+      }
       const info = await nameInfo(api.enroll!.name);
       // Orphan-registry guard: the name resolves to an SA but that SA has no
       // code on-chain. Refuse to use it — every downstream `executeCall` would
