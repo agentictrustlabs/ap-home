@@ -96,8 +96,8 @@ const faithImpact: WhiteLabelConfig = {
       // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
       // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
       paymentConfig: {
-        payee: '0xa9e0acecfbce08548358b4f5681b13a00a5cab7a',
-        asset: '0x8fb56ff3C13347DFC4E1287aE83E88deE5a7211C',
+        payee: '0x17320bF2DAe8820157530c634B9bB76f6Eb72004',
+        asset: '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92',
         maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
         maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
@@ -121,8 +121,8 @@ const faithImpact: WhiteLabelConfig = {
       // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
       // and the content service exposing the owner-gated due/collected endpoints.
       collectionConfig: {
-        treasury: '0xa9e0acecfbce08548358b4f5681b13a00a5cab7a',
-        asset: '0x8fb56ff3C13347DFC4E1287aE83E88deE5a7211C',
+        treasury: '0x17320bF2DAe8820157530c634B9bB76f6Eb72004',
+        asset: '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92',
         edition: 'lbsb',
         a2aBase: 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },
