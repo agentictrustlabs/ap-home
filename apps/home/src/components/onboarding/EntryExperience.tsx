@@ -252,6 +252,11 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           if (via === 'youversion') continueWithYouVersion(undefined, stash); else continueWithGoogle(undefined, stash);
           return;
         }
+        // AMBIGUOUS custody (EOA custodian, no passkey, NO published connection record): an EOA on-chain
+        // may be a WALLET or the social/KMS C_sub — spec 280's own rule is "absence ⇒ show ALL credential
+        // buttons", so route to the credential-first entry instead of guessing wallet (auto-MetaMask for
+        // a Google home → "the active account isn't a custodian").
+        if (via === 'wallet' && !info.connectionKind && !info.hasPasskey) { setView({ k: 'enroll-entry' }); return; }
         setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent, via });
       }
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
@@ -378,6 +383,8 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           if (via === 'youversion') continueWithYouVersion(undefined, stash); else continueWithGoogle(undefined, stash);
           return;
         }
+        // Ambiguous custody (EOA-only, no published connection record) → all credential buttons (spec 280).
+        if (via === 'wallet' && !info.connectionKind && !info.hasPasskey) { setView({ k: 'enroll-entry' }); return; }
         setView({ k: 'enroll-existing', name, agent: info.agent, via });
       }
       else setView({ k: 'journey', variant: 'enroll-new', name });
