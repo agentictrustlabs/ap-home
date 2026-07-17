@@ -48,9 +48,13 @@ function addressOf(caip10: string | undefined): Address | null {
 }
 
 /** The credential an EXISTING home actually signs with, from its on-chain credentials (name-info) — so
- *  a wallet-only home is opened/granted with the WALLET, not the passkey default. (KMS/Google homes
- *  don't reach the name path; they're recognized via the session cookie.) */
+ *  a wallet-only home is opened/granted with the WALLET, not the passkey default. A social/KMS home's
+ *  custodian C_sub LOOKS like an EOA on-chain, so `connectionKind` (the name-info's off-chain record of
+ *  how the home actually connects) MUST win over the hasEoa guess — otherwise a Google home reaching the
+ *  name path (e.g. after a pin-mismatch cleared the session) gets MetaMask + "isn't a custodian". */
 function viaForHome(info: NameInfo): Via {
+  const ck = (info.connectionKind ?? '').toLowerCase();
+  if (ck === 'google' || ck === 'youversion' || ck === 'email' || ck === 'phone') return ck as Via;
   return info.hasPasskey ? 'passkey' : info.hasEoa ? 'wallet' : 'passkey';
 }
 
@@ -237,7 +241,19 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // request, so the RP ID is the person's own home — not the www/apex host. No-op once we're already
       // on the subdomain (post-hop) and on dev hosts. org-create / incomplete returned above.
       if (redirectForEnrollName(api.enroll!.name)) return;
-      if (info.exists && info.agent) setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent, via: viaForHome(info) });
+      if (info.exists && info.agent) {
+        const via = viaForHome(info);
+        // A social/KMS home reaching this path has NO recognized session (recognition would have
+        // one-tapped) — the journey can't sign for it. Go straight through the provider sign-in with
+        // the enroll stashed; GoogleEnrollResume completes the grant (incl. the x402 payment leg).
+        if (via === 'google' || via === 'youversion') {
+          api.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with your provider…', idp: true });
+          const stash = JSON.stringify({ enroll: api.enroll, popupMode: api.popupMode, name: api.enroll!.name ?? '' });
+          if (via === 'youversion') continueWithYouVersion(undefined, stash); else continueWithGoogle(undefined, stash);
+          return;
+        }
+        setView({ k: 'enroll-existing', name: api.enroll!.name, agent: info.agent, via });
+      }
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
   }, [mode, api.enroll, api.allowed]);
@@ -352,7 +368,18 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       if (redirectForEnrollName(name)) return;
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
-      if (info.exists && info.agent) setView({ k: 'enroll-existing', name, agent: info.agent, via: viaForHome(info) });
+      if (info.exists && info.agent) {
+        const via = viaForHome(info);
+        // Social/KMS home on the name path = no recognized session → provider sign-in with the
+        // enroll stashed (GoogleEnrollResume finishes the grant incl. the payment leg).
+        if (via === 'google' || via === 'youversion') {
+          api.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with your provider…', idp: true });
+          const stash = JSON.stringify({ enroll: api.enroll, popupMode: api.popupMode, name: toAgentName(nameLabel(name)) });
+          if (via === 'youversion') continueWithYouVersion(undefined, stash); else continueWithGoogle(undefined, stash);
+          return;
+        }
+        setView({ k: 'enroll-existing', name, agent: info.agent, via });
+      }
       else setView({ k: 'journey', variant: 'enroll-new', name });
     }} />;
   }
