@@ -1569,6 +1569,30 @@ async function nameManagedAgentSocial(
   return { ok: true, name: b.name };
 }
 
+/** Reconcile the member's person-treasury from the AUTHORITATIVE on-chain naming registry when the
+ *  related-orgs projection misses it (observed 2026-07-17: the portal shows the treasury but the
+ *  connect ceremony's listManagedAgents view lacks it, so x402-pay silently skipped the payment leg).
+ *  Portal naming convention: `<label>-treasury.<tld>`. Reconciling a projection from its source is
+ *  not a fallback mechanism (ADR-0013). Returns null when the name doesn't resolve. */
+export async function resolveTreasuryByConvention(memberName: string | undefined): Promise<Address | null> {
+  const m = (memberName ?? '').trim().toLowerCase();
+  const dot = m.indexOf('.');
+  if (!m || dot <= 0) return null;
+  const candidate = `${m.slice(0, dot)}-treasury${m.slice(dot)}`;
+  try {
+    const { AgentNamingClient } = await import('@agenticprimitives/agent-naming');
+    const naming = new AgentNamingClient({
+      rpcUrl: DEFAULT_RPC_URL,
+      chainId: CHAIN_ID,
+      registry: CONTRACTS.agentNameRegistry,
+      universalResolver: CONTRACTS.agentNameUniversalResolver,
+    });
+    return ((await naming.resolveName(candidate)) as Address | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** List the member's managed agents (all kinds) from their home vault — one read path
  *  (the same /connect/related-orgs the orgs view already uses, MAM-D7). */
 export async function listManagedAgents(sessionToken: string): Promise<ManagedAgent[]> {

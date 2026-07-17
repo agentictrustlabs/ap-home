@@ -20,7 +20,7 @@ import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
-import { fetchProfile, listManagedAgents } from '../../connect-client';
+import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
 import type { DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';

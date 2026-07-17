@@ -16,6 +16,7 @@ import { recordConnectedApp } from '../../lib/connected-apps';
 import { setSsoCookie } from '../../lib/sso-cookie';
 import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
+import { listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -137,13 +138,41 @@ export function GoogleEnrollResume() {
     try {
       // SEC-001: server-mint the enrollment grant FIRST; use the registry-derived delegate.
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
+      // spec 272/243 — x402-pay: this OAuth-return path is the TERMINAL leg for every social re-auth
+      // (the nameless-connect forced chooser routes here), so it MUST run the payment leg too — it
+      // previously connected site-login-only, silently skipping the charge (2026-07-17). Resolve the
+      // member's person-treasury (projection first, then the authoritative naming registry) and
+      // authorize + charge in the same ceremony, exactly like RecognizedEnroll.
+      let payment: Parameters<typeof givePermission>[5];
+      let treasuryAddr: `0x${string}` | null = null;
+      const pc = relyingApp?.paymentConfig;
+      if (enroll.template === 'x402-pay' && pc) {
+        try {
+          treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as `0x${string}`) ?? null;
+        } catch (e) { console.warn('[google-resume] listManagedAgents failed:', e); }
+        if (!treasuryAddr) {
+          treasuryAddr = await resolveTreasuryByConvention(home.name);
+          if (treasuryAddr) console.warn('[google-resume] person-treasury reconciled from ANS:', treasuryAddr);
+        }
+        if (treasuryAddr) {
+          const cap = BigInt(pc.maxAmountPerCharge);
+          const req = enroll.payAmount ? BigInt(enroll.payAmount) : cap;
+          payment = {
+            treasury: treasuryAddr, payee: pc.payee, asset: pc.asset,
+            maxAmountPerCharge: cap, maxAggregate: BigInt(pc.maxAggregate),
+            maxRedemptionsPerWindow: pc.maxRedemptionsPerWindow, windowSeconds: pc.windowSeconds, mode: pc.mode,
+            chargeNow: true, chargeAmount: req < cap ? req : cap, edition: 'lbsb',
+            subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
+          };
+        }
+      }
       // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
-      const granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey);
+      const granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
       if (!granted.ok) return fail(granted.error);
       // spec 278 — turn on the member's encrypted vault during enroll (Google signs via KMS, no
       // gesture; skipped if already bound). Best-effort — must not block the connect.
       try { await activateVaultIfNeeded(home.address, 'google', { token }); } catch { /* non-fatal */ }
-      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation);
+      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
       // means a follow-on home operation — e.g. org-create at `<handle>.impact-agent.me`, which arrives

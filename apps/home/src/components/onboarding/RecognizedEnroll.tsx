@@ -22,7 +22,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, resolveVia, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
-import { fetchProfile, listManagedAgents } from '../../connect-client';
+import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -235,8 +235,14 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         let treasuryAddr: Address | null = null;
         try {
           treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null;
-        } catch {
+        } catch (e) {
+          console.warn('[connect] listManagedAgents failed (treasury projection unavailable):', e);
           treasuryAddr = null;
+        }
+        // Projection miss → reconcile from the authoritative naming registry (`<label>-treasury.<tld>`).
+        if (!treasuryAddr) {
+          treasuryAddr = await resolveTreasuryByConvention(home.name);
+          if (treasuryAddr) console.warn('[connect] person-treasury reconciled from ANS (projection was stale):', treasuryAddr);
         }
         // ALL custodians (wallet / passkey / social-KMS) — the charge is signed via signHashFor, which
         // handles every credential. With no treasury we connect without payment and the app surfaces
