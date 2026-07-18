@@ -345,7 +345,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // Bounded cosmetic follow-up polls so it appears without a manual reload; detection stays
       // entirely server-side — this only refreshes the view when a reply is plausibly coming.
       const a = channels?.find((c) => c.descriptor.id === active)?.assistant;
-      const mentioned = a && (a.trigger === 'all' || (a.mentionHandle && new RegExp(`@${a.mentionHandle}\\b`, 'i').test(body)));
+      const mentioned = a && (a.trigger === 'all' || /(?:^|[^a-z0-9-])@ask(?![a-z0-9-])/i.test(body) || (a.mentionHandle && new RegExp(`@${a.mentionHandle}\\b`, 'i').test(body)));
       if (mentioned) { setTimeout(() => void load(), 3500); setTimeout(() => void load(), 8000); }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -636,9 +636,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                       : `Open · all ${listings.length} members participate · ${channel.messages.length} messages`}
                     {channel.assistant && (
                       <span
-                        title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @${channel.assistant.mentionHandle}` : 'answers every post'}`}
+                        title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @ask (or @${channel.assistant.mentionHandle})` : 'answers every post'}`}
                       >
-                        {channel.assistant.trigger === 'mention' ? ` · 🤖 @${channel.assistant.mentionHandle}` : ' · 🤖 auto'}
+                        {channel.assistant.trigger === 'mention' ? ' · 🤖 @ask' : ' · 🤖 auto'}
                       </span>
                     )}
                   </div>
@@ -761,7 +761,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 placeholder={orgVault === false
                   ? 'Enable discussion storage to post'
                   : channel.assistant?.trigger === 'mention' && channel.assistant.mentionHandle
-                    ? `Message # ${channel.title} — @${channel.assistant.mentionHandle} to ask the assistant`
+                    ? `Message # ${channel.title} — @ask to ask the assistant`
                     : `Message # ${channel.title}`}
               />
             </>
