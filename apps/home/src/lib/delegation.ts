@@ -4,12 +4,14 @@
 // custodian of the person SA. Signed off-chain (EIP-712 `hashDelegation`) by the ROOT
 // passkey via the same WebAuthn path that signs UserOps; the SA's ERC-1271 validates it at
 // redemption. No new contracts — DelegationManager + enforcers are deployed.
+import { keccak256, toBytes } from 'viem';
 import {
   type Delegation,
   type Caveat,
   buildCaveat,
   encodeTimestampTerms,
   encodeAllowedTargetsTerms,
+  encodeAllowedMethodsTerms,
   encodeValueTerms,
   buildPaymentMandateCaveats,
   buildVaultKeyUseCaveat,
@@ -420,6 +422,55 @@ export async function issueMemberProfileAccessDelegation(
   const d: Delegation = { delegator: member, delegate: orgSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = await signHash(digest); // the member's connection custodian consents to org membership
+  return d;
+}
+
+// ─── spec 329 §2.1 — the consultability delegation (member → org) ─────────────────────────────
+
+/** The consult A2A skill (spec 329 §3). Kept as a local literal (this transport-agnostic module
+ *  takes no fabric/a2a dependency — the INBOX_DELIVERY_RESOURCE_SCOPE precedent); demo-a2a's
+ *  `authorizeA2aMessage` derives the same selector from the same string at the member's gate. */
+export const CONSULT_SKILL = 'discussion.consult' as const;
+
+/** 4-byte A2A skill selector: keccak256(utf8(skill))[:4] — byte-for-byte the
+ *  `@agenticprimitives/a2a` `skillSelector` the member's gate decodes against. */
+export function consultSkillSelector(): Hex {
+  return keccak256(toBytes(CONSULT_SKILL)).slice(0, 10) as Hex;
+}
+
+/** Default consultability lifetime (spec 329 §2.1): 180 days; re-opt-in refreshes. */
+export const CONSULT_GRANT_VALIDITY_SECONDS = 180 * 24 * 60 * 60;
+
+/**
+ * spec 329 §2.1 — the OPT-IN consultability delegation `member → org`, signed by the MEMBER's
+ * connection custodian at the Home ceremony (spec 321's third, member-signed leg). Authorizes the
+ * ORG (the delegate — never a router service account) to submit A2A tasks to the MEMBER's agent
+ * for the `discussion.consult` skill ONLY:
+ *   allowedTargets = [the member SA]  (the grant is non-replayable against another agent),
+ *   allowedMethods = [consult selector]  (NEVER A2A_ANY_SKILL),
+ *   timestamp-bounded (default 180 days), on-chain revocable (revocation is immediate at the
+ *   member's gate regardless of what the org has cached).
+ * The member's A2A gate (`authorizeA2aMessage`, spec 269 FR-4) re-verifies ALL of it per message —
+ * this delegation IS the authority; the listing's `consultable` flag is only the routing hint.
+ */
+export async function issueConsultabilityDelegation(
+  member: Address,
+  orgSA: Address,
+  signHash: SignHash,
+  validitySeconds = CONSULT_GRANT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([member])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([consultSkillSelector()])),
+  ];
+  const d: Delegation = { delegator: member, delegate: orgSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the member's connection custodian consents to consultation
   return d;
 }
 

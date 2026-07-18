@@ -3,16 +3,23 @@
 // Messages ⚙ "Messaging settings" dialog (0c07dde6): a horizontal sub-tab row —
 //   · "Message bot"  — the auto-reply assistant on/off, plus the messaging/delivery status it
 //                      depends on (vault-stored bodies must be enabled before the bot can reply).
-//   · "SKILL.md"     — the playbook docs. Today: the personal auto-reply playbook; the list is
-//                      structured so more SKILL.md docs can join later.
-// Reuses the existing /connect/inbox-assistant route and the spec-323 delivery activation — this
-// file is a relocation, not new backend work. MessagesView shares useMessagingDelivery for its
-// in-context nudge banner.
+//   · "Discussions"  — spec 329 §7: per-org "Discussion participation" — the consultability
+//                      opt-in. The toggle RUNS THE CEREMONY: signs the member→org consult
+//                      delegation (the authority, 180 days, discussion.consult only) and
+//                      republishes the member's directory listing with the `consultable` hint.
+//                      Revoke = immediate (org-side eligibility drop + best-effort on-chain revoke).
+//   · "SKILL.md"     — the playbook docs. Today: the personal playbook (auto-replies AND, per
+//                      spec 329, consult answers); the list is structured so more docs can join.
+// Reuses /connect/inbox-assistant + /connect/consultability + the spec-323 delivery activation.
+// MessagesView shares useMessagingDelivery for its in-context nudge banner.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
-import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, type Via } from '../../../home/onboarding';
+import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../../lib/inbox-delivery';
+import { issueConsultabilityDelegation, toWire, type DelegationWire } from '../../../lib/delegation';
+import { issueDirectoryListing } from '../../../home/directory';
+import { revokeGrantedDelegation } from '../../../connect-client';
 import { shortId } from '../../../home/use-inbox';
 import { BusyButton } from '../../shared/BusyButton';
 import { Tabs, type TabItem } from '../../shared/ui';
@@ -75,8 +82,23 @@ const SKILL_DOCS = [
   { id: 'messages', label: 'Messages — personal auto-reply playbook' },
 ] as const;
 
+/** spec 329 §2.3 — the consent copy the opt-in MUST state (verbatim; topic-context disclosure). */
+const CONSULT_CONSENT_COPY =
+  "Questions from this organization's discussions — including surrounding discussion context — " +
+  "will be sent to your agent. Your agent's reply may be quoted, with your name, in the discussion.";
+
+/** One org row of the member's consultability state (/connect/consultability GET). */
+interface ConsultOrgRow {
+  orgAgent: string;
+  orgName: string;
+  relationship: string;
+  consultable: boolean;
+  consultGrantedAt: string | null;
+  consultDelegation: DelegationWire | null;
+}
+
 export function AgentTab() {
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress, agentName, profile: homeProfile } = useSession();
   const delivery = useMessagingDelivery();
 
   // spec 328 §6 — the owner's auto-reply assistant (person inbox only; never managed inboxes).
@@ -87,6 +109,11 @@ export function AgentTab() {
   const [skillText, setSkillText] = useState('');
   const [skillBusy, setSkillBusy] = useState(false);
   const [skillSaved, setSkillSaved] = useState(false);
+
+  // spec 329 §7 — per-org discussion-participation (consultability) state.
+  const [consultOrgs, setConsultOrgs] = useState<ConsultOrgRow[] | null>(null);
+  const [consultBusyOrg, setConsultBusyOrg] = useState<string | null>(null);
+  const [consultError, setConsultError] = useState<string | null>(null);
 
   const authedHeaders = useMemo(
     () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
@@ -123,6 +150,66 @@ export function AgentTab() {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setAssistantBusy(false); }
   }, [assistant, authedHeaders]);
+
+  const loadConsultOrgs = useCallback(async () => {
+    if (!authedHeaders) return;
+    try {
+      const r = await fetch('/connect/consultability', { headers: authedHeaders });
+      const b = (await r.json().catch(() => ({}))) as { ok?: boolean; orgs?: ConsultOrgRow[] };
+      if (r.ok && b.ok) setConsultOrgs(b.orgs ?? []);
+    } catch { /* row list stays in the checking state */ }
+  }, [authedHeaders]);
+
+  useEffect(() => { void loadConsultOrgs(); }, [loadConsultOrgs]);
+
+  // spec 329 §2.1/§2.2 — the opt-in ceremony. AUTHORITY FIRST (the member-signed consult
+  // delegation, custodied at the org's execution point), THEN the listing HINT (republish with
+  // `consultable`). A failed hint publish leaves a delegation the router never surfaces — safe;
+  // a failed grant leaves nothing. Revoke: org-side eligibility drop (immediate) + best-effort
+  // ON-CHAIN revocation with the returned wire + hint clear.
+  const toggleConsult = useCallback(async (row: ConsultOrgRow) => {
+    if (!session || !agentAddress || !authedHeaders) return;
+    const org = row.orgAgent.toLowerCase();
+    setConsultBusyOrg(org); setConsultError(null);
+    try {
+      const sign = await signHashFor(resolveVia(homeProfile?.credential, session.via), agentAddress as Address, { token: session.token });
+      const displayName = agentName ?? `member-${agentAddress.slice(2, 8)}`;
+      if (!row.consultable) {
+        const d = await issueConsultabilityDelegation(agentAddress as Address, org as Address, sign);
+        const res = await fetch('/connect/consultability', {
+          method: 'POST', headers: authedHeaders,
+          body: JSON.stringify({ action: 'grant', org, delegation: toWire(d) }),
+        });
+        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !b.ok) throw new Error(b.error ?? `consult opt-in failed (${res.status})`);
+        // The routing hint: republish the listing with the consultable flag (re-signed).
+        const listing = await issueDirectoryListing(agentAddress as Address, sign, { communityId: org, displayName, consultable: true });
+        const pub = await fetch('/connect/directory', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'publish', listing }) });
+        const pb = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!pub.ok || !pb.ok) {
+          // Delegation stored, hint missing ⇒ routing won't surface you yet (fail-closed, honest).
+          setConsultError(pb.error ? `Opted in, but the listing flag did not publish: ${pb.error}` : 'Opted in, but the listing flag did not publish — try toggling again.');
+        }
+      } else {
+        const res = await fetch('/connect/consultability', {
+          method: 'POST', headers: authedHeaders,
+          body: JSON.stringify({ action: 'revoke', org }),
+        });
+        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; consultDelegation?: DelegationWire | null };
+        if (!res.ok || !b.ok) throw new Error(b.error ?? `consult revoke failed (${res.status})`);
+        // Best-effort ON-CHAIN revocation (the authority kill at your own gate) + hint clear.
+        if (b.consultDelegation) {
+          const rr = await revokeGrantedDelegation(b.consultDelegation, sign).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+          if (!rr.ok) setConsultError(`Opt-out recorded; on-chain revocation did not land: ${rr.error}`);
+        }
+        const listing = await issueDirectoryListing(agentAddress as Address, sign, { communityId: org, displayName });
+        await fetch('/connect/directory', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'publish', listing }) }).catch(() => null);
+      }
+      await loadConsultOrgs();
+    } catch (e) {
+      setConsultError(e instanceof Error ? e.message : String(e));
+    } finally { setConsultBusyOrg(null); }
+  }, [session, agentAddress, agentName, authedHeaders, homeProfile?.credential, loadConsultOrgs]);
 
   const saveSkill = useCallback(async () => {
     if (!authedHeaders) return;
@@ -199,6 +286,64 @@ export function AgentTab() {
     </div>
   );
 
+  // spec 329 §7 — the per-org "Discussion participation" section. Icon-only toggle conventions
+  // (aria-pressed, dim when off) match the 🤖 assistant toggle above; revoke is immediate.
+  const discussionsPanel = (
+    <div style={{ display: 'grid', gap: '1rem', paddingTop: '0.9rem' }}>
+      <section aria-label="Discussion participation">
+        <h3 style={sectionTitleSty}>Discussion participation</h3>
+        <p style={{ margin: '0 0 0.6rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+          Let an organization&rsquo;s assistant consult <i>your</i> agent when a discussion question
+          matches what you know. Per organization, revocable any time. {CONSULT_CONSENT_COPY}
+        </p>
+        {consultOrgs === null ? (
+          <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>Checking your organizations…</p>
+        ) : consultOrgs.length === 0 ? (
+          <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+            You don&rsquo;t belong to any organizations yet — join one and its row appears here.
+          </p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.4rem' }}>
+            {consultOrgs.map((row) => (
+              <li key={row.orgAgent} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.4rem 0.65rem' }}>
+                <BusyButton
+                  busy={consultBusyOrg === row.orgAgent.toLowerCase()}
+                  busyLabel="…"
+                  onClick={() => void toggleConsult(row)}
+                  className="ghost"
+                  disabled={consultBusyOrg !== null}
+                  aria-label={row.consultable
+                    ? `Consultable for ${row.orgName} — click to revoke`
+                    : `Let ${row.orgName}'s assistant consult your agent`}
+                  aria-pressed={row.consultable}
+                  style={row.consultable ? undefined : { opacity: 0.45 }}
+                  title={row.consultable
+                    ? `Your agent may be consulted for ${row.orgName}'s discussions — click to revoke (immediate)`
+                    : `Opt in: sign a scoped, revocable grant so ${row.orgName}'s assistant may ask your agent discussion questions`}
+                >
+                  🗣
+                </BusyButton>
+                <span style={{ fontSize: '0.82rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <b>{row.orgName}</b>
+                  {' — '}
+                  {row.consultable
+                    ? <>consultable{row.consultGrantedAt ? ` since ${new Date(row.consultGrantedAt).toLocaleDateString()}` : ''}</>
+                    : 'not consultable'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {consultError && <p role="alert" style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--color-danger)' }}>{consultError}</p>}
+        <p style={{ margin: '0.6rem 0 0', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+          Opting in signs a delegation scoped to exactly one skill (discussion questions) for that
+          organization only, valid 180 days. Your SKILL.md playbook also governs how your agent
+          answers — including when to decline.
+        </p>
+      </section>
+    </div>
+  );
+
   const skillPanel = (
     <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.9rem' }}>
       <div role="group" aria-label="SKILL.md documents" style={{ display: 'grid', gap: '0.25rem' }}>
@@ -226,8 +371,9 @@ export function AgentTab() {
         <div>
           <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
             Assistant instructions (markdown; the reply contract — one reply per message — always applies
-            regardless). Personal 1:1 auto-replies only — organization board playbooks are edited on each
-            organization&rsquo;s Discussions page.
+            regardless). Governs your personal 1:1 auto-replies AND how your agent answers questions
+            routed from organization discussions you opted into (it may decline classes of questions).
+            Organization board playbooks are edited on each organization&rsquo;s Discussions page.
             {assistant !== null && !assistant.enabled && (
               <> The message bot is currently <b>off</b> — these instructions take effect when it&rsquo;s on.</>
             )}
@@ -257,6 +403,7 @@ export function AgentTab() {
 
   const tabs: TabItem[] = [
     { id: 'message-bot', label: 'Message bot', content: messageBot },
+    { id: 'discussions', label: 'Discussions', content: discussionsPanel },
     { id: 'skill-md', label: 'SKILL.md', content: skillPanel },
   ];
 

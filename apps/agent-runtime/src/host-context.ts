@@ -112,6 +112,17 @@ export async function resolveAgentByLabel(
 /** One A2A skill-card entry (A2A protocol shape). */
 export interface A2aSkill { id: string; name: string; description?: string; tags?: string[] }
 
+/** spec 329 §3 — the `discussion.consult` card entry for a PERSON agent with ≥1 active
+ *  consultability delegation. Surfaced the same way `atl:skills` labels surface (spec 282):
+ *  a card DESCRIPTION, never authority — reachability is the member's delegation gate alone. */
+export const CONSULT_SKILL_CARD: A2aSkill = { id: 'discussion.consult', name: 'Discussion consult', tags: ['skill'] };
+
+/** Append the consult skill card iff the agent is consultable somewhere (dedup-safe). */
+export function withConsultSkill(skills: A2aSkill[], consultable: boolean): A2aSkill[] {
+  if (!consultable || skills.some((s) => s.id === CONSULT_SKILL_CARD.id)) return skills;
+  return [...skills, CONSULT_SKILL_CARD];
+}
+
 /** Map an agent's publicly-asserted skill labels (spec 282 `atl:skills`, comma-joined) to A2A skill cards. */
 export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
   if (!csv) return [];

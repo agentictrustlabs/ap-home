@@ -34,6 +34,10 @@ export async function issueDirectoryListing(
     subject?: Address;
     contextKind?: string;
     visibility?: 'community' | 'public';
+    /** spec 329 §2.2 — the org-scoped consultability HINT (aporg:consultable). Set at the opt-in
+     *  ceremony alongside the member→org consult delegation (the authority); cleared by
+     *  re-publishing without it. Absent ⇒ false. */
+    consultable?: boolean;
   },
 ): Promise<DirectoryListingV1> {
   const subject = homeCaip10(opts.subject ?? signerAgent);
@@ -44,6 +48,7 @@ export async function issueDirectoryListing(
     context: { kind: opts.contextKind ?? 'community', id: opts.communityId, label: opts.communityLabel },
     displayName: opts.displayName,
     roles: opts.roles,
+    ...(opts.consultable ? { consultable: true } : {}),
     visibility: opts.visibility ?? 'community',
     publishedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (opts.validityDays ?? 180) * 86_400_000).toISOString(),

@@ -34,12 +34,23 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import { runOrchestration } from './orchestration.js';
 import { handleDiscussionRespond, type DiscussionRespondInput } from './discussion-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
+import { handleConsultRespond } from './consult-skill.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
+import { caip10 } from './custody-oidc.js';
+import type { CanonicalAgentId } from '@agenticprimitives/types';
+import {
+  CONSULT_RATE_MAX,
+  CONSULT_RATE_WINDOW_MS,
+  CONSULT_SKILL_ID,
+  fixedWindowAllow,
+  parseConsultRequest,
+  type FixedWindowState,
+} from '@agenticprimitives/fabric/messaging';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { callMcpToolWithProof, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolWithProof, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -94,6 +105,103 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
 
 const AGENT_SA_KEY = '__a2a_agent_sa';
 const ALARM_DELAY_MS = 1500;
+
+// ── spec 329 §3 — the `discussion.consult` skill on PERSON agents ────────────────────────────────────
+/** Member-side per-org consult rate bucket key (DO storage; fixed window 12/hour/org). */
+const CONSULT_RATE_KEY = (orgSA: string): string => `consult.rate:${orgSA.toLowerCase()}`;
+
+/**
+ * The consult skill handler (spec 329 §3.2). Registered on EVERY agent's DO alongside the
+ * messaging skills — REACHABILITY is the delegation gate's alone (`authorizeA2aMessage`: the
+ * member-signed consultability grant must name the org as delegate, THIS agent in allowedTargets,
+ * and the `discussion.consult` selector in allowedMethods; on-chain isRevoked + ERC-1271 per
+ * message). No delegation, no consult (ADR-0013). The handler adds the belts the gate can't see:
+ *   • delegator === THIS agent (the grant is the MEMBER's own opt-in — a third party's grant
+ *     naming this agent as a target is not consultability);
+ *   • the payload's context.orgSA === the VERIFIED sender (no org spoofing inside the body);
+ *   • the member-side per-org fixed window (12/hour/org — spec 329 §3.2), audited on exceed.
+ * The turn itself is the Ring-0 loop in ./consult-skill.ts; the structured ConsultAnswer artifact
+ * is the task's terminal (decline included — an explicit decline COMPLETES with a declined
+ * artifact; only pipeline errors fail the task).
+ */
+function makeConsultSkill(env: Env, agentSA: Address, storage: DurableObjectStorage): SkillHandler {
+  return {
+    skill: CONSULT_SKILL_ID,
+    handle: async (ctx) => {
+      const audit = buildAuditSink(env);
+      const orgSender = ctx.sender.toLowerCase();
+      const auditRow = (action: string, outcome: 'success' | 'denied' | 'error', subjectId: string, reason?: string) =>
+        audit.write({
+          id: crypto.randomUUID(), timestamp: new Date().toISOString(), action, outcome,
+          actor: { type: 'service', id: orgSender }, subject: { type: 'consult', id: subjectId },
+          ...(reason ? { reason } : {}),
+        }).catch(() => undefined);
+
+      // The consultability grant is the MEMBER's own opt-in: its delegator must BE this agent.
+      if (ctx.principal.toLowerCase() !== agentSA.toLowerCase()) {
+        await auditRow('a2a.consult.received', 'denied', orgSender, 'delegation delegator is not this member agent');
+        return { state: 'failed', error: 'consult grant must be signed by this member agent (delegator mismatch)' };
+      }
+      const parsed = parseConsultRequest(ctx.input);
+      if (!parsed.ok) {
+        await auditRow('a2a.consult.received', 'denied', orgSender, parsed.error);
+        return { state: 'failed', error: parsed.error };
+      }
+      const { request } = parsed;
+      // No org spoofing inside the body: the carried orgSA must be the VERIFIED sender.
+      if (request.context.orgSA !== orgSender) {
+        await auditRow('a2a.consult.received', 'denied', request.context.questionId, 'context.orgSA does not match the verified sender');
+        return { state: 'failed', error: 'context.orgSA must be the verified consulting org (sender)' };
+      }
+      await auditRow('a2a.consult.received', 'success', request.context.questionId);
+
+      // Member-side per-org fixed window (spec 329 §3.2: 12/hour/org). Exceed ⇒ typed fail, audited.
+      const rateKey = CONSULT_RATE_KEY(orgSender);
+      const prev = (await storage.get(rateKey)) as FixedWindowState | undefined;
+      const rate = fixedWindowAllow(prev, Date.now(), { windowMs: CONSULT_RATE_WINDOW_MS, max: CONSULT_RATE_MAX });
+      if (!rate.allowed) {
+        await auditRow('a2a.consult.rateLimited', 'denied', request.context.questionId);
+        return { state: 'failed', error: `consult rate limit exceeded for this organization (${CONSULT_RATE_MAX}/hour)` };
+      }
+      await storage.put(rateKey, rate.next);
+
+      const memberCaip = caip10(Number(env.CHAIN_ID ?? 84532), agentSA) as CanonicalAgentId;
+      try {
+        const turn = await handleConsultRespond(env, { member: memberCaip, request }, {
+          // Harness pre-read (spec 328 §4b record): the member's playbook + display name via the
+          // marker-gated internal op on THEIR InteractionsDO. Best-effort enrichment — a member who
+          // never enabled interactions answers under the default playbook, same mechanism.
+          readContext: async () => {
+            const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
+            if (!secret) throw new Error('no internal marker configured');
+            const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(agentSA.toLowerCase()));
+            const resp = await stub.fetch(new Request(`https://do/interactions/${agentSA.toLowerCase()}/internal.consult.context`, {
+              method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify({}),
+            }));
+            const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+            if (!resp.ok || out.ok === false) throw new Error(out.error ?? `consult context read failed (${resp.status})`);
+            return out;
+          },
+        });
+        if (!turn.answer) {
+          await auditRow('a2a.consult.answered', 'error', request.context.questionId, turn.error ?? turn.result.error ?? 'turn completed without a terminal');
+          return { state: 'failed', error: turn.error ?? turn.result.error ?? 'consult turn completed without posting an answer' };
+        }
+        const artifactId = await ctx.emitArtifact({
+          artifactKind: 'consult.answer',
+          body: turn.answer,
+          bodyContentType: 'application/json',
+        });
+        await auditRow(turn.answer.declined ? 'a2a.consult.declined' : 'a2a.consult.answered', 'success', request.context.questionId);
+        return { state: 'completed', artifactIds: [artifactId] };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await auditRow('a2a.consult.answered', 'error', request.context.questionId, msg);
+        return { state: 'failed', error: msg };
+      }
+    },
+  };
+}
 
 /** Normalize a JSON-wire delegation (string salt, optional caveat args) into the package's shape. */
 function normalizeDelegation(d: Record<string, unknown>): Delegation {
@@ -253,7 +361,9 @@ export class A2aTaskDO {
       // agent's DO (this IS its inbox gateway).
       // spec 322 W3f: the inbox.data merge rides the recipient's InteractionsDO (in-Worker
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
+      // ONLY under a member-signed consultability grant naming the org + this skill's selector).
+      checks, handlers: [echo, makeOrchestrateSkill(this.env), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));

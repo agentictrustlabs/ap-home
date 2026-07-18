@@ -20,6 +20,7 @@
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
+import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
   appendBoardPost,
   assistantTrigger,
@@ -35,6 +36,8 @@ import {
   setTopicAssistant,
   sha256Hex32,
   validateDirectoryListing,
+  CONSULT_SKILL_ID,
+  consultGrantRecordKey,
   type ChannelMessageEntryV1,
   type ChannelV1,
   type ConversationDescriptorV1,
@@ -625,7 +628,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -802,6 +805,20 @@ export class InteractionsDO {
             const seen = (await this.state.storage.get(INBOX_ASSISTANT_SEEN_KEY)) as string[] | undefined;
             if (seen) await this.state.storage.put(INBOX_ASSISTANT_SEEN_KEY, [...seen, envelope.id].slice(-INBOX_ASSISTANT_SEEN_CAP));
             return json({ ok: true, messageId: envelope.id });
+          });
+        }
+        // ── spec 329 §3.2 — the consult turn's harness pre-read (in-Worker marker only): the
+        // member's SKILL.md playbook (the spec-328 §4b record — ONE playbook governs auto-replies
+        // AND consult answers) + their display name. Deliberately NOT gated on the auto-reply
+        // assistant being enabled: consultability is its own opt-in (the delegation); the playbook
+        // is guidance either way. Read-only; returns markdown + name, never bodies or mail.
+        if (op === 'internal.consult.context') {
+          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, PERSON_ASSISTANT_SKILL_RESOURCE, null);
+          const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
+          return json({
+            ok: true,
+            ...(skill?.markdown?.trim() ? { skillMarkdown: skill.markdown } : {}),
+            ...(cfg?.displayName ? { displayName: cfg.displayName } : {}),
           });
         }
         if (op === 'invite.get' || op === 'invite.put') {
@@ -1429,6 +1446,93 @@ export class InteractionsDO {
         if (body.membership === undefined) return json({ error: 'membership (SituationV2) required' }, 400);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.membership.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'org-membership', id: org } });
         await this.vaultFor(grant).write({ owner: '', resource: MEMBERSHIP_RESOURCE(org), data: { membership: body.membership, credential: body.credential ?? null }, classification: 'internal' } as never);
+        return json({ ok: true });
+      }
+
+      // ── spec 329 §2.1 — consultability grant custody (member → org) on the ORG's DO. The wire
+      //    is a capability and lives WITH its delegate service (the org SA is the delegate; this
+      //    DO is the org's execution point — the spec-322 §2 / 323 W3 custody rule), keyed by the
+      //    spec's record name `org.consult-grant:<memberSA>`. NOTE (deviation from §2.1's vault
+      //    residency, recorded in the spec): the deployed grant scopes cover no
+      //    `vault:org.consult-grant:*` resource, and widening them forces a fleet-wide re-enable
+      //    ceremony — so W1 custodies the wire in DO storage under the SAME key; W2's
+      //    `find_members` eligibility read comes here. Fail-closed verification at store time:
+      //    self-consent (session SA === delegator), delegate === this org, allowedTargets ===
+      //    [the member], allowedMethods === the `discussion.consult` selector ONLY (never
+      //    A2A_ANY_SKILL), timestamp caveat present, ERC-1271 + unrevoked on-chain. The MEMBER's
+      //    A2A gate re-verifies everything again per message — this store is eligibility, never
+      //    the authority (the delegation itself is).
+      if (op === 'consult.grantPut' || op === 'consult.grantStatus' || op === 'consult.grantRevoke') {
+        if (op === 'consult.grantPut') {
+          const wire = body.delegation as IncomingDelegation | undefined;
+          if (!wire?.signature || !wire.delegator || !wire.delegate) return json({ error: 'signed consultability delegation required' }, 400);
+          const member = wire.delegator.toLowerCase();
+          // The member consents for THEMSELVES only (the same self gate as inbox.assistantEnable).
+          if (sessionSa.toLowerCase() !== member) return json({ error: 'consultability is the member\'s own consent — self grant only' }, 403);
+          if (wire.delegate.toLowerCase() !== principal) return json({ error: 'consult grant delegate must be this organization' }, 400);
+          // Caveat shape (spec 329 §2.1): allowedTargets = [memberSA]; allowedMethods = [consult
+          // selector] (never the any-skill sentinel); timestamp-bounded. Fail closed on missing
+          // enforcer config — an unverifiable shape is never stored.
+          const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+          const atEnf = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+          const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+          if (![tsEnf, atEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
+            return json({ error: 'consult grant enforcers not configured — cannot verify the grant shape' }, 503);
+          }
+          const caveats = wire.caveats ?? [];
+          const byEnforcer = (addr: string) => caveats.find((c) => (c.enforcer ?? '').toLowerCase() === addr);
+          if (!byEnforcer(tsEnf)) return json({ error: 'consult grant must be timestamp-bounded' }, 400);
+          const atCav = byEnforcer(atEnf);
+          const amCav = byEnforcer(amEnf);
+          if (!atCav?.terms || !amCav?.terms) return json({ error: 'consult grant must carry allowedTargets + allowedMethods caveats' }, 400);
+          try {
+            const targets = decodeAllowedTargetsTerms(atCav.terms as Hex).map((t) => t.toLowerCase());
+            if (targets.length !== 1 || targets[0] !== member) return json({ error: 'consult grant allowedTargets must name exactly the member agent' }, 400);
+            const selectors = decodeAllowedMethodsTerms(amCav.terms as Hex).map((s) => s.toLowerCase());
+            const want = skillSelector(CONSULT_SKILL_ID).toLowerCase();
+            if (selectors.some((s) => s === A2A_ANY_SKILL.toLowerCase())) return json({ error: 'consult grant must never carry the any-skill sentinel' }, 400);
+            if (selectors.length !== 1 || selectors[0] !== want) return json({ error: 'consult grant allowedMethods must name exactly the discussion.consult selector' }, 400);
+          } catch {
+            return json({ error: 'consult grant caveat terms are undecodable' }, 400);
+          }
+          // ERC-1271 against the member + unrevoked on-chain (fail-closed junk-overwrite guard).
+          const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
+            return json({ error: 'consult grant signature failed verification against the member' }, 403);
+          }
+          try {
+            const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+            if (revoked) return json({ error: 'consult grant is already revoked on-chain' }, 403);
+          } catch { return json({ error: 'revocation check unavailable — grant not stored (fail-closed)' }, 503); }
+          const grantedAt = new Date().toISOString();
+          await this.state.storage.put(consultGrantRecordKey(member), { wire, member, grantedAt, hash: digest });
+          st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: principal, resources: [consultGrantRecordKey(member)], storedAt: grantedAt }].slice(-50);
+          await this.state.storage.put('state', st);
+          await audit.write({ id: crypto.randomUUID(), timestamp: grantedAt, action: 'interactions.consult.grantPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'consult-grant', id: `${principal}:${member}` } });
+          return json({ ok: true, grantedAt });
+        }
+        if (op === 'consult.grantStatus') {
+          // Self (the member asking about their own grant) or the org steward. Metadata only —
+          // the wire itself never leaves the DO (capability hygiene).
+          const member = String(body.member ?? sessionSa).toLowerCase();
+          const self = sessionSa.toLowerCase() === member;
+          const steward = self ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+          if (!self && !steward) return json({ error: 'consult grant status is self-or-steward only' }, 403);
+          const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { grantedAt?: string } | undefined;
+          return json({ ok: true, granted: !!rec, grantedAt: rec?.grantedAt ?? null });
+        }
+        // consult.grantRevoke — the member withdraws their opt-in (or the steward clears it).
+        // Removal here is the ORG-side eligibility kill (immediate: W2's find_members reads this
+        // store); the on-chain revocation — the authority kill at the MEMBER's gate — is the
+        // member's own client-side act (revokeGrantedDelegation), mirroring org-member-remove.
+        const member = String(body.member ?? sessionSa).toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
+        const self = sessionSa.toLowerCase() === member;
+        const steward = self ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!self && !steward) return json({ error: 'consult grant revoke is self-or-steward only' }, 403);
+        await this.state.storage.delete(consultGrantRecordKey(member));
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.consult.grantRevoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'consult-grant', id: `${principal}:${member}` } });
         return json({ ok: true });
       }
 
