@@ -4,7 +4,8 @@
   display: grid;
   grid-template-columns: minmax(240px, 300px) 1fr;
   gap: 0;
-  min-height: 480px;
+  /* Viewport-bounded: the thread/rail scroll INSIDE the shell — the page never grows with the conversation. */
+  height: clamp(480px, calc(100dvh - 200px), 100dvh);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-12);
   overflow: hidden;
@@ -39,7 +40,8 @@
   flex-direction: column;
   border-right: 1px solid var(--color-border);
   background: var(--color-surface-raised);
-  min-height: 480px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .chat-rail-search {
@@ -131,7 +133,7 @@
 .chat-thread {
   display: flex;
   flex-direction: column;
-  min-height: 480px;
+  min-height: 0;
   min-width: 0;
   background: var(--color-surface);
 }

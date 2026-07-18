@@ -562,6 +562,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 onChange={setComposeBody}
                 onSend={sendNew}
                 busy={busy === 'compose'}
+                rows={3}
                 placeholder="Write your message…"
               />
             </>
@@ -683,7 +684,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 </div>
 
                 {canReply ? (
-                  <MessageComposer value={draft} onChange={setDraft} onSend={sendReply} busy={busy === `reply:${activeId}`} />
+                  <MessageComposer value={draft} onChange={setDraft} onSend={sendReply} busy={busy === `reply:${activeId}`} rows={3} />
                 ) : (
                   <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', opacity: 0.6, borderTop: '1px solid var(--color-border)' }}>
                     {activeCase ? 'Respond with the request actions above.' : 'Replies open once the conversation has a two-party descriptor.'}

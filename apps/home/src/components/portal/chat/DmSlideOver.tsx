@@ -222,6 +222,7 @@ export function DmSlideOver({
           onSend={send}
           busy={busy !== null}
           disabled={!canSend}
+          rows={3}
           placeholder={composerPlaceholder}
         />
       </div>
