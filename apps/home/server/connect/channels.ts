@@ -157,6 +157,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors(r.body, request, r.status);
   }
   // Org-assistant enablement (spec 327) — steward-only; the DO owns the gate + name capture.
+  // spec 329 §7 — the steward's member-routing ceremony + per-topic toggle. Pass-through: the
+  // org's InteractionsDO verifies the wire (delegate = the interactions-session key, consult
+  // selector only, ERC-1271 + unrevoked) and custodies it; this route only adds the steward proof.
+  if (body?.action === 'routingStatus' || body?.action === 'routingEnable' || body?.action === 'routingDisable') {
+    const op = { routingStatus: 'consult.routingStatus', routingEnable: 'consult.routingEnable', routingDisable: 'consult.routingDisable' }[body.action]!;
+    const b = body as { channelId?: string; delegation?: unknown; maxFanout?: number; clearWire?: boolean };
+    const r = await callInteractions(env, communityId, op, {
+      session: who.token,
+      ...(b.channelId ? { channelId: b.channelId } : {}),
+      ...(b.delegation ? { delegation: b.delegation } : {}),
+      ...(b.maxFanout !== undefined ? { maxFanout: b.maxFanout } : {}),
+      ...(b.clearWire !== undefined ? { clearWire: b.clearWire } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
   if (body?.action === 'assistantEnable' || body?.action === 'assistantDisable') {
     const r = await callInteractions(env, communityId, body.action === 'assistantEnable' ? 'channels.assistantEnable' : 'channels.assistantDisable', {
       session: who.token, channelId: body.channelId ?? '',

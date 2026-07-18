@@ -14,7 +14,7 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import { type DelegationWire } from '../../lib/delegation';
+import { issueOrgConsultRoutingDelegation, toWire, type DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { BusyButton } from '../shared/BusyButton';
 import {
@@ -34,7 +34,8 @@ interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string; acto
 // participationPolicy (tbox/messaging.ttl): open — every org MEMBER participates automatically (derived
 // from membership; no stored list); restricted — invite-only, participation asserted per person.
 // assistant (spec 327): steward-enabled org-assistant participation on this topic.
-interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted'; assistant?: { trigger: 'mention' | 'all'; mentionHandle: string; displayName: string } }
+// routing (spec 329): steward-enabled member routing — the assistant may consult opted-in member agents.
+interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted'; assistant?: { trigger: 'mention' | 'all'; mentionHandle: string; displayName: string }; routing?: { maxFanout: number } }
 interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
 interface ParticipantRow { personSA: string; personName?: string; role: 'facilitator' | 'contributor'; derived?: boolean }
 interface PendingInviteRow { id: string; invitedAgent: string; invitedName?: string; role: 'facilitator' | 'contributor' }
@@ -405,6 +406,51 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   }, [active, channels, communityId, authed, load]);
 
 
+  // spec 329 §7 — steward toggle: member routing on the ACTIVE topic. Enabling runs the §3.1
+  // ceremony on first use: fetch the interactions-session key, sign the NARROW org consult wire
+  // with the org's custody credential (the steward's), and hand it to the org's execution point
+  // (which verifies + custodies it). Subsequent enables just flag the topic.
+  const [routingBusy, setRoutingBusy] = useState(false);
+  const toggleRouting = useCallback(async () => {
+    if (!active) return;
+    const enabled = !!channels?.find((c) => c.descriptor.id === active)?.routing;
+    setRoutingBusy(true); setError(null);
+    try {
+      if (enabled) {
+        const res = await fetch('/connect/channels', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({ action: 'routingDisable', communityId, channelId: active }),
+        });
+        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !b.ok) throw new Error(b.error ?? `routing disable failed (${res.status})`);
+      } else {
+        const stRes = await fetch('/connect/channels', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({ action: 'routingStatus', communityId }),
+        });
+        const st = (await stRes.json().catch(() => ({}))) as { ok?: boolean; wirePresent?: boolean; sessionKey?: string | null; error?: string };
+        if (!stRes.ok || !st.ok) throw new Error(st.error ?? `routing status failed (${stRes.status})`);
+        let delegation: DelegationWire | undefined;
+        if (!st.wirePresent) {
+          if (!st.sessionKey) throw new Error('routing is unavailable — the interactions-session key is not provisioned on this deployment');
+          if (!session) throw new Error('not signed in');
+          const via = resolveVia(homeProfile?.credential, session.via);
+          const sign = await signHashFor(via, communityId as Address, { token: session.token });
+          delegation = toWire(await issueOrgConsultRoutingDelegation(communityId as Address, st.sessionKey as Address, sign));
+        }
+        const res = await fetch('/connect/channels', {
+          method: 'POST', headers: authed,
+          body: JSON.stringify({ action: 'routingEnable', communityId, channelId: active, maxFanout: 3, ...(delegation ? { delegation } : {}) }),
+        });
+        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !b.ok) throw new Error(b.error ?? `routing enable failed (${res.status})`);
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setRoutingBusy(false); }
+  }, [active, channels, communityId, authed, load, session, homeProfile?.credential]);
+
   const listingBySubject = useMemo(() => {
     const m = new Map<string, Listing>();
     for (const l of listings) m.set(l.listing.subject.toLowerCase(), l);
@@ -641,6 +687,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                         {channel.assistant.trigger === 'mention' ? ' · 🤖 @ask' : ' · 🤖 auto'}
                       </span>
                     )}
+                    {channel.assistant && channel.routing && (
+                      <span title={`Member routing on — the assistant may consult up to ${channel.routing.maxFanout} opted-in members' agents per question`}>
+                        {' · 🧭 members'}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {steward && (
@@ -660,6 +711,22 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     >
                       🤖
                     </BusyButton>
+                    {channel.assistant && (
+                      <BusyButton
+                        busy={routingBusy}
+                        busyLabel="…"
+                        onClick={() => void toggleRouting()}
+                        className="manage-btn manage-btn--ghost"
+                        aria-label={channel.routing ? 'Member routing on — disable' : 'Enable member routing'}
+                        aria-pressed={Boolean(channel.routing)}
+                        style={channel.routing ? undefined : { opacity: 0.45 }}
+                        title={channel.routing
+                          ? 'Member routing on — the assistant may consult opted-in members’ agents. Click to disable.'
+                          : 'Let the assistant consult opted-in members’ agents about questions in this topic (spec 329 — signs the routing authorization on first use)'}
+                      >
+                        🧭
+                      </BusyButton>
+                    )}
                     <BusyButton
                       busy={skillBusy && !skillOpen}
                       onClick={() => void openSkillEditor()}
@@ -704,6 +771,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   const next = channel.messages[idx + 1];
                   const firstOfGroup = !prev || prev.authorName !== m.authorName;
                   const lastOfGroup = !next || next.authorName !== m.authorName;
+                  // spec 329 §7 — the routed-consultation contextRef renders as a small chip on the
+                  // turn-1 status + turn-2 synthesis posts (member consultation happened here).
+                  const routed = (m.envelope.contextRefs ?? []).some((r) => r.kind === 'routed-consultation');
 
                   return (
                     <div
@@ -730,17 +800,27 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                           <span style={{ width: 30, flex: 'none' }} />
                         )
                       )}
-                      <MessageBubble
-                        mine={mine}
-                        body={bodies[m.envelope.id]}
-                        time={timeShort(m.envelope.createdAt)}
-                        authorName={m.authorName}
-                        authorBadge={m.actor ? 'agent' : undefined}
-                        showAuthor={!mine}
-                        firstOfGroup={firstOfGroup}
-                        lastOfGroup={lastOfGroup}
-                        onAuthorClick={() => openDm(m.authorName, l?.label, l?.listing.subject)}
-                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', minWidth: 0 }}>
+                        <MessageBubble
+                          mine={mine}
+                          body={bodies[m.envelope.id]}
+                          time={timeShort(m.envelope.createdAt)}
+                          authorName={m.authorName}
+                          authorBadge={m.actor ? 'agent' : undefined}
+                          showAuthor={!mine}
+                          firstOfGroup={firstOfGroup}
+                          lastOfGroup={lastOfGroup}
+                          onAuthorClick={() => openDm(m.authorName, l?.label, l?.listing.subject)}
+                        />
+                        {routed && (
+                          <span
+                            title="This reply involved consulting opted-in members’ agents (routed consultation)"
+                            style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', margin: '0.1rem 0.35rem 0' }}
+                          >
+                            🧭 member consultation
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

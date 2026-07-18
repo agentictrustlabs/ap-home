@@ -34,12 +34,19 @@ import {
   inboxAssistantTrigger,
   isListingCurrent,
   setTopicAssistant,
+  setTopicRouting,
   sha256Hex32,
   validateDirectoryListing,
   CONSULT_SKILL_ID,
+  ROUTED_CONSULTATION_CONTEXT_KIND,
+  ROUTING_FANOUT_DEFAULT,
   consultGrantRecordKey,
+  eligibleConsultMembers,
   type ChannelMessageEntryV1,
   type ChannelV1,
+  type ConsultProvenanceV1,
+  type ConsultRosterRowV1,
+  type ContextRefV1,
   type ConversationDescriptorV1,
   type DirectoryListingV1,
   type FixedWindowState,
@@ -54,7 +61,8 @@ import type { Vault } from '@agenticprimitives/vault';
 import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolBound, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
+import { checkConsultWireShape } from './consult-wire.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -115,6 +123,15 @@ const INBOX_ASSISTANT_RATE_KEY = (conversationId: string): string => `assistant.
 const INBOX_ASSISTANT_MAX_PER_SCAN = 2;
 /** Context bound for the assistant's conversation reads (spec 328 §4). */
 const INBOX_ASSISTANT_READ_LIMIT = 8;
+
+// spec 329 §3.1 — the DO-custodied ORG consult wire (the routing-enable ceremony's mint): a narrow
+// org-signed delegation (delegator = this org, delegate = the interactions-session KMS key,
+// allowedMethods = [discussion.consult selector]) that lets the org's runtime SIGN consult-rail
+// message/send + tasks/get digests as the org. A stored wire lives with its delegate service
+// (spec 322 §2); the KMS key itself never rests here. Clearing this key is the org-side routing
+// kill switch (the on-chain revocation is the authority kill at every member's gate).
+const ROUTING_ORG_WIRE_KEY = 'routing.orgWire';
+interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; sessionKey: string; enabledBy: string; enabledAt: string }
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
@@ -628,7 +645,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -710,6 +727,13 @@ export class InteractionsDO {
           const channelId = String(body.channelId ?? '');
           const bodyText = String(body.bodyText ?? '').trim();
           if (!channelId || !bodyText) return json({ error: 'channelId + bodyText required' }, 400);
+          // spec 329 §6 — the routing turns' posts may carry the `routed-consultation` contextRef
+          // (chip) + PROV attribution. PINNED: only that ref kind is accepted from the caller (the
+          // in-Worker assistant pipeline), so this seam can never smuggle arbitrary refs.
+          const extraRefs = (Array.isArray(body.contextRefs) ? (body.contextRefs as ContextRefV1[]) : [])
+            .filter((r) => r?.kind === ROUTED_CONSULTATION_CONTEXT_KIND && typeof r.id === 'string' && r.id.trim())
+            .slice(0, 2);
+          const prov = body.prov && typeof body.prov === 'object' ? (body.prov as ConsultProvenanceV1) : undefined;
           const audit = buildAuditSink(this.env);
           return this.serialize(async () => { // ARCH-H1 — same single-writer append as every board post
             const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
@@ -720,7 +744,7 @@ export class InteractionsDO {
             const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as MessageEnvelopeV1['from'];
             const messages = await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []);
             const composed: ChannelV1[] = [{ ...entry, messages }];
-            const r = await appendBoardPost(composed, { channelId, from: orgCaip, authorName: assistant.displayName, bodyText, actor: orgCaip });
+            const r = await appendBoardPost(composed, { channelId, from: orgCaip, authorName: assistant.displayName, bodyText, actor: orgCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
             if (!r.ok) return json({ error: r.error }, 400);
             await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.assistantPost', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'channel-post', id: r.envelope.id } });
             const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
@@ -820,6 +844,49 @@ export class InteractionsDO {
             ...(skill?.markdown?.trim() ? { skillMarkdown: skill.markdown } : {}),
             ...(cfg?.displayName ? { displayName: cfg.displayName } : {}),
           });
+        }
+        // ── spec 329 W2/W3 — the org's routing internal ops (in-Worker marker only). ──
+        if (op === 'internal.consult.eligible') {
+          // The `find_members` ELIGIBILITY read (spec 329 §4): roster ∩ topic participants ∩
+          // consultable-hinted ∩ grant-present, computed HERE (the org's single-reader execution
+          // point) with the fabric pure intersection — the planner never widens this set.
+          const channelId = String(body.channelId ?? '');
+          if (!channelId) return json({ error: 'channelId required' }, 400);
+          const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
+          const entry = index.find((c) => c.descriptor.id === channelId);
+          if (!entry) return json({ error: 'unknown channel' }, 404);
+          const routing = entry.routing;
+          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          if (!routing || !entry.assistant || !wireRec) {
+            return json({ ok: true, enabled: false, maxFanout: 0, members: [] });
+          }
+          const now = new Date().toISOString();
+          const rows = await this.readDoc<IndexedListing[]>(g, DIRECTORY_RESOURCE, []);
+          const roster: ConsultRosterRowV1[] = rows.map((l) => ({
+            subject: l.listing.subject,
+            displayName: l.listing.displayName || l.label,
+            consultable: l.listing.consultable === true,
+            current: isListingCurrent(l.listing, now),
+          }));
+          const grantKeys = await this.state.storage.list({ prefix: consultGrantRecordKey('') });
+          const grantMembers = [...grantKeys.keys()].map((k) => k.slice(consultGrantRecordKey('').length));
+          const members = eligibleConsultMembers({ roster, channel: entry, grantMembers, orgSA: principal });
+          return json({ ok: true, enabled: true, maxFanout: routing.maxFanout, members });
+        }
+        if (op === 'internal.consult.orgWire') {
+          // The §3.1 wire, handed ONLY in-Worker to the org's own A2aTaskDO (the routing signer).
+          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          if (!wireRec) return json({ ok: true, wire: null });
+          return json({ ok: true, wire: wireRec.wire, sessionKey: wireRec.sessionKey });
+        }
+        if (op === 'internal.consult.grant') {
+          // ask_member's SEND-TIME grant re-read (spec 329 §8 stale-opt-in rule): the wire is
+          // fetched fresh per send AND per turn-2 collection — a member whose grant row is gone is
+          // dropped/marked revoked immediately, before the member's own gate would even be asked.
+          const member = String(body.member ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
+          const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
+          return json({ ok: true, wire: rec?.wire ?? null });
         }
         if (op === 'invite.get' || op === 'invite.put') {
           // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
@@ -1175,6 +1242,86 @@ export class InteractionsDO {
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.assistantEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
           await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
           return json({ ok: true, assistant: r.channel.assistant });
+        });
+      }
+
+      // ── spec 329 §3.1/§7 — steward member-routing ceremony + per-topic toggle. The ENABLE mints
+      //    (first time) the DO-held ORG consult wire: org → the interactions-session KMS key,
+      //    consult-selector-only, steward-signed with the org's custody credential — the runtime's
+      //    authority to SIGN consult-rail messages as the org (no raw key at rest). Disable clears
+      //    the topic flag immediately (and optionally the wire) + cancels pending consults. ──
+      if (op === 'consult.routingEnable' || op === 'consult.routingDisable' || op === 'consult.routingStatus') {
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the organization custodian may manage member routing' }, 403);
+        if (op === 'consult.routingStatus') {
+          const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+          // The session-key address the CLIENT needs to mint the wire (the NEW-C1 key, §3.1 pairing).
+          let sessionKey: string | null = null;
+          try { sessionKey = (await interactionsSessionAccount(this.env)).address; } catch { /* unprovisioned ⇒ null */ }
+          return json({ ok: true, wirePresent: !!wireRec, enabledAt: wireRec?.enabledAt ?? null, sessionKey });
+        }
+        const channelId = String(body.channelId ?? '');
+        if (!channelId) return json({ error: 'channelId required' }, 400);
+        if (op === 'consult.routingDisable') {
+          return this.serialize(async () => {
+            const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+            const r = setTopicRouting(index, channelId, undefined);
+            if (!r.ok) return json({ error: r.error }, 404);
+            await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
+            if (body.clearWire === true) await this.state.storage.delete(ROUTING_ORG_WIRE_KEY);
+            // Steward disable = immediate: pending consults for this topic are cancelled at the
+            // org's task runtime (in-Worker, marker-gated). Best-effort — the turn-2 poller also
+            // re-checks the wire/flag and drops on absence (belt to this suspender).
+            try {
+              const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
+              await stub.fetch(new Request(`https://do/internal/routing-cancel?agent=${principal}`, {
+                method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '' },
+                body: JSON.stringify({ channelId }),
+              }));
+            } catch { /* audited by the poller's own drop path */ }
+            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.disable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
+            return json({ ok: true });
+          });
+        }
+        // consult.routingEnable — verify + custody the wire (when supplied / first enable), then flag the topic.
+        const wireRec = (await this.state.storage.get(ROUTING_ORG_WIRE_KEY)) as RoutingOrgWireRecord | undefined;
+        const incoming = body.delegation as IncomingDelegation | undefined;
+        if (!wireRec && !incoming) return json({ error: 'org consult wire required — the routing ceremony signs it first' }, 400);
+        if (incoming) {
+          if (incoming.delegator.toLowerCase() !== principal) return json({ error: 'org consult wire delegator must be this organization' }, 400);
+          // Delegate MUST be the interactions-session KMS key (the §3.1 pairing) — fail-closed if unprovisioned.
+          let sessionKey: string;
+          try { sessionKey = (await interactionsSessionAccount(this.env)).address.toLowerCase(); } catch {
+            return json({ error: 'interactions-session KMS key unprovisioned — routing needs GCP_KMS_INTERACTIONS_KEY_NAME' }, 503);
+          }
+          if (incoming.delegate.toLowerCase() !== sessionKey) return json({ error: 'org consult wire delegate must be the interactions-session key' }, 400);
+          const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+          const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+          if (![tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'consult enforcers not configured — cannot verify the wire shape' }, 503);
+          const shapeErr = checkConsultWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000));
+          if (shapeErr) return json({ error: shapeErr }, 400);
+          const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
+            return json({ error: 'org consult wire signature failed verification against the organization' }, 403);
+          }
+          try {
+            const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+            if (revoked) return json({ error: 'org consult wire is already revoked on-chain' }, 403);
+          } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
+          const rec: RoutingOrgWireRecord = { wire: incoming, hash: digest, sessionKey, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() };
+          await this.state.storage.put(ROUTING_ORG_WIRE_KEY, rec);
+          st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: sessionKey, resources: ['(routing:consult-sign)'], storedAt: rec.enabledAt }].slice(-50);
+          await this.state.storage.put('state', st);
+        }
+        const rawFanout = Number(body.maxFanout ?? ROUTING_FANOUT_DEFAULT);
+        return this.serialize(async () => {
+          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+          const r = setTopicRouting(index, channelId, { maxFanout: rawFanout, enabledBy: sessionSa.toLowerCase(), enabledAt: new Date().toISOString() });
+          if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 409);
+          await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
+          return json({ ok: true, routing: r.channel.routing });
         });
       }
 

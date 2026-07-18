@@ -17,10 +17,13 @@ import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import {
   createA2aAgent,
   dispatchA2aRpc,
+  hashA2aMessage,
+  hashA2aTaskRequest,
   type A2aAgent,
   type A2aBudgetPort,
   type OnChainChecks,
   type VaultClient,
+  type VaultRef,
   type McpClient,
   type SkillHandler,
 } from '@agenticprimitives/a2a';
@@ -32,25 +35,43 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
-import { handleDiscussionRespond, type DiscussionRespondInput } from './discussion-skill.js';
+import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
+import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
+import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 import { caip10 } from './custody-oidc.js';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
 import {
+  CONSULT_MEMBER_TIMEOUT_MS,
   CONSULT_RATE_MAX,
   CONSULT_RATE_WINDOW_MS,
   CONSULT_SKILL_ID,
+  ROUTING_RATE_MAX,
+  ROUTING_RATE_WINDOW_MS,
+  buildConsultRequest,
+  buildConsultProvenance,
+  buildConsultationIntentRecord,
+  consultationIntentKey,
   fixedWindowAllow,
   parseConsultRequest,
+  rankConsultCandidates,
+  routedConsultationContextRef,
+  routingPendingKey,
+  sha256Hex32,
+  validateConsultAnswer,
+  type ConsultAnswerV1,
+  type ConsultOutcomeV1,
+  type ConsultationIntentV1,
+  type EligibleConsultMemberV1,
   type FixedWindowState,
 } from '@agenticprimitives/fabric/messaging';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { buildAuditSink, callMcpToolWithProof, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -105,6 +126,37 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
 
 const AGENT_SA_KEY = '__a2a_agent_sa';
 const ALARM_DELAY_MS = 1500;
+
+// ── spec 329 W3 — the ORG side of routed consultation (pending ring + poll cadence). ─────────────
+/** Poll cadence for pending consults (alarm-driven — never a busy loop). */
+const ROUTING_POLL_MS = 4000;
+/** Bounded synthesis retries before the pending entry is dropped (audited). */
+const ROUTING_SYNTHESIS_MAX_ATTEMPTS = 3;
+/** Per-topic routing bucket key (spec 329 §4 — 3 routed questions / 10 min, on top of 327's). */
+const ROUTING_RATE_KEY = (channelId: string): string => `routing.rate:${channelId}`;
+
+/** One consulted member's slot in the pending ring. `status:'sent'` until a terminal outcome. */
+interface PendingConsultMemberV1 {
+  memberSA: string;
+  displayName: string;
+  taskId: Hex;
+  sentAt: number;
+  deadlineAt: number;
+  status: 'sent' | ConsultOutcomeV1['status'];
+  answer?: ConsultAnswerV1;
+}
+/** The `routing.pending:<topicId>:<questionId>` record (spec 329 §4.1 — org DO storage; DO-side
+ *  custody like the W1 grant-store deviation: no deployed vault scope covers routing.*). */
+interface PendingRoutingV1 {
+  channelId: string;
+  questionId: string;
+  question: string;
+  topicTitle: string;
+  displayName: string;
+  members: PendingConsultMemberV1[];
+  createdAt: number;
+  synthesisAttempts?: number;
+}
 
 // ── spec 329 §3 — the `discussion.consult` skill on PERSON agents ────────────────────────────────────
 /** Member-side per-org consult rate bucket key (DO storage; fixed window 12/hour/org). */
@@ -267,15 +319,36 @@ export class A2aTaskDO {
           return r.valid && r.deployed;
         }
       : erc1271Inline;
+    const isRevokedFn = reader
+      ? async (d: Delegation) => (await reader.isDelegationRevoked(hashDelegation(d, chainId, dm))).revoked
+      : async (d: Delegation) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean;
+    const verifyDelegationSigFn = async (d: Delegation) => verifySig(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex);
+    // spec 329 §3.1 — accept the SESSION-WRAPPED consult signature alongside plain ERC-1271: an org
+    // runtime holds no org key, so its consult-rail message/tasks-get signatures are ECDSA by the
+    // interactions-session KMS key, wrapped WITH the steward-minted org consult wire. Verification
+    // is fail-closed per message (wire shape: consult selector only + timestamp; delegator = the
+    // claimed signer; ECDSA recovers to the wire's delegate; wire ERC-1271-valid against the org;
+    // wire UNREVOKED on-chain — revocation kills routing immediately at this gate). Any other
+    // signature shape takes the unchanged ERC-1271 path.
+    const wireEnforcers = { timestamp: this.env.TIMESTAMP_ENFORCER ?? '', allowedMethods: this.env.ALLOWED_METHODS_ENFORCER ?? '' };
+    const verifySigOrRouted = async (signer: Address, digest: Hex, signature: Hex): Promise<boolean> => {
+      if (parseRoutedConsultSignature(signature)) {
+        return verifyRoutedConsultSignature({
+          signer, digest, signature,
+          enforcers: wireEnforcers,
+          verifyDelegationSig: verifyDelegationSigFn,
+          isRevoked: isRevokedFn,
+        });
+      }
+      return verifySig(signer, digest, signature);
+    };
     const checks: OnChainChecks = {
       // Fail-closed: any throw propagates and the package denies (ADR-0013).
-      isRevoked: reader
-        ? async (d) => (await reader.isDelegationRevoked(hashDelegation(d, chainId, dm))).revoked
-        : async (d) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
-      verifyDelegationSignature: async (d) => verifySig(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex),
-      verifyMessageSignature: async (msg, digest) => verifySig(msg.sender as Address, digest, msg.signature as Hex),
+      isRevoked: isRevokedFn,
+      verifyDelegationSignature: verifyDelegationSigFn,
+      verifyMessageSignature: async (msg, digest) => verifySigOrRouted(msg.sender as Address, digest, msg.signature as Hex),
       // AUDIT NEW-A2A-2 — the read/control caller proves control of `caller` via ERC-1271 over the request digest.
-      verifyCallerSignature: async (caller, digest, signature) => verifySig(caller as Address, digest, signature as Hex),
+      verifyCallerSignature: async (caller, digest, signature) => verifySigOrRouted(caller as Address, digest, signature as Hex),
     };
     // Vault seam (A2A-INV-04 — only refs/hashes in task state):
     //  • with a delegation (FR-3.4) → write/read the DELEGATOR's demo-mcp vault via the captured grant
@@ -409,18 +482,132 @@ export class A2aTaskDO {
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
         return out;
       };
+      // ── spec 329 W2/W3 — routing context, HARNESS-computed before the turn (the 327 "harness
+      // reads, model posts" finding applied to routing: eligibility ∩ discovery ranking are
+      // pre-read and embedded; the tools only expose/pin that snapshot). Every failure here
+      // fail-opens to the plain spec-327 turn — the human surface is never blocked (§1). The
+      // depth-1 guard is structural: this dispatch only fires for human-authored triggers
+      // (assistantTrigger skips actor-marked + org-authored posts), and the consult skill's
+      // handler has NO routing tools.
+      let routing: DiscussionRoutingOpts | undefined;
+      let askCount = 0; // consults actually sent — the status post carries the contextRef iff > 0
+      const audit = buildAuditSink(this.env);
+      try {
+        const elig = (await call('internal.consult.eligible', { channelId: p.channelId })) as { enabled?: boolean; maxFanout?: number; members?: EligibleConsultMemberV1[] };
+        if (elig.enabled === true && (elig.members?.length ?? 0) > 0) {
+          // Per-topic routing bucket (spec 329 §4: 3 routed questions / 10 min, on top of 327's
+          // dispatch bucket). Consumed only when a routed question actually starts; exceed ⇒ the
+          // turn runs WITHOUT routing tools (audited, never queued).
+          const rateKey = ROUTING_RATE_KEY(p.channelId);
+          const prev = (await this.state.storage.get(rateKey)) as FixedWindowState | undefined;
+          const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ROUTING_RATE_WINDOW_MS, max: ROUTING_RATE_MAX });
+          if (!rate.allowed) {
+            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.rateLimited', outcome: 'denied', actor: { type: 'service', id: p.principal }, subject: { type: 'channel', id: p.channelId } });
+          } else {
+            const wireResp = (await call('internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null };
+            if (wireResp.wire) {
+              await this.state.storage.put(rateKey, rate.next);
+              const questionId = `q_${crypto.randomUUID()}`;
+              // W2 — discovery enrichment + spec-281 ranking (fail-open to fewer signals: an
+              // unreachable discovery yields the un-enriched eligible set, never more candidates).
+              const facets = await fetchDiscoveryFacets(this.env, elig.members!.map((m) => m.memberSA));
+              const ranking = rankConsultCandidates({ eligible: elig.members!, facets, need: p.triggerBody, max: 5 });
+              const evidenceHash = await sha256Hex32(new TextEncoder().encode(JSON.stringify(ranking.candidates)));
+              await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.decision', outcome: 'success', actor: { type: 'service', id: p.principal }, subject: { type: 'routing-question', id: questionId }, reason: `candidates=${ranking.candidates.length} enriched=${ranking.enriched} droppedByMandates=${ranking.droppedByMandates} evidenceHash=${evidenceHash}` });
+              if (ranking.candidates.length > 0) {
+                // Clipped topic tail for the routed context (spec 329 §2.3) — one bounded read.
+                let tail: Array<{ author: string; bodyText: string }> = [];
+                try {
+                  const topicRead = (await call('internal.channels.read', { channelId: p.channelId, limit: 8 })) as { messages?: Array<{ authorName?: string; bodyText?: string }> };
+                  tail = (topicRead.messages ?? []).map((m) => ({ author: m.authorName ?? 'member', bodyText: m.bodyText ?? '' }));
+                } catch { /* trigger-only context */ }
+                const maxFanout = Math.min(Math.max(Number(elig.maxFanout ?? 3) || 3, 1), 5);
+                routing = {
+                  questionId,
+                  candidates: ranking.candidates,
+                  maxFanout,
+                  ask: async (memberSA, question) => {
+                    const r = await this.submitConsult({
+                      org: p.principal.toLowerCase(), orgWire: wireResp.wire!, memberSA, question,
+                      channelId: p.channelId, questionId, topicTitle: p.topicTitle, tail,
+                    });
+                    askCount++;
+                    return r;
+                  },
+                };
+              }
+            }
+          }
+        }
+      } catch { /* fail-open: the plain 327 turn (the org answers alone) */ }
+
       try {
         const turn = await handleDiscussionRespond(this.env, p, {
           readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
-          post: async (bodyText) => (await call('internal.channels.post', { channelId: p.channelId, bodyText })) as { messageId?: string },
-        });
+          post: async (bodyText) => (await call('internal.channels.post', {
+            channelId: p.channelId, bodyText,
+            // The turn-1 status post carries the routed-consultation contextRef iff asks went out
+            // (a routed-tools turn that consulted no one is a plain 327 answer — no chip).
+            ...(routing && askCount > 0 ? { contextRefs: [routedConsultationContextRef(p.principal, p.channelId, routing.questionId)] } : {}),
+          })) as { messageId?: string },
+        }, routing);
+        // W3 — pending ring + alarm-driven turn 2 (spec 329 §4.1). Recorded AFTER the status post
+        // committed; a turn that asked no one leaves nothing pending (exact 327 behavior).
+        if (routing && turn.asked.length > 0) {
+          const nowMs = Date.now();
+          const pending: PendingRoutingV1 = {
+            channelId: p.channelId, questionId: routing.questionId, question: p.triggerBody,
+            topicTitle: p.topicTitle, displayName: p.displayName, createdAt: nowMs,
+            members: turn.asked.map((a) => ({
+              memberSA: a.memberSA, displayName: a.displayName, taskId: a.taskId as Hex,
+              sentAt: nowMs, deadlineAt: nowMs + CONSULT_MEMBER_TIMEOUT_MS, status: 'sent' as const,
+            })),
+          };
+          await this.state.storage.put(routingPendingKey(p.channelId, routing.questionId), pending);
+          await this.state.storage.put(AGENT_SA_KEY, p.principal.toLowerCase()); // alarm() rehydration
+          await this.state.storage.setAlarm(Date.now() + ROUTING_POLL_MS);
+        }
         if (turn.result.outcome !== 'completed' || !turn.posted) {
           return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without posting a reply', plannerKind: turn.plannerKind }, { status: 502 });
         }
-        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind });
+        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: turn.asked.length });
       } catch (e) {
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }
+    }
+    // ── spec 329 §7 — steward routing disable: cancel this topic's pending consults (in-Worker,
+    // marker-gated; called by the org's InteractionsDO). Cancellation is a DROP + audit — the
+    // member-side tasks run to completion on their own store; their answers are simply never read.
+    if (url.pathname === '/internal/routing-cancel') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { channelId?: string } | null;
+      if (!p?.channelId) return Response.json({ ok: false, error: 'channelId required' }, { status: 400 });
+      const audit = buildAuditSink(this.env);
+      const map = await this.state.storage.list({ prefix: `routing.pending:${p.channelId}:` });
+      for (const key of map.keys()) {
+        await this.state.storage.delete(key);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.cancelled', outcome: 'success', actor: { type: 'service', id: url.searchParams.get('agent') ?? '' }, subject: { type: 'routing-pending', id: key } }).catch(() => undefined);
+      }
+      return Response.json({ ok: true, cancelled: map.size });
+    }
+    // ── spec 329 §4.1 — consult-answer artifact read (in-Worker, marker-gated). The org's poller
+    // has ALREADY proven itself via the signed tasks/get (caller = task sender, session-wrapped
+    // signature verified); this body fetch re-checks sender-ship against the task record as the
+    // belt. Bounded to a2a artifacts of the named task — never a general vault read.
+    if (url.pathname === '/internal/consult-artifact') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { taskId?: Hex; caller?: string; artifactId?: string } | null;
+      if (!p?.taskId || !p.caller || !p.artifactId) return Response.json({ ok: false, error: 'taskId + caller + artifactId required' }, { status: 400 });
+      const store = createDurableObjectTaskStore(this.state.storage);
+      const rec = await store.get(p.taskId);
+      if (!rec) return Response.json({ ok: false, error: 'unknown task' }, { status: 404 });
+      if (rec.sender.toLowerCase() !== p.caller.toLowerCase()) return Response.json({ ok: false, error: 'only the task sender may read its artifacts' }, { status: 403 });
+      const art = rec.artifacts.find((a) => String((a as { artifactId?: string }).artifactId ?? '').toLowerCase() === p.artifactId!.toLowerCase());
+      if (!art) return Response.json({ ok: false, error: 'unknown artifact' }, { status: 404 });
+      const body = await this.state.storage.get(`vault:${art.bodyRef.owner.toLowerCase()}:${art.bodyRef.recordType}`);
+      return Response.json({ ok: true, body: body ?? null });
     }
     // ── spec 328 §4 — the person-inbox auto-reply turn (`inbox.respond`). IN-WORKER ONLY:
     // dispatched by the person's InteractionsDO after a triggering 1:1 delivery, gated by the
@@ -478,8 +665,233 @@ export class A2aTaskDO {
     if (!agentSA) return;
     const agent = this.build(agentSA as Address);
     await agent.processDue();
+    // spec 329 §4.1 turn 2 — advance the org's pending consult fan-outs (poll → collect →
+    // synthesize). Isolated from task processing: a routing failure never stalls the task loop.
+    let routingRemain = false;
+    try {
+      routingRemain = await this.processRoutingDue(agentSA.toLowerCase());
+    } catch { /* per-entry drops are audited inside; a total failure retries on the next alarm */ }
     // If anything remains due (e.g. auth-required→resubmit just landed), re-arm.
     const store = createDurableObjectTaskStore(this.state.storage);
     if ((await store.listDue(Date.now())).length > 0) await this.state.storage.setAlarm(Date.now() + ALARM_DELAY_MS);
+    else if (routingRemain) await this.state.storage.setAlarm(Date.now() + ROUTING_POLL_MS);
+  }
+
+  // ── spec 329 W3 — the org-side routing engine (ask → poll → synthesize) ────────────────────────
+
+  /** In-Worker call to a principal's InteractionsDO internal op (ARCH-H2 marker). */
+  private async interactionsInternal(principal: string, op: string, payload: unknown): Promise<Record<string, unknown>> {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) throw new Error('no internal marker configured');
+    const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(principal.toLowerCase()));
+    const resp = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+    if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+    return out;
+  }
+
+  /** Session-wrapped org signature over a consult-rail digest (§3.1): the interactions-session
+   *  KMS key signs; the steward-minted org wire authorizes. No raw key at rest. */
+  private async signAsOrg(orgWire: IncomingDelegation, digest: Hex): Promise<Hex> {
+    const signer = await interactionsSessionAccount(this.env);
+    const signRaw = signer.sign;
+    if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign');
+    return wrapRoutedConsultSignature(orgWire, await signRaw({ hash: digest }));
+  }
+
+  /**
+   * `ask_member`'s executor: SEND-TIME grant re-read (member revoke is immediate — no grant, no
+   * consult, no exception), the bounded ConsultRequest, the org-signed `message/send` to the
+   * member's A2A endpoint (the shared demo-a2a host: every agent's endpoint terminates at its own
+   * A2aTaskDO — the same dispatch `/api/a2a` performs after Host resolution), and the
+   * ConsultationIntent description record. The member's gate re-verifies EVERYTHING on-chain.
+   */
+  private async submitConsult(args: {
+    org: string; orgWire: IncomingDelegation; memberSA: string; question: string;
+    channelId: string; questionId: string; topicTitle?: string; tail?: Array<{ author: string; bodyText: string }>;
+  }): Promise<{ taskId: string }> {
+    const audit = buildAuditSink(this.env);
+    const memberSA = args.memberSA.toLowerCase();
+    const grantResp = (await this.interactionsInternal(args.org, 'internal.consult.grant', { member: memberSA })) as { wire?: IncomingDelegation | null };
+    if (!grantResp.wire) {
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason: 'consult grant absent at send time (revoked?)' }).catch(() => undefined);
+      throw new Error('member consult grant is not present (revoked?) — not asking');
+    }
+    const request = buildConsultRequest({
+      question: args.question, orgSA: args.org, topicId: args.channelId, questionId: args.questionId,
+      ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}),
+    });
+    const idBytes = new Uint8Array(32);
+    crypto.getRandomValues(idBytes);
+    const messageId = (`0x${Array.from(idBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`) as Hex;
+    const createdAt = Math.floor(Date.now() / 1000);
+    const bodyHash = hashBody(request);
+    const digest = hashA2aMessage({ messageId, sender: args.org as Address, skill: CONSULT_SKILL_ID, bodyHash, createdAt });
+    const signature = await this.signAsOrg(args.orgWire, digest);
+    const message = {
+      messageId, sender: args.org, skill: CONSULT_SKILL_ID,
+      bodyRef: { owner: memberSA, recordType: 'pending' }, bodyHash, createdAt, signature,
+    };
+    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(memberSA));
+    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${memberSA}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: messageId, method: 'message/send',
+        params: { delegation: grantResp.wire, requester: args.org, message, input: request },
+      }),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as { result?: { taskId?: string }; error?: { message?: string } };
+    if (!out.result?.taskId) {
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason: out.error?.message ?? 'message/send rejected' }).catch(() => undefined);
+      throw new Error(out.error?.message ?? 'consult message/send was rejected by the member\'s gate');
+    }
+    // spec 329 §5 — the ConsultationIntent DESCRIPTION record (expressed at send; the spine
+    // describes, the task rail executes). DO-side custody (the W1 §2.1 deviation's rationale:
+    // no deployed vault scope covers routing.* and widening forces a fleet re-enable).
+    await this.state.storage.put(
+      consultationIntentKey(args.questionId, memberSA),
+      buildConsultationIntentRecord({ questionId: args.questionId, orgSA: args.org, memberSA, topicId: args.channelId }),
+    );
+    await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'success', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` } }).catch(() => undefined);
+    return { taskId: out.result.taskId };
+  }
+
+  /** Read one completed consult's answer artifact from the MEMBER's runtime (marker-gated body
+   *  fetch AFTER the signed tasks/get proved sender-ship — see /internal/consult-artifact). */
+  private async readConsultArtifact(memberSA: string, taskId: Hex, org: string, artifactId: string): Promise<unknown> {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '';
+    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(memberSA));
+    const resp = await stub.fetch(new Request(`https://a2a-task-do/internal/consult-artifact?agent=${memberSA}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+      body: JSON.stringify({ taskId, caller: org, artifactId }),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; body?: unknown; error?: string };
+    if (!resp.ok || out.ok !== true) throw new Error(out.error ?? `consult artifact read failed (${resp.status})`);
+    return out.body ?? null;
+  }
+
+  /**
+   * Advance every pending routed question (alarm-driven — spec 329 §4.1 turn 2). Per member:
+   * SIGNED `tasks/get` on their runtime (the §3.1 wire authorizes the caller signature) →
+   * completed ⇒ artifact read + ConsultAnswer validation + mid-flight-revoke re-check; terminal
+   * failure ⇒ failed; past deadline ⇒ timedOut. When all resolve, run the ONE synthesis turn
+   * (single tool, attribution + PROV + routed-consultation contextRef) and clear the entry.
+   * Returns whether anything remains pending (the alarm re-arms on true).
+   */
+  private async processRoutingDue(orgSA: string): Promise<boolean> {
+    const pendingMap = await this.state.storage.list({ prefix: 'routing.pending:' });
+    if (pendingMap.size === 0) return false;
+    const audit = buildAuditSink(this.env);
+    // Steward disable is immediate: an absent wire (or one cleared mid-flight) cancels everything.
+    let orgWire: IncomingDelegation | null = null;
+    try {
+      orgWire = ((await this.interactionsInternal(orgSA, 'internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null }).wire ?? null;
+    } catch { orgWire = null; }
+    let remain = false;
+    for (const [key, value] of pendingMap) {
+      const pending = value as PendingRoutingV1;
+      if (!orgWire) {
+        await this.state.storage.delete(key);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.cancelled', outcome: 'success', actor: { type: 'service', id: orgSA }, subject: { type: 'routing-pending', id: key }, reason: 'org consult wire absent (routing disabled)' }).catch(() => undefined);
+        continue;
+      }
+      const now = Date.now();
+      for (const m of pending.members) {
+        if (m.status !== 'sent') continue;
+        try {
+          const issuedAt = Math.floor(now / 1000);
+          const digest = hashA2aTaskRequest({ method: 'tasks/get', taskId: m.taskId, agentSA: m.memberSA as Address, chainId: Number(this.env.CHAIN_ID ?? 84532), issuedAt });
+          const signature = await this.signAsOrg(orgWire, digest);
+          const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(m.memberSA));
+          const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${m.memberSA}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: m.taskId, method: 'tasks/get', params: { taskId: m.taskId, caller: orgSA, signature, issuedAt } }),
+          }));
+          const out = (await resp.json().catch(() => ({}))) as { result?: { state?: string; artifactRefs?: VaultRef[] }; error?: { message?: string } };
+          const state = out.result?.state;
+          if (state === 'completed') {
+            const ref = (out.result?.artifactRefs ?? []).find((r) => r.recordType?.startsWith('a2a:artifact:'));
+            const artifactId = ref?.recordType?.slice('a2a:artifact:'.length);
+            if (!artifactId) m.status = 'failed';
+            else {
+              const body = (await this.readConsultArtifact(m.memberSA, m.taskId, orgSA, artifactId)) as ConsultAnswerV1 | null;
+              const valid = !!body && validateConsultAnswer(body).length === 0
+                && body.questionId === pending.questionId
+                && body.orgSA === orgSA
+                && String(body.actor).toLowerCase().endsWith(m.memberSA);
+              if (!valid) m.status = 'failed';
+              else {
+                // Mid-flight revoke (spec 329 W4 rule): grant gone between turn 1 and now ⇒ the
+                // answer is DISCARDED and the attribution says so.
+                let grantStill = false;
+                try { grantStill = !!((await this.interactionsInternal(orgSA, 'internal.consult.grant', { member: m.memberSA })) as { wire?: unknown }).wire; } catch { grantStill = false; }
+                if (!grantStill) m.status = 'revoked';
+                else { m.status = body.declined === true ? 'declined' : 'answered'; m.answer = body; }
+              }
+            }
+          } else if (state === 'failed' || state === 'rejected' || state === 'canceled') {
+            m.status = 'failed';
+          } else if (now > m.deadlineAt) {
+            m.status = 'timedOut';
+          }
+        } catch {
+          // Transient poll failure — retry until the deadline, then time out honestly.
+          if (now > m.deadlineAt) m.status = 'timedOut';
+        }
+        if (m.status !== 'sent') {
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultResolved', outcome: m.status === 'answered' || m.status === 'declined' ? 'success' : 'error', actor: { type: 'service', id: orgSA }, subject: { type: 'consult', id: `${pending.questionId}:${m.memberSA}` }, reason: m.status }).catch(() => undefined);
+        }
+      }
+      const allDone = pending.members.every((m) => m.status !== 'sent');
+      if (!allDone) {
+        await this.state.storage.put(key, pending);
+        remain = true;
+        continue;
+      }
+      // ── TURN 2 — the synthesis turn (tolerates partial failure: whatever resolved is used). ──
+      try {
+        const outcomes: ConsultOutcomeV1[] = pending.members.map((m) => ({
+          memberSA: m.memberSA, displayName: m.displayName, status: m.status as ConsultOutcomeV1['status'],
+          ...(m.answer && m.status !== 'revoked' ? { answer: m.answer } : {}),
+        }));
+        const ctxRef = routedConsultationContextRef(orgSA, pending.channelId, pending.questionId);
+        const prov = buildConsultProvenance(pending.questionId, outcomes);
+        const turn = await handleConsultSynthesis(this.env, {
+          principal: orgSA, channelId: pending.channelId, topicTitle: pending.topicTitle,
+          displayName: pending.displayName, question: pending.question, questionId: pending.questionId, outcomes,
+        }, {
+          readTopic: () => this.interactionsInternal(orgSA, 'internal.channels.read', { channelId: pending.channelId }),
+          post: async (bodyText) => (await this.interactionsInternal(orgSA, 'internal.channels.post', { channelId: pending.channelId, bodyText, contextRefs: [ctxRef], prov })) as { messageId?: string },
+        });
+        if (turn.result.outcome !== 'completed' || !turn.posted) throw new Error(turn.result.error ?? 'synthesis turn completed without posting');
+        // Spine lifecycle (spec 329 §5): fulfilled for contributing consults, abandoned otherwise.
+        for (const o of outcomes) {
+          const ikey = consultationIntentKey(pending.questionId, o.memberSA);
+          const rec = (await this.state.storage.get(ikey)) as ConsultationIntentV1 | undefined;
+          if (rec) {
+            await this.state.storage.put(ikey, {
+              ...rec,
+              status: o.status === 'answered' ? 'fulfilled' as const : 'abandoned' as const,
+              object: o.status === 'answered' ? ikey : rec.object,
+            });
+          }
+        }
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.synthesisPost', outcome: 'success', actor: { type: 'service', id: orgSA }, subject: { type: 'channel-post', id: turn.messageId ?? pending.questionId } }).catch(() => undefined);
+        await this.state.storage.delete(key);
+      } catch (e) {
+        const attempts = (pending.synthesisAttempts ?? 0) + 1;
+        if (attempts >= ROUTING_SYNTHESIS_MAX_ATTEMPTS) {
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.synthesisPost', outcome: 'error', actor: { type: 'service', id: orgSA }, subject: { type: 'routing-pending', id: key }, reason: `dropped after ${attempts} attempts: ${e instanceof Error ? e.message : String(e)}` }).catch(() => undefined);
+          await this.state.storage.delete(key);
+        } else {
+          pending.synthesisAttempts = attempts;
+          await this.state.storage.put(key, pending);
+          remain = true;
+        }
+      }
+    }
+    return remain;
   }
 }

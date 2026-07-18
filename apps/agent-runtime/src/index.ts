@@ -230,6 +230,12 @@ export interface Env {
    *  Use env.MCP.fetch(...) instead of fetch(MCP_URL/...) — sibling
    *  Worker calls via workers.dev hit Cloudflare error 1042. */
   MCP?: Fetcher;
+  /** spec 329 W2 — service binding to demo-discovery-mcp (production; same 1042 rationale as MCP).
+   *  `find_members` enriches consult candidates through it — read-only, public facets (ADR-0040). */
+  DISCOVERY_MCP?: Fetcher;
+  /** Dev/base-URL fallback for the discovery MCP (no binding outside deployed environments).
+   *  Unreachable/unset ⇒ find_members degrades to the un-enriched eligible set (spec 329 §4). */
+  DISCOVERY_MCP_BASE?: string;
 
   // Contract addresses (.dev.vars locally; wrangler secret put for production)
   ENTRY_POINT: string;

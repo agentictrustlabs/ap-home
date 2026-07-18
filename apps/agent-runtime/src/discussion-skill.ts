@@ -17,7 +17,14 @@
 // config choice, not a fallback path (ADR-0013). Message bodies are DATA to the planner; the tool
 // below is the total capability surface (fail-closed assertKnownTools in the loop), and the
 // invoker enforces at-most-one post per turn independently of the plan.
-import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
+import { runIntent, createRuleBasedPlanner, type Planner, type PlanStep, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
+import {
+  deterministicStatusBody,
+  deterministicSynthesisBody,
+  synthesisOutcomeLines,
+  type ConsultCandidateV1,
+  type ConsultOutcomeV1,
+} from '@agenticprimitives/fabric/messaging';
 import { selectPlanner, type PlannerEnv } from './orchestration.js';
 
 export interface DiscussionRespondInput {
@@ -27,6 +34,25 @@ export interface DiscussionRespondInput {
   displayName: string;
   triggerAuthor: string;
   triggerBody: string;
+}
+
+/** spec 329 W3 — the routing extension of the discussion turn. Present ⇔ the steward enabled
+ *  routing on this topic AND the org consult wire is custodied AND the trigger is human-authored
+ *  (`routingToolsAllowed`, the depth-1 guard) AND the per-topic routing bucket admitted this
+ *  question — the CALLER (the org's A2aTaskDO) decides all of that; this module only runs the
+ *  turn. `candidates` are the HARNESS-computed, discovery-ranked eligible set (spec 329 §4 — the
+ *  327 "harness reads, model posts" finding applied to routing: a plan-then-execute planner
+ *  cannot compose ask/status args from results it hasn't seen, so the candidate snapshot is
+ *  pre-read and embedded in the goal; the find_members TOOL returns the same snapshot, and
+ *  ask_member's INVOKER pins every memberSA to it — allow-list pinning, never planner authority). */
+export interface DiscussionRoutingOpts {
+  questionId: string;
+  candidates: ConsultCandidateV1[];
+  /** Fan-out K (steward-tuned 1..5; approved default 3). */
+  maxFanout: number;
+  /** Submit ONE consult task (the caller signs + sends + records the intent). Throws on failure —
+   *  the loop observes it (the planner may re-plan); a member is never silently skipped. */
+  ask: (memberSA: string, question: string) => Promise<{ taskId: string }>;
 }
 
 /** The assistant turn's I/O seam — both calls land on the org's InteractionsDO internal ops.
@@ -48,6 +74,34 @@ export const DISCUSSION_TOOLS: ToolSpec[] = [
     id: 'post_topic_message',
     description: "Post ONE reply into the discussion topic, authored as the organization. `bodyText` is the complete reply text. May be called at most once per turn.",
     inputSchema: { type: 'object', properties: { bodyText: { type: 'string', description: 'The full reply text.' } }, required: ['bodyText'] },
+  },
+];
+
+/** spec 329 §4 — the two routing tools joining DISCUSSION_TOOLS when routing is enabled. */
+export const ROUTING_TOOLS: ToolSpec[] = [
+  {
+    id: 'find_members',
+    description:
+      'List the members whose agents may be consulted about this question (already computed: the ' +
+      'candidate list in the goal). Returns the ranked candidates with evidence. Deterministic — ' +
+      'it can never add members beyond the opted-in, topic-participant set.',
+    inputSchema: { type: 'object', properties: { need: { type: 'string', description: 'What kind of expertise the question needs.' } } },
+  },
+  {
+    id: 'ask_member',
+    description:
+      "Send the question to ONE candidate member's agent (asynchronous — answers arrive later; a " +
+      'follow-up post will be made automatically when they do). `memberSA` MUST be one of the ' +
+      'candidates; `question` is the exact question their agent should answer. Ask at most the ' +
+      'stated fan-out limit of members, then post an honest status reply saying who you asked.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        memberSA: { type: 'string', description: "The candidate's 0x agent address (from the candidate list)." },
+        question: { type: 'string', description: 'The question to route to this member.' },
+      },
+      required: ['memberSA', 'question'],
+    },
   },
 ];
 
@@ -80,11 +134,21 @@ function contextLines(read: TopicReadResult | null): string {
   return `\nRecent messages in the topic:\n${lines.join('\n')}`;
 }
 
+/** The routing addendum to the tool contract (spec 329 §4.1 turn 1). */
+const ROUTING_CONTRACT =
+  '\n\nRouting (enabled for this topic): the goal lists candidate members whose agents you MAY ' +
+  'consult. If the question would benefit from their input, call ask_member for the best ' +
+  'candidates (respect the fan-out limit), and make your single post_topic_message an HONEST ' +
+  'status reply naming exactly who you asked (their answers arrive in a follow-up post). If no ' +
+  'candidate fits, ask no one and answer the question yourself as usual. Always finish with ' +
+  'exactly one post_topic_message.';
+
 export async function handleDiscussionRespond(
   env: PlannerEnv,
   input: DiscussionRespondInput,
   io: DiscussionIo,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
+  routing?: DiscussionRoutingOpts,
+): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string; asked: Array<{ memberSA: string; displayName: string; taskId: string }> }> {
   // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
   // not authority and not a second mechanism: a failed read just means the goal carries only the
   // trigger message and the default playbook. Also carries the org's steward-authored PLAYBOOK
@@ -100,20 +164,35 @@ export async function handleDiscussionRespond(
     } catch { /* trigger-only context + default playbook */ }
   }
 
-  const { planner, kind } = selectPlanner(env, { systemPrompt: playbook + DISCUSSION_CONTRACT });
-  // The deterministic turn (no LLM configured): one template reply acknowledging the trigger.
-  // Sufficient for e2e verification without a model key.
-  const deterministic: Planner = createRuleBasedPlanner([
-    {
-      match: () => true,
-      toolId: 'post_topic_message',
-      args: { bodyText: `${input.displayName} here — thanks for the mention, ${input.triggerAuthor}. A steward will follow up in this topic.` },
-    },
-  ]);
+  const routingOn = !!routing && routing.candidates.length > 0;
+  const { planner, kind } = selectPlanner(env, {
+    systemPrompt: playbook + DISCUSSION_CONTRACT + (routingOn ? ROUTING_CONTRACT : ''),
+  });
+  // The deterministic turn (no LLM configured). Routing variant: ask the top-K candidates, then
+  // post the exact honest status body — sufficient for e2e verification without a model key.
+  const deterministicSteps: PlanStep[] = routingOn
+    ? [
+        ...routing.candidates.slice(0, routing.maxFanout).map((c) => ({
+          toolId: 'ask_member',
+          args: { memberSA: c.memberSA, question: input.triggerBody },
+        })),
+        {
+          toolId: 'post_topic_message',
+          args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => c.displayName)) },
+        },
+      ]
+    : [
+        {
+          toolId: 'post_topic_message',
+          args: { bodyText: `${input.displayName} here — thanks for the mention, ${input.triggerAuthor}. A steward will follow up in this topic.` },
+        },
+      ];
+  const deterministic: Planner = createRuleBasedPlanner([{ match: () => true, steps: deterministicSteps }]);
   const effective = kind === 'anthropic' ? planner : deterministic;
 
   let posted = false;
   let messageId: string | undefined;
+  const asked: Array<{ memberSA: string; displayName: string; taskId: string }> = [];
   const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
     if (toolId === 'post_topic_message') {
       if (posted) throw new Error('post_topic_message may be called at most once per turn');
@@ -124,17 +203,117 @@ export async function handleDiscussionRespond(
       messageId = r.messageId;
       return r;
     }
+    if (routingOn && toolId === 'find_members') {
+      // Deterministic snapshot return — the harness already computed + embedded it (no LLM authority).
+      return { candidates: routing.candidates, note: 'harness-computed eligibility ∩ discovery ranking (spec 329 §4)' };
+    }
+    if (routingOn && toolId === 'ask_member') {
+      // INVOKER pinning (spec 329 §4/§8): memberSA MUST be in the harness snapshot; the fan-out
+      // bound holds regardless of the plan; a member is asked at most once per question.
+      const memberSA = String(args.memberSA ?? '').toLowerCase();
+      const candidate = routing.candidates.find((c) => c.memberSA === memberSA);
+      if (!candidate) throw new Error('ask_member: memberSA is not in the candidate set (allow-list pinning)');
+      if (asked.some((a) => a.memberSA === memberSA)) throw new Error('ask_member: this member was already asked');
+      if (asked.length >= routing.maxFanout) throw new Error(`ask_member: fan-out limit of ${routing.maxFanout} reached`);
+      const question = String(args.question ?? '').trim() || input.triggerBody;
+      const r = await routing.ask(memberSA, question);
+      asked.push({ memberSA, displayName: candidate.displayName, taskId: r.taskId });
+      return { ok: true, taskId: r.taskId, member: candidate.displayName };
+    }
     throw new Error(`unknown tool: ${toolId}`);
   };
 
+  const candidateBlock = routingOn
+    ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}):\n` +
+      routing.candidates
+        .map((c) => `- ${c.displayName} (memberSA ${c.memberSA})${c.evidence.length ? ` — ${c.evidence.slice(0, 3).join('; ')}` : ''}`)
+        .join('\n')
+    : '';
   const goal =
     `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
     `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
-    `Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).` +
+    (routingOn
+      ? 'Decide whether to consult member agents (ask_member) about this, then post exactly one reply — an honest status naming who you asked, or a direct answer if you asked no one.'
+      : 'Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).') +
+    candidateBlock +
     topicContext;
 
   const result = await runIntent(
-    { goal, context: { principal: input.principal, channelId: input.channelId } },
+    { goal, context: { principal: input.principal, channelId: input.channelId, ...(routingOn ? { questionId: routing.questionId } : {}) } },
+    { planner: effective, tools: routingOn ? [...DISCUSSION_TOOLS, ...ROUTING_TOOLS] : DISCUSSION_TOOLS, invoke },
+  );
+  return { result, plannerKind: kind, posted, asked, ...(messageId ? { messageId } : {}) };
+}
+
+// ── spec 329 §4.1 turn 2 — the synthesis turn (Ring-0, single tool, harness pre-reads) ─────────
+
+export interface ConsultSynthesisInput {
+  principal: string;
+  channelId: string;
+  topicTitle: string;
+  displayName: string;
+  question: string;
+  questionId: string;
+  outcomes: ConsultOutcomeV1[];
+}
+
+/** The non-negotiable synthesis contract (attribution is REQUIRED — spec 329 §4.1). */
+const SYNTHESIS_CONTRACT =
+  '\n\nTool contract (always applies): call post_topic_message exactly once with the complete ' +
+  'follow-up reply. You are synthesizing member agents\' answers to an earlier question. You MUST ' +
+  'name who was consulted, attribute what you use to the member whose agent said it (quoting is ' +
+  'allowed, with names), and state plainly who declined or did not respond in time. Never invent ' +
+  'an answer for a member who gave none. Never answer in prose.';
+
+/**
+ * Run the turn-2 synthesis: harness pre-reads the collected answers + the playbook; the model
+ * posts through exactly ONE tool. The deterministic (no-LLM) variant posts the exact
+ * attribution-complete template from fabric.
+ */
+export async function handleConsultSynthesis(
+  env: PlannerEnv,
+  input: ConsultSynthesisInput,
+  io: DiscussionIo,
+): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
+  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  let playbook = DEFAULT_ASSISTANT_SKILL_MD;
+  let topicContext = '';
+  if (llmConfigured) {
+    try {
+      const read = (await io.readTopic()) as TopicReadResult;
+      topicContext = contextLines(read);
+      if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
+    } catch { /* answers-only context + default playbook */ }
+  }
+
+  const { planner, kind } = selectPlanner(env, { systemPrompt: playbook + SYNTHESIS_CONTRACT });
+  const deterministic: Planner = createRuleBasedPlanner([
+    { match: () => true, toolId: 'post_topic_message', args: { bodyText: deterministicSynthesisBody(input.question, input.outcomes) } },
+  ]);
+  const effective = kind === 'anthropic' ? planner : deterministic;
+
+  let posted = false;
+  let messageId: string | undefined;
+  const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (toolId !== 'post_topic_message') throw new Error(`unknown tool: ${toolId}`);
+    if (posted) throw new Error('post_topic_message may be called at most once per turn');
+    const bodyText = String(args.bodyText ?? '').trim();
+    if (!bodyText) throw new Error('post_topic_message requires bodyText');
+    posted = true;
+    const r = await io.post(bodyText);
+    messageId = r.messageId;
+    return r;
+  };
+
+  const goal =
+    `You are ${input.displayName}, the organization's assistant, following up in topic "${input.topicTitle}". ` +
+    `Earlier you asked member agents about: "${input.question}". Their outcomes:\n` +
+    synthesisOutcomeLines(input.outcomes) +
+    '\nPost exactly one synthesized follow-up reply with full attribution (who was consulted, who contributed what, who declined or timed out).' +
+    topicContext;
+
+  const result = await runIntent(
+    { goal, context: { principal: input.principal, channelId: input.channelId, questionId: input.questionId } },
     { planner: effective, tools: DISCUSSION_TOOLS, invoke },
   );
   return { result, plannerKind: kind, posted, ...(messageId ? { messageId } : {}) };

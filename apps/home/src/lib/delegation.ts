@@ -474,6 +474,41 @@ export async function issueConsultabilityDelegation(
   return d;
 }
 
+/**
+ * spec 329 §3.1 — the ORG consult wire `org → interactions-session key`, signed by the ORG's
+ * custody (the steward's credential) at the ROUTING-ENABLE ceremony. Resolves the caller-signature
+ * gap: the org's runtime holds no org key, so consult-rail `message/send` sender signatures and
+ * `tasks/get` caller signatures are ECDSA by the interactions-session KMS key, presented
+ * session-wrapped WITH this wire — the member's gate verifies the wire (ERC-1271 against the org
+ * + unrevoked on-chain + consult-selector-only + timestamp) per message. NARROW by construction:
+ *   allowedMethods = [discussion.consult selector]  (NEVER any-skill — unusable for anything else),
+ *   allowedTargets = [the org SA]                   (usable solely to act AS this org),
+ *   timestamp-bounded (180 days, the consultability symmetry; re-enable refreshes),
+ *   on-chain revocable (steward revoke kills routing at every member's gate immediately).
+ * Custodied in the org's InteractionsDO (spec 322 §2 — a stored wire lives with its delegate
+ * service); no raw key ever rests server-side.
+ */
+export async function issueOrgConsultRoutingDelegation(
+  orgSA: Address,
+  interactionsSessionKey: Address,
+  signHash: SignHash,
+  validitySeconds = CONSULT_GRANT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([orgSA])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([consultSkillSelector()])),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate: interactionsSessionKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the org's custody (the steward's credential) authorizes routing
+  return d;
+}
+
 // ─── spec 272/243 — x402 payment delegation (treasury → treasury) ─────────────────────────────
 
 /** DelegationManager sentinel: delegate = 0xa11 ⇒ ANY redeemer may redeem (the PaymentEnforcer still

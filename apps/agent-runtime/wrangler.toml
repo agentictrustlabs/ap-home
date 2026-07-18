@@ -38,6 +38,10 @@ RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = "31337"
 ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
 MCP_URL = "http://127.0.0.1:8788"
+# spec 329 W2 — discovery reach for find_members in local dev (base-URL transport; production uses
+# the DISCOVERY_MCP service binding below). Unreachable ⇒ routing degrades to the un-enriched
+# eligible set (fail-open to fewer signals, never to more candidates).
+DISCOVERY_MCP_BASE = "http://127.0.0.1:8790"
 
 # Contract addresses + secrets live in .dev.vars (gitignored) for local dev.
 
@@ -212,6 +216,14 @@ id = "e050ce20dd6e4a88b568e2f5ed1b47a0"
 [[env.production.services]]
 binding = "MCP"
 service = "demo-mcp-production"
+
+# spec 329 W2 — service binding: demo-a2a → demo-discovery-mcp (same-account Worker, plain name —
+# deployed without an env suffix). find_members enriches consult candidates through it (read-only,
+# public facets, ADR-0040). COMMITTED here (not a --var) so it survives targeted deploys; discovery
+# unreachable at runtime ⇒ routing degrades to the un-enriched eligible set (spec 329 §4).
+[[env.production.services]]
+binding = "DISCOVERY_MCP"
+service = "demo-discovery-mcp"
 
 [[migrations]]
 tag = "v3"
