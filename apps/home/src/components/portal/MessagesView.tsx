@@ -14,6 +14,7 @@ import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
 import { AvatarUpload } from './chat/AvatarUpload';
 import { BusyButton } from '../shared/BusyButton';
+import { Dialog } from '../shared/ui';
 import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
@@ -105,7 +106,7 @@ function ConvAvatar({ conversationId, title, view }: { conversationId: string; t
 }
 
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, agentName } = useSession();
   const { view, refresh, loadThread, post, busy, error, setError } = useInboxView(session, targetAgent);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -122,12 +123,14 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [railFilter, setRailFilter] = useState('');
 
   // spec 328 — the owner's auto-reply assistant (person inbox only; never managed `?agent=`
-  // inboxes). State + toggle + playbook editor mirror OrgDiscussionsView's spec-327 controls.
+  // inboxes). Config lives behind the ⚙ "Messaging settings" dialog next to the title; the toggle +
+  // playbook editor there mirror OrgDiscussionsView's spec-327 controls.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [assistant, setAssistant] = useState<{ enabled: boolean; displayName?: string } | null>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [skillOpen, setSkillOpen] = useState(false);
   const [skillText, setSkillText] = useState('');
   const [skillBusy, setSkillBusy] = useState(false);
+  const [skillSaved, setSkillSaved] = useState(false);
   const authedHeaders = useMemo(
     () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
     [session],
@@ -163,7 +166,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   }, [assistant, authedHeaders, setError]);
   const saveSkill = useCallback(async () => {
     if (!authedHeaders) return;
-    setSkillBusy(true); setError(null);
+    setSkillBusy(true); setSkillSaved(false); setError(null);
     try {
       const res = await fetch('/connect/inbox-assistant', {
         method: 'POST', headers: authedHeaders,
@@ -171,7 +174,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       });
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
-      setSkillOpen(false);
+      setSkillSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setSkillBusy(false); }
@@ -408,7 +411,22 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   };
 
   return (
-    <SectionShell title="Messages" description="Direct messages and requests in one place">
+    <SectionShell
+      title="Messages"
+      description="Direct messages and requests in one place"
+      actions={!targetAgent ? (
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Messaging settings"
+          aria-haspopup="dialog"
+          title="Messaging settings — vault storage & auto-reply assistant"
+        >
+          ⚙
+        </button>
+      ) : undefined}
+    >
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
       {pendingCases.length > 0 && (
@@ -466,57 +484,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         <button type="button" className="ghost" onClick={() => { setComposeOpen((v) => !v); setHits(null); }}>
           {composeOpen ? 'Close' : 'New message'}
         </button>
-        {!targetAgent && assistant !== null && (
-          <span style={{ display: 'inline-flex', gap: '0.4rem' }}>
-            {/* spec 328 — icon-only assistant controls (the spec-327 topic-header pattern). */}
-            <BusyButton
-              busy={assistantBusy}
-              busyLabel="…"
-              onClick={() => void toggleAssistant()}
-              className="ghost"
-              aria-label={assistant.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
-              aria-pressed={assistant.enabled}
-              style={assistant.enabled ? undefined : { opacity: 0.45 }}
-              title={assistant.enabled
-                ? `Auto-reply assistant on${assistant.displayName ? ` (replies as ${assistant.displayName})` : ''} — click to disable`
-                : 'Let your own agent auto-reply to new 1:1 messages while you are away'}
-            >
-              🤖
-            </BusyButton>
-            <BusyButton
-              busy={skillBusy && !skillOpen}
-              onClick={() => setSkillOpen((o) => !o)}
-              className="ghost"
-              aria-label="Assistant instructions"
-              title="Assistant instructions (SKILL.md playbook — shapes every auto-reply your agent writes)"
-            >
-              📝
-            </BusyButton>
-          </span>
-        )}
       </div>
-
-      {skillOpen && !targetAgent && (
-        <div style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface-raised, #fff)', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
-            Assistant instructions (markdown; the reply contract — one reply per message — always applies regardless).
-          </div>
-          <textarea
-            value={skillText}
-            onChange={(e) => setSkillText(e.target.value)}
-            rows={8}
-            maxLength={8192}
-            placeholder={'# Assistant playbook\n\nDescribe how your assistant should reply: tone, what it may say on your behalf, what to defer to you…'}
-            style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)', resize: 'vertical' }}
-          />
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', justifyContent: 'flex-end' }}>
-            <button type="button" className="ghost" onClick={() => setSkillOpen(false)}>Cancel</button>
-            <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="btn">
-              Save instructions
-            </BusyButton>
-          </div>
-        </div>
-      )}
 
       {composeOpen && (
         <div style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
@@ -714,6 +682,103 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
             );
           })}
         </details>
+      )}
+
+      {/* spec 328 UX — "Messaging settings" dialog (⚙ next to the title): identity, delivery/vault
+          status, and the auto-reply assistant (toggle + SKILL.md playbook). Person inbox only. */}
+      {!targetAgent && (
+        <Dialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          title="Messaging settings"
+          description={
+            <>
+              Messaging for <b style={{ color: 'var(--color-text-body)' }}>{agentName ?? 'your agent'}</b>
+              {agentAddress && <> · <code style={{ fontSize: '0.78rem' }}>{shortId(agentAddress)}</code></>}
+            </>
+          }
+        >
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {error && <p role="alert" style={{ color: 'var(--color-danger)', margin: 0, fontSize: '0.82rem' }}>{error}</p>}
+
+            <section aria-label="Messaging status">
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' }}>Messaging status</h3>
+              {vaultBodies === null ? (
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>Checking message storage…</p>
+              ) : vaultBodies ? (
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-sage-700)' }}>
+                  ✓ Messaging enabled — message contents are stored encrypted in your personal vault.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.82rem' }}>
+                    <b>Secure your message storage.</b> Store message contents encrypted in your personal vault.
+                  </span>
+                  <BusyButton busy={vaultBusy} busyLabel="Signing…" onClick={() => void enableVaultBodies()} className="btn">
+                    Enable vault storage
+                  </BusyButton>
+                </div>
+              )}
+            </section>
+
+            <section aria-label="Auto-reply assistant">
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' }}>Auto-reply assistant</h3>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <BusyButton
+                  busy={assistantBusy}
+                  busyLabel="…"
+                  onClick={() => void toggleAssistant()}
+                  className="ghost"
+                  disabled={assistant === null}
+                  aria-label={assistant?.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
+                  aria-pressed={assistant?.enabled === true}
+                  style={assistant?.enabled ? undefined : { opacity: 0.45 }}
+                  title={assistant?.enabled
+                    ? `Auto-reply assistant on${assistant.displayName ? ` (replies as ${assistant.displayName})` : ''} — click to disable`
+                    : 'Let your own agent auto-reply to new 1:1 messages while you are away'}
+                >
+                  🤖
+                </BusyButton>
+                <span style={{ fontSize: '0.82rem' }}>
+                  {assistant === null
+                    ? 'Checking…'
+                    : assistant.enabled
+                      ? <>On{assistant.displayName ? <> — replies as <b>{assistant.displayName}</b></> : null}</>
+                      : 'Off'}
+                </span>
+              </div>
+              <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                Your agent answers messages sent to you.
+              </p>
+
+              {assistant?.enabled && (
+                <div style={{ marginTop: '0.6rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
+                    Assistant instructions (markdown; the reply contract — one reply per message — always applies regardless).
+                  </div>
+                  <textarea
+                    value={skillText}
+                    onChange={(e) => { setSkillText(e.target.value); setSkillSaved(false); }}
+                    rows={8}
+                    maxLength={8192}
+                    aria-label="Assistant instructions"
+                    placeholder={'# Assistant playbook\n\nDescribe how your assistant should reply: tone, what it may say on your behalf, what to defer to you…'}
+                    style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)', resize: 'vertical' }}
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{skillText.length} / 8192</span>
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {skillSaved && <span role="status" style={{ fontSize: '0.78rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
+                      <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="btn">
+                        Save instructions
+                      </BusyButton>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        </Dialog>
       )}
     </SectionShell>
   );
