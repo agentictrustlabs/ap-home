@@ -6,7 +6,7 @@ import type { WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
-  ChatIcon, HashIcon, GlobeIcon,
+  ChatIcon, HashIcon, GlobeIcon, BotIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -142,6 +142,9 @@ export function buildNav(
   const manage: NavItem[] = [];
   if (person) {
     manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
+    // Agent (spec 328 UX v2): the person's message bot + SKILL.md playbooks — config that used to
+    // hide behind the Messages ⚙ dialog.
+    manage.push({ id: 'agent', label: 'Agent', href: '/agent', Icon: BotIcon, status: 'live' });
     // Unified metadata editor (docs/architecture/agent-metadata-tiers.md): all three tiers, one page.
     manage.push({ id: 'metadata', label: 'Metadata', href: '/metadata', Icon: TagIcon, status: 'live' });
     // Records: what's in YOUR vault (the person's own analog of the org Records page).

@@ -7,14 +7,12 @@ import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
 import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
-import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
-import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
+import { signHashFor, type Via } from '../../home/onboarding';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
 import { AvatarUpload } from './chat/AvatarUpload';
-import { BusyButton } from '../shared/BusyButton';
-import { Dialog } from '../shared/ui';
+import { useMessagingDelivery } from './agent/AgentTab';
 import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
@@ -106,7 +104,7 @@ function ConvAvatar({ conversationId, title, view }: { conversationId: string; t
 }
 
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress } = useSession();
   const { view, refresh, loadThread, post, busy, error, setError } = useInboxView(session, targetAgent);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -117,99 +115,12 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
   const [composeBody, setComposeBody] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
-  const [vaultBodies, setVaultBodies] = useState<boolean | null>(null);
-  const [vaultBusy, setVaultBusy] = useState(false);
   const [mobileThread, setMobileThread] = useState(false);
   const [railFilter, setRailFilter] = useState('');
 
-  // spec 328 — the owner's auto-reply assistant (person inbox only; never managed `?agent=`
-  // inboxes). Config lives behind the ⚙ "Messaging settings" dialog next to the title; the toggle +
-  // playbook editor there mirror OrgDiscussionsView's spec-327 controls.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [assistant, setAssistant] = useState<{ enabled: boolean; displayName?: string } | null>(null);
-  const [assistantBusy, setAssistantBusy] = useState(false);
-  const [skillText, setSkillText] = useState('');
-  const [skillBusy, setSkillBusy] = useState(false);
-  const [skillSaved, setSkillSaved] = useState(false);
-  const authedHeaders = useMemo(
-    () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
-    [session],
-  );
-  useEffect(() => {
-    if (!session || targetAgent || !authedHeaders) return;
-    let cancelled = false;
-    void fetch('/connect/inbox-assistant', { headers: authedHeaders })
-      .then((r) => r.json())
-      .then((d: { ok?: boolean; assistant?: { enabled?: boolean; displayName?: string } | null; skill?: { markdown?: string } | null }) => {
-        if (cancelled || !d.ok) return;
-        setAssistant({ enabled: d.assistant?.enabled === true, displayName: d.assistant?.displayName });
-        setSkillText(d.skill?.markdown ?? '');
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [session, targetAgent, authedHeaders]);
-  const toggleAssistant = useCallback(async () => {
-    if (!authedHeaders) return;
-    const enabled = assistant?.enabled === true;
-    setAssistantBusy(true); setError(null);
-    try {
-      const res = await fetch('/connect/inbox-assistant', {
-        method: 'POST', headers: authedHeaders,
-        body: JSON.stringify({ action: enabled ? 'disable' : 'enable' }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; assistant?: { displayName?: string } };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `assistant ${enabled ? 'disable' : 'enable'} failed (${res.status})`);
-      setAssistant({ enabled: !enabled, displayName: b.assistant?.displayName ?? assistant?.displayName });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setAssistantBusy(false); }
-  }, [assistant, authedHeaders, setError]);
-  const saveSkill = useCallback(async () => {
-    if (!authedHeaders) return;
-    setSkillBusy(true); setSkillSaved(false); setError(null);
-    try {
-      const res = await fetch('/connect/inbox-assistant', {
-        method: 'POST', headers: authedHeaders,
-        body: JSON.stringify({ action: 'skillPut', markdown: skillText }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
-      setSkillSaved(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setSkillBusy(false); }
-  }, [authedHeaders, skillText, setError]);
-
-  useEffect(() => {
-    if (!session || !agentAddress || targetAgent || !DELIVERY_SERVICE_SA) return;
-    let cancelled = false;
-    // spec 323 W3.2 — delivery-wire residency is the InteractionsDO; read its open status.
-    void fetch(`/a2a/interactions/${agentAddress.toLowerCase()}/status`)
-      .then((r) => r.json())
-      .then((d: { deliveryGranted?: boolean }) => { if (!cancelled) setVaultBodies(d.deliveryGranted === true); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [session, agentAddress, targetAgent]);
-
-  const enableVaultBodies = useCallback(async () => {
-    if (!session || !agentAddress) return;
-    setVaultBusy(true);
-    try {
-      // Normalize via (session stores 'Google'/'YouVersion' display form; isKmsVia matches lowercase) so a
-      // SOCIAL home signs gesture-free via KMS instead of falling to a passkey prompt. FORCE-reissue BOTH
-      // planes: the send path needs the interactions grant (inbox writes) AND the delivery grant (dm bodies),
-      // and /status reports only presence — so a grant minted before the dm-body write scope stays stale and
-      // causes record_scope_denied until forcibly refreshed. Target = the inbox owner (this person, or the
-      // org when a targetAgent is set).
-      const owner = (targetAgent ?? agentAddress) as Address;
-      const via = (String(session.via ?? '').toLowerCase() || 'passkey') as Via;
-      const auth = isKmsVia(via) ? { token: session.token } : undefined;
-      const a = await activateInteractionsIfNeeded(owner, via, auth, true);
-      const b = await activateInboxDeliveryIfNeeded(owner, via, auth, true);
-      if (a.ok && b.ok) setVaultBodies(true);
-      else setError(!a.ok ? a.error : !b.ok ? b.error : 'could not enable messaging');
-    } finally { setVaultBusy(false); }
-  }, [session, agentAddress, targetAgent, setError]);
+  // spec 328 UX v2 — assistant config (toggle + SKILL.md playbook) lives on Manage → Agent
+  // (`/agent`, AgentTab); this view keeps only the in-context delivery nudge via the shared hook.
+  const delivery = useMessagingDelivery(targetAgent);
 
   useEffect(() => {
     const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
@@ -415,16 +326,15 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       title="Messages"
       description="Direct messages and requests in one place"
       actions={!targetAgent ? (
-        <button
-          type="button"
+        <a
+          href="/agent"
           className="ghost"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="Messaging settings"
-          aria-haspopup="dialog"
-          title="Messaging settings — vault storage & auto-reply assistant"
+          aria-label="Agent settings — message bot & SKILL.md"
+          title="Agent settings (Manage → Agent) — message bot & SKILL.md"
+          style={{ textDecoration: 'none' }}
         >
-          ⚙
-        </button>
+          🤖
+        </a>
       ) : undefined}
     >
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
@@ -454,14 +364,16 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         </div>
       )}
 
-      {vaultBodies === false && (
+      {delivery.enabled === false && (
         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', borderRadius: 10, padding: '0.5rem 0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.83rem', color: 'var(--color-sage-700)' }}>
-            <b>Secure your message storage.</b> Store message contents encrypted in your personal vault.
+            <b>Secure your message storage.</b> Store message contents encrypted in your personal vault — also
+            manageable under <a href="/agent">Manage → Agent</a>.
           </span>
-          <button type="button" className="btn" disabled={vaultBusy} onClick={() => void enableVaultBodies()}>
-            {vaultBusy ? 'Signing…' : 'Enable vault storage'}
+          <button type="button" className="btn" disabled={delivery.busy} onClick={() => void delivery.enable()}>
+            {delivery.busy ? 'Signing…' : 'Enable vault storage'}
           </button>
+          {delivery.error && <span style={{ fontSize: '0.78rem', color: 'var(--color-danger)' }}>{delivery.error}</span>}
         </div>
       )}
 
@@ -684,102 +596,6 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         </details>
       )}
 
-      {/* spec 328 UX — "Messaging settings" dialog (⚙ next to the title): identity, delivery/vault
-          status, and the auto-reply assistant (toggle + SKILL.md playbook). Person inbox only. */}
-      {!targetAgent && (
-        <Dialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          title="Messaging settings"
-          description={
-            <>
-              Messaging for <b style={{ color: 'var(--color-text-body)' }}>{agentName ?? 'your agent'}</b>
-              {agentAddress && <> · <code style={{ fontSize: '0.78rem' }}>{shortId(agentAddress)}</code></>}
-            </>
-          }
-        >
-          <div style={{ display: 'grid', gap: '1rem' }}>
-            {error && <p role="alert" style={{ color: 'var(--color-danger)', margin: 0, fontSize: '0.82rem' }}>{error}</p>}
-
-            <section aria-label="Messaging status">
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' }}>Messaging status</h3>
-              {vaultBodies === null ? (
-                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>Checking message storage…</p>
-              ) : vaultBodies ? (
-                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-sage-700)' }}>
-                  ✓ Messaging enabled — message contents are stored encrypted in your personal vault.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.82rem' }}>
-                    <b>Secure your message storage.</b> Store message contents encrypted in your personal vault.
-                  </span>
-                  <BusyButton busy={vaultBusy} busyLabel="Signing…" onClick={() => void enableVaultBodies()} className="btn">
-                    Enable vault storage
-                  </BusyButton>
-                </div>
-              )}
-            </section>
-
-            <section aria-label="Auto-reply assistant">
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' }}>Auto-reply assistant</h3>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <BusyButton
-                  busy={assistantBusy}
-                  busyLabel="…"
-                  onClick={() => void toggleAssistant()}
-                  className="ghost"
-                  disabled={assistant === null}
-                  aria-label={assistant?.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
-                  aria-pressed={assistant?.enabled === true}
-                  style={assistant?.enabled ? undefined : { opacity: 0.45 }}
-                  title={assistant?.enabled
-                    ? `Auto-reply assistant on${assistant.displayName ? ` (replies as ${assistant.displayName})` : ''} — click to disable`
-                    : 'Let your own agent auto-reply to new 1:1 messages while you are away'}
-                >
-                  🤖
-                </BusyButton>
-                <span style={{ fontSize: '0.82rem' }}>
-                  {assistant === null
-                    ? 'Checking…'
-                    : assistant.enabled
-                      ? <>On{assistant.displayName ? <> — replies as <b>{assistant.displayName}</b></> : null}</>
-                      : 'Off'}
-                </span>
-              </div>
-              <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                Your agent answers messages sent to you.
-              </p>
-
-              {assistant?.enabled && (
-                <div style={{ marginTop: '0.6rem' }}>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
-                    Assistant instructions (markdown; the reply contract — one reply per message — always applies regardless).
-                  </div>
-                  <textarea
-                    value={skillText}
-                    onChange={(e) => { setSkillText(e.target.value); setSkillSaved(false); }}
-                    rows={8}
-                    maxLength={8192}
-                    aria-label="Assistant instructions"
-                    placeholder={'# Assistant playbook\n\nDescribe how your assistant should reply: tone, what it may say on your behalf, what to defer to you…'}
-                    style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)', resize: 'vertical' }}
-                  />
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{skillText.length} / 8192</span>
-                    <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
-                      {skillSaved && <span role="status" style={{ fontSize: '0.78rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
-                      <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="btn">
-                        Save instructions
-                      </BusyButton>
-                    </span>
-                  </div>
-                </div>
-              )}
-            </section>
-          </div>
-        </Dialog>
-      )}
     </SectionShell>
   );
 }
