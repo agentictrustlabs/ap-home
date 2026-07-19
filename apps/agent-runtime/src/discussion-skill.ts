@@ -21,6 +21,7 @@ import { runIntent, createRuleBasedPlanner, type Planner, type PlanStep, type To
 import {
   deterministicStatusBody,
   deterministicSynthesisBody,
+  routedTurnDegrade,
   synthesisOutcomeLines,
   type ConsultCandidateV1,
   type ConsultOutcomeV1,
@@ -77,7 +78,10 @@ export const DISCUSSION_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** spec 329 §4 — the two routing tools joining DISCUSSION_TOOLS when routing is enabled. */
+/** spec 329 §4 — the two routing tools of the routed turn. NOTE (2026-07-17 live 502): only
+ *  `ask_member` is OFFERED to the planner — see PLANNER_ROUTING_TOOLS below. `find_members` stays
+ *  defined (spec surface) and its invoker branch stays live, but it is never presented to a
+ *  plan-then-execute model. */
 export const ROUTING_TOOLS: ToolSpec[] = [
   {
     id: 'find_members',
@@ -104,6 +108,13 @@ export const ROUTING_TOOLS: ToolSpec[] = [
     },
   },
 ];
+
+/** The routing tools the PLANNER is offered — ask_member ONLY. The live 2026-07-17 502 (demo-a2a
+ *  v9fbd0b33) re-proved the spec-327 harness-reads finding for routing: a plan-then-execute
+ *  planner OFFERED a read tool (find_members) planned only the read — the plan "completed" with
+ *  nothing asked and nothing posted, and the turn died. The candidate snapshot is already embedded
+ *  in the goal, so the read tool adds no capability, only the trap. */
+const PLANNER_ROUTING_TOOLS: ToolSpec[] = ROUTING_TOOLS.filter((t) => t.id === 'ask_member');
 
 /** The default playbook (spec 327 §4b) — used when the org's steward hasn't authored one. A config
  *  default, not a fallback mechanism: the load path is one read; absent means this constant. */
@@ -143,12 +154,16 @@ const ROUTING_CONTRACT =
   'candidate fits, ask no one and answer the question yourself as usual. Always finish with ' +
   'exactly one post_topic_message.';
 
+/** Why (and at which step) the routing extension degraded this dispatch to the base reply —
+ *  the execution point audits `interactions.routing.degraded` with this. */
+export interface DiscussionTurnDegraded { step: 'routed-turn'; cause: string }
+
 export async function handleDiscussionRespond(
   env: PlannerEnv,
   input: DiscussionRespondInput,
   io: DiscussionIo,
   routing?: DiscussionRoutingOpts,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string; asked: Array<{ memberSA: string; displayName: string; taskId: string }> }> {
+): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string; asked: Array<{ memberSA: string; displayName: string; taskId: string }>; degraded?: DiscussionTurnDegraded }> {
   // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
   // not authority and not a second mechanism: a failed read just means the goal carries only the
   // trigger message and the default playbook. Also carries the org's steward-authored PLAYBOOK
@@ -165,31 +180,9 @@ export async function handleDiscussionRespond(
   }
 
   const routingOn = !!routing && routing.candidates.length > 0;
-  const { planner, kind } = selectPlanner(env, {
-    systemPrompt: playbook + DISCUSSION_CONTRACT + (routingOn ? ROUTING_CONTRACT : ''),
-  });
-  // The deterministic turn (no LLM configured). Routing variant: ask the top-K candidates, then
-  // post the exact honest status body — sufficient for e2e verification without a model key.
-  const deterministicSteps: PlanStep[] = routingOn
-    ? [
-        ...routing.candidates.slice(0, routing.maxFanout).map((c) => ({
-          toolId: 'ask_member',
-          args: { memberSA: c.memberSA, question: input.triggerBody },
-        })),
-        {
-          toolId: 'post_topic_message',
-          args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => c.displayName)) },
-        },
-      ]
-    : [
-        {
-          toolId: 'post_topic_message',
-          args: { bodyText: `${input.displayName} here — thanks for the mention, ${input.triggerAuthor}. A steward will follow up in this topic.` },
-        },
-      ];
-  const deterministic: Planner = createRuleBasedPlanner([{ match: () => true, steps: deterministicSteps }]);
-  const effective = kind === 'anthropic' ? planner : deterministic;
 
+  // Turn state is PER DISPATCH, not per runIntent call: at-most-one post and the ask ledger hold
+  // across the routed attempt AND a degraded plain re-run (the invoker below closes over these).
   let posted = false;
   let messageId: string | undefined;
   const asked: Array<{ memberSA: string; displayName: string; taskId: string }> = [];
@@ -223,26 +216,99 @@ export async function handleDiscussionRespond(
     throw new Error(`unknown tool: ${toolId}`);
   };
 
-  const candidateBlock = routingOn
-    ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}):\n` +
-      routing.candidates
-        .map((c) => `- ${c.displayName} (memberSA ${c.memberSA})${c.evidence.length ? ` — ${c.evidence.slice(0, 3).join('; ')}` : ''}`)
-        .join('\n')
-    : '';
-  const goal =
-    `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
-    `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
-    (routingOn
-      ? 'Decide whether to consult member agents (ask_member) about this, then post exactly one reply — an honest status naming who you asked, or a direct answer if you asked no one.'
-      : 'Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).') +
-    candidateBlock +
-    topicContext;
+  /** One runIntent pass — routed (ask_member offered, candidates in the goal) or plain spec-327
+   *  (single tool; `tool_choice: any` + the invoker guarantee the post structurally). */
+  const runTurn = async (withRouting: boolean): Promise<{ result: RunResult; kind: 'anthropic' | 'rule-based' }> => {
+    const { planner, kind } = selectPlanner(env, {
+      systemPrompt: playbook + DISCUSSION_CONTRACT + (withRouting ? ROUTING_CONTRACT : ''),
+    });
+    // The deterministic turn (no LLM configured). Routing variant: ask the top-K candidates, then
+    // post the exact honest status body — sufficient for e2e verification without a model key.
+    const deterministicSteps: PlanStep[] = withRouting && routingOn
+      ? [
+          ...routing.candidates.slice(0, routing.maxFanout).map((c) => ({
+            toolId: 'ask_member',
+            args: { memberSA: c.memberSA, question: input.triggerBody },
+          })),
+          {
+            toolId: 'post_topic_message',
+            args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => c.displayName)) },
+          },
+        ]
+      : [
+          {
+            toolId: 'post_topic_message',
+            args: { bodyText: `${input.displayName} here — thanks for the mention, ${input.triggerAuthor}. A steward will follow up in this topic.` },
+          },
+        ];
+    const deterministic: Planner = createRuleBasedPlanner([{ match: () => true, steps: deterministicSteps }]);
+    const effective = kind === 'anthropic' ? planner : deterministic;
+    const candidateBlock = withRouting && routingOn
+      ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}):\n` +
+        routing.candidates
+          .map((c) => `- ${c.displayName} (memberSA ${c.memberSA})${c.evidence.length ? ` — ${c.evidence.slice(0, 3).join('; ')}` : ''}`)
+          .join('\n')
+      : '';
+    const goal =
+      `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
+      `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
+      (withRouting && routingOn
+        ? 'Decide whether to consult member agents (ask_member) about this, then post exactly one reply — an honest status naming who you asked, or a direct answer if you asked no one.'
+        : 'Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).') +
+      candidateBlock +
+      topicContext;
+    const result = await runIntent(
+      { goal, context: { principal: input.principal, channelId: input.channelId, ...(withRouting && routingOn ? { questionId: routing.questionId } : {}) } },
+      { planner: effective, tools: withRouting && routingOn ? [...DISCUSSION_TOOLS, ...PLANNER_ROUTING_TOOLS] : DISCUSSION_TOOLS, invoke },
+    );
+    return { result, kind };
+  };
 
-  const result = await runIntent(
-    { goal, context: { principal: input.principal, channelId: input.channelId, ...(routingOn ? { questionId: routing.questionId } : {}) } },
-    { planner: effective, tools: routingOn ? [...DISCUSSION_TOOLS, ...ROUTING_TOOLS] : DISCUSSION_TOOLS, invoke },
-  );
-  return { result, plannerKind: kind, posted, asked, ...(messageId ? { messageId } : {}) };
+  // ── RESILIENCE INVARIANT (2026-07-17 live 502): the routing EXTENSION may fail; the base reply
+  // may not. The routed attempt runs first (when routing is on); the fabric routedTurnDegrade
+  // verdict then finishes the dispatch honestly — harness-posted status when consults are already
+  // in flight, else the plain spec-327 turn. Only a failure of the PLAIN turn (posting itself
+  // broken) surfaces to the caller as an error. ──
+  let degraded: DiscussionTurnDegraded | undefined;
+  let last: { result: RunResult; kind: 'anthropic' | 'rule-based' } | undefined;
+  if (routingOn) {
+    let outcome: { outcome: 'completed' | 'failed'; error?: string };
+    try {
+      last = await runTurn(true);
+      outcome = { outcome: last.result.outcome, ...(last.result.error ? { error: last.result.error } : {}) };
+    } catch (e) {
+      // A throw OUTSIDE the loop's observation (planner/setup) — same invariant, same degrade.
+      outcome = { outcome: 'failed', error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    }
+    const verdict = routedTurnDegrade({ posted, askedCount: asked.length, ...outcome });
+    if (verdict.action !== 'none' || verdict.cause) degraded = { step: 'routed-turn', cause: verdict.cause ?? 'unknown' };
+    if (verdict.action === 'post-status') {
+      // Consults ARE in flight — the member still sees the honest status (harness post, determinism
+      // by construction; the caller's io.post attaches the routed-consultation contextRef).
+      posted = true;
+      try {
+        const r = await io.post(deterministicStatusBody(asked.map((a) => a.displayName)));
+        messageId = r.messageId;
+      } catch (e) {
+        posted = false; // the post itself failed — fall through to the plain turn's own attempt
+        degraded = { step: 'routed-turn', cause: `${verdict.cause}; status post failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+  }
+  if (!posted) {
+    // The plain spec-327 turn — the base reply. Errors here propagate: they are BASE failures
+    // (posting itself broken), not routing failures.
+    last = await runTurn(false);
+  }
+  const finalResult: RunResult = last?.result ?? { outcome: 'failed', plan: { steps: [] }, steps: [], error: 'no turn ran' };
+  return {
+    result: finalResult,
+    plannerKind: (last?.kind ?? (llmConfigured ? 'anthropic' : 'rule-based')),
+    posted,
+    asked,
+    ...(messageId ? { messageId } : {}),
+    ...(degraded ? { degraded } : {}),
+  };
 }
 
 // ── spec 329 §4.1 turn 2 — the synthesis turn (Ring-0, single tool, harness pre-reads) ─────────

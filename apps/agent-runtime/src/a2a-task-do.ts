@@ -567,11 +567,21 @@ export class A2aTaskDO {
           await this.state.storage.put(AGENT_SA_KEY, p.principal.toLowerCase()); // alarm() rehydration
           await this.state.storage.setAlarm(Date.now() + ROUTING_POLL_MS);
         }
-        if (turn.result.outcome !== 'completed' || !turn.posted) {
-          return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without posting a reply', plannerKind: turn.plannerKind }, { status: 502 });
+        // RESILIENCE INVARIANT (2026-07-17 live 502): a routing-extension failure degrades the turn
+        // (audited below) — it never kills the base reply. Success ⇔ a reply was POSTED; the only
+        // 502 left is the base turn itself failing to post, and that is never silent again.
+        if (turn.degraded) {
+          console.error(`[discussion-respond] routing degraded (step=${turn.degraded.step}): ${turn.degraded.cause}`);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.degraded', outcome: 'error', actor: { type: 'service', id: p.principal }, subject: routing ? { type: 'routing-question', id: routing.questionId } : { type: 'channel', id: p.channelId }, reason: `${turn.degraded.step}: ${turn.degraded.cause}`.slice(0, 500) }).catch(() => undefined);
         }
-        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: turn.asked.length });
+        if (!turn.posted) {
+          const cause = turn.result.error ?? 'assistant turn completed without posting a reply';
+          console.error(`[discussion-respond] 502 — no reply posted (step=turn outcome=${turn.result.outcome} planner=${turn.plannerKind}): ${cause}`);
+          return Response.json({ ok: false, error: cause, plannerKind: turn.plannerKind }, { status: 502 });
+        }
+        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: turn.asked.length, ...(turn.degraded ? { degraded: true } : {}) });
       } catch (e) {
+        console.error(`[discussion-respond] 502 — dispatch threw (step=dispatch): ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }
     }
