@@ -33,6 +33,7 @@ import {
   fixedWindowAllow,
   inboxAssistantTrigger,
   isListingCurrent,
+  isRetryableVaultToolFailure,
   setTopicAssistant,
   setTopicRouting,
   sha256Hex32,
@@ -42,6 +43,7 @@ import {
   ROUTING_FANOUT_DEFAULT,
   consultGrantRecordKey,
   eligibleConsultMembers,
+  verifiedBodiesFromBatch,
   type ChannelMessageEntryV1,
   type ChannelV1,
   type ConsultProvenanceV1,
@@ -343,44 +345,72 @@ export class InteractionsDO {
     } catch { return false; }
   }
 
+  /** One delegation-authorized demo-mcp tool call (bound-mint transport). NEW-C1 — per-op transport
+   *  selection: when the principal has custodied a DEL-001 session leaf (st.sessionLeaf,
+   *  PRINCIPAL-signed, binding the interactions-session KMS key) AND that key is configured,
+   *  CLIENT-MINT a bound token (callMcpToolBound, enforceBinding) — the leaf's delegator MUST equal
+   *  this grant's delegator (the principal / token sub), else it's not the right principal's leaf. */
+  private async mcpVaultTool(
+    grant: IncomingDelegation,
+    toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
+    toolArgs: Record<string, unknown>,
+  ): Promise<Response> {
+    const env = this.env;
+    if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+      const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      const leaf = st.sessionLeaf;
+      if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
+        return callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
+      }
+      // CRIT-2 W4 — the interactions-session key IS configured but this principal has NO custodied leaf
+      // (it enabled before leaf-signing shipped). FAIL-CLOSED (ADR-0013 one-mechanism): require a
+      // re-enable to custody the DEL-001 leaf; do NOT switch to the server-mint bridge. Server-mint is
+      // retired. The Home's activateInteractionsIfNeeded self-heals this on the principal's next login.
+      return new Response(
+        JSON.stringify({ ok: false, error: 'session_leaf_required', detail: 'interactions vault access needs a re-enable to custody the DEL-001 session leaf (server-mint retired — CRIT-2)' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    // CRIT-2 W6 — server-mint retired. The interactions-session KMS key is REQUIRED for interactions vault
+    // ops (bound-mint above / DO-side proof). Unconfigured ⇒ FAIL-CLOSED (dev must provision
+    // GCP_KMS_INTERACTIONS_KEY_NAME); prod always sets it, taking the bound/409 branch above. No fallback.
+    return new Response(
+      JSON.stringify({ ok: false, error: 'interactions_key_unprovisioned', detail: 'GCP_KMS_INTERACTIONS_KEY_NAME is unset — interactions vault ops require it (server-mint retired, CRIT-2)' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  // 2026-07-18 LIVE REGRESSION — a THROTTLED vault call is not an auth failure. demo-mcp's stage-2
+  // soft rate limiter (120 verified calls/60s per principal+capability) rejects with the same opaque
+  // 401 `{ error: 'auth failed', code: 'rate-limited' }` as a credential reject, and this DO used to
+  // rethrow that string verbatim: a member opening a busy org's Discussions board saw a raw
+  // "auth failed" instead of the board. The limiter rejects BEFORE the tool handler runs (nothing
+  // executed), and its window frees in well under a second (observed retryAfterMs 8–394ms), so a
+  // rate-limited response is RETRIED with a short backoff and, if it persists, surfaces as an
+  // explicit throttle error — never as an authorization verdict.
+  private static readonly VAULT_THROTTLE_BACKOFF_MS = 250;
+  private static vaultThrottledError(op: string): Error {
+    return new Error(`vault ${op} throttled (rate-limited) — this agent's storage budget is momentarily exhausted; retry shortly`);
+  }
+
   /** The fabric Vault port over the delegation-authorized demo-mcp transport (plane B). */
   private vaultFor(grant: IncomingDelegation): Vault {
-    const env = this.env;
-    // NEW-C1 — per-op transport selection. When the principal has custodied a DEL-001 session leaf
-    // (st.sessionLeaf, PRINCIPAL-signed, binding the interactions-session KMS key) AND that key is
-    // configured, CLIENT-MINT a bound token (callMcpToolBound, enforceBinding) — the leaf's delegator MUST
-    // equal this grant's delegator (the principal / token sub), else it's not the right principal's leaf.
-    // Otherwise fall back to the server-mint bridge so pre-enable principals keep working; they migrate to
-    // bound-mint on their next enable (grant.put). No behavior change until GCP_KMS_INTERACTIONS_KEY_NAME set.
-    const callTool = async (toolName: 'get_vault_record' | 'set_vault_record' | 'list_vault_record', toolArgs: Record<string, unknown>): Promise<Response> => {
-      if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
-        const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-        const leaf = st.sessionLeaf;
-        if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
-          return callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
-        }
-        // CRIT-2 W4 — the interactions-session key IS configured but this principal has NO custodied leaf
-        // (it enabled before leaf-signing shipped). FAIL-CLOSED (ADR-0013 one-mechanism): require a
-        // re-enable to custody the DEL-001 leaf; do NOT switch to the server-mint bridge. Server-mint is
-        // retired. The Home's activateInteractionsIfNeeded self-heals this on the principal's next login.
-        return new Response(
-          JSON.stringify({ ok: false, error: 'session_leaf_required', detail: 'interactions vault access needs a re-enable to custody the DEL-001 session leaf (server-mint retired — CRIT-2)' }),
-          { status: 409, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
-      // CRIT-2 W6 — server-mint retired. The interactions-session KMS key is REQUIRED for interactions vault
-      // ops (bound-mint above / DO-side proof). Unconfigured ⇒ FAIL-CLOSED (dev must provision
-      // GCP_KMS_INTERACTIONS_KEY_NAME); prod always sets it, taking the bound/409 branch above. No fallback.
-      return new Response(
-        JSON.stringify({ ok: false, error: 'interactions_key_unprovisioned', detail: 'GCP_KMS_INTERACTIONS_KEY_NAME is unset — interactions vault ops require it (server-mint retired, CRIT-2)' }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } },
-      );
-    };
+    const callTool = (toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record', toolArgs: Record<string, unknown>): Promise<Response> =>
+      this.mcpVaultTool(grant, toolName, toolArgs);
     return {
       async write({ resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
-        const resp = await callTool('set_vault_record', { recordType: resource, data });
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `vault write failed (${resp.status})`);
+        // A rate-limited write was rejected at verify time (never executed) — same bounded retry as reads.
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const resp = await callTool('set_vault_record', { recordType: resource, data });
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string };
+          if (resp.ok && out.ok !== false) return;
+          if (isRetryableVaultToolFailure(resp.status, out)) {
+            if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+            throw InteractionsDO.vaultThrottledError('write');
+          }
+          throw new Error(out.error ?? `vault write failed (${resp.status})`);
+        }
+        throw InteractionsDO.vaultThrottledError('write');
       },
       async read<T>({ resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
         // BOUNDED RETRY (2026-07-11) — cold-cache first read; demo-mcp caches the deterministic vault-key
@@ -391,8 +421,15 @@ export class InteractionsDO {
         let lastErr = 'vault read failed';
         for (let attempt = 0; attempt < 4; attempt++) {
           const resp = await callTool('get_vault_record', { recordType: resource });
-          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string };
-          if (!resp.ok) throw new Error(out.error ?? `vault read failed (${resp.status})`);
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; data?: T | null; error?: string; code?: string };
+          if (!resp.ok) {
+            // Transient throughput reject (stage-2 limiter) ⇒ back off + retry; never an auth verdict.
+            if (isRetryableVaultToolFailure(resp.status, out)) {
+              if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+              throw InteractionsDO.vaultThrottledError('read');
+            }
+            throw new Error(out.error ?? `vault read failed (${resp.status})`);
+          }
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
           return out.data === null || out.data === undefined ? null : { data: out.data };
         }
@@ -408,6 +445,36 @@ export class InteractionsDO {
         return (out.records ?? []).map((r) => ({ resource: r.record_type, updatedAt: r.updated_at }));
       },
     } as unknown as Vault;
+  }
+
+  /** BATCHED message-body read: ONE `get_vault_records` round-trip for a whole topic's bodies,
+   *  hash-verified per envelope (fabric `verifiedBodiesFromBatch` — the same spec 309 §8.4
+   *  verification as `loadBody`, one mechanism). Replaces the per-message delegated reads whose
+   *  O(board size) call volume per poll exhausted the org principal's stage-2 verified-call budget
+   *  (the 2026-07-18 live regression: gate reads on the same budget then rejected and the member's
+   *  board surfaced a raw "auth failed"). Requires demo-mcp ≥ VL-W2 (`get_vault_records`, deployed
+   *  2026-07-13) — the deployed fleet has it; there is deliberately NO per-record fallback path
+   *  (ADR-0013 one-mechanism). Fail-closed PER RECORD: unverifiable bodies are omitted. */
+  private async readTopicBodies(grant: IncomingDelegation, envelopes: MessageEnvelopeV1[]): Promise<Record<string, string>> {
+    if (envelopes.length === 0) return {};
+    const recordTypes = [...new Set(envelopes.map((e) => e.body.resource))];
+    let records: Record<string, unknown> = {};
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const resp = await this.mcpVaultTool(grant, 'get_vault_records', { recordTypes });
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Record<string, unknown>; error?: string; code?: string };
+      if (!resp.ok || out.ok === false) {
+        if (isRetryableVaultToolFailure(resp.status, out)) {
+          if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
+          throw InteractionsDO.vaultThrottledError('read');
+        }
+        throw new Error(out.error ?? `vault batch read failed (${resp.status})`);
+      }
+      records = out.records ?? {};
+      break;
+    }
+    const bytes = await verifiedBodiesFromBatch(envelopes, records);
+    const decoder = new TextDecoder();
+    return Object.fromEntries(Object.entries(bytes).map(([id, b]) => [id, decoder.decode(b)]));
   }
 
   private async readDoc<T>(grant: IncomingDelegation, resource: string, empty: T): Promise<T> {
@@ -709,12 +776,10 @@ export class InteractionsDO {
           if (!entry) return json({ error: 'unknown channel' }, 404);
           const limit = Math.min(Math.max(Number(body.limit ?? ASSISTANT_READ_LIMIT) || ASSISTANT_READ_LIMIT, 1), ASSISTANT_READ_LIMIT);
           const messages = (await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), [])).slice(-limit);
-          const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
-          const rows = await Promise.all(messages.map(async (m) => {
-            let text = '';
-            try { text = new TextDecoder().decode(await store.loadBody(m.envelope)).slice(0, ASSISTANT_BODY_CLIP); } catch { /* fail-closed omit body */ }
-            return { id: m.envelope.id, from: m.envelope.from, authorName: m.authorName, ...(m.actor ? { actor: m.actor } : {}), createdAt: m.envelope.createdAt, bodyText: text };
-          }));
+          // ONE batched, hash-verified body read (same seam as the session-gated channels.read);
+          // fail-closed omit per body — an unverifiable body renders empty, never fails the turn.
+          const bodyById = await this.readTopicBodies(g, messages.map((m) => m.envelope)).catch(() => ({} as Record<string, string>));
+          const rows = messages.map((m) => ({ id: m.envelope.id, from: m.envelope.from, authorName: m.authorName, ...(m.actor ? { actor: m.actor } : {}), createdAt: m.envelope.createdAt, bodyText: (bodyById[m.envelope.id] ?? '').slice(0, ASSISTANT_BODY_CLIP) }));
           // spec 327 §4b — the assistant's context read also carries the org playbook (one round trip;
           // absent ⇒ the turn uses the built-in default playbook — a config default, not a fallback).
           const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null);
@@ -1103,11 +1168,10 @@ export class InteractionsDO {
         if (op === 'channels.read' && typeof body.channelId === 'string') {
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
           wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
-          const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
-          await Promise.all(messages.map(async (m) => {
-            // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
-            try { bodies[m.envelope.id] = new TextDecoder().decode(await store.loadBody(m.envelope)); } catch { /* fail-closed omit */ }
-          }));
+          // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
+          // ONE batched round-trip for the whole topic (was one delegated read PER MESSAGE — the
+          // O(board size) per-poll amplification behind the 2026-07-18 "auth failed" regression).
+          Object.assign(bodies, await this.readTopicBodies(grant, messages.map((m) => m.envelope)));
         }
         return json({ ok: true, channels: wire, bodies, you: name ?? 'Steward', steward });
       }
