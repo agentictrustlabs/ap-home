@@ -19,6 +19,8 @@
 // invoker enforces at-most-one post per turn independently of the plan.
 import { runIntent, createRuleBasedPlanner, type Planner, type PlanStep, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
 import {
+  consultCandidateLine,
+  consultSelectionBasis,
   deterministicStatusBody,
   deterministicSynthesisBody,
   routedTurnDegrade,
@@ -145,14 +147,25 @@ function contextLines(read: TopicReadResult | null): string {
   return `\nRecent messages in the topic:\n${lines.join('\n')}`;
 }
 
-/** The routing addendum to the tool contract (spec 329 §4.1 turn 1). */
+/** The routing addendum to the tool contract (spec 329 §4.1 turn 1 + §4 skill-based
+ *  auto-selection): SELECTION IS THE MODEL'S, grounded in each candidate's PUBLISHED SKILLS —
+ *  the asker never has to name anyone (a named member is an override, not a requirement), and a
+ *  no-fit outcome is stated honestly, never silent. */
 const ROUTING_CONTRACT =
   '\n\nRouting (enabled for this topic): the goal lists candidate members whose agents you MAY ' +
-  'consult. If the question would benefit from their input, call ask_member for the best ' +
-  'candidates (respect the fan-out limit), and make your single post_topic_message an HONEST ' +
-  'status reply naming exactly who you asked (their answers arrive in a follow-up post). If no ' +
-  'candidate fits, ask no one and answer the question yourself as usual. Always finish with ' +
-  'exactly one post_topic_message.';
+  "consult, each with their PUBLISHED SKILLS. Selecting who to consult is YOUR job: match the " +
+  "question's subject against each candidate's published skills (for a candidate with no " +
+  'published skills, match only on their displayName/description — never assume skills they did ' +
+  "not publish). When one or more candidates' published skills clearly cover the question's " +
+  'domain, consult them via ask_member EVEN IF the question named no one — a member named in the ' +
+  'question is an override to honor, never a requirement for consulting. Never ask more members ' +
+  'than the fan-out limit. Make your single post_topic_message an HONEST status reply naming ' +
+  'exactly who you asked and the selection basis for each, e.g. "asking alice (published skills: ' +
+  'water systems, plumbing)" — for a no-skills candidate, say the name/description basis instead. ' +
+  "Their answers arrive in a follow-up post. If NO candidate's published skills (or " +
+  'name/description) fit the question, ask no one, answer the question yourself, and say plainly ' +
+  'that the org has no opted-in member with matching published skills. Always finish with exactly ' +
+  'one post_topic_message.';
 
 /** Why (and at which step) the routing extension degraded this dispatch to the base reply —
  *  the execution point audits `interactions.routing.degraded` with this. */
@@ -232,7 +245,7 @@ export async function handleDiscussionRespond(
           })),
           {
             toolId: 'post_topic_message',
-            args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => c.displayName)) },
+            args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => ({ displayName: c.displayName, basis: consultSelectionBasis(c) }))) },
           },
         ]
       : [
@@ -244,16 +257,23 @@ export async function handleDiscussionRespond(
     const deterministic: Planner = createRuleBasedPlanner([{ match: () => true, steps: deterministicSteps }]);
     const effective = kind === 'anthropic' ? planner : deterministic;
     const candidateBlock = withRouting && routingOn
-      ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}):\n` +
-        routing.candidates
-          .map((c) => `- ${c.displayName} (memberSA ${c.memberSA})${c.evidence.length ? ` — ${c.evidence.slice(0, 3).join('; ')}` : ''}`)
-          .join('\n')
+      ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}). Match ` +
+        "the question's subject against each candidate's published skills; a candidate marked " +
+        '"NO published skills" may only be matched on displayName/description — never assume ' +
+        'skills they have not published:\n' +
+        routing.candidates.map((c) => consultCandidateLine(c)).join('\n')
       : '';
     const goal =
       `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
       `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
       (withRouting && routingOn
-        ? 'Decide whether to consult member agents (ask_member) about this, then post exactly one reply — an honest status naming who you asked, or a direct answer if you asked no one.'
+        ? "Select which candidate members to consult by matching the question's subject to their " +
+          'published skills (the question does NOT need to name anyone; a named member is an ' +
+          'override, not a requirement). Call ask_member for each selected candidate (at most the ' +
+          'fan-out limit), then post exactly one reply — an honest status naming who you asked ' +
+          "and each pick's selection basis, or, if no candidate's published skills (or " +
+          'name/description) fit, a direct answer that says the org has no opted-in member with ' +
+          'matching published skills.'
         : 'Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).') +
       candidateBlock +
       topicContext;
@@ -287,7 +307,10 @@ export async function handleDiscussionRespond(
       // by construction; the caller's io.post attaches the routed-consultation contextRef).
       posted = true;
       try {
-        const r = await io.post(deterministicStatusBody(asked.map((a) => a.displayName)));
+        const r = await io.post(deterministicStatusBody(asked.map((a) => {
+          const c = routing.candidates.find((x) => x.memberSA === a.memberSA);
+          return { displayName: a.displayName, ...(c ? { basis: consultSelectionBasis(c) } : {}) };
+        })));
         messageId = r.messageId;
       } catch (e) {
         posted = false; // the post itself failed — fall through to the plain turn's own attempt
