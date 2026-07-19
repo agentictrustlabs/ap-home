@@ -30,6 +30,8 @@ interface LookupRow {
   smartAgent?: string; name?: string | null; displayName?: string | null; description?: string | null;
   skills?: string | null; facets?: string[]; shaclConforms?: boolean; registryStatus?: string | null;
   kind?: string | null;
+  /** Spec 331 — the structured facets the matcher now ranks on, ahead of any lexical signal. */
+  capabilityIds?: string[]; languages?: string | null; regions?: string | null; focusAreas?: string | null;
 }
 
 async function discoveryPost(env: DiscoveryEnv, path: string, body: unknown): Promise<Record<string, unknown> | null> {
@@ -76,6 +78,13 @@ export async function fetchDiscoveryFacets(
       displayName: row.displayName ?? null,
       description: row.description ?? null,
       skills: row.skills ?? null,
+      // Spec 331 — carried through so `rankConsultCandidates` can score STRUCTURE. The MCP parses
+      // `capabilityIds` out of `skills` server-side so every consumer agrees on what a declared
+      // capability id is; the `?? []` is the pre-migration server, not a silent default.
+      capabilityIds: row.capabilityIds ?? [],
+      languages: row.languages ?? null,
+      regions: row.regions ?? null,
+      focusAreas: row.focusAreas ?? null,
       facets: row.facets ?? [],
       shaclConforms: row.shaclConforms === true,
       registered: row.registryStatus === 'active' || (row.facets ?? []).includes('registry'),
