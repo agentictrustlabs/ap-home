@@ -58,6 +58,16 @@ function viaForHome(info: NameInfo): Via {
   return info.hasPasskey ? 'passkey' : info.hasEoa ? 'wallet' : 'passkey';
 }
 
+/** Would resolving this name actually run a PASSKEY ceremony? Only then does the RP ID matter, and
+ *  only then is the hop to `<label>.impact-agent.me` (redirectForEnrollName) worth a page load.
+ *  A NEW name may bootstrap a passkey home → hop. An EXISTING home that has no passkey on-chain
+ *  signs with a wallet or server-side KMS — both origin-agnostic — so it resolves in place on the
+ *  apex, which is also where the enroll's consent belongs (no mid-ceremony origin jump). */
+function needsPasskeyOrigin(info: NameInfo): boolean {
+  if (!(info.exists && info.agent)) return true; // new name — the journey may create a passkey
+  return !!info.hasPasskey;
+}
+
 // Subdomain-isolated passkeys (spec 229 P5): the ROOT passkey must be created/used at the
 // person's OWN subdomain (RP ID = <label>.impact-agent.me). If we're not there yet, redirect;
 // the subdomain auto-resumes via ?start / ?signin. Dev hosts (localhost/pages.dev) skip this.
@@ -246,11 +256,13 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         else setView({ k: 'blocked' });
         return;
       }
-      // ROOT-passkey subdomain isolation (spec 229 P5): before running ANY person passkey ceremony
+      // ROOT-passkey subdomain isolation (spec 229 P5): before running a person PASSKEY ceremony
       // (new bootstrap OR existing-home assertion), hop to <label>.impact-agent.me carrying the enroll
       // request, so the RP ID is the person's own home — not the www/apex host. No-op once we're already
       // on the subdomain (post-hop) and on dev hosts. org-create / incomplete returned above.
-      if (redirectForEnrollName(api.enroll!.name)) return;
+      // `needsPasskeyOrigin` keeps a wallet/social home OFF the hop: it gains nothing and would strand
+      // the ceremony on a second front door at an origin the member never asked for.
+      if (needsPasskeyOrigin(info) && redirectForEnrollName(api.enroll!.name)) return;
       if (info.exists && info.agent) {
         const via = viaForHome(info);
         // A social/KMS home reaching this path has NO recognized session (recognition would have
@@ -371,18 +383,22 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // "Use my Impact name" within a name-deferred enroll → collect a name, then route to the named
   // enroll path (existing home → sign in + grant; new → the named journey which handles passkey).
   if (view.k === 'enroll-name') {
-    return <NameStart enrollApi={api} reason={view.reason} onStart={async (name) => {
+    const reason = view.reason; // set when the member explicitly chose the device-credential lane
+    return <NameStart enrollApi={api} reason={reason} onStart={async (name) => {
       // OWNER-ops never take the named grant path (no owner-op branch in OnboardingJourney). Sign in to
       // the named home, then resume the recognized ceremony on that session (Step 3 — SignInView onSession).
       if (api.enroll?.template === 'content-signer' || api.enroll?.template === 'subscription-collect') {
         setView({ k: 'signin', name }); return;
       }
-      // ROOT-passkey subdomain isolation (spec 229 P5): hop to <label>.impact-agent.me FIRST, carrying
-      // the enroll request, so the passkey is created/asserted at the person's own RP ID — not the
-      // www/apex host. On dev hosts / when already home this is a no-op and we resolve in place below.
-      if (redirectForEnrollName(name)) return;
+      // Resolve the name BEFORE deciding to hop: only a PASSKEY ceremony needs the person's own RP ID
+      // (spec 229 P5). Resolving first is what lets `needsPasskeyOrigin` keep a wallet/social home on
+      // the apex — the hop used to be unconditional, so every named home took a pointless origin jump.
       const info = await nameInfo(name);
       if (info.exists && info.agent && info.deployed === false) { setView({ k: 'incomplete', name }); return; }
+      // ROOT-passkey subdomain isolation: hop to <label>.impact-agent.me carrying the enroll request, so
+      // the passkey is created/asserted at the person's own RP ID. On dev hosts / when already home this
+      // is a no-op and we resolve in place below.
+      if (needsPasskeyOrigin(info) && redirectForEnrollName(name)) return;
       if (info.exists && info.agent) {
         const via = viaForHome(info);
         // Social/KMS home on the name path = no recognized session → provider sign-in with the
@@ -393,8 +409,14 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           if (via === 'youversion') continueWithYouVersion(undefined, stash); else continueWithGoogle(undefined, stash);
           return;
         }
-        // Ambiguous custody (EOA-only, no published connection record) → all credential buttons (spec 280).
-        if (via === 'wallet' && !info.connectionKind && !info.hasPasskey) { setView({ k: 'enroll-entry' }); return; }
+        // Ambiguous custody (EOA-only, no published connection record) → all credential buttons (spec 280)
+        // — but ONLY when the member has not already told us. `reason` is set precisely when they got here
+        // by pressing "Continue with a passkey or wallet", i.e. they chose the DEVICE-credential lane; the
+        // home has no passkey on-chain, so the wallet is the only device credential it can assert with.
+        // Bouncing them back to the chooser they just left is a closed cycle: enroll-entry's only
+        // device-credential button routes straight back to this name door (the enroll front door has no
+        // wallet button by design, spec 259 / ADR-0029), so a named wallet home could never connect.
+        if (!reason && via === 'wallet' && !info.connectionKind && !info.hasPasskey) { setView({ k: 'enroll-entry' }); return; }
         setView({ k: 'enroll-existing', name, agent: info.agent, via });
       }
       else setView({ k: 'journey', variant: 'enroll-new', name });
