@@ -1,6 +1,6 @@
 // Tier-3 reader (docs/architecture/agent-metadata-tiers.md): the SA-keyed ERC-4337 account
 // metadata on AgentProfileResolver. READ-ONLY by design — this tier is public, system-managed
-// (authOrigin at onboarding, skills by the spec-282 ceremony), and the home deliberately ships no
+// (authOrigin at onboarding, declared capabilities by the spec-282 ceremony), and the home deliberately ships no
 // editor for it. One mechanism: direct readContract of the `atl:` predicates (ADR-0012-safe views).
 import { createPublicClient, http, keccak256, toBytes } from 'viem';
 import { baseSepolia } from 'viem/chains';
@@ -11,7 +11,9 @@ import { CONTRACTS, DEFAULT_RPC_URL } from './chain';
 export const SA_PROFILE_KEYS = [
   { key: 'displayName', label: 'Display name' },
   { key: 'description', label: 'Description' },
-  { key: 'skills', label: 'Skills' },
+  // `skills` → `atl:skills` — the DECLARED CAPABILITY projection (capability-architecture.md §1); the key
+  // name is legacy and immutable (it derives the on-chain predicate id), the label is canonical.
+  { key: 'skills', label: 'Declared capabilities' },
   { key: 'authOrigin', label: 'Auth origin' },
 ] as const;
 

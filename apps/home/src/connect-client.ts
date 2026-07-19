@@ -2423,11 +2423,13 @@ export async function setConnectionInfo(
   return { ok: true, txHash: res.txHash };
 }
 
-// ── Public skill assertion (spec 282) — the agent's OWN SA writes its `atl:skills` profile property ──
-/** On-chain id for the publicly-asserted skills property (mirrors AgentProfilePredicates.ATL_SKILLS). */
+// ── Publish for discovery (spec 282) — the agent's OWN SA writes its `atl:skills` profile property ──
+/** `atl:skills` — the DECLARED CAPABILITY projection (capability-architecture.md §1); the key name and the
+ *  derived predicate id are legacy and IMMUTABLE (live on-chain data), so only the prose says "capability".
+ *  Mirrors AgentProfilePredicates.ATL_SKILLS. */
 const ATL_SKILLS: Hex = keccak256(toBytes('atl:skills'));
 
-/** Read the agent's currently-asserted PUBLIC skills (comma-joined labels), for prefilling the UI. */
+/** Read the capabilities the agent currently PUBLISHES for discovery (comma-joined labels), to prefill the UI. */
 export async function getSkills(sa: Address): Promise<string[]> {
   try {
     const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
@@ -2436,10 +2438,10 @@ export async function getSkills(sa: Address): Promise<string[]> {
   } catch { return []; }
 }
 
-/** Assert PUBLIC skills (spec 282): the agent's own SA writes `atl:skills` on AgentProfileResolver
+/** Publish capabilities for discovery (spec 282): the agent's own SA writes `atl:skills` on AgentProfileResolver
  *  (`onlyAgent` → msg.sender == SA via executeCall), signed by `signHash`, gasless. `setStringProperty`
  *  is `onlyRegistered`, so we first `register` the profile in the SAME batch if needed (register reverts
- *  if already registered — AlreadyRegistered — hence the isRegistered gate). The asserted labels are what
+ *  if already registered — AlreadyRegistered — hence the isRegistered gate). The published labels are what
  *  the discovery indexer projects + the matcher ranks on; the agent's full PRIVATE claim set stays in its
  *  vault (Phase 2b). Fires the discovery re-index. */
 /** Broadcast a batch of contract calls as ONE userOp on `sa` (spec 283/284 connect-treasury BIND step).
@@ -2482,11 +2484,12 @@ export async function setSkills(
 }
 
 // ── Private skill-claim vault (spec 282 Phase 2b) — the PRIVATE tier ──────────────────────────────
-// The full claim set lives in the person's Connect-home vault (KV, session-authorized) — never public.
-// Each claim has an `asserted` flag; the asserted subset's labels are what `setSkills` publishes on-chain.
+// The person's CAPABILITY RECORD — capability claim credentials living in their Connect-home vault (KV,
+// session-authorized) — never public. Each entry has an `asserted` flag; that subset's labels are what
+// `setSkills` publishes for discovery. `SkillClaim` / `asserted` are legacy names (ADR-0051 prose/key split).
 export interface SkillClaim { label: string; skillId?: string; relation?: string; proficiency?: number; asserted: boolean; createdAt?: number }
 
-/** Read the person's private skill claims from the home vault (session token). */
+/** Read the person's private capability record from the home vault (session token). */
 export async function listSkillClaims(token: string): Promise<SkillClaim[]> {
   const r = await fetch('/connect/skills', { headers: { authorization: `Bearer ${token}` } });
   if (!r.ok) return [];
@@ -2494,7 +2497,7 @@ export async function listSkillClaims(token: string): Promise<SkillClaim[]> {
   return b.skills ?? [];
 }
 
-/** Persist the full private claim set to the home vault (session-authorized; no on-chain write). */
+/** Persist the full private capability record to the home vault (session-authorized; no on-chain write). */
 export async function saveSkillClaims(token: string, skills: SkillClaim[]): Promise<{ ok: true } | { ok: false; error: string }> {
   const r = await fetch('/connect/skills', {
     method: 'POST',

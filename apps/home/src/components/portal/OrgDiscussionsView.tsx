@@ -734,7 +734,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                       onClick={() => void openSkillEditor()}
                       className="manage-btn manage-btn--ghost"
                       aria-label="Assistant instructions"
-                      title="Assistant instructions (SKILL.md playbook — shapes every reply the assistant writes for this organization)"
+                      title="Assistant instructions (the playbook — shapes every reply the assistant writes for this organization)"
                     >
                       📝
                     </BusyButton>

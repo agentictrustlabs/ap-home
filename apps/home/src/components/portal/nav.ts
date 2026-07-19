@@ -129,7 +129,9 @@ export function buildNav(
   const discovery: NavItem[] = [
     { id: 'registry', label: 'Registry', href: '/registry', Icon: DatabaseIcon, status: 'live' },
     { id: 'naming', label: 'Naming', href: '/naming', Icon: TagIcon, status: 'live' },
-    { id: 'skills', label: 'Skills', href: '/skills', Icon: AwardIcon, status: 'live' },
+    // id + href stay `skills` — they are legacy route/state keys (ADR-0051 prose/key split); the LABEL is
+    // the canonical user-facing term for the declared capability projection (facet-registries.md §7).
+    { id: 'skills', label: 'What this agent can do', href: '/skills', Icon: AwardIcon, status: 'live' },
     // Trust web (impact port): who holds keys vs who granted authority — the person's live graph.
     { id: 'trust-graph', label: 'Trust graph', href: '/trust-graph', Icon: ShieldIcon, status: 'live' },
     // Live backend status (impact port): a2a/mcp health, chain head, the on-chain contract registry.
@@ -142,7 +144,7 @@ export function buildNav(
   const manage: NavItem[] = [];
   if (person) {
     manage.push({ id: 'you', label: 'Profile', href: '/you', Icon: UserIcon, status: person.status });
-    // Agent (spec 328 UX v2): the person's message bot + SKILL.md playbooks — config that used to
+    // Agent (spec 328 UX v2): the person's message bot + playbooks — config that used to
     // hide behind the Messages ⚙ dialog.
     manage.push({ id: 'agent', label: 'Agent', href: '/agent', Icon: BotIcon, status: 'live' });
     // Unified metadata editor (docs/architecture/agent-metadata-tiers.md): all three tiers, one page.

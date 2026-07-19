@@ -288,7 +288,7 @@ export const RELATIONSHIPS_DATA_RESOURCE_SCOPE = 'vault:relationships.data' as c
 export const MEMBER_PROFILE_WILDCARD_SCOPE = 'vault:member.profile:*' as const;
 /** spec 323 W2 — owner-own capability records reached self-only over the interactions grant: the
  *  person's community profile (V-1 remediation — delegation-authorized, replaces the bearer path),
- *  their private skills tier, and their home manifest master. */
+ *  their private capability record (`vault:skills.data` — legacy key), and their home manifest master. */
 export const IMPACT_PROFILE_RESOURCE_SCOPE = 'vault:impact-profile' as const;
 export const SKILLS_DATA_RESOURCE_SCOPE = 'vault:skills.data' as const;
 export const HOME_MANIFEST_RESOURCE_SCOPE = 'vault:home.manifest' as const;
@@ -427,12 +427,14 @@ export async function issueMemberProfileAccessDelegation(
 
 // ─── spec 329 §2.1 — the consultability delegation (member → org) ─────────────────────────────
 
-/** The consult A2A skill (spec 329 §3). Kept as a local literal (this transport-agnostic module
+/** The consult A2A OFFERING — an A2A `AgentSkill` advertisement, not a capability claim or a playbook
+ *  (facet-registries.md §7); `CONSULT_SKILL` is the wire name and is immutable. (spec 329 §3.)
+ *  Kept as a local literal (this transport-agnostic module
  *  takes no fabric/a2a dependency — the INBOX_DELIVERY_RESOURCE_SCOPE precedent); demo-a2a's
  *  `authorizeA2aMessage` derives the same selector from the same string at the member's gate. */
 export const CONSULT_SKILL = 'discussion.consult' as const;
 
-/** 4-byte A2A skill selector: keccak256(utf8(skill))[:4] — byte-for-byte the
+/** 4-byte A2A offering selector: keccak256(utf8(skill))[:4] — byte-for-byte the
  *  `@agenticprimitives/a2a` `skillSelector` the member's gate decodes against. */
 export function consultSkillSelector(): Hex {
   return keccak256(toBytes(CONSULT_SKILL)).slice(0, 10) as Hex;

@@ -11,7 +11,8 @@
 //                      Also spec 329 §12: a per-org ROLE input ("tax advisor") — self-asserted and
 //                      member-signed (saving re-signs the listing with `orgRole`), which is what
 //                      the org assistant routes role-addressed questions on.
-//   · "SKILL.md"     — the playbook docs. Today: the personal playbook (auto-replies AND, per
+//   · "Playbook"     — the playbook docs (`apguide:AgentSkillPackage`; on disk SKILL.md, and the
+//                      `skill-md` tab id is legacy). Today: the personal playbook (auto-replies AND, per
 //                      spec 329, consult answers); the list is structured so more docs can join.
 // Reuses /connect/inbox-assistant + /connect/consultability + the spec-323 delivery activation.
 // MessagesView shares useMessagingDelivery for its in-context nudge banner.
@@ -80,7 +81,8 @@ export function useMessagingDelivery(targetAgent?: Address): {
 
 const sectionTitleSty: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' };
 
-/** The SKILL.md docs the tab can edit. One today; the list is the seam more playbooks join through. */
+/** The playbooks the tab can edit (`apguide:AgentSkillPackage`, on disk as SKILL.md — the SKILL_DOCS
+ *  identifier is legacy). One today; the list is the seam more playbooks join through. */
 const SKILL_DOCS = [
   { id: 'messages', label: 'Messages — personal auto-reply playbook' },
 ] as const;
@@ -334,7 +336,7 @@ export function AgentTab() {
           </span>
         </div>
         <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-          Your agent answers messages sent to you. Shape <i>how</i> it replies in the SKILL.md tab.
+          Your agent answers messages sent to you. Shape <i>how</i> it replies in the Playbook tab.
         </p>
       </section>
     </div>
@@ -426,8 +428,8 @@ export function AgentTab() {
         )}
         {consultError && <p role="alert" style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--color-danger)' }}>{consultError}</p>}
         <p style={{ margin: '0.6rem 0 0', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-          Opting in signs a delegation scoped to exactly one skill (discussion questions) for that
-          organization only, valid 180 days. Your SKILL.md playbook also governs how your agent
+          Opting in signs a delegation scoped to exactly one offering (discussion questions) for that
+          organization only, valid 180 days. Your playbook also governs how your agent
           answers — including when to decline.
         </p>
       </section>
@@ -436,7 +438,7 @@ export function AgentTab() {
 
   const skillPanel = (
     <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.9rem' }}>
-      <div role="group" aria-label="SKILL.md documents" style={{ display: 'grid', gap: '0.25rem' }}>
+      <div role="group" aria-label="Playbooks" style={{ display: 'grid', gap: '0.25rem' }}>
         {SKILL_DOCS.map((d) => (
           <button
             key={d.id}
@@ -494,7 +496,9 @@ export function AgentTab() {
   const tabs: TabItem[] = [
     { id: 'message-bot', label: 'Message bot', content: messageBot },
     { id: 'discussions', label: 'Discussions', content: discussionsPanel },
-    { id: 'skill-md', label: 'SKILL.md', content: skillPanel },
+    // `skill-md` — the tab id is a legacy state key; the LABEL is the canonical term for
+    // `apguide:AgentSkillPackage` (facet-registries.md §7). The on-disk file is still SKILL.md.
+    { id: 'skill-md', label: 'Playbook', content: skillPanel },
   ];
 
   return (

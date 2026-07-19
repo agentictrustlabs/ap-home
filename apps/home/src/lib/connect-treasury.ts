@@ -92,7 +92,7 @@ export interface ConnectTreasuryDeps {
   executeBatch(calls: ContractCall[]): Promise<{ txHash?: Hex }>;
   /** Sign the scoped host delegation (off-chain) and return it. */
   issueHostDelegation(caveats: Caveat[]): Promise<Delegation>;
-  /** Publish the SA's public skill families (spec 282). */
+  /** Publish the SA's declared capabilities for discovery (spec 282). `publishSkills` is the legacy name. */
   publishSkills(skills: string[]): Promise<{ txHash?: Hex }>;
   onStep?(step: 'bind' | 'authorize' | 'assert'): void;
 }

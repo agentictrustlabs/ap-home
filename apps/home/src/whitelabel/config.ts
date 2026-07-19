@@ -68,7 +68,7 @@ const faithImpact: WhiteLabelConfig = {
       // registered" so a future split is a config-only change).
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
-    // spec 250/251 — "Global Switchboard" relying app (demo-gs): a skills/expertise broker.
+    // spec 250/251 — "Global Switchboard" relying app (demo-gs): a capability/expertise broker.
     // A person signs in (KC individual) or creates a GCO organization (the org holds the GCO
     // role) — both through the shared Global.Church identity, exactly the Phase-2 "one-tap"
     // arrival the Switchboard pilot describes. demo-gs holds no PII; site-login + org-create only.

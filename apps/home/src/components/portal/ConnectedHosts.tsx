@@ -2,7 +2,7 @@
 // "Connected hosts" — a person-readable picture of how a treasury Smart Agent relates to the app's hosted
 // services (spec 283/284). When a treasury has bound its endpoints on-chain (the connect-treasury ceremony),
 // this shows the relationship:  treasury → A2A agent (other agents talk to it) + MCP server (apps/tools
-// access it).  The A2A row drills into the live agent-card SKILLS; the MCP row into how ACCESS + the VAULT
+// access it).  The A2A row drills into the live agent-card OFFERINGS; the MCP row into how ACCESS + the VAULT
 // work. Endpoints are read on-chain (the canonical source) from the AgentNameResolver, keyed by namehash.
 import { useEffect, useState, type CSSProperties } from 'react';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
@@ -32,6 +32,7 @@ function useHostBindings(name: string): { a2a: string; mcp: string; loaded: bool
   return state;
 }
 
+/** One A2A card OFFERING. `CardSkill` mirrors the card's `skills[]` wire shape — legacy name, kept. */
 interface CardSkill { id: string; name?: string; effect?: string }
 const hostLabel = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 
@@ -71,7 +72,7 @@ export function ConnectedHosts({ name, address }: { name: string; address: strin
               <span style={tag}>A2A</span>
               <span className="mono" style={{ ...muted }}>{hostLabel(a2a)}</span>
               <button type="button" style={linkBtn} onClick={() => setOpen(open === 'a2a' ? null : 'a2a')}>
-                {open === 'a2a' ? 'hide skills' : 'view skills ▸'}
+                {open === 'a2a' ? 'hide offerings' : 'view offerings ▸'}
               </button>
             </div>
           )}
@@ -93,7 +94,10 @@ export function ConnectedHosts({ name, address }: { name: string; address: strin
   );
 }
 
-/** Live agent-card skills — fetched from the A2A host's bound endpoint (card visibility ≠ authorization). */
+/** Live agent-card OFFERINGS — the A2A `skills[]` array is an ADVERTISEMENT (`apdisc:Offering`), not a
+ *  capability claim and not a playbook (facet-registries.md §7). The `skills` JSON key, the `CardSkill`
+ *  type and the `A2aSkills` name are the wire/legacy names and stay; the prose says "offerings".
+ *  Fetched from the A2A host's bound endpoint (card visibility ≠ authorization). */
 function A2aSkills({ endpoint }: { endpoint: string }) {
   const [skills, setSkills] = useState<CardSkill[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -108,7 +112,7 @@ function A2aSkills({ endpoint }: { endpoint: string }) {
   }, [endpoint]);
   return (
     <div style={drawer}>
-      <b>Skills this agent advertises</b>
+      <b>Offerings — what this agent advertises</b>
       {!skills && !err && <span style={{ ...muted }}> · loading…</span>}
       {err && <span style={{ color: 'var(--color-danger)' }}> · couldn’t reach the card ({err})</span>}
       {skills && skills.length > 0 && (
@@ -120,7 +124,7 @@ function A2aSkills({ endpoint }: { endpoint: string }) {
           ))}
         </div>
       )}
-      {skills && skills.length === 0 && <span style={{ ...muted }}> · no skills on the card.</span>}
+      {skills && skills.length === 0 && <span style={{ ...muted }}> · no offerings on the card.</span>}
       <p style={{ margin: '.4rem 0 0', ...muted, fontSize: '.72rem' }}>Other agents call these over A2A; every call still re-checks delegation + policy before anything runs.</p>
     </div>
   );

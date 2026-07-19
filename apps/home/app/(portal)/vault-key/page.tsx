@@ -100,7 +100,7 @@ export default function VaultKeyPage() {
         session?.token ? { token: session.token } : undefined,
       );
       if (!out.ok) { setError(out.error); return; }
-      // The owner's own records (profile, skills) live on their InteractionsDO (record.get/put), which
+      // The owner's own records (profile, capability record) live on their InteractionsDO (record.get/put), which
       // needs the INTERACTIONS grant — a distinct plane from the vault key. Users onboarded before the
       // interactions plane (spec 322) existed have their vault key bound but `granted:false`, so every
       // record.get 409s ("no interactions grant") and the profile misreads it as "activate your vault

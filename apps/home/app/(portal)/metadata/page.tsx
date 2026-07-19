@@ -91,7 +91,7 @@ function SaMetaSection({ agent }: { agent: Address }) {
   return (
     <div>
       {rows.length === 0 ? (
-        <p style={{ ...mutedText, fontSize: '.85rem', margin: 0 }}>Nothing set — this tier is written by system ceremonies only (sign-in origin, published skills).</p>
+        <p style={{ ...mutedText, fontSize: '.85rem', margin: 0 }}>Nothing set — this tier is written by system ceremonies only (sign-in origin, published capabilities).</p>
       ) : (
         <div style={{ display: 'grid', gap: '.35rem', fontSize: '.85rem' }}>
           {rows.map(({ key, label }) => (

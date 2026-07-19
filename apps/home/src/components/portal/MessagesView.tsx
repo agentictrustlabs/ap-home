@@ -329,8 +329,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         <a
           href="/agent"
           className="ghost"
-          aria-label="Agent settings — message bot & SKILL.md"
-          title="Agent settings (Manage → Agent) — message bot & SKILL.md"
+          aria-label="Agent settings — message bot & playbook"
+          title="Agent settings (Manage → Agent) — message bot & playbook"
           style={{ textDecoration: 'none' }}
         >
           🤖

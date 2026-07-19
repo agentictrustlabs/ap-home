@@ -124,6 +124,7 @@ async function postProfile(path: 'get' | 'set', principal: Address, data?: Impac
 // InteractionsDO `CAPABILITY_RECORDS` whitelist, NOT the whole vault: the person's own list is
 // whitelist-gated by design (unlike the org viewer, which lists everything through the stewardship
 // delegation's record scope). Showing every vault record would need a server `record.list` op.
+// `skills.data` — the person's CAPABILITY RECORD (capability claim credentials); record-type key is legacy.
 export const PERSON_CAPABILITY_RECORDS = ['impact-profile', 'skills.data', 'home.manifest', 'control-events.data'] as const;
 export type PersonRecordType = (typeof PERSON_CAPABILITY_RECORDS)[number];
 

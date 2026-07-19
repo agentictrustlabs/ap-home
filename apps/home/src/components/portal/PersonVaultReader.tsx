@@ -19,7 +19,9 @@ import {
 function labelFor(recordType: string): string {
   const exact: Record<string, string> = {
     'impact-profile': 'Community profile',
-    'skills.data': 'Skills',
+    // `skills.data` — the vault-resident CAPABILITY CLAIM CREDENTIALS (facet-registries.md §7); the
+    // record-type key is legacy and immutable (it addresses live vault rows), the label is canonical.
+    'skills.data': 'Your capability record',
     'home.manifest': 'Home manifest',
     'control-events.data': 'Activity timeline',
     'inbox.data': 'Inbox',

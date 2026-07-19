@@ -130,7 +130,7 @@ export function ConnectTreasuryModal({
           <div>
             <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Connect to hosts</h3>
             <p style={{ margin: '.2rem 0 0', fontSize: '.85rem', color: '#64748b' }}>
-              Bind <b>{name || 'this treasury'}</b> to its A2A + MCP hosts, authorize a scoped host delegation, and publish its skills.
+              Bind <b>{name || 'this treasury'}</b> to its A2A + MCP hosts, authorize a scoped host delegation, and publish its capabilities for discovery.
             </p>
           </div>
           <button type="button" className="btn-ghost" style={{ fontSize: '.85rem', padding: '.25rem .55rem' }}
@@ -175,7 +175,8 @@ export function ConnectTreasuryModal({
           <div style={{ marginTop: '.8rem', fontSize: '.85rem', display: 'flex', flexDirection: 'column', gap: '.2rem' }}>
             <p style={{ margin: 0 }}>✓ Bound endpoints {result.bindTxHash ? `(tx ${result.bindTxHash.slice(0, 10)}…)` : ''}</p>
             <p style={{ margin: 0 }}>✓ Authorized host — delegation to {result.delegation.delegate.slice(0, 10)}… with {result.delegation.caveats.length} caveat(s)</p>
-            <p style={{ margin: 0 }}>✓ Published skills: {result.publishedSkills.join(', ') || '(none)'}</p>
+            {/* `publishedSkills` is the legacy result key — the DECLARED CAPABILITY projection it carries. */}
+            <p style={{ margin: 0 }}>✓ Published for discovery: {result.publishedSkills.join(', ') || '(none)'}</p>
             {result.unmappedCaveats.length > 0 && (
               <p style={{ margin: 0, color: '#92400e' }}>Note: {result.unmappedCaveats.join(', ')} have no on-chain enforcer — enforced off-chain by the host policy.</p>
             )}

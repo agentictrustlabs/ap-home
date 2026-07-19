@@ -17,7 +17,7 @@ export interface AgentSearchHit {
   smartAgent: string;
   displayName: string | null;
   description: string | null;
-  skills: string | null;
+  skills: string | null; // `approf:skills` — the agent's DECLARED CAPABILITIES; KB key is legacy, prose says capability.
   registryStatus: string | null;
   facets: string[];
 }

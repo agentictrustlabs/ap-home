@@ -1,5 +1,5 @@
 // Shared inline-style tokens for portal pages that pre-date the `manage-card`/`btn-*` CSS classes
-// (Registry, Naming, Skills — spec 279/280/282). These once hardcoded an indigo palette independent
+// (Registry, Naming, "What this agent can do" — spec 279/280/282). These once hardcoded an indigo palette independent
 // of the app's amber design tokens (`app/globals.css`); this module is the single source so all three
 // pages render as ONE visual language, using the same CSS variables as every other portal surface.
 // New self-contained-inline portal pages should import from here rather than re-declaring locally.
@@ -70,7 +70,7 @@ export function badgeStyle(kind: BadgeKind): CSSProperties {
   };
 }
 
-/** Toggle "pill" used by Skills (asserted/private) — same visual language as `badgeStyle`. */
+/** Toggle "pill" used by "What this agent can do" (published/private) — same visual language as `badgeStyle`. */
 export function pillStyle(on: boolean): CSSProperties {
   return {
     fontSize: '.72rem',
