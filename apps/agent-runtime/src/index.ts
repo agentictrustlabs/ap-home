@@ -220,6 +220,14 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   ORCHESTRATION_MODEL?: string;
   /**
+   * spec 329 §4.1 — the per-member routed-consult deadline (ms). Overrides the
+   * built-in 150s default in a2a-task-do (which itself supersedes fabric's 60s
+   * pure-layer default): a broad fan-out runs several member LLM turns
+   * concurrently and 60s clipped answers that had actually landed. Tunable
+   * without a redeploy.
+   */
+  CONSULT_MEMBER_DEADLINE_MS?: string;
+  /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
    * Used as `iss` (and currently `aud`, until spec 227 splits them)
    * when minting session JWTs. Falls back to `https://demo-a2a.local`

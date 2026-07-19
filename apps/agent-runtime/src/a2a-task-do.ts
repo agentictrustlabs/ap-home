@@ -45,7 +45,6 @@ import { buildA2aReceiptsConfig } from './receipts.js';
 import { caip10 } from './custody-oidc.js';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
 import {
-  CONSULT_MEMBER_TIMEOUT_MS,
   CONSULT_RATE_MAX,
   CONSULT_RATE_WINDOW_MS,
   CONSULT_SKILL_ID,
@@ -132,6 +131,25 @@ const ALARM_DELAY_MS = 1500;
 const ROUTING_POLL_MS = 4000;
 /** Bounded synthesis retries before the pending entry is dropped (audited). */
 const ROUTING_SYNTHESIS_MAX_ATTEMPTS = 3;
+/**
+ * Per-member consult deadline — the EXECUTION POINT's policy (fabric's
+ * CONSULT_MEMBER_TIMEOUT_MS is the pure-layer DEFAULT; the deadline that actually
+ * gates the poll is ours to set, per consult-routing.ts's module doctrine). The
+ * 60s default was tuned for a single member; a broad question fans to up to
+ * maxFanout members whose agents each run a CONCURRENT LLM Ring-0 turn, and 3
+ * such turns compose long grounded answers and, run CONCURRENTLY (and serialized
+ * by the shared model key), routinely finish anywhere from ~70s to past 180s —
+ * far past 60s, so answers that DID land were reported as timedOut. 240s covers
+ * three concurrent multi-paragraph LLM answers with headroom; the alarm re-polls
+ * every ROUTING_POLL_MS until then, so a member that finishes early is picked up
+ * immediately (no fixed wait — the deadline only bites a member that never
+ * completes). Tunable via the CONSULT_MEMBER_DEADLINE_MS var without a redeploy.
+ */
+const CONSULT_MEMBER_DEADLINE_DEFAULT_MS = 240_000;
+function consultMemberDeadlineMs(env: { CONSULT_MEMBER_DEADLINE_MS?: string }): number {
+  const v = Number(env.CONSULT_MEMBER_DEADLINE_MS);
+  return Number.isFinite(v) && v > 0 ? v : CONSULT_MEMBER_DEADLINE_DEFAULT_MS;
+}
 /** Per-topic routing bucket key (spec 329 §4 — 3 routed questions / 10 min, on top of 327's). */
 const ROUTING_RATE_KEY = (channelId: string): string => `routing.rate:${channelId}`;
 
@@ -560,7 +578,7 @@ export class A2aTaskDO {
             topicTitle: p.topicTitle, displayName: p.displayName, createdAt: nowMs,
             members: turn.asked.map((a) => ({
               memberSA: a.memberSA, displayName: a.displayName, taskId: a.taskId as Hex,
-              sentAt: nowMs, deadlineAt: nowMs + CONSULT_MEMBER_TIMEOUT_MS, status: 'sent' as const,
+              sentAt: nowMs, deadlineAt: nowMs + consultMemberDeadlineMs(this.env), status: 'sent' as const,
             })),
           };
           await this.state.storage.put(routingPendingKey(p.channelId, routing.questionId), pending);
