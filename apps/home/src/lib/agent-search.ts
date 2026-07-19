@@ -22,6 +22,32 @@ export interface AgentSearchHit {
   facets: string[];
 }
 
+// CLAIMED-tier corroboration (capability-architecture.md §2): how many DISTINCT non-self agents
+// have endorsed this subject for a capability, aggregated by the discovery MCP. Self-endorsement,
+// volume and same-org discounting are ALL applied server-side — we just display `independentEndorsers`.
+// Best-effort: returns null on any failure (never throws) so a missing read can't break the page;
+// returns 0 when the subject is not yet endorsed. This is CORROBORATION, never authorization.
+export async function lookupIndependentEndorsers(sa: string): Promise<number | null> {
+  try {
+    const res = await fetch(`${MCP_URL}/lookup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agents: [sa] }),
+    });
+    if (!res.ok) return null;
+    const out = (await res.json()) as {
+      ok?: boolean;
+      results?: Array<{ smartAgent?: string; independentEndorsers?: number }>;
+    };
+    if (!out.ok) return null;
+    const row = (out.results ?? []).find((r) => r.smartAgent?.toLowerCase() === sa.toLowerCase()) ?? out.results?.[0];
+    const n = row?.independentEndorsers;
+    return typeof n === 'number' && n > 0 ? n : 0;
+  } catch {
+    return null;
+  }
+}
+
 export async function searchAgentsKb(q: string, limit = 20): Promise<AgentSearchHit[]> {
   const res = await fetch(`${MCP_URL}/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   if (!res.ok) throw new Error(`knowledge-base search failed (${res.status})`);

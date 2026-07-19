@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { listSkillClaims, saveSkillClaims, setSkills, getSkills, type SkillClaim } from '../../../src/connect-client';
+import { lookupIndependentEndorsers } from '../../../src/lib/agent-search';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 import { cardSty, btnSty, btnPrimarySty, mutedText, errorText, inputSty, infoBannerSty, pillStyle as pill } from '../../../src/components/portal/theme';
 import { Tooltip } from '../../../src/components/shared/ui';
@@ -34,6 +35,9 @@ export default function SkillsPage() {
   const [busy, setBusy] = useState<'save' | 'publish' | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // CLAIMED-tier corroboration: distinct non-self agents who have endorsed this subject for a
+  // capability (aggregated + de-abused server-side). Best-effort — null = not loaded/unavailable.
+  const [endorsers, setEndorsers] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!agentAddress || !session?.token) { setLoading(false); return; }
@@ -42,6 +46,14 @@ export default function SkillsPage() {
     setClaims(vault); setPublishedPublic(onChain.slice().sort()); setLoading(false);
   }, [agentAddress, session?.token]);
   useEffect(() => { void load(); }, [load]);
+
+  // Best-effort endorsement read: corroboration only, never gates the page. Failures stay silent.
+  useEffect(() => {
+    let live = true;
+    if (!agentAddress) { setEndorsers(null); return; }
+    void lookupIndependentEndorsers(agentAddress).then((n) => { if (live) setEndorsers(n); });
+    return () => { live = false; };
+  }, [agentAddress]);
 
   const add = () => { const v = norm(input); if (v && !claims.some((c) => c.label.toLowerCase() === v.toLowerCase())) setClaims([...claims, { label: v, relation: 'hasSkill', asserted: false, createdAt: Date.now() }]); setInput(''); };
   const remove = (label: string) => setClaims(claims.filter((c) => c.label !== label));
@@ -83,6 +95,16 @@ export default function SkillsPage() {
         publish it for discovery — only published capabilities become a public facet of your Smart Agent. Same for a person,
         organization, or service/treasury agent.
       </div>
+
+      {agentAddress && endorsers && endorsers > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem', marginBottom: '1.1rem', fontSize: '.82rem', color: 'var(--color-sage-700)' }}>
+          <span aria-hidden style={{ fontSize: '.9rem', lineHeight: 1 }}>✓</span>
+          <span>
+            <strong>Endorsed by {endorsers} independent {endorsers === 1 ? 'agent' : 'agents'}</strong> — other agents have
+            corroborated what this agent can do. Corroboration only; it grants no authority.
+          </span>
+        </div>
+      )}
 
       {!agentAddress ? <p style={mutedText}>Sign in to manage what your agent can do.</p>
         : !agentName ? <p style={mutedText}>Your home needs a public name first (Naming Service tab) before you can publish capabilities for discovery.</p>
