@@ -931,6 +931,9 @@ export class InteractionsDO {
             subject: l.listing.subject,
             displayName: l.listing.displayName || l.label,
             consultable: l.listing.consultable === true,
+            // spec 329 §12 — the member's self-asserted primary role in THIS org, straight from
+            // their signed listing (never derived, never steward-set).
+            ...(l.listing.orgRole?.trim() ? { orgRole: l.listing.orgRole.trim() } : {}),
             current: isListingCurrent(l.listing, now),
           }));
           const grantKeys = await this.state.storage.list({ prefix: consultGrantRecordKey('') });

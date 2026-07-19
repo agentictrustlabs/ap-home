@@ -21,6 +21,7 @@ import { runIntent, createRuleBasedPlanner, type Planner, type PlanStep, type To
 import {
   consultCandidateLine,
   consultSelectionBasis,
+  questionAddressesRole,
   deterministicStatusBody,
   deterministicSynthesisBody,
   routedTurnDegrade,
@@ -153,19 +154,26 @@ function contextLines(read: TopicReadResult | null): string {
  *  no-fit outcome is stated honestly, never silent. */
 const ROUTING_CONTRACT =
   '\n\nRouting (enabled for this topic): the goal lists candidate members whose agents you MAY ' +
-  "consult, each with their PUBLISHED SKILLS. Selecting who to consult is YOUR job: match the " +
-  "question's subject against each candidate's published skills (for a candidate with no " +
-  'published skills, match only on their displayName/description — never assume skills they did ' +
-  "not publish). When one or more candidates' published skills clearly cover the question's " +
+  "consult, each with their ORG ROLE (when they published one) and their PUBLISHED SKILLS. " +
+  'Selecting who to consult is YOUR job, and you match on BOTH facets. (1) ORG ROLE: a candidate ' +
+  'marked "role: X" holds role X in THIS organization. When the question ADDRESSES a role — ' +
+  '"@ask tax advisor …", "ask our tax advisor about …", "what does the bookkeeper think" — ' +
+  'consult exactly the candidate(s) holding that role. A role match OUTRANKS a generic skill ' +
+  "match: if one candidate's role answers the question, prefer them over a candidate who merely " +
+  "published a related skill. (2) PUBLISHED SKILLS: otherwise match the question's subject " +
+  "against each candidate's published skills (for a candidate with no role and no published " +
+  'skills, match only on their displayName/description — never assume a role or skills they did ' +
+  "not publish). When a candidate's role or published skills clearly cover the question's " +
   'domain, consult them via ask_member EVEN IF the question named no one — a member named in the ' +
   'question is an override to honor, never a requirement for consulting. Never ask more members ' +
   'than the fan-out limit. Make your single post_topic_message an HONEST status reply naming ' +
-  'exactly who you asked and the selection basis for each, e.g. "asking alice (published skills: ' +
-  'water systems, plumbing)" — for a no-skills candidate, say the name/description basis instead. ' +
-  "Their answers arrive in a follow-up post. If NO candidate's published skills (or " +
+  'exactly who you asked and the selection basis for each — when a role drove the pick, STATE THE ' +
+  'ROLE, e.g. "asking alice (org role: tax advisor)"; otherwise "asking alice (published skills: ' +
+  'water systems, plumbing)", or the name/description basis for a candidate with neither. ' +
+  "Their answers arrive in a follow-up post. If NO candidate's org role, published skills (or " +
   'name/description) fit the question, ask no one, answer the question yourself, and say plainly ' +
-  'that the org has no opted-in member with matching published skills. Always finish with exactly ' +
-  'one post_topic_message.';
+  'that the org has no opted-in member with a matching role or published skills. Always finish ' +
+  'with exactly one post_topic_message.';
 
 /** Why (and at which step) the routing extension degraded this dispatch to the base reply —
  *  the execution point audits `interactions.routing.degraded` with this. */
@@ -245,7 +253,7 @@ export async function handleDiscussionRespond(
           })),
           {
             toolId: 'post_topic_message',
-            args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => ({ displayName: c.displayName, basis: consultSelectionBasis(c) }))) },
+            args: { bodyText: deterministicStatusBody(routing.candidates.slice(0, routing.maxFanout).map((c) => ({ displayName: c.displayName, basis: consultSelectionBasis(c, questionAddressesRole(input.triggerBody, c.orgRole)) }))) },
           },
         ]
       : [
@@ -258,22 +266,26 @@ export async function handleDiscussionRespond(
     const effective = kind === 'anthropic' ? planner : deterministic;
     const candidateBlock = withRouting && routingOn
       ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}). Match ` +
-        "the question's subject against each candidate's published skills; a candidate marked " +
-        '"NO published skills" may only be matched on displayName/description — never assume ' +
-        'skills they have not published:\n' +
+        "the question against each candidate's ORG ROLE first (\"role: …\" — a question that " +
+        'addresses that role selects them, ahead of a generic skill match), then against their ' +
+        'published skills; a candidate marked "NO published skills" and carrying no role may only ' +
+        'be matched on displayName/description — never assume a role or skills they have not ' +
+        'published:\n' +
         routing.candidates.map((c) => consultCandidateLine(c)).join('\n')
       : '';
     const goal =
       `You are ${input.displayName}, the organization's own assistant participating in its discussion topic "${input.topicTitle}". ` +
       `${input.triggerAuthor} just posted: "${input.triggerBody}". ` +
       (withRouting && routingOn
-        ? "Select which candidate members to consult by matching the question's subject to their " +
-          'published skills (the question does NOT need to name anyone; a named member is an ' +
-          'override, not a requirement). Call ask_member for each selected candidate (at most the ' +
-          'fan-out limit), then post exactly one reply — an honest status naming who you asked ' +
-          "and each pick's selection basis, or, if no candidate's published skills (or " +
-          'name/description) fit, a direct answer that says the org has no opted-in member with ' +
-          'matching published skills.'
+        ? 'Select which candidate members to consult by matching the question against their ORG ' +
+          "ROLE (a question addressing a role picks the holder of that role, and OUTRANKS a " +
+          "generic skill match) and then their published skills (the question does NOT need to " +
+          'name anyone; a named member is an override, not a requirement). Call ask_member for ' +
+          'each selected candidate (at most the fan-out limit), then post exactly one reply — an ' +
+          "honest status naming who you asked and each pick's selection basis (state the ROLE " +
+          "when a role drove the pick), or, if no candidate's org role, published skills (or " +
+          'name/description) fit, a direct answer that says the org has no opted-in member with a ' +
+          'matching role or published skills.'
         : 'Post exactly one concise, helpful reply as the organization (call post_topic_message with the full reply as bodyText).') +
       candidateBlock +
       topicContext;
@@ -309,7 +321,10 @@ export async function handleDiscussionRespond(
       try {
         const r = await io.post(deterministicStatusBody(asked.map((a) => {
           const c = routing.candidates.find((x) => x.memberSA === a.memberSA);
-          return { displayName: a.displayName, ...(c ? { basis: consultSelectionBasis(c) } : {}) };
+          return {
+            displayName: a.displayName,
+            ...(c ? { basis: consultSelectionBasis(c, questionAddressesRole(input.triggerBody, c.orgRole)) } : {}),
+          };
         })));
         messageId = r.messageId;
       } catch (e) {

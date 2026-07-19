@@ -8,6 +8,9 @@
 //                      delegation (the authority, 180 days, discussion.consult only) and
 //                      republishes the member's directory listing with the `consultable` hint.
 //                      Revoke = immediate (org-side eligibility drop + best-effort on-chain revoke).
+//                      Also spec 329 §12: a per-org ROLE input ("tax advisor") — self-asserted and
+//                      member-signed (saving re-signs the listing with `orgRole`), which is what
+//                      the org assistant routes role-addressed questions on.
 //   · "SKILL.md"     — the playbook docs. Today: the personal playbook (auto-replies AND, per
 //                      spec 329, consult answers); the list is structured so more docs can join.
 // Reuses /connect/inbox-assistant + /connect/consultability + the spec-323 delivery activation.
@@ -95,6 +98,9 @@ interface ConsultOrgRow {
   consultable: boolean;
   consultGrantedAt: string | null;
   consultDelegation: DelegationWire | null;
+  /** spec 329 §12 — the member's PRIMARY ROLE in this org, as last published in their signed
+   *  listing (the projection copy; the listing is the authority). */
+  orgRole: string | null;
 }
 
 export function AgentTab() {
@@ -114,6 +120,10 @@ export function AgentTab() {
   const [consultOrgs, setConsultOrgs] = useState<ConsultOrgRow[] | null>(null);
   const [consultBusyOrg, setConsultBusyOrg] = useState<string | null>(null);
   const [consultError, setConsultError] = useState<string | null>(null);
+  // spec 329 §12 — per-org role drafts (uncommitted input text) + the row currently re-signing.
+  const [roleDraft, setRoleDraft] = useState<Record<string, string>>({});
+  const [roleBusyOrg, setRoleBusyOrg] = useState<string | null>(null);
+  const [roleSavedOrg, setRoleSavedOrg] = useState<string | null>(null);
 
   const authedHeaders = useMemo(
     () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
@@ -156,7 +166,12 @@ export function AgentTab() {
     try {
       const r = await fetch('/connect/consultability', { headers: authedHeaders });
       const b = (await r.json().catch(() => ({}))) as { ok?: boolean; orgs?: ConsultOrgRow[] };
-      if (r.ok && b.ok) setConsultOrgs(b.orgs ?? []);
+      if (r.ok && b.ok) {
+        const orgs = b.orgs ?? [];
+        setConsultOrgs(orgs);
+        // Seed the role inputs from the published values (loads follow every committed action).
+        setRoleDraft(Object.fromEntries(orgs.map((o) => [o.orgAgent.toLowerCase(), o.orgRole ?? ''])));
+      }
     } catch { /* row list stays in the checking state */ }
   }, [authedHeaders]);
 
@@ -183,7 +198,12 @@ export function AgentTab() {
         const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!res.ok || !b.ok) throw new Error(b.error ?? `consult opt-in failed (${res.status})`);
         // The routing hint: republish the listing with the consultable flag (re-signed).
-        const listing = await issueDirectoryListing(agentAddress as Address, sign, { communityId: org, displayName, consultable: true });
+        // Re-publishing REPLACES the listing, so every facet the member still asserts must ride
+        // along — the role included (spec 329 §12), or toggling consultability would silently
+        // clear it.
+        const listing = await issueDirectoryListing(agentAddress as Address, sign, {
+          communityId: org, displayName, consultable: true, ...(row.orgRole ? { orgRole: row.orgRole } : {}),
+        });
         const pub = await fetch('/connect/directory', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'publish', listing }) });
         const pb = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!pub.ok || !pb.ok) {
@@ -202,7 +222,9 @@ export function AgentTab() {
           const rr = await revokeGrantedDelegation(b.consultDelegation, sign).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
           if (!rr.ok) setConsultError(`Opt-out recorded; on-chain revocation did not land: ${rr.error}`);
         }
-        const listing = await issueDirectoryListing(agentAddress as Address, sign, { communityId: org, displayName });
+        const listing = await issueDirectoryListing(agentAddress as Address, sign, {
+          communityId: org, displayName, ...(row.orgRole ? { orgRole: row.orgRole } : {}),
+        });
         await fetch('/connect/directory', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'publish', listing }) }).catch(() => null);
       }
       await loadConsultOrgs();
@@ -210,6 +232,38 @@ export function AgentTab() {
       setConsultError(e instanceof Error ? e.message : String(e));
     } finally { setConsultBusyOrg(null); }
   }, [session, agentAddress, agentName, authedHeaders, homeProfile?.credential, loadConsultOrgs]);
+
+  // spec 329 §12 — set/clear the member's PRIMARY ROLE in one org. Same flow as the consultability
+  // hint republish: the listing is member-signed, so the role is set by RE-SIGNING the listing
+  // (the org's routing reads it from there). The KV projection is written after, for prefill only
+  // — a failed projection write is cosmetic; a failed publish is the real failure and is surfaced.
+  const saveRole = useCallback(async (row: ConsultOrgRow) => {
+    if (!session || !agentAddress || !authedHeaders) return;
+    const org = row.orgAgent.toLowerCase();
+    const role = (roleDraft[org] ?? '').trim().slice(0, 80);
+    if (role === (row.orgRole ?? '')) return; // nothing to re-sign
+    setRoleBusyOrg(org); setConsultError(null); setRoleSavedOrg(null);
+    try {
+      const sign = await signHashFor(resolveVia(homeProfile?.credential, session.via), agentAddress as Address, { token: session.token });
+      const displayName = agentName ?? `member-${agentAddress.slice(2, 8)}`;
+      const listing = await issueDirectoryListing(agentAddress as Address, sign, {
+        communityId: org, displayName,
+        ...(row.consultable ? { consultable: true } : {}),
+        ...(role ? { orgRole: role } : {}),
+      });
+      const pub = await fetch('/connect/directory', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'publish', listing }) });
+      const pb = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!pub.ok || !pb.ok) throw new Error(pb.error ?? `publishing your role failed (${pub.status})`);
+      await fetch('/connect/consultability', {
+        method: 'POST', headers: authedHeaders,
+        body: JSON.stringify({ action: 'setRole', org, orgRole: role }),
+      }).catch(() => null);
+      setRoleSavedOrg(org);
+      await loadConsultOrgs();
+    } catch (e) {
+      setConsultError(e instanceof Error ? e.message : String(e));
+    } finally { setRoleBusyOrg(null); }
+  }, [session, agentAddress, agentName, authedHeaders, homeProfile?.credential, roleDraft, loadConsultOrgs]);
 
   const saveSkill = useCallback(async () => {
     if (!authedHeaders) return;
@@ -296,6 +350,12 @@ export function AgentTab() {
           Let an organization&rsquo;s assistant consult <i>your</i> agent when a discussion question
           matches what you know. Per organization, revocable any time. {CONSULT_CONSENT_COPY}
         </p>
+        <p style={{ margin: '0 0 0.6rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+          You can also state <b>your role in each organization</b> — you may be the tax advisor in
+          one and the financial advisor in another. The organization&rsquo;s assistant routes
+          role-addressed questions (&ldquo;@ask tax advisor …&rdquo;) to the member holding that
+          role. Only you can set your own role; saving re-signs your listing.
+        </p>
         {consultOrgs === null ? (
           <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>Checking your organizations…</p>
         ) : consultOrgs.length === 0 ? (
@@ -305,7 +365,7 @@ export function AgentTab() {
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.4rem' }}>
             {consultOrgs.map((row) => (
-              <li key={row.orgAgent} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.4rem 0.65rem' }}>
+              <li key={row.orgAgent} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.4rem 0.65rem' }}>
                 <BusyButton
                   busy={consultBusyOrg === row.orgAgent.toLowerCase()}
                   busyLabel="…"
@@ -329,6 +389,36 @@ export function AgentTab() {
                   {row.consultable
                     ? <>consultable{row.consultGrantedAt ? ` since ${new Date(row.consultGrantedAt).toLocaleDateString()}` : ''}</>
                     : 'not consultable'}
+                  {row.orgRole ? <> · <b>{row.orgRole}</b></> : null}
+                </span>
+                {/* spec 329 §12 — the member's own primary role IN THIS ORG. Saving re-signs and
+                    republishes the listing (the same ceremony as the consultability hint), which
+                    is what the org's assistant routes on. */}
+                <span style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', marginLeft: 'auto' }}>
+                  <label htmlFor={`org-role-${row.orgAgent}`} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+                    Your role in {row.orgName}
+                  </label>
+                  <input
+                    id={`org-role-${row.orgAgent}`}
+                    type="text"
+                    maxLength={80}
+                    value={roleDraft[row.orgAgent.toLowerCase()] ?? ''}
+                    onChange={(e) => { setRoleSavedOrg(null); setRoleDraft((d) => ({ ...d, [row.orgAgent.toLowerCase()]: e.target.value })); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void saveRole(row); }}
+                    placeholder="Your role in this organization — e.g. tax advisor"
+                    title="Your role in this organization — e.g. tax advisor. Saving re-signs your listing; the organization's assistant can then route role-addressed questions (“@ask tax advisor …”) to your agent."
+                    style={{ fontSize: '0.78rem', padding: '0.2rem 0.4rem', width: '17rem', maxWidth: '100%' }}
+                  />
+                  <BusyButton
+                    busy={roleBusyOrg === row.orgAgent.toLowerCase()}
+                    busyLabel="…"
+                    className="ghost"
+                    style={{ width: 'auto', padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+                    disabled={roleBusyOrg !== null || (roleDraft[row.orgAgent.toLowerCase()] ?? '').trim() === (row.orgRole ?? '')}
+                    onClick={() => void saveRole(row)}
+                  >
+                    {roleSavedOrg === row.orgAgent.toLowerCase() ? 'Saved' : 'Save role'}
+                  </BusyButton>
                 </span>
               </li>
             ))}

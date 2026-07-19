@@ -12,6 +12,9 @@
 //   GET                                    → { ok, orgs: [{ orgAgent, orgName, relationship,
 //                                             consultable, consultGrantedAt, consultDelegation }] }
 //   POST { action:'grant', org, delegation } → { ok, grantedAt }
+//   POST { action:'setRole', org, orgRole }  → { ok, orgRole } (spec 329 §12 — DISPLAY PROJECTION of
+//                                              the role the client just published in the SIGNED
+//                                              listing; the listing is the authority, this is prefill)
 //   POST { action:'revoke', org }            → { ok, consultDelegation } (returned so the CLIENT
 //                                              revokes it ON-CHAIN — the org-member-remove pattern)
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
@@ -47,6 +50,10 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
 interface ConsultLinkFields {
   consultDelegation?: DelegationWire;
   consultGrantedAt?: string;
+  /** spec 329 §12 — DISPLAY PROJECTION of the member's org role. The AUTHORITY is the member-signed
+   *  listing's `orgRole` (published through /connect/directory and read by the org's routing);
+   *  this copy exists only so the Home can prefill the input without an org-DO roster read. */
+  orgRole?: string;
 }
 
 /** The member's org links, decorated with their consult opt-in state ("orgs you belong to" —
@@ -70,6 +77,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       consultGrantedAt: link.consultGrantedAt ?? null,
       // The member's OWN copy (spec 329 §2.1 — kept for display/revocation; on-chain revoke needs it).
       consultDelegation: link.consultDelegation ?? null,
+      orgRole: link.orgRole ?? null,
     });
   }
   return jsonCors({ ok: true, orgs }, request);
@@ -79,7 +87,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const who = await personFrom(request, env);
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; org?: string; delegation?: DelegationWire }
+    | { action?: string; org?: string; delegation?: DelegationWire; orgRole?: string }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(org)) return jsonCors({ error: 'org (SA address) required' }, request, 400);
@@ -103,6 +111,22 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, consultDelegation: d, consultGrantedAt: grantedAt }));
     }
     return jsonCors({ ok: true, grantedAt }, request);
+  }
+
+  if (body?.action === 'setRole') {
+    // spec 329 §12 — DISPLAY PROJECTION ONLY. The client has already re-signed and published the
+    // listing carrying `orgRole` (the authority routing reads); this just records the prefill on
+    // the member's own related link. Never an authorization: no grant, no scope, no verification
+    // hangs off it. Blank clears. Bounded to the listing's own 80-char clip.
+    const role = (body.orgRole ?? '').trim().slice(0, 80);
+    const existing = await env.AUTH_CODES.get(linkKey);
+    if (existing) {
+      const link = JSON.parse(existing) as Record<string, unknown> & ConsultLinkFields;
+      if (role) link.orgRole = role;
+      else delete link.orgRole;
+      await env.AUTH_CODES.put(linkKey, JSON.stringify(link));
+    }
+    return jsonCors({ ok: true, orgRole: role || null }, request);
   }
 
   if (body?.action === 'revoke') {

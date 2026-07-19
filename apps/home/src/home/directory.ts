@@ -38,6 +38,10 @@ export async function issueDirectoryListing(
      *  ceremony alongside the member→org consult delegation (the authority); cleared by
      *  re-publishing without it. Absent ⇒ false. */
     consultable?: boolean;
+    /** spec 329 §12 — the member's PRIMARY ROLE in this organization ("tax advisor"), self-asserted
+     *  and member-signed (the listing is). Org-scoped by construction: one listing per org, one
+     *  role per listing. Cleared by re-publishing without it; blank/whitespace ⇒ omitted. */
+    orgRole?: string;
   },
 ): Promise<DirectoryListingV1> {
   const subject = homeCaip10(opts.subject ?? signerAgent);
@@ -49,6 +53,7 @@ export async function issueDirectoryListing(
     displayName: opts.displayName,
     roles: opts.roles,
     ...(opts.consultable ? { consultable: true } : {}),
+    ...(opts.orgRole?.trim() ? { orgRole: opts.orgRole.trim().slice(0, 80) } : {}),
     visibility: opts.visibility ?? 'community',
     publishedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (opts.validityDays ?? 180) * 86_400_000).toISOString(),

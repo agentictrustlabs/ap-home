@@ -36,7 +36,9 @@ interface ChannelMessage { envelope: MessageEnvelopeV1; authorName: string; acto
 // assistant (spec 327): steward-enabled org-assistant participation on this topic.
 // routing (spec 329): steward-enabled member routing — the assistant may consult opted-in member agents.
 interface Channel { descriptor: { id: string; owner: string }; title: string; createdBy: string; messages: ChannelMessage[]; participationPolicy?: 'open' | 'restricted'; assistant?: { trigger: 'mention' | 'all'; mentionHandle: string; displayName: string }; routing?: { maxFanout: number } }
-interface Listing { listing: { subject: string; displayName: string; communityId: string }; label: string }
+// `orgRole` (spec 329 §12) is the member's own signed, org-scoped primary role — display only here;
+// the org's assistant routes role-addressed questions on the same field.
+interface Listing { listing: { subject: string; displayName: string; communityId: string; orgRole?: string }; label: string }
 interface ParticipantRow { personSA: string; personName?: string; role: 'facilitator' | 'contributor'; derived?: boolean }
 interface PendingInviteRow { id: string; invitedAgent: string; invitedName?: string; role: 'facilitator' | 'contributor' }
 
@@ -1000,7 +1002,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     <div style={{ fontSize: '0.83rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {l.listing.displayName}{l.listing.displayName === you ? ' (you)' : ''}
                     </div>
-                    <div style={{ fontSize: '0.72rem', opacity: 0.55 }}>{l.label}</div>
+                    <div style={{ fontSize: '0.72rem', opacity: 0.55, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {l.listing.orgRole ? `${l.listing.orgRole} · ${l.label}` : l.label}
+                    </div>
                   </div>
                   {l.listing.displayName !== you && (
                     <span className="channels-member-row__hint" aria-hidden>✉</span>
