@@ -105,18 +105,24 @@ ORCHESTRATION_LLM = "anthropic"
 # spec 290 §8 — per-SA hard-budget unit cap for the A2A task path. MUST match demo-mcp's value (same
 # shared DO authority per SA across both paths).
 SA_BUDGET_LIMIT_UNITS = "25"
-# spec 288 §6 — edge-mode flag. DEFAULT "false" (edge-less: /api/a2a works direct via the subdomain Host).
-# `deploy-cloudflare.ts` OVERRIDES to "true" via --var when EDGE_REQUIRED=true: then BOTH A2A task ingress
-# shapes REQUIRE a valid edge GatewayAssertion — the agent-addressed edge path `POST /api/a2a/<handle>` (the
-# edge conveys the agent in the signed assertion `path`; demo-a2a resolves it via resolveAgentByLabel) works,
-# while the bare subdomain-direct path 401s (intentional — forces traffic through the edge). The agent-card
-# then advertises the edge endpoint (DEMO_EDGE_URL). Relayer verbs (/session/*, /account/*) are never gated.
-DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-# These two are placeholders — `pnpm deploy:cloudflare` overrides via `--var`
-# with the freshly-deployed Pages URL + demo-mcp Worker URL. Defaults left
-# blank so a misconfigured deploy fails closed (no CORS allowed, no MCP).
-ALLOWED_ORIGINS = ""
-MCP_URL = ""
+# spec 288 §6 — edge-mode flag. Production runs EDGE-REQUIRED: both A2A task ingress shapes REQUIRE a valid
+# edge GatewayAssertion — the agent-addressed edge path `POST /api/a2a/<handle>` (the edge conveys the agent
+# in the signed assertion `path`; demo-a2a resolves it via resolveAgentByLabel) works, while the bare
+# subdomain-direct path 401s (intentional — forces traffic through the edge). The agent-card then advertises
+# the edge endpoint (DEMO_EDGE_URL). Relayer verbs (/session/*, /account/*) are never gated. Committed "true"
+# as the production BASELINE (INCIDENT 2026-07-19): a plain `wrangler deploy` must not silently drop this to
+# the edge-less default. `deploy-cloudflare.ts` still passes String(EDGE_REQUIRED) via --var, so an
+# intentional edge-less deploy (EDGE_DISABLED=true) still overrides to "false".
+DEMO_REQUIRE_GATEWAY_ASSERTION = "true"
+# INCIDENT 2026-07-19 — these were empty placeholders overridden ONLY by `pnpm deploy:cloudflare`'s --var
+# flags. A hand-run `wrangler deploy --env production --var <subset>` (or a plain deploy) reverted them to ""
+# → ALLOWED_ORIGINS="" made verifyCsrf reject EVERY mutating request ("csrf invalid": portal rebuild, Home
+# name-claim, /a2a/custody/* 403s), and MCP_URL="" broke entitled reads. Now committed with the canonical
+# production values as a fail-safe BASELINE so a plain deploy can never drop them again. deploy-cloudflare.ts
+# still re-injects the same values via --var (from deployments-<network>.json + the Pages URLs), so a real
+# deploy stays authoritative for address/URL rotation; these committed values only backstop targeted deploys.
+ALLOWED_ORIGINS = "https://agenticprimitives-demo.pages.dev,https://agenticprimitives-demo-pro.pages.dev,https://agenticprimitives-demo-recovery.pages.dev,https://agenticprimitives-demo-org.pages.dev,https://agenticprimitives-demo-jp.pages.dev,https://agenticprimitives-demo-gs.pages.dev,https://demo-bible-ontology-production.richardpedersen3.workers.dev,https://impact-agent.io,https://*.impact-agent.io,https://impact-agent.me,https://*.impact-agent.me,https://churchcore.me,https://*.churchcore.me"
+MCP_URL = "https://demo-mcp-production.richardpedersen3.workers.dev"
 # Signer backend selection. EXPLICIT default — there is NO silent fallback
 # inside @agenticprimitives/key-custody (ADR-0013 / feedback_no_silent_fallbacks),
 # so an empty string here means "misconfigured" and the topup / relayer /
@@ -125,9 +131,12 @@ MCP_URL = ""
 # A2A_MASTER_PRIVATE_KEY secret); production stacks override per-deploy with
 #   A2A_KMS_BACKEND=gcp-kms GCP_KMS_KEY_NAME=projects/... pnpm deploy:cloudflare
 # (the deploy script passes both via --var; GCP_SERVICE_ACCOUNT_JSON is set
-# via `wrangler secret put`).
+# via `wrangler secret put`). INCIDENT 2026-07-19 — GCP_KMS_KEY_NAME committed
+# with its canonical value (a non-secret KMS RESOURCE PATH — the private key
+# never leaves Cloud KMS) so a plain deploy keeps the relayer/custody signer
+# wired instead of throwing "[key-custody] No backend specified".
 A2A_KMS_BACKEND = "gcp-kms"
-GCP_KMS_KEY_NAME = ""
+GCP_KMS_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/relay/cryptoKeyVersions/1"
 # A2A_ALLOW_LOCAL_MASTER_KEY: opt-in for the dev-only LocalSecp256k1Signer
 # (which loads A2A_MASTER_PRIVATE_KEY into worker memory) to run in
 # NODE_ENV=production. Required for the demo because esbuild's --define
@@ -152,14 +161,20 @@ A2A_ALLOW_LOCAL_ENVELOPE_KEY = "false"
 # Encrypt/Decrypt for envelope wrapping instead of LocalAesProvider's
 # HKDF-from-local-secret path. Required for live (production) deploys
 # because LocalAesProvider fails closed when NODE_ENV=production.
-GCP_KMS_ENCRYPT_KEY_NAME = ""
+# INCIDENT 2026-07-19 — committed canonical (non-secret KMS resource path).
+GCP_KMS_ENCRYPT_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/envelope/cryptoKeyVersions/1"
+# NEW-C1 — the interactions-session signing key (DEL-001 client-mint bound
+# vault tokens). Committed canonical (non-secret KMS resource path).
+GCP_KMS_INTERACTIONS_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/interactions-session/cryptoKeyVersions/1"
 # PAYMASTER: SmartAgentPaymaster contract address. When set, demo-a2a
 # enables the /session/deploy endpoints; demo-web shows the Step 1.5
 # "Deploy smart account" prompt and the user's smart account is deployed
 # via a paymaster-sponsored UserOp on first SIWE login. When empty,
 # /session/deploy returns 409 and the demo falls back to counterfactual
-# mode (requireDeployed:false in demo-mcp).
-PAYMASTER = ""
+# mode (requireDeployed:false in demo-mcp). INCIDENT 2026-07-19 — committed
+# canonical (from deployments-base-sepolia.json) so /session/deploy stays
+# enabled after a plain deploy; deploy-cloudflare.ts still overrides via --var.
+PAYMASTER = "0x3444160e79C463B8F1e10f86Eae4047E22256aD0"
 # PAYMASTER_VERIFYING_SIGNER: address that demo-a2a must sign paymaster
 # envelopes for. MUST match SmartAgentPaymaster.verifyingSigner() on-chain;
 # /session/deploy appends a 77-byte verifying-paymaster signature using
@@ -173,9 +188,52 @@ PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"
 # uses the validator (required for the passkey path — spec 130). When
 # unset, falls back to legacy ECDSA-only recovery (EOA flow only).
 # Injected via --var at deploy time by scripts/deploy-cloudflare.ts.
-UNIVERSAL_SIGNATURE_VALIDATOR = ""
-# Contract addresses (ENTRY_POINT, DELEGATION_MANAGER, etc.) likewise injected
-# at deploy time via --var from deployments-base-sepolia.json.
+# INCIDENT 2026-07-19 — committed canonical so a plain deploy keeps the
+# passkey/ERC-6492 SIWE path working.
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
+
+# ──────────────────────────────────────────────────────────────────────────
+# INCIDENT 2026-07-19 — production BASELINE for the remaining deploy-injected
+# vars. Previously these existed ONLY as `--var` flags in
+# scripts/deploy-cloudflare.ts (built from deployments-<network>.json + fixed
+# constants). A plain `wrangler deploy --env production` — or a targeted
+# `--var <subset>` hotfix — carried NONE of them, wiping ALLOWED_ORIGINS, the
+# contract addresses, the broker/custody config, etc. to their empty toml
+# defaults. That is what broke the live Home + custody + portal rebuild
+# ("csrf invalid" everywhere ALLOWED_ORIGINS was empty). Committing them here
+# makes that class of failure impossible: the sanctioned deploy still
+# re-injects the same values via --var (authoritative for rotation), while any
+# other deploy path inherits a WORKING production config instead of blanks.
+#
+# Contract addresses — mirror packages/contracts/deployments-base-sepolia.json.
+# deploy-cloudflare.ts overrides these from the JSON on a real deploy, so a
+# contract redeploy still rotates them; these are only the safe fallback.
+ENTRY_POINT = "0x96E37dD695840AF7781E669bdca9d79E4d7d8040"
+DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
+AGENT_ACCOUNT_FACTORY = "0xA9B6e53FcD8DA3658DeD09f4e37b22baA25De715"
+TIMESTAMP_ENFORCER = "0xBb8fF9c82417189c6EfeBbB369e9dd9d651aa0f3"
+ALLOWED_TARGETS_ENFORCER = "0xb06252FaD1D41B9943c73ec696Af70F268581625"
+ALLOWED_METHODS_ENFORCER = "0xa076b759D6785bA5E67016e399Af651fC2ABC811"
+VALUE_ENFORCER = "0x3D2abD6c7C1319f2bbA96B3b76A7e0d92C620A39"
+CUSTODY_POLICY = "0x5DB542eeBa652372afE6B4b0Cd40D999e65846de"
+QUORUM_ENFORCER = "0xA4b148EfF1Ff1c116849F6e9D9c0059bC644873F"
+APPROVED_HASH_REGISTRY = "0x465f8DCE65aB51A1562CC60E6bc046ca8734D537"
+AGENT_NAME_REGISTRY = "0x6629Cca40B008C0984a1Ca266Ca10A344420cac3"
+AGENT_NAME_UNIVERSAL_RESOLVER = "0xB890060dE1B3Fd2C78e1f0859da3883743eAD452"
+PROFILE_RESOLVER = "0xfcd37F8dca26ead889922b22C169c21370bd352a"
+PERMISSIONLESS_SUBREGISTRY = "0x598C7bbAf25f5246BE3D5A75FdEDC180D67D8026"
+AGENT_RELATIONSHIP = "0x0AF2455e3f76594E81d9042aD5FE22A5A35dc57f"
+# Personal-subdomain → agent resolution base for the A2A endpoints (spec 231).
+A2A_PUBLIC_BASE_DOMAIN = "impact-agent.io"
+# Agentic Edge admission Worker (advertised on the agent-card in edge mode).
+DEMO_EDGE_URL = "https://demo-edge-production.richardpedersen3.workers.dev"
+# Google × KMS custody (spec 235): the broker `iss` + JWKS the custody gate
+# verifies social sessions against, and the broker-token audience.
+BROKER_ISS = "https://www.impact-agent.me"
+BROKER_JWKS_URL = "https://www.impact-agent.me/jwks"
+DEMO_SSO_AUD = "demo-sso"
+# NEW-H6 — the pinned interactions grant delegate (interactions-do.ts).
+INTERACTIONS_SERVICE_SA = "0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a"
 
 [env.production.durable_objects]
 bindings = [
