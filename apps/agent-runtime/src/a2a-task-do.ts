@@ -698,7 +698,13 @@ export class A2aTaskDO {
     let routingRemain = false;
     try {
       routingRemain = await this.processRoutingDue(agentSA.toLowerCase());
-    } catch { /* per-entry drops are audited inside; a total failure retries on the next alarm */ }
+    } catch {
+      // A total failure of the poll must NOT strand a pending fan-out: re-arm as long as any
+      // routed question is still pending, so the next alarm retries (the poll is idempotent).
+      try {
+        routingRemain = (await this.state.storage.list({ prefix: 'routing.pending:', limit: 1 })).size > 0;
+      } catch { routingRemain = false; }
+    }
     // If anything remains due (e.g. auth-required→resubmit just landed), re-arm.
     const store = createDurableObjectTaskStore(this.state.storage);
     if ((await store.listDue(Date.now())).length > 0) await this.state.storage.setAlarm(Date.now() + ALARM_DELAY_MS);
@@ -813,13 +819,26 @@ export class A2aTaskDO {
     if (pendingMap.size === 0) return false;
     const audit = buildAuditSink(this.env);
     // Steward disable is immediate: an absent wire (or one cleared mid-flight) cancels everything.
+    // BUT a wire READ can also fail TRANSIENTLY (a DO-to-DO hiccup), and this poll re-reads the wire
+    // on EVERY cadence tick — a long fan-out (3 slow member turns held for the full deadline) runs
+    // dozens of ticks, so a single transient read failure treated as "wire absent" would wrongly
+    // CANCEL the whole routed question and no synthesis would ever post (observed live: N=2 finishes
+    // in ~12 ticks and synthesizes; N=3 ran ~60 ticks and stalled). So DISTINGUISH a genuine absence
+    // (read succeeded, wire null ⇒ steward disabled ⇒ cancel) from a transient read failure (retry
+    // next tick, never cancel). Fail-OPEN toward the in-flight consult; steward disable still cancels.
     let orgWire: IncomingDelegation | null = null;
+    let wireReadOk = true;
     try {
       orgWire = ((await this.interactionsInternal(orgSA, 'internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null }).wire ?? null;
-    } catch { orgWire = null; }
+    } catch { wireReadOk = false; }
     let remain = false;
     for (const [key, value] of pendingMap) {
       const pending = value as PendingRoutingV1;
+      if (!wireReadOk) {
+        // Transient wire-read failure — do NOT cancel; keep the entry and re-poll on the next alarm.
+        remain = true;
+        continue;
+      }
       if (!orgWire) {
         await this.state.storage.delete(key);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.cancelled', outcome: 'success', actor: { type: 'service', id: orgSA }, subject: { type: 'routing-pending', id: key }, reason: 'org consult wire absent (routing disabled)' }).catch(() => undefined);
