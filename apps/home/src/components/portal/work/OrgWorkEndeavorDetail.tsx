@@ -360,37 +360,43 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
               <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginBottom: '0.45rem' }}>
                 Revision {detail.plan.revision} · adopted{(detail.plan.proposedBy ?? '').toLowerCase() === communityId ? " · drafted by the organization's agent" : ''}
               </div>
-              {detail.plan.steps.map((s, i) => {
+              {detail.plan.steps.map((s) => {
                 const st = stepStatus(s.stepId, !!s.satisfied);
                 const canMarkDone = !s.satisfied && phase === 'execution' && (myCommittedSteps.has(s.stepId) || isSteward);
                 const canOffer = st.kind === 'open' && phase === 'execution';
                 return (
                   <div key={s.stepId} style={{ padding: '0.45rem 0', borderBottom: '1px solid var(--color-border)' }}>
                     <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'baseline', fontSize: '0.84rem' }}>
-                      {canOffer ? (
-                        <input
-                          type="checkbox"
-                          title="Select to offer help with this step"
-                          checked={offerSteps[s.stepId] === true}
-                          onChange={(ev) => setOfferSteps((cur) => ({ ...cur, [s.stepId]: ev.target.checked }))}
-                          style={{ flex: 'none', position: 'relative', top: 2 }}
-                        />
-                      ) : (
-                        <span style={{ flex: 'none', width: 14, textAlign: 'center', color: s.satisfied ? 'var(--color-sage-700, #047857)' : 'var(--color-text-faint)' }}>
-                          {s.satisfied ? '✓' : `${i + 1}.`}
-                        </span>
-                      )}
+                      {/* Leading status marker — ALWAYS a clean glyph: ✓ done, ○ still to do.
+                          Offering help is a separate, explicitly-labelled control on the right, so an
+                          open step never shows a bare/ambiguous checkbox in the marker slot. */}
+                      <span
+                        aria-hidden
+                        style={{ flex: 'none', width: 16, textAlign: 'center', fontSize: '0.95rem', lineHeight: 1, color: s.satisfied ? 'var(--color-sage-700, #047857)' : 'var(--color-text-faint)' }}
+                      >
+                        {s.satisfied ? '✓' : '○'}
+                      </span>
                       <span style={{ flex: 1, ...(s.satisfied ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{s.description}</span>
                       <span className="badge" style={{ flex: 'none', fontSize: '0.64rem', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
                         {STEP_KIND_LABEL[s.kind] ?? s.kind}
                       </span>
-                      <span style={{ flex: 'none', fontSize: '0.72rem', color: st.kind === 'done' ? 'var(--color-sage-700, #047857)' : 'var(--color-text-muted)' }}>
+                      <span style={{ flex: 'none', fontSize: '0.72rem', fontWeight: st.kind === 'done' ? 600 : 400, color: st.kind === 'done' ? 'var(--color-sage-700, #047857)' : 'var(--color-text-muted)' }}>
                         {st.kind === 'done' ? 'Done'
                           : st.kind === 'committed' ? `${label(st.who)} committed`
                           : st.kind === 'assigned' ? `assigned to ${label(st.who)}`
                           : st.kind === 'offered' ? `${label(st.who)} offered`
-                          : 'Open'}
+                          : 'To do'}
                       </span>
+                      {canOffer && (
+                        <label style={{ flex: 'none', display: 'inline-flex', gap: '0.28rem', alignItems: 'center', fontSize: '0.72rem', color: 'var(--color-text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }} title="Select to offer help with this step">
+                          <input
+                            type="checkbox"
+                            checked={offerSteps[s.stepId] === true}
+                            onChange={(ev) => setOfferSteps((cur) => ({ ...cur, [s.stepId]: ev.target.checked }))}
+                          />
+                          offer
+                        </label>
+                      )}
                       {canMarkDone && doneFor !== s.stepId && (
                         <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => { setDoneFor(s.stepId); setDoneNote(''); }}>
                           Mark done
