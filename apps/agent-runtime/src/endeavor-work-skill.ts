@@ -70,17 +70,23 @@ const ANSWER_TOOLS: ToolSpec[] = [
 const ANSWER_CONTRACT =
   "You are an organization's or person's own agent, writing the FINAL result of an adopted " +
   'coordination plan directly to the requester. Do not summarize the process or list the steps — ' +
-  'ANSWER their question. Synthesize the step deliverables into the concrete outcome they asked for ' +
-  '(the actual recommendation, price range, plan, decision, or artifact), stated plainly and ' +
-  'addressed to them ("Here is…"). Where the deliverables left gaps, fill them with your own ' +
-  'reasoning and clearly-labelled assumptions so the requester gets a real, actionable answer — ' +
-  'then note what they should confirm or provide to refine it. Call submit_answer exactly once.';
+  'ANSWER their question. Your FIRST sentence MUST be the direct verdict/answer to the goal ' +
+  '(e.g. "Yes — you can afford the trip, because…", "No — not yet, because…", "Aim for $450k–$550k."), ' +
+  'then support it: synthesize the step deliverables into the concrete outcome they asked for ' +
+  '(the actual recommendation, numbers, decision, or artifact), stated plainly and addressed to ' +
+  'them. Where the deliverables left gaps, fill them with your own reasoning and clearly-labelled ' +
+  'assumptions so the requester gets a real, actionable answer — then note what they should confirm ' +
+  'or provide to refine it. Call submit_answer exactly once.';
 
-/** Deterministic fallback (no LLM configured) — an honest note that the step was picked up by the
- *  agent, so auto-work still advances the plan and leaves a real evidence trail even without a key. */
-function deterministicOutput(input: EndeavorStepWorkInput): string {
+/** Honest step fallback when no deliverable could be produced. The reason distinguishes "no model
+ *  configured" from "the model calls failed" (rate limits) — the old text claimed the former in
+ *  both cases, which misled operators on keyed deployments. */
+function deterministicOutput(input: EndeavorStepWorkInput, kind: 'anthropic' | 'rule-based', lastError?: string): string {
   const d = input.stepDescription.trim().replace(/\.$/, '');
-  return `Handled by the agent for the goal "${input.goal}": ${d}. (No model configured on this deployment — recorded as an agent-completed step; a human can refine the deliverable.)`;
+  const why = kind === 'anthropic'
+    ? `The agent's model calls failed for this step${lastError ? ` (${lastError})` : ''} — recorded as picked up; re-run auto-work or refine by hand.`
+    : 'No model configured on this deployment — recorded as an agent-completed step; a human can refine the deliverable.';
+  return `Handled by the agent for the goal "${input.goal}": ${d}. (${why})`;
 }
 
 function sanitize(raw: unknown): string {
@@ -90,9 +96,18 @@ function sanitize(raw: unknown): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Run one single-tool turn, capturing the tool argument. Retries the model path once on
- *  failure/empty (transient rate-limits are the common cause of a dropped step), then falls back
- *  to the deterministic planner. Returns the captured text (never empty) + which planner ran. */
+/** Compact an error message to a short operator-readable tag. */
+function shortError(e: string): string {
+  if (/429|rate.?limit/i.test(e)) return 'rate-limited';
+  if (/529|overloaded/i.test(e)) return 'model overloaded';
+  const m = e.match(/HTTP \d{3}/);
+  return m ? m[0] : e.slice(0, 80);
+}
+
+/** Run one single-tool turn, capturing the tool argument. The model path retries with REAL backoff
+ *  — per-minute rate limits (429/529) are the common cause of dropped turns and need tens of
+ *  seconds, not milliseconds, to clear (the autopilot fires several LLM calls back-to-back). Falls
+ *  back to `fallback(lastError)` only after retries are exhausted. */
 async function runSingleToolTurn(
   env: PlannerEnv,
   opts: {
@@ -102,9 +117,9 @@ async function runSingleToolTurn(
     argKey: string;
     goal: string;
     context: Record<string, unknown>;
-    fallback: string;
+    fallback: (kind: 'anthropic' | 'rule-based', lastError?: string) => string;
   },
-): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based' }> {
+): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
   const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract });
 
   let captured = '';
@@ -114,38 +129,55 @@ async function runSingleToolTurn(
     return { ok: true, length: captured.length };
   };
 
-  const deterministic: Planner = createRuleBasedPlanner([
-    { match: () => true, toolId: opts.toolId, args: { [opts.argKey]: opts.fallback } },
-  ]);
+  if (kind !== 'anthropic') {
+    const fallbackText = opts.fallback(kind);
+    const deterministic: Planner = createRuleBasedPlanner([
+      { match: () => true, toolId: opts.toolId, args: { [opts.argKey]: fallbackText } },
+    ]);
+    try {
+      await runIntent({ goal: opts.goal, context: opts.context }, { planner: deterministic, tools: opts.tools, invoke });
+    } catch { /* fall through to fallback */ }
+    return { output: captured.length > 0 ? captured : fallbackText, plannerKind: kind, fellBack: true };
+  }
 
-  const attempts = kind === 'anthropic' ? 2 : 1;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const effective = kind === 'anthropic' ? planner : deterministic;
+  // Model path: 3 attempts. Rate-limit/overload errors get long waits (the per-minute window has
+  // to actually elapse); other failures get short ones. All waits are IO (DO wall-clock, not CPU).
+  let lastError: string | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
     let result: RunResult;
     try {
       result = await runIntent(
         { goal: opts.goal, context: opts.context },
-        { planner: effective, tools: opts.tools, invoke },
+        { planner, tools: opts.tools, invoke },
       );
-    } catch {
-      result = { outcome: 'failed', plan: { steps: [] }, steps: [] };
+    } catch (e) {
+      result = { outcome: 'failed', plan: { steps: [] }, steps: [], error: e instanceof Error ? e.message : String(e) };
     }
-    void result;
-    if (captured.length > 0) return { output: captured, plannerKind: kind };
-    if (attempt + 1 < attempts) await sleep(600 * (attempt + 1));
+    if (captured.length > 0) return { output: captured, plannerKind: kind, fellBack: false };
+    lastError = result.error ?? lastError;
+    if (attempt < 2) {
+      const rateLimited = /429|529|rate.?limit|overloaded/i.test(lastError ?? '');
+      await sleep(rateLimited ? 20_000 + attempt * 15_000 : 1_500 * (attempt + 1));
+    }
   }
-  return { output: opts.fallback, plannerKind: kind };
+  return { output: opts.fallback(kind, lastError ? shortError(lastError) : undefined), plannerKind: kind, fellBack: true };
+}
+
+/** Clip prior deliverables for prompt context — full texts stay in the evidence record; the prompt
+ *  only needs the gist (keeps per-minute input-token pressure down across a 6-step run). */
+function clipPrior(outputs: Array<{ description: string; output: string }>): string {
+  return outputs
+    .map((p, i) => `Step ${i + 1} (${p.description}): ${p.output.length > 700 ? `${p.output.slice(0, 700)}…` : p.output}`)
+    .join('\n');
 }
 
 /** Run one step's work turn. Returns the deliverable text (never empty — falls back to the
- *  deterministic note) and which planner ran. Pure compute — the caller records it. */
+ *  honest pickup note) and which planner ran. Pure compute — the caller records it. */
 export async function executeEndeavorStep(
   env: PlannerEnv,
   input: EndeavorStepWorkInput,
-): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based' }> {
-  const priorText = (input.priorOutputs ?? [])
-    .map((p, i) => `Step ${i + 1} (${p.description}): ${p.output}`)
-    .join('\n');
+): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
+  const priorText = clipPrior(input.priorOutputs ?? []);
   return runSingleToolTurn(env, {
     contract: WORK_CONTRACT,
     tools: WORK_TOOLS,
@@ -155,25 +187,30 @@ export async function executeEndeavorStep(
       `Endeavor goal: "${input.goal}".\nExecute this ${input.stepKind} step: "${input.stepDescription}".` +
       (priorText ? `\n\nDeliverables so far:\n${priorText}` : ''),
     context: { principal: input.principal, endeavorId: input.endeavorId },
-    fallback: deterministicOutput(input),
+    fallback: (kind, err) => deterministicOutput(input, kind, err),
   });
 }
 
-/** Synthesize the requester-facing OUTCOME — the actual answer to the goal, not a process recap
- *  (spec 334 §7). Takes every step's deliverable and produces the concrete result addressed to the
- *  requester. Full-length (recorded as the satisfy note + delivered to the requester's inbox). */
+/** Synthesize the requester-facing OUTCOME — the actual answer to the goal (first sentence = the
+ *  verdict), not a process recap (spec 334 §7). Takes every step's deliverable and produces the
+ *  concrete result addressed to the requester. Full-length (recorded as the satisfy note +
+ *  delivered to the requester's inbox). */
 export async function synthesizeEndeavorOutcome(
   env: PlannerEnv,
   input: { principal: string; endeavorId: string; goal: string; deliverables: Array<{ description: string; output: string }> },
-): Promise<{ answer: string; plannerKind: 'anthropic' | 'rule-based' }> {
+): Promise<{ answer: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
   const body = input.deliverables
     .map((d, i) => `Step ${i + 1} — ${d.description}\n${d.output}`)
     .join('\n\n');
-  const fallback =
-    `Here is where things stand on "${input.goal}": the agent worked through ${input.deliverables.length} ` +
-    'planned step(s) and recorded a deliverable for each (see the per-step results). No model is ' +
-    'configured on this deployment, so a person should review the deliverables to produce the final answer.';
-  const { output, plannerKind } = await runSingleToolTurn(env, {
+  const fallback = (kind: 'anthropic' | 'rule-based', err?: string): string =>
+    kind === 'anthropic'
+      ? `The agent completed all ${input.deliverables.length} plan step(s) for "${input.goal}" (see the per-step ` +
+        `results), but its model calls failed while writing the final answer${err ? ` (${err})` : ''}. ` +
+        'The step deliverables contain the substance — a person can read them for the answer, or re-run the request.'
+      : `Here is where things stand on "${input.goal}": the agent worked through ${input.deliverables.length} ` +
+        'planned step(s) and recorded a deliverable for each (see the per-step results). No model is ' +
+        'configured on this deployment, so a person should review the deliverables to produce the final answer.';
+  const { output, plannerKind, fellBack } = await runSingleToolTurn(env, {
     contract: ANSWER_CONTRACT,
     tools: ANSWER_TOOLS,
     toolId: 'submit_answer',
@@ -181,9 +218,9 @@ export async function synthesizeEndeavorOutcome(
     goal:
       `The requester's goal: "${input.goal}".\n\n` +
       `Deliverables produced across the plan:\n\n${body}\n\n` +
-      'Write the final answer to the requester now.',
+      'Write the final answer to the requester now — first sentence = the direct verdict.',
     context: { principal: input.principal, endeavorId: input.endeavorId },
     fallback,
   });
-  return { answer: output, plannerKind };
+  return { answer: output, plannerKind, fellBack };
 }

@@ -852,12 +852,19 @@ export class A2aTaskDO {
     const plan = state.plan;
     if (!plan) return { adopted, stepsDone: 0, satisfied: false };
 
-    // 2) Execute each open step. Bounded (≤ plan length, hard cap 12) — no unbounded loop.
+    // 2) Execute each open step. Bounded (≤ plan length, hard cap 12) — no unbounded loop. Turns
+    //    are PACED (short IO sleep between model calls) so a 6-step run doesn't burst straight into
+    //    the provider's per-minute rate limit — that burst is what used to drop steps 2..n to the
+    //    "picked up" fallback.
     const goal = state.goal || 'the endeavor goal';
     const priorOutputs: Array<{ description: string; output: string }> = [];
+    const pace = (): Promise<void> => new Promise((r) => setTimeout(r, 2_500));
     let stepsDone = 0;
+    let firstTurn = true;
     for (const step of plan.steps.slice(0, 12)) {
       if (step.satisfied) continue;
+      if (!firstTurn) await pace();
+      firstTurn = false;
       let output: string;
       try {
         const turn = await executeEndeavorStep(this.env, {
@@ -891,6 +898,7 @@ export class A2aTaskDO {
       // "what came of it" the requester reads). Falls back to a plain count if no model is configured.
       let outcomeNote = `Completed ${after.plan!.steps.length} plan steps for "${goal}".`;
       try {
+        if (!firstTurn) await pace(); // don't burst straight from the last step turn into synthesis
         const synth = await synthesizeEndeavorOutcome(this.env, { principal, endeavorId, goal, deliverables: priorOutputs });
         if (synth.answer.trim()) outcomeNote = synth.answer.trim();
       } catch { /* keep the deterministic count */ }

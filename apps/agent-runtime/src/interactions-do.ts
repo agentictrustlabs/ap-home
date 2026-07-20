@@ -1161,7 +1161,9 @@ export class InteractionsDO {
           return json({
             ok: true,
             lifecycle: state.endeavor?.lifecycle ?? null,
-            goal: state.endeavor?.title ?? state.request?.record.goal ?? '',
+            // Prefer the FULL request goal — the endeavor title is truncated to 80 chars at adopt
+            // time, and the work turns need the whole ask.
+            goal: state.request?.record.goal ?? state.endeavor?.title ?? '',
             requester: state.request?.record.requester?.toLowerCase() ?? null,
             adoptedPlanRef: adoptedRef,
             latestPlan: latest ? { planId: latest.planId, revision: latest.revision, contentHash: latest.contentHash, proposedBy: latest.proposedBy.toLowerCase() } : null,
