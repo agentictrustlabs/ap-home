@@ -22,6 +22,8 @@ import {
   projectCommitmentEntry,
   projectDecisionCard,
   type AllocationRow,
+  type EndeavorRequestRow,
+  type EndeavorRow,
 } from '../../../lib/work-client';
 import { NewRequestComposer } from './NewRequestComposer';
 import { useRelatedOrgs, useReEnableInteractions } from './useWork';
@@ -32,6 +34,10 @@ interface OrgWorkBundle {
   allocations: AllocationRow[];
   entries: HomeContributionEntryV1[];
   decisions: HomeDecisionCardV1[];
+  /** Requests THIS viewer submitted to the org (§12 — the requester sees their own). */
+  myRequests: EndeavorRequestRow[];
+  /** The org's visible endeavors — used to resolve adopted requests to their endeavor. */
+  endeavors: EndeavorRow[];
 }
 
 /** An org whose interactions grant predates the vault:coordination.* scopes (the serving
@@ -107,7 +113,8 @@ export function MyWorkView() {
             .filter((d) => d.status === 'pending')
             .map((d) => projectDecisionCard(o.orgAgent, d))
             .filter((c) => validateHomeDecisionCard(c).length === 0);
-          return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions };
+          const myRequests = (r.requests ?? []).filter((q) => q.requester.toLowerCase() === agentAddress.toLowerCase());
+          return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions, myRequests, endeavors: r.endeavors ?? [] };
         } catch { return null; }
       }));
       setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
@@ -159,12 +166,15 @@ export function MyWorkView() {
     } finally { setBusyId(null); }
   }, [session, load]);
 
-  const { awaiting, active, decisions } = useMemo(() => {
+  const { awaiting, active, decisions, myRequests } = useMemo(() => {
     const all = bundles ?? [];
     return {
       awaiting: all.flatMap((b) => b.entries.filter((e) => e.status === 'allocated').map((e) => ({ b, e }))),
       active: all.flatMap((b) => b.entries.filter((e) => e.status !== 'allocated').map((e) => ({ b, e }))),
       decisions: all.flatMap((b) => b.decisions.map((c) => ({ b, c }))),
+      myRequests: all
+        .flatMap((b) => b.myRequests.map((q) => ({ b, q })))
+        .sort((x, y) => Date.parse(y.q.submittedAt) - Date.parse(x.q.submittedAt)),
     };
   }, [bundles]);
 
@@ -213,6 +223,43 @@ export function MyWorkView() {
         <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>Loading…</p>
       ) : (
         <>
+          <h3 className="subhead">Your requests</h3>
+          {myRequests.length === 0 ? (
+            <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>
+              No requests yet — use New request to state a goal for an organization or person.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginBottom: '0.9rem' }}>
+              {myRequests.map(({ b, q }) => {
+                // Adopted → resolve the Endeavor it became (the request row's endeavorId, or the
+                // endeavor whose requestRef points back at this request).
+                const endeavorId = q.endeavorId ?? b.endeavors.find((e) => e.requestRef === q.requestId)?.endeavorId;
+                const endeavor = endeavorId ? b.endeavors.find((e) => e.endeavorId === endeavorId) : undefined;
+                const status = q.status ?? 'pending';
+                return (
+                  <div key={`${b.org}:${q.requestId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{q.goal}</div>
+                      <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>
+                        {b.orgName ? `${b.orgName} · ` : ''}
+                        {new Date(q.submittedAt).toLocaleString()}
+                        {status === 'pending' && ' · awaiting triage'}
+                        {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
+                        {status === 'adopted' && endeavor && ` · adopted — ${endeavor.lifecycle}`}
+                        {status === 'adopted' && !endeavor && ' · adopted as an endeavor'}
+                      </div>
+                    </div>
+                    {status === 'adopted' && endeavorId && (
+                      <a href={`/org/${b.org}/work/${encodeURIComponent(endeavorId)}`} className="btn" style={{ width: 'auto', fontSize: '0.76rem', textDecoration: 'none' }}>
+                        View endeavor
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <h3 className="subhead">Awaiting your commitment</h3>
           {awaiting.length === 0 ? (
             <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>No allocations awaiting your commitment.</p>

@@ -22,11 +22,15 @@ export type EndeavorEntryPoint = 'home-request' | 'discussion-ask' | 'inbox-ask'
 export interface EndeavorRequestRow {
   requestId: string;
   requester: string;
-  targetPrincipal: string;
+  targetPrincipal?: string;
   goal: string;
   entryPoint: EndeavorEntryPoint;
   submittedAt: string;
   status?: 'pending' | 'adopted' | 'declined';
+  /** Set when the request was adopted — the Endeavor it became. */
+  endeavorId?: string;
+  /** Set when declined — the steward's recorded reason. */
+  reason?: string;
 }
 
 export interface EndeavorRow {
