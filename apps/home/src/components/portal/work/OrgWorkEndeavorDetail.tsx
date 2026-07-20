@@ -358,7 +358,7 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
           {detail.plan && detail.plan.status === 'adopted' ? (
             <div className="manage-card" style={{ padding: '0.75rem 0.95rem', marginBottom: '0.8rem' }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginBottom: '0.45rem' }}>
-                Revision {detail.plan.revision} · adopted{proposedByAgent && detail.plan.proposedBy?.toLowerCase() === communityId ? " · drafted by the organization's agent" : ''}
+                Revision {detail.plan.revision} · adopted{(detail.plan.proposedBy ?? '').toLowerCase() === communityId ? " · drafted by the organization's agent" : ''}
               </div>
               {detail.plan.steps.map((s, i) => {
                 const st = stepStatus(s.stepId, !!s.satisfied);
@@ -397,7 +397,7 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
                         </button>
                       )}
                     </div>
-                    {doneFor === s.stepId && (
+                    {canMarkDone && doneFor === s.stepId && (
                       <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', alignItems: 'center' }}>
                         <input
                           autoFocus

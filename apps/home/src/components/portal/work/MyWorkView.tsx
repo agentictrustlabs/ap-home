@@ -27,6 +27,7 @@ import {
 } from '../../../lib/work-client';
 import { NewRequestComposer } from './NewRequestComposer';
 import { useRelatedOrgs, useReEnableInteractions } from './useWork';
+import { LIFECYCLE_LABEL } from './labels';
 
 interface OrgWorkBundle {
   org: string;
@@ -291,10 +292,10 @@ export function MyWorkView() {
                       <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>
                         {b.orgName ? `${b.orgName} · ` : ''}
                         {new Date(q.submittedAt).toLocaleString()}
-                        {status === 'pending' && ' · awaiting triage'}
+                        {status === 'pending' && ' · awaiting a decision'}
                         {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
-                        {status === 'adopted' && endeavor && ` · adopted — ${endeavor.lifecycle}`}
-                        {status === 'adopted' && !endeavor && ' · adopted as an endeavor'}
+                        {status === 'adopted' && endeavor && ` · accepted — ${LIFECYCLE_LABEL[endeavor.lifecycle]}`}
+                        {status === 'adopted' && !endeavor && ' · accepted as an endeavor'}
                       </div>
                     </div>
                     {status === 'adopted' && endeavorId && (
