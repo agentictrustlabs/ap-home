@@ -6,7 +6,7 @@ import type { WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
-  ChatIcon, HashIcon, GlobeIcon, BotIcon,
+  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -60,6 +60,8 @@ export function buildNav(
           heading: workspaceName ?? 'Organization',
           items: [
             { id: 'org-discussions', label: 'Discussions', href: orgHref(a, 'discussions'), Icon: HashIcon, status: 'live' },
+            // spec 334 §6/§12 — members see open endeavors + their own participations.
+            { id: 'org-work', label: 'Work', href: orgHref(a, 'work'), Icon: CheckCircleIcon, status: 'live' },
           ],
         },
         backHome,
@@ -72,6 +74,8 @@ export function buildNav(
           { id: 'org-overview', label: 'Overview', href: orgHref(a, 'overview'), Icon: BuildingIcon, status: 'live' },
           { id: 'org-messages', label: 'Messages', href: orgHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
           { id: 'org-discussions', label: 'Discussions', href: orgHref(a, 'discussions'), Icon: HashIcon, status: 'live' },
+          // spec 334 §6 — Requests/Triage, Endeavor list/board, Endeavor detail, New request.
+          { id: 'org-work', label: 'Work', href: orgHref(a, 'work'), Icon: CheckCircleIcon, status: 'live' },
         ],
       },
       // Manage: the old scrolling "Data" page split into its real pieces (spec 315) + Treasury.
@@ -112,6 +116,9 @@ export function buildNav(
   const top: NavItem[] = [
     { id: 'home', label: 'Home', href: '/', Icon: HomeIcon, status: 'live' },
     { id: 'messages', label: 'Messages', href: '/messages', Icon: ChatIcon, status: 'live', badge: badges.inbox },
+    // spec 334 §7 — the person's own coordination facts (allocations awaiting
+    // commitment, active commitments, pending decisions) + the New request composer.
+    { id: 'my-work', label: 'My Work', href: '/work', Icon: CheckCircleIcon, status: 'live' },
   ];
 
   const yourAgents: NavItem[] = others.map((a) => ({

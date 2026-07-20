@@ -28,6 +28,23 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
     // (channels.acceptInvite) and deep-links to the org's Discussions.
     return <JoinDiscussionChip refId={r.id} label={r.label} names={names} />;
   }
+  if (r.kind === 'endeavor') {
+    // spec 334 §9 — the endeavor chip mirrors the discussion-topic invite chip:
+    // id is `<managingPrincipalSA>/<endeavorId>`, deep-linking to the org Work
+    // endeavor detail. A pointer only — never authority.
+    const [principal = '', endeavorId = ''] = r.id.split('/');
+    const orgName = names?.[principal.toLowerCase()];
+    return (
+      <a
+        href={`/org/${principal.toLowerCase()}/work/${encodeURIComponent(endeavorId)}`}
+        className="badge"
+        style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', textDecoration: 'none', fontWeight: 600 }}
+        title={`Endeavor${orgName ? ` at ${orgName}` : ''}: ${r.label ?? endeavorId}`}
+      >
+        {r.label ?? 'View endeavor'} →
+      </a>
+    );
+  }
   if (r.kind === 'org-channels') {
     // Name the ORG on the chip — a thread can carry invites to DIFFERENT orgs (contextRefs union),
     // and generic "Join the organization" chips were indistinguishable.
@@ -326,15 +343,27 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       title="Messages"
       description="Direct messages and requests in one place"
       actions={!targetAgent ? (
-        <a
-          href="/agent"
-          className="ghost"
-          aria-label="Agent settings — message bot & playbook"
-          title="Agent settings (Manage → Agent) — message bot & playbook"
-          style={{ textDecoration: 'none' }}
-        >
-          🤖
-        </a>
+        <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+          {/* spec 334 §5 — posting a request is a first-class Home action; the
+              goal-first composer lives on My Work. */}
+          <a
+            href="/work"
+            className="ghost"
+            title="New request — describe a goal for a person or organization (My Work)"
+            style={{ textDecoration: 'none', fontSize: '0.8rem' }}
+          >
+            New request
+          </a>
+          <a
+            href="/agent"
+            className="ghost"
+            aria-label="Agent settings — message bot & playbook"
+            title="Agent settings (Manage → Agent) — message bot & playbook"
+            style={{ textDecoration: 'none' }}
+          >
+            🤖
+          </a>
+        </span>
       ) : undefined}
     >
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}

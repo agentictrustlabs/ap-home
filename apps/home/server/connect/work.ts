@@ -1,0 +1,159 @@
+// /connect/work — PROXY to the managing principal's InteractionsDO `endeavor.*`
+// op family (spec 334 §3), exactly the channels.ts pattern: the Home gates and
+// persists NOTHING here — the per-principal serialized execution point on
+// demo-a2a owns session re-verification, the member/steward/participant gates,
+// command validation, the audit row before commit, and the vault writes over
+// the interactions grant. This route only extracts the session, attaches the
+// steward-wire proof, and forwards. Fail-closed: no execution point ⇒ 503,
+// never a local fallback (ADR-0013).
+//
+// Wire shapes (spec 332 §5 records; the DO is the validator of record):
+//   GET  ?org=…                → endeavor.list → { endeavors, requests, mine, steward, you }
+//   GET  ?org=…&endeavorId=…   → endeavor.get  → { endeavor, plan, participations, commitments, decisions, events }
+//   POST { action:'request', target, goal }                 → endeavor.request (any authenticated session)
+//   POST { action:'adopt'|'decline', org, requestId, … }    → endeavor.create (steward triage — adopt or decline, audited, never silent)
+//   POST { action:'commit', org, … , signature }            → endeavor.commit (participant-signed; binds exact plan revision hash)
+//   POST { action:'decide', org, endeavorId, decisionId, …} → endeavor.decide (declared approver only)
+import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { callInteractions, stewardWireFor } from './channels';
+
+function cors(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') ?? '';
+  return origin && isAllowedClientOrigin(origin)
+    ? { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization, content-type', vary: 'Origin' }
+    : {};
+}
+const jsonCors = (body: unknown, request: Request, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...cors(request) } });
+
+export const onRequestOptions = async ({ request }: FnContext): Promise<Response> =>
+  new Response(null, { status: 204, headers: cors(request) });
+
+async function personFrom(request: Request, env: FnContext['env']): Promise<{ person: string; token: string } | null> {
+  const auth = request.headers.get('authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return null;
+  const { jwks } = await getServer(env);
+  const keys = await importJwks(jwks);
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  if (!v.ok) return null;
+  const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  return person ? { person, token } : null;
+}
+
+export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
+  const who = await personFrom(request, env);
+  if (!who) return jsonCors({ error: 'home session required' }, request, 401);
+  const url = new URL(request.url);
+  const org = (url.searchParams.get('org') ?? '').trim().toLowerCase();
+  if (!org) return jsonCors({ error: 'org required' }, request, 400);
+
+  const endeavorId = url.searchParams.get('endeavorId')?.trim();
+  const stewardship = await stewardWireFor(env, who.person, org);
+  const r = await callInteractions(env, org, endeavorId ? 'endeavor.get' : 'endeavor.list', {
+    session: who.token,
+    ...(endeavorId ? { endeavorId } : {}),
+    ...(stewardship ? { stewardship } : {}),
+  });
+  if (r.status !== 200) return jsonCors(r.body, request, r.status);
+  return jsonCors({ ...r.body, steward: r.body.steward === true || !!stewardship }, request);
+};
+
+export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  const who = await personFrom(request, env);
+  if (!who) return jsonCors({ error: 'home session required' }, request, 401);
+  const body = (await request.json().catch(() => null)) as
+    | {
+        action?: string;
+        /** The principal whose serving plane receives an endeavor.request (person or org SA). */
+        target?: string;
+        org?: string;
+        goal?: string;
+        title?: string;
+        reason?: string;
+        requestId?: string;
+        endeavorId?: string;
+        decisionId?: string;
+        outcome?: 'approved' | 'rejected';
+        allocationRef?: string;
+        participant?: string;
+        planRef?: { planId: string; revision: number; hash: string };
+        steps?: string[];
+        signature?: { signer: string; scheme: string; signature: string };
+      }
+    | null;
+  if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
+
+  // Home Request (spec 334 §5, entry point 'home-request'): the GOAL travels to
+  // the TARGET principal's serving plane; the requester is the session subject.
+  if (body.action === 'request') {
+    const target = (body.target ?? '').trim().toLowerCase();
+    const goal = (body.goal ?? '').trim();
+    if (!target) return jsonCors({ error: 'target required' }, request, 400);
+    if (!goal) return jsonCors({ error: 'goal required' }, request, 400);
+    const r = await callInteractions(env, target, 'endeavor.request', {
+      session: who.token,
+      goal,
+      entryPoint: 'home-request',
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  const org = (body.org ?? '').trim().toLowerCase();
+  if (!org) return jsonCors({ error: 'org required' }, request, 400);
+  const stewardship = await stewardWireFor(env, who.person, org);
+
+  // Steward triage (spec 334 §6): adopt runs endeavor.create; decline is the
+  // decline command on the same op — both recorded + audited, never silent.
+  if (body.action === 'adopt' || body.action === 'decline') {
+    if (!body.requestId?.trim()) return jsonCors({ error: 'requestId required' }, request, 400);
+    const r = await callInteractions(env, org, 'endeavor.create', {
+      session: who.token,
+      requestId: body.requestId,
+      decision: body.action === 'adopt' ? 'adopt' : 'decline',
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.reason ? { reason: body.reason } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // The participant's signed commitment (spec 332 §9.2): binds the EXACT adopted
+  // plan revision hash. The DO re-derives the digest and verifies the signature
+  // fail-closed; a stale/mismatched hash is a 409, never coerced.
+  if (body.action === 'commit') {
+    if (!body.endeavorId?.trim() || !body.allocationRef?.trim() || !body.signature) {
+      return jsonCors({ error: 'endeavorId, allocationRef, signature required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.commit', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      allocationRef: body.allocationRef,
+      participant: body.participant ?? who.person,
+      planRef: body.planRef ?? null,
+      steps: body.steps ?? [],
+      signature: body.signature,
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Decision (spec 334 §3): the DO resolves the declared approver and rejects
+  // any other session — steward status does not substitute.
+  if (body.action === 'decide') {
+    if (!body.endeavorId?.trim() || !body.decisionId?.trim() || !body.outcome) {
+      return jsonCors({ error: 'endeavorId, decisionId, outcome required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.decide', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      decisionId: body.decisionId,
+      outcome: body.outcome,
+      ...(body.reason ? { reason: body.reason } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  return jsonCors({ error: 'unknown action' }, request, 400);
+};

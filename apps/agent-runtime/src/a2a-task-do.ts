@@ -35,6 +35,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
+import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
@@ -94,9 +95,33 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
   return {
     skill: 'orchestrate',
     handle: async (ctx) => {
-      const raw = ctx.input as { goal?: unknown } | string | null;
+      const raw = ctx.input as { goal?: unknown; endeavor?: unknown } | string | null;
       const goal = typeof raw === 'string' ? raw : typeof raw?.goal === 'string' ? raw.goal : '';
       if (!goal.trim()) return { state: 'failed', error: 'orchestrate requires input.goal (a declarative goal)' };
+
+      // spec 334 §4 door 4 (W4): a caller may ask for coordination intake (`input.endeavor: true`) —
+      // the task is then ALSO admitted as an EndeavorRequest against the managing principal,
+      // requester = the delegation-verified task sender, intake context = this task's ref. Fail-
+      // closed: an opted-in intake that cannot be filed fails the task rather than proceeding
+      // unregistered (ADR-0013 — no silent skip).
+      let endeavorRequestId: string | undefined;
+      if (typeof raw === 'object' && raw?.endeavor === true) {
+        const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
+        if (!secret) return { state: 'failed', error: 'endeavor intake requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
+        const opBody = endeavorRequestFromA2aTask({ taskId: ctx.taskId, goal });
+        const target = ctx.principal.toLowerCase();
+        const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
+        const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.request`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+          body: JSON.stringify({ ...opBody, requester: ctx.sender.toLowerCase() }),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; requestId?: string; error?: string };
+        if (!resp.ok || !out.ok || !out.requestId) {
+          return { state: 'failed', error: `endeavor intake failed: ${out.error ?? `status ${resp.status}`}` };
+        }
+        endeavorRequestId = out.requestId;
+      }
 
       const { result, plannerKind } = await runOrchestration(env, {
         goal,
@@ -114,6 +139,7 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
           plan: result.plan,
           result: result.result ?? null,
           error: result.error ?? null,
+          ...(endeavorRequestId ? { endeavorRequestId } : {}),
         },
       });
       return result.outcome === 'completed'

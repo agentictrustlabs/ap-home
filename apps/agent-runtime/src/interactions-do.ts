@@ -65,6 +65,7 @@ import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hm
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 import { checkConsultWireShape } from './consult-wire.js';
+import { handleEndeavorOp } from './endeavors.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -142,6 +143,9 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 // plane (channels/directory/inbox/invite) on it would strand any grant that predates it (or was signed in a
 // deploy window) with a blanket "stale — re-enable". A grant lacking it simply can't write org.applications
 // (the vault-record-scope caveat enforces that at the vault); everything else keeps working.
+// Same precedent for the spec-334 coordination docs (`vault:coordination.requests`, `vault:coordination.index`,
+// `vault:coordination.endeavor:*`): additive scopes the grant-signing ceremony (demo-sso-next) must include for
+// endeavor.* ops to reach the vault — a grant lacking them is denied per-record at demo-mcp, never blanket-staled.
 const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
@@ -712,7 +716,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -955,6 +959,37 @@ export class InteractionsDO {
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
           return json({ ok: true, wire: rec?.wire ?? null });
+        }
+        // ── spec 334 §4 door 4 (W4) — the A2A intent door, in-Worker marker only. The A2aTaskDO
+        // orchestrate skill calls here AFTER its delegation gate verified the task sender; that
+        // VERIFIED sender is the requester. Pinned to exactly `endeavor.request` (never arbitrary
+        // endeavor.* ops), and it runs the SAME engine as every door — handleEndeavorOp →
+        // SubmitEndeavorRequest → the reducer (one engine, four doors). ──
+        if (op === 'internal.endeavor.request') {
+          const requester = String(body.requester ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(requester)) return json({ error: 'requester (the verified task sender) required' }, 400);
+          const chainId = Number(this.env.CHAIN_ID ?? 84532);
+          const doorAudit = buildAuditSink(this.env);
+          return handleEndeavorOp({
+            principal,
+            principalCaip: caip10(chainId, principal as Address),
+            sessionSa: requester,
+            sessionCaip: caip10(chainId, requester as Address),
+            readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(g, resource, empty),
+            writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(g, resource, data),
+            serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
+            // This door carries NO member session and NO stewardship wire — both honestly absent
+            // (endeavor.request needs neither; any gated op through this door fails closed).
+            memberName: async () => null,
+            isSteward: async () => false,
+            verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
+            writeAudit: (action, subject, timestamp) =>
+              doorAudit.write({ id: crypto.randomUUID(), timestamp: timestamp ?? new Date().toISOString(), action, outcome: 'success', actor: { type: 'service', id: requester }, subject }),
+            putTopicBody: async (envelope, bodyText) => {
+              const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
+              await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
+            },
+          }, 'endeavor.request', body);
         }
         if (op === 'invite.get' || op === 'invite.put') {
           // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
@@ -1245,6 +1280,30 @@ export class InteractionsDO {
           }
           return json({ ok: true, messageId: r.envelope.id });
         });
+      }
+
+      // ── spec 334 §3 — the coordination serving plane (`endeavor.*`). Same ingress as channels.*
+      //    (broker session verified above); gates + serialize + audit + vault docs are injected as
+      //    closures so the op family shares this DO's exact mechanisms (one mechanism, ADR-0013). ──
+      if (op.startsWith('endeavor.')) {
+        return handleEndeavorOp({
+          principal,
+          principalCaip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address),
+          sessionSa,
+          sessionCaip,
+          readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(grant, resource, empty),
+          writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(grant, resource, data),
+          serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
+          memberName: () => this.memberName(grant, principal, sessionCaip),
+          isSteward: () => this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined),
+          verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
+          writeAudit: (action, subject, timestamp) =>
+            audit.write({ id: crypto.randomUUID(), timestamp: timestamp ?? new Date().toISOString(), action, outcome: 'success', actor: { type: 'user', id: sessionSa }, subject }),
+          putTopicBody: async (envelope, bodyText) => {
+            const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
+            await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
+          },
+        }, op, body);
       }
 
       // ── spec 327 §4b — the org's assistant PLAYBOOK (Agent Skill package / SKILL.md projection):
