@@ -59,6 +59,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     return jsonCors(r.body, request, r.status);
   }
+  // spec 334 §6 — the person's own auto-work switch (the agent does the work on the person's endeavors).
+  if (body?.action === 'autoWorkStatus' || body?.action === 'autoWorkEnable' || body?.action === 'autoWorkDisable') {
+    const op = body.action === 'autoWorkStatus' ? 'autowork.get' : body.action === 'autoWorkEnable' ? 'autowork.enable' : 'autowork.disable';
+    const r = await callInteractions(env, who.person, op, { session: who.token });
+    return jsonCors(r.body, request, r.status);
+  }
   if (body?.action === 'skillPut') {
     const r = await callInteractions(env, who.person, 'inbox.assistantSkill.put', {
       session: who.token, markdown: body.markdown ?? '',

@@ -113,6 +113,9 @@ export function AgentTab() {
   const [assistant, setAssistant] = useState<{ enabled: boolean; displayName?: string } | null>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // spec 334 §6 — the person's auto-work switch (the agent does the work on the person's endeavors).
+  const [autoWork, setAutoWork] = useState<boolean | null>(null);
+  const [autoWorkBusy, setAutoWorkBusy] = useState(false);
   const [skillDoc, setSkillDoc] = useState<(typeof SKILL_DOCS)[number]['id']>('messages');
   const [skillText, setSkillText] = useState('');
   const [skillBusy, setSkillBusy] = useState(false);
@@ -145,6 +148,33 @@ export function AgentTab() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [authedHeaders]);
+
+  useEffect(() => {
+    if (!authedHeaders) return;
+    let cancelled = false;
+    void fetch('/connect/inbox-assistant', { method: 'POST', headers: authedHeaders, body: JSON.stringify({ action: 'autoWorkStatus' }) })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; enabled?: boolean }) => { if (!cancelled && d.ok) setAutoWork(d.enabled === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [authedHeaders]);
+
+  const toggleAutoWork = useCallback(async () => {
+    if (!authedHeaders) return;
+    const on = autoWork === true;
+    setAutoWorkBusy(true); setError(null);
+    try {
+      const res = await fetch('/connect/inbox-assistant', {
+        method: 'POST', headers: authedHeaders,
+        body: JSON.stringify({ action: on ? 'autoWorkDisable' : 'autoWorkEnable' }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; enabled?: boolean };
+      if (!res.ok || !b.ok) throw new Error(b.error ?? `auto-work ${on ? 'disable' : 'enable'} failed (${res.status})`);
+      setAutoWork(b.enabled === true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setAutoWorkBusy(false); }
+  }, [autoWork, authedHeaders]);
 
   const toggleAssistant = useCallback(async () => {
     if (!authedHeaders) return;
@@ -336,7 +366,42 @@ export function AgentTab() {
           </span>
         </div>
         <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-          Your agent answers messages sent to you. Shape <i>how</i> it replies in the Playbook tab.
+          Your agent answers messages sent to you (including <b>@ask</b>). Shape <i>how</i> it replies in the Playbook tab.
+        </p>
+      </section>
+
+      <section aria-label="Do the work">
+        <h3 style={sectionTitleSty}>Do the work</h3>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <BusyButton
+            busy={autoWorkBusy}
+            busyLabel="…"
+            onClick={() => void toggleAutoWork()}
+            className="ghost"
+            disabled={autoWork === null}
+            aria-label={autoWork ? 'Auto-work on — disable' : 'Enable auto-work'}
+            aria-pressed={autoWork === true}
+            style={autoWork ? undefined : { opacity: 0.45 }}
+            title={autoWork
+              ? 'Your agent executes plan steps it can do itself and advances your endeavors — click to disable'
+              : 'Let your agent do the work: draft a plan, execute the steps it can, and advance your endeavors'}
+          >
+            🛠
+          </BusyButton>
+          <span style={{ fontSize: '0.82rem' }}>{autoWork === null ? 'Checking…' : autoWork ? 'On' : 'Off'}</span>
+        </div>
+        <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+          When a request becomes an endeavor, your agent drafts a plan, does the steps it can on its
+          own, records what it did, and moves to the next step — instead of waiting for you. Steps that
+          need someone else&rsquo;s authority stay open for a human. Shape the work in the Playbook tab.
+        </p>
+      </section>
+
+      <section aria-label="Incoming intents">
+        <h3 style={sectionTitleSty}>Incoming intents</h3>
+        <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-sage-700)' }}>
+          ✓ Always on — your agent already processes incoming intents (goals other agents send you) and
+          routes them to the right capability.
         </p>
       </section>
     </div>
@@ -494,7 +559,7 @@ export function AgentTab() {
   );
 
   const tabs: TabItem[] = [
-    { id: 'message-bot', label: 'Message bot', content: messageBot },
+    { id: 'message-bot', label: 'Assistant', content: messageBot },
     { id: 'discussions', label: 'Discussions', content: discussionsPanel },
     // `skill-md` — the tab id is a legacy state key; the LABEL is the canonical term for
     // `apguide:AgentSkillPackage` (facet-registries.md §7). The on-disk file is still SKILL.md.

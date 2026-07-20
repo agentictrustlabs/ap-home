@@ -38,6 +38,7 @@ import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
+import { executeEndeavorStep } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
 import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
@@ -706,24 +707,57 @@ export class A2aTaskDO {
     if (url.pathname === '/internal/endeavor-plan') {
       const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
       if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
-      const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string; goal?: string } | null;
+      const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string; goal?: string; autoWork?: boolean } | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.endeavorId ?? '').startsWith('end_') || !String(p.goal ?? '').trim()) {
         return Response.json({ ok: false, error: 'principal + endeavorId + goal required' }, { status: 400 });
       }
       const principal = p.principal!.toLowerCase();
+      const endeavorId = p.endeavorId!;
       try {
-        const draft = await draftEndeavorPlan(this.env, { principal, endeavorId: p.endeavorId!, goal: String(p.goal).trim() });
-        const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(principal));
-        const resp = await stub.fetch(new Request(`https://do/interactions/${principal}/internal.endeavor.proposePlan`, {
-          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
-          body: JSON.stringify({
-            endeavorId: p.endeavorId,
-            steps: draft.steps.map((s, i) => ({ stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`, kind: s.kind, description: s.description })),
-          }),
-        }));
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; planId?: string; revision?: number };
-        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `proposePlan failed (${resp.status})`);
-        return Response.json({ ok: true, planId: out.planId, revision: out.revision, steps: draft.steps.length, plannerKind: draft.plannerKind });
+        const draft = await draftEndeavorPlan(this.env, { principal, endeavorId, goal: String(p.goal).trim() });
+        const out = (await this.interactionsInternal(principal, 'internal.endeavor.proposePlan', {
+          endeavorId,
+          steps: draft.steps.map((s, i) => ({ stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`, kind: s.kind, description: s.description })),
+        })) as { ok?: boolean; error?: string; planId?: string; revision?: number };
+        // Auto-work: the SAME turn that drafted the plan now adopts + executes it (the agent does the
+        // work). Off ⇒ draft-only, a steward reviews/adopts. Autopilot failures never fail the draft.
+        let autopilot: { adopted?: boolean; stepsDone?: number; satisfied?: boolean } | undefined;
+        if (p.autoWork) autopilot = await this.runEndeavorWork(principal, endeavorId).catch(() => undefined);
+        return Response.json({ ok: true, planId: out.planId, revision: out.revision, steps: draft.steps.length, plannerKind: draft.plannerKind, ...(autopilot ? { autopilot } : {}) });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      }
+    }
+    // spec 334 §6 auto-work — the org agent auto-triages (ADOPTS) a pending request, then the
+    // adoption seeds the plan draft (which, being auto-work, chains into execute).
+    if (url.pathname === '/internal/endeavor-adopt') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { principal?: string; requestId?: string } | null;
+      if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.requestId ?? '').startsWith('ereq_')) {
+        return Response.json({ ok: false, error: 'principal + requestId required' }, { status: 400 });
+      }
+      const principal = p.principal!.toLowerCase();
+      try {
+        const out = (await this.interactionsInternal(principal, 'internal.endeavor.create', { requestId: p.requestId })) as { ok?: boolean; error?: string; endeavorId?: string };
+        return Response.json({ ok: true, endeavorId: out.endeavorId });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      }
+    }
+    // spec 334 §6 auto-work — run the autopilot for one endeavor (adopt latest plan if needed →
+    // execute every open step the principal can do itself → satisfy).
+    if (url.pathname === '/internal/endeavor-work') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string } | null;
+      if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.endeavorId ?? '').startsWith('end_')) {
+        return Response.json({ ok: false, error: 'principal + endeavorId required' }, { status: 400 });
+      }
+      const principal = p.principal!.toLowerCase();
+      try {
+        const result = await this.runEndeavorWork(principal, p.endeavorId!);
+        return Response.json({ ok: true, ...result });
       } catch (e) {
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }
@@ -780,6 +814,79 @@ export class A2aTaskDO {
     const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
     if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
     return out;
+  }
+
+  /** spec 334 §6 auto-work autopilot for ONE endeavor: adopt the latest plan revision if none is
+   *  adopted yet, then execute every OPEN step the principal can do itself (a step turn produces the
+   *  deliverable, which is posted to the endeavor conversation and recorded as the step's completion
+   *  evidence), and finally satisfy the endeavor. Idempotent: re-runs skip satisfied steps and stop
+   *  at whatever the reducer refuses (a step needing another party's authority stays open, honestly).
+   *  All actor authority is the reducer's managing-principal gate (the org/person acting on itself).
+   */
+  private async runEndeavorWork(principal: string, endeavorId: string): Promise<{ adopted: boolean; stepsDone: number; satisfied: boolean }> {
+    type PlanStep = { stepId: string; kind: string; description: string; satisfied: boolean };
+    type StateOut = {
+      lifecycle: string | null; goal: string; adoptedPlanRef: { planId: string; revision: number; hash: string } | null;
+      latestPlan: { planId: string; revision: number; contentHash: string } | null;
+      plan: { planId: string; revision: number; contentHash: string; steps: PlanStep[] } | null;
+    };
+    let state = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId })) as StateOut & { ok?: boolean };
+    if (state.lifecycle !== 'adopted' && state.lifecycle !== 'active') return { adopted: false, stepsDone: 0, satisfied: state.lifecycle === 'satisfied' };
+
+    // 1) Adopt the latest proposed plan if nothing is adopted yet (the org adopting its own draft).
+    let adopted = !!state.adoptedPlanRef;
+    if (!adopted && state.latestPlan) {
+      await this.interactionsInternal(principal, 'internal.endeavor.adoptPlan', {
+        endeavorId,
+        planRef: { planId: state.latestPlan.planId, revision: state.latestPlan.revision, hash: state.latestPlan.contentHash },
+      });
+      adopted = true;
+      state = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId })) as StateOut & { ok?: boolean };
+    }
+    const plan = state.plan;
+    if (!plan) return { adopted, stepsDone: 0, satisfied: false };
+
+    // 2) Execute each open step. Bounded (≤ plan length, hard cap 12) — no unbounded loop.
+    const goal = state.goal || 'the endeavor goal';
+    const priorOutputs: Array<{ description: string; output: string }> = [];
+    let stepsDone = 0;
+    for (const step of plan.steps.slice(0, 12)) {
+      if (step.satisfied) continue;
+      let output: string;
+      try {
+        const turn = await executeEndeavorStep(this.env, {
+          principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs,
+        });
+        output = turn.output;
+      } catch {
+        continue; // this step couldn't be done autonomously — leave it open for a human
+      }
+      // Post the deliverable to the endeavor conversation (visible provenance), then record it as the
+      // step's completion evidence. A satisfyStep refusal (reducer gate) stops the run for this step.
+      await this.interactionsInternal(principal, 'internal.endeavor.post', {
+        endeavorId, bodyText: `[agent] ${step.description}\n\n${output}`,
+      }).catch(() => undefined);
+      try {
+        await this.interactionsInternal(principal, 'internal.endeavor.satisfyStep', { endeavorId, stepId: step.stepId, evidence: output });
+        priorOutputs.push({ description: step.description, output });
+        stepsDone += 1;
+      } catch {
+        break; // the reducer refused (e.g. this step needs another party) — stop cleanly
+      }
+    }
+
+    // 3) If every step is now satisfied, satisfy the endeavor (the coordinator confirming the outcome).
+    const after = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId })) as StateOut & { ok?: boolean };
+    const allDone = !!after.plan && after.plan.steps.length > 0 && after.plan.steps.every((s) => s.satisfied);
+    let satisfied = after.lifecycle === 'satisfied';
+    if (allDone && !satisfied) {
+      await this.interactionsInternal(principal, 'internal.endeavor.satisfy', {
+        endeavorId, note: `All ${after.plan!.steps.length} plan steps completed by the agent.`,
+      }).catch(() => undefined);
+      const final = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId }).catch(() => ({}))) as { lifecycle?: string };
+      satisfied = final.lifecycle === 'satisfied';
+    }
+    return { adopted, stepsDone, satisfied };
   }
 
   /** Session-wrapped org signature over a consult-rail digest (§3.1): the interactions-session

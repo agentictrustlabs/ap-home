@@ -65,7 +65,8 @@ import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hm
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 import { checkConsultWireShape } from './consult-wire.js';
-import { handleEndeavorOp } from './endeavors.js';
+import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, type EndeavorOpDeps } from './endeavors.js';
+import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const ERC1271_MAGIC = '0x1626ba7e';
@@ -121,6 +122,17 @@ const INBOX_ASSISTANT_FLAG_KEY = 'assistant.inbox.on';
  *  history/replays never trigger. */
 const INBOX_ASSISTANT_SEEN_KEY = 'assistant.inbox.seen';
 const INBOX_ASSISTANT_SEEN_CAP = 300;
+
+// ── spec 334 §6 auto-work — "the agent does the work it can". A single per-principal switch (org OR
+// person) that turns the plan-draft turn into a full autopilot: draft → adopt → execute every step it
+// can do itself → satisfy. Config is a VAULT record under `conversation.topic:` (rides the existing
+// 327 §4b grant scope — no re-enable); the DO flag is the O(1) gate cache the trigger paths read.
+const AUTO_WORK_RESOURCE = 'conversation.topic:auto-work';
+const AUTO_WORK_FLAG_KEY = 'assistant.autowork.on';
+/** Bound autopilot dispatches per endeavor per window — one flight at a time; re-triggers are
+ *  idempotent (the pipeline skips already-satisfied steps), this just avoids stampedes. */
+const AUTO_WORK_RATE_KEY = (endeavorId: string): string => `assistant.rate:autowork:${endeavorId}`;
+interface AutoWorkV1 { version: 'ap.auto-work.v1'; enabled: boolean; enabledBy: string; enabledAt: string }
 const INBOX_ASSISTANT_RATE_KEY = (conversationId: string): string => `assistant.rate:inbox:${conversationId}`;
 /** Bound dispatches per scan — a whole-doc put can carry several new envelopes at once. */
 const INBOX_ASSISTANT_MAX_PER_SCAN = 2;
@@ -286,11 +298,14 @@ export class InteractionsDO {
     if (!secret) return;
     const audit = buildAuditSink(this.env);
     void (async () => {
+      // Auto-work: when the flag is on, the SAME turn that drafts the plan continues straight into
+      // adopt → execute → satisfy (the agent does the work). Off ⇒ draft-only, steward drives.
+      const autoWork = (await this.state.storage.get(AUTO_WORK_FLAG_KEY)) === true;
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
       const resp = await stub.fetch(new Request(`https://do/internal/endeavor-plan?agent=${principal}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
-        body: JSON.stringify({ principal, endeavorId, goal }),
+        body: JSON.stringify({ principal, endeavorId, goal, autoWork }),
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!resp.ok || out.ok === false) throw new Error(out.error ?? `plan draft failed (${resp.status})`);
@@ -298,6 +313,85 @@ export class InteractionsDO {
     })().catch((e) => {
       void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.planDraftFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'endeavor', id: endeavorId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
     });
+  }
+
+  /** spec 334 §6 auto-work — run the autopilot for one endeavor (adopt latest plan if needed →
+   *  execute every open step the principal can do itself → satisfy). Fire-and-forget to the
+   *  principal's own A2aTaskDO; per-endeavor rate-limited so re-triggers don't stampede. Every
+   *  failure is AUDITED and DROPPED (ADR-0013): the human path in Work always remains available. */
+  private dispatchEndeavorWork(principal: string, endeavorId: string): void {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) return;
+    const audit = buildAuditSink(this.env);
+    void (async () => {
+      if ((await this.state.storage.get(AUTO_WORK_FLAG_KEY)) !== true) return;
+      const key = AUTO_WORK_RATE_KEY(endeavorId);
+      const prev = (await this.state.storage.get(key)) as FixedWindowState | undefined;
+      const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ASSISTANT_RATE_WINDOW_MS, max: 1 });
+      if (!rate.allowed) return;
+      await this.state.storage.put(key, rate.next);
+      const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
+      const resp = await stub.fetch(new Request(`https://do/internal/endeavor-work?agent=${principal}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        body: JSON.stringify({ principal, endeavorId }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!resp.ok || out.ok === false) throw new Error(out.error ?? `endeavor work failed (${resp.status})`);
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.workDispatch', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'endeavor', id: endeavorId } });
+    })().catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.workFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'endeavor', id: endeavorId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+    });
+  }
+
+  /** spec 334 §6 auto-work — the org agent auto-triages (ADOPTS) a just-submitted request when the
+   *  switch is on, so a request flows all the way to done with no human. Adoption seeds the plan
+   *  draft (which, with auto-work, chains into execute). Audited + dropped on failure. */
+  private dispatchEndeavorAutoAdopt(principal: string, requestId: string): void {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) return;
+    const audit = buildAuditSink(this.env);
+    void (async () => {
+      if ((await this.state.storage.get(AUTO_WORK_FLAG_KEY)) !== true) return;
+      const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
+      const resp = await stub.fetch(new Request(`https://do/internal/endeavor-adopt?agent=${principal}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        body: JSON.stringify({ principal, requestId }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!resp.ok || out.ok === false) throw new Error(out.error ?? `auto-adopt failed (${resp.status})`);
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.autoAdoptDispatch', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'endeavor-request', id: requestId } });
+    })().catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.autoAdoptFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'endeavor-request', id: requestId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+    });
+  }
+
+  /** EndeavorOpDeps for the principal's OWN agent acting at an internal door (the internal `x-ap-internal`
+   *  marker is the authorization; the reducer's actor gate is the real authority). `steward:true` lets
+   *  it take steward-gated ops (adopt request/plan) as the org acting on itself. */
+  private endeavorSelfDeps(g: IncomingDelegation, principal: string, opts?: { steward?: boolean }): EndeavorOpDeps {
+    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const doorAudit = buildAuditSink(this.env);
+    return {
+      principal,
+      principalCaip: caip10(chainId, principal as Address),
+      sessionSa: principal,
+      sessionCaip: caip10(chainId, principal as Address),
+      readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(g, resource, empty),
+      writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(g, resource, data),
+      serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
+      memberName: async () => 'Organization agent',
+      isSteward: async () => opts?.steward ?? false,
+      verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
+      writeAudit: (action, subject, timestamp) =>
+        doorAudit.write({ id: crypto.randomUUID(), timestamp: timestamp ?? new Date().toISOString(), action, outcome: 'success', actor: { type: 'service', id: principal }, subject }),
+      putTopicBody: async (envelope, bodyText) => {
+        const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
+        await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
+      },
+      draftPlanForGoal: (endeavorId, goal) => this.dispatchEndeavorPlanDraft(principal, endeavorId, goal),
+    };
   }
 
   /** spec 328 §3 — post-commit person-inbox assistant scan. Called (fire-and-forget) after ANY
@@ -739,7 +833,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -993,7 +1087,7 @@ export class InteractionsDO {
           if (!/^0x[0-9a-f]{40}$/.test(requester)) return json({ error: 'requester (the verified task sender) required' }, 400);
           const chainId = Number(this.env.CHAIN_ID ?? 84532);
           const doorAudit = buildAuditSink(this.env);
-          return handleEndeavorOp({
+          const res = await handleEndeavorOp({
             principal,
             principalCaip: caip10(chainId, principal as Address),
             sessionSa: requester,
@@ -1013,6 +1107,12 @@ export class InteractionsDO {
               await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
             },
           }, 'endeavor.request', body);
+          // Auto-work: an A2A intent that landed a request gets auto-triaged too (no-op unless on).
+          if (res.ok) {
+            const rid = ((await res.clone().json().catch(() => ({}))) as { requestId?: string }).requestId;
+            if (rid) this.dispatchEndeavorAutoAdopt(principal, rid);
+          }
+          return res;
         }
         // ── spec 334 §6 — the org agent's plan-draft return path. Pinned to exactly
         // `endeavor.proposePlan` with the ORG ITSELF as actor (the reducer's managing-principal
@@ -1041,6 +1141,54 @@ export class InteractionsDO {
               await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
             },
           }, 'endeavor.proposePlan', body);
+        }
+        // ── spec 334 §6 auto-work — the principal's OWN agent driving its endeavors. Each door pins
+        // exactly ONE endeavor op with the principal as actor; the internal marker is authorization.
+        // `internal.endeavor.state` is a raw, un-gated read (the autopilot's own substrate reading its
+        // own log — no viewer visibility gates apply to the principal reading itself).
+        if (op === 'internal.endeavor.state') {
+          const endeavorId = String(body.endeavorId ?? '');
+          if (!endeavorId.startsWith('end_')) return json({ error: 'endeavorId required' }, 400);
+          const log = await this.readDoc<CoordinationEventV1[]>(g, coordinationEventsResource(endeavorId), []);
+          if (log.length === 0) return json({ error: 'unknown endeavor' }, 404);
+          const state = reduceEventLog(log);
+          const adoptedRef = state.endeavor?.adoptedPlanRef ?? null;
+          const all = Object.values(state.plans);
+          const latest = all.sort((a, b) => b.revision - a.revision)[0] ?? null;
+          const plan = adoptedRef
+            ? all.find((p) => p.planId === adoptedRef.planId && p.revision === adoptedRef.revision) ?? null
+            : latest;
+          return json({
+            ok: true,
+            lifecycle: state.endeavor?.lifecycle ?? null,
+            goal: state.endeavor?.title ?? state.request?.record.goal ?? '',
+            adoptedPlanRef: adoptedRef,
+            latestPlan: latest ? { planId: latest.planId, revision: latest.revision, contentHash: latest.contentHash, proposedBy: latest.proposedBy.toLowerCase() } : null,
+            plan: plan
+              ? {
+                  planId: plan.planId,
+                  revision: plan.revision,
+                  contentHash: plan.contentHash,
+                  proposedBy: plan.proposedBy.toLowerCase(),
+                  steps: plan.steps.map((s) => ({ stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!state.satisfiedSteps[s.stepId] })),
+                }
+              : null,
+          });
+        }
+        if (op === 'internal.endeavor.create') {
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal, { steward: true }), 'endeavor.create', { ...body, decision: 'adopt' });
+        }
+        if (op === 'internal.endeavor.adoptPlan') {
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal, { steward: true }), 'endeavor.adoptPlan', body);
+        }
+        if (op === 'internal.endeavor.satisfyStep') {
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal), 'endeavor.satisfyStep', body);
+        }
+        if (op === 'internal.endeavor.satisfy') {
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal), 'endeavor.satisfy', body);
+        }
+        if (op === 'internal.endeavor.post') {
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal), 'endeavor.post', body);
         }
         if (op === 'invite.get' || op === 'invite.put') {
           // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
@@ -1333,6 +1481,28 @@ export class InteractionsDO {
         });
       }
 
+      // ── spec 334 §6 auto-work switch — the single per-principal toggle behind "the agent does the
+      //    work". Self (a person's own DO) OR steward (an org's DO) may set it; anyone visible reads
+      //    it. Config is the canonical VAULT record; the DO flag is the O(1) gate cache the trigger
+      //    paths read (written LAST, like the inbox assistant flag — never flags an unwritten config).
+      if (op === 'autowork.get' || op === 'autowork.enable' || op === 'autowork.disable') {
+        const self = sessionSa.toLowerCase() === principal;
+        if (op === 'autowork.get') {
+          const cfg = await this.readDoc<AutoWorkV1 | null>(grant, AUTO_WORK_RESOURCE, null);
+          return json({ ok: true, enabled: cfg?.enabled === true });
+        }
+        const allowed = self || (await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined));
+        if (!allowed) return json({ error: 'only the principal (or an organization steward) may change auto-work' }, 403);
+        const enabled = op === 'autowork.enable';
+        const now = new Date().toISOString();
+        const cfg: AutoWorkV1 = { version: 'ap.auto-work.v1', enabled, enabledBy: sessionSa.toLowerCase(), enabledAt: now };
+        await audit.write({ id: crypto.randomUUID(), timestamp: now, action: `interactions.${op}`, outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'auto-work', id: principal } });
+        await this.writeDoc(grant, AUTO_WORK_RESOURCE, cfg);
+        if (enabled) await this.state.storage.put(AUTO_WORK_FLAG_KEY, true);
+        else await this.state.storage.delete(AUTO_WORK_FLAG_KEY);
+        return json({ ok: true, enabled });
+      }
+
       // ── spec 334 §3 — the coordination serving plane (`endeavor.*`). Same ingress as channels.*
       //    (broker session verified above); gates + serialize + audit + vault docs are injected as
       //    closures so the op family shares this DO's exact mechanisms (one mechanism, ADR-0013). ──
@@ -1342,7 +1512,7 @@ export class InteractionsDO {
       //    never a weaker read path.
       if (op.startsWith('endeavor.')) {
         try {
-          return await handleEndeavorOp({
+          const res = await handleEndeavorOp({
           principal,
           principalCaip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address),
           sessionSa,
@@ -1361,6 +1531,20 @@ export class InteractionsDO {
           },
           draftPlanForGoal: (endeavorId, goal) => this.dispatchEndeavorPlanDraft(principal, endeavorId, goal),
         }, op, body);
+          // spec 334 §6 auto-work triggers (best-effort; each dispatcher no-ops unless the switch is on):
+          //   · a submitted request → the org agent auto-triages (ADOPT), which seeds the plan draft
+          //     → which (auto-work) chains into execute → satisfy.
+          //   · a human-adopted plan → the agent executes the steps it can and satisfies the endeavor.
+          if (res.ok) {
+            if (op === 'endeavor.request') {
+              const rid = ((await res.clone().json().catch(() => ({}))) as { requestId?: string }).requestId;
+              if (rid) this.dispatchEndeavorAutoAdopt(principal, rid);
+            } else if (op === 'endeavor.adoptPlan') {
+              const eid = String(body.endeavorId ?? '');
+              if (eid.startsWith('end_')) this.dispatchEndeavorWork(principal, eid);
+            }
+          }
+          return res;
         } catch (e) {
           // The ONLY mapped failure: the interactions grant predates the coordination scopes
           // (demo-mcp per-record `record_scope_denied`) ⇒ the steward re-signs via the Enable ceremony.

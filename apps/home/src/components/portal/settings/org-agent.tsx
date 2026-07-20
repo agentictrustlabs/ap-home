@@ -1,11 +1,13 @@
 'use client';
-// Org Manage → Agent — the ORG's discussion-bot config, mirroring the person Manage → Agent tab.
+// Org Manage → Agent — the ORG's agent config, mirroring the person Manage → Agent tab.
 // Two sub-tabs:
-//   · "Manage Bot" — the org's own agent replies to @ask / @<org> in EVERY discussion topic
+//   · "Assistant"  — the org's own agent replies to @ask / @<org> in EVERY discussion topic
 //                    (always on; enabled silently per topic on the Discussions page — spec 327).
 //                    Here the steward turns on MEMBER ROUTING once (spec 329 §3.1): the ceremony
 //                    signs the narrow org→interactions-session consult wire and flips routing on
-//                    across the board. Turning it off clears the wire.
+//                    across the board. Turning it off clears the wire. And AUTO-WORK (spec 334 §6):
+//                    one switch that lets the org agent do the work on its endeavors (adopt → plan →
+//                    execute the steps it can → satisfy) instead of a steward driving each step.
 //   · "Playbook"   — the org-level assistant instructions (`apguide:AgentSkillPackage`; on disk a
 //                    SKILL.md projection) that shape every reply the bot writes for this org's
 //                    discussion topics. Moved here FROM the per-topic Discussions editor so skills
@@ -37,6 +39,34 @@ export function OrgAgentSection({ orgSa }: { orgSa: string }) {
   const [wirePresent, setWirePresent] = useState<boolean | null>(null);
   const [routingBusy, setRoutingBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── spec 334 §6 — the org's auto-work switch (the org agent does the work on its endeavors) ──
+  const [autoWork, setAutoWork] = useState<boolean | null>(null);
+  const [autoWorkBusy, setAutoWorkBusy] = useState(false);
+
+  useEffect(() => {
+    if (!authed) return;
+    let cancelled = false;
+    void fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'autoWorkStatus', communityId }) })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; enabled?: boolean }) => { if (!cancelled && d.ok) setAutoWork(d.enabled === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [authed, communityId]);
+
+  const toggleAutoWork = useCallback(async () => {
+    if (!authed) return;
+    const on = autoWork === true;
+    setAutoWorkBusy(true); setError(null);
+    try {
+      const r = await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: on ? 'autoWorkDisable' : 'autoWorkEnable', communityId }) });
+      const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; enabled?: boolean };
+      if (!r.ok || !b.ok) throw new Error(b.error ?? `auto-work ${on ? 'disable' : 'enable'} failed (${r.status})`);
+      setAutoWork(b.enabled === true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setAutoWorkBusy(false); }
+  }, [autoWork, authed, communityId]);
 
   const loadStatus = useCallback(async () => {
     if (!authed) return;
@@ -190,6 +220,41 @@ export function OrgAgentSection({ orgSa }: { orgSa: string }) {
           Members choose whether to be consultable per organization on their own <b>Manage → Agent → Discussions</b> tab.
         </p>
       </section>
+
+      <section aria-label="Do the work">
+        <h3 style={sectionTitleSty}>Do the work</h3>
+        <p style={{ margin: '0 0 0.55rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+          Let the organization&rsquo;s agent do the work on its endeavors: when a request comes in, the
+          agent adopts it, drafts a multi-step plan, executes the steps it can do itself, records what it
+          did, and advances the endeavor — instead of waiting for a steward at each step. Steps that need
+          another party&rsquo;s authority stay open for a human. Shape the work in the <b>Playbook</b> tab.
+        </p>
+        {autoWork === null ? (
+          <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>Checking…</p>
+        ) : autoWork ? (
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--color-sage-700)' }}>✓ Auto-work is on — the agent drives endeavors it can.</span>
+            <BusyButton busy={autoWorkBusy} busyLabel="…" onClick={() => void toggleAutoWork()} className="ghost" style={{ width: 'auto' }}>
+              Turn off
+            </BusyButton>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.82rem' }}>Auto-work is <b>off</b> — a steward drives each step.</span>
+            <BusyButton busy={autoWorkBusy} busyLabel="…" onClick={() => void toggleAutoWork()} className="btn" style={{ width: 'auto' }}>
+              Turn on auto-work
+            </BusyButton>
+          </div>
+        )}
+      </section>
+
+      <section aria-label="Incoming intents">
+        <h3 style={sectionTitleSty}>Incoming intents</h3>
+        <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-sage-700)' }}>
+          ✓ Always on — the organization&rsquo;s agent processes incoming intents (goals other agents send
+          it) and routes them to the right capability.
+        </p>
+      </section>
     </div>
   );
 
@@ -223,7 +288,7 @@ export function OrgAgentSection({ orgSa }: { orgSa: string }) {
   );
 
   const tabs: TabItem[] = [
-    { id: 'manage-bot', label: 'Manage Bot', content: manageBot },
+    { id: 'manage-bot', label: 'Assistant', content: manageBot },
     { id: 'playbook', label: 'Playbook', content: playbook },
   ];
 

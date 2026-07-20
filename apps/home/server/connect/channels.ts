@@ -174,6 +174,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors(r.body, request, r.status);
   }
 
+  // spec 334 §6 — the org's auto-work switch (the org agent does the work on its endeavors).
+  // Steward-only for enable/disable (the DO gates); status is readable by the steward too.
+  if (body?.action === 'autoWorkStatus' || body?.action === 'autoWorkEnable' || body?.action === 'autoWorkDisable') {
+    const op = { autoWorkStatus: 'autowork.get', autoWorkEnable: 'autowork.enable', autoWorkDisable: 'autowork.disable' }[body.action]!;
+    const r = await callInteractions(env, communityId, op, {
+      session: who.token,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
   if (body?.action === 'assistantEnable' || body?.action === 'assistantDisable') {
     const r = await callInteractions(env, communityId, body.action === 'assistantEnable' ? 'channels.assistantEnable' : 'channels.assistantDisable', {
       session: who.token, channelId: body.channelId ?? '',
