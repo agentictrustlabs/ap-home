@@ -205,7 +205,7 @@ export function indexEntryFromState(state: CoordinationStateV1, updatedAt: strin
  *  detail view can render the proposal honestly (its `status` says which it is). */
 function planProjection(state: CoordinationStateV1): {
   planId: string; revision: number; contentHash: string; status: string; proposedBy: string;
-  steps: Array<{ stepId: string; kind: string; description: string; satisfied: boolean }>;
+  steps: Array<{ stepId: string; kind: string; description: string; satisfied: boolean; evidence?: string }>;
 } | null {
   const adoptedRef = state.endeavor?.adoptedPlanRef;
   const all = Object.values(state.plans);
@@ -219,12 +219,16 @@ function planProjection(state: CoordinationStateV1): {
     contentHash: plan.contentHash,
     status: plan.status,
     proposedBy: plan.proposedBy.toLowerCase(),
-    steps: plan.steps.map((s) => ({
-      stepId: s.stepId,
-      kind: s.kind,
-      description: s.description,
-      satisfied: !!state.satisfiedSteps[s.stepId],
-    })),
+    steps: plan.steps.map((s) => {
+      const done = state.satisfiedSteps[s.stepId];
+      return {
+        stepId: s.stepId,
+        kind: s.kind,
+        description: s.description,
+        satisfied: !!done,
+        ...(done ? { evidence: decodeEvidenceNote(done.evidenceRefs) } : {}),
+      };
+    }),
   };
 }
 
@@ -239,6 +243,16 @@ function decodeEvidenceNote(refs: EntityRef[]): string | undefined {
     }
   }
   return undefined;
+}
+
+/** The agent/coordinator's outcome summary — the note recorded on EndeavorSatisfied, decoded back
+ *  to display text. This is the requester-facing "what came of it" (spec 334 §7 outcome). */
+function outcomeSummaryFromLog(events: CoordinationEventV1[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.kind === 'EndeavorSatisfied') return decodeEvidenceNote([e.outcomeValidationRef]) ?? null;
+  }
+  return null;
 }
 
 /** The Provenance-trail rows: the ordered event log projected to display facts only. */
@@ -550,17 +564,37 @@ export async function handleEndeavorOp(
     const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
     const requests = await deps.readDoc<CoordinationRequestsDocV1>(COORDINATION_REQUESTS_RESOURCE, { version: 1, rows: [] });
     const endeavors = visibleEndeavorRows(Object.values(index.endeavors), viewer, { steward, member: !!name });
-    const requestRows = (steward ? requests.rows : requests.rows.filter((r) => r.request.requester.toLowerCase() === viewer))
-      .map((r) => ({
-        requestId: r.request.requestId,
-        requester: r.request.requester,
-        goal: r.request.goal,
-        entryPoint: r.request.entryPoint,
-        submittedAt: r.request.submittedAt,
-        status: r.status,
-        ...(r.endeavorId ? { endeavorId: r.endeavorId } : {}),
-        ...(r.reason ? { reason: r.reason } : {}),
-      }));
+    const requestRows = await Promise.all(
+      (steward ? requests.rows : requests.rows.filter((r) => r.request.requester.toLowerCase() === viewer))
+        .map(async (r) => {
+          // The requester's outcome window: for an adopted request, surface the endeavor's lifecycle
+          // + the agent's outcome summary once satisfied — so "Your requests" shows the RESULT, not
+          // just "adopted" (the requester isn't a participant, so this is their only view of it).
+          let extra: { endeavorLifecycle?: EndeavorLifecycle; outcomeSummary?: string } = {};
+          if (r.endeavorId) {
+            const elog = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(r.endeavorId), []);
+            if (elog.length > 0) {
+              const es = reduceEventLog(elog);
+              const summary = outcomeSummaryFromLog(elog);
+              extra = {
+                ...(es.endeavor?.lifecycle ? { endeavorLifecycle: es.endeavor.lifecycle } : {}),
+                ...(summary ? { outcomeSummary: summary } : {}),
+              };
+            }
+          }
+          return {
+            requestId: r.request.requestId,
+            requester: r.request.requester,
+            goal: r.request.goal,
+            entryPoint: r.request.entryPoint,
+            submittedAt: r.request.submittedAt,
+            status: r.status,
+            ...(r.endeavorId ? { endeavorId: r.endeavorId } : {}),
+            ...(r.reason ? { reason: r.reason } : {}),
+            ...extra,
+          };
+        }),
+    );
     // §7 My Work: the caller's own allocations/commitments across VISIBLE endeavors only.
     const mine = await mineAcross(deps, endeavors, viewer);
     return json({ ok: true, endeavors, requests: requestRows, mine, steward, member: !!name, you: viewer });
@@ -581,6 +615,10 @@ export async function handleEndeavorOp(
         ok: true,
         view,
         request: req ? { requestId: req.record.requestId, goal: req.record.goal, submittedAt: req.record.submittedAt, status: req.status } : null,
+        // The requester's window into their own request's result: the endeavor's lifecycle + the
+        // agent's outcome summary once satisfied (they see the "what came of it" without full access).
+        endeavorLifecycle: state.endeavor?.lifecycle ?? null,
+        outcomeSummary: outcomeSummaryFromLog(log),
       });
     }
     const entry = indexEntryFromState(state, new Date().toISOString());
@@ -602,6 +640,7 @@ export async function handleEndeavorOp(
           }
         : null,
       outcome: state.outcome ?? null,
+      outcomeSummary: outcomeSummaryFromLog(log),
       request: state.request ? { requestId: state.request.record.requestId, requester: state.request.record.requester, goal: state.request.record.goal, status: state.request.status } : null,
       plan: planProjection(state),
       plans: Object.values(state.plans),

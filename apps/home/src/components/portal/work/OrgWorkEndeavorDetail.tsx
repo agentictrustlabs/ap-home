@@ -215,6 +215,9 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
   const e = detail?.endeavor;
   const stepsTotal = e?.stepsTotal ?? 0;
   const stepsDone = e?.stepsSatisfied ?? 0;
+  const outcomeSummary = (detail?.outcomeSummary ?? '').trim();
+  const isSatisfied = e?.lifecycle === 'satisfied';
+  const hasDeliverables = !!detail?.plan?.steps.some((s) => s.satisfied && !!s.evidence);
 
   // ── The ONE next-action band, per role × phase ──
   const nextAction = ((): { text: string; strong?: boolean } | null => {
@@ -311,6 +314,40 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
             >
               <span style={{ fontWeight: 600, marginRight: '0.4rem' }}>{nextAction.strong ? 'Your next action:' : 'Status:'}</span>
               {nextAction.text}
+            </div>
+          )}
+
+          {/* ── Outcome — the requester-facing result (agent summary + per-step deliverables) ── */}
+          {(outcomeSummary || hasDeliverables) && (
+            <div className="manage-card" style={{ padding: '0.75rem 0.95rem', marginBottom: '0.8rem', borderLeft: '3px solid var(--color-sage-500, #5f9b76)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.45rem' }}>
+                <h3 className="subhead" style={{ margin: 0 }}>Outcome</h3>
+                {isSatisfied && (
+                  <span className="badge" style={{ fontSize: '0.64rem', color: 'var(--color-sage-700, #047857)', border: '1px solid var(--color-sage-500, #5f9b76)' }}>Completed</span>
+                )}
+              </div>
+              {outcomeSummary ? (
+                <p style={{ margin: 0, fontSize: '0.86rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{outcomeSummary}</p>
+              ) : (
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+                  In progress — the deliverables recorded so far are shown under each step below.
+                </p>
+              )}
+              {hasDeliverables && (
+                <details style={{ marginTop: '0.55rem' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                    What the agent produced ({detail.plan!.steps.filter((s) => s.satisfied && s.evidence).length})
+                  </summary>
+                  <ul style={{ margin: '0.45rem 0 0', paddingLeft: '1.1rem', display: 'grid', gap: '0.5rem' }}>
+                    {detail.plan!.steps.filter((s) => s.satisfied && s.evidence).map((s) => (
+                      <li key={s.stepId} style={{ fontSize: '0.82rem' }}>
+                        <div style={{ fontWeight: 600 }}>{s.description}</div>
+                        <div style={{ color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap', marginTop: '0.15rem' }}>{s.evidence}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           )}
 

@@ -880,8 +880,20 @@ export class A2aTaskDO {
     const allDone = !!after.plan && after.plan.steps.length > 0 && after.plan.steps.every((s) => s.satisfied);
     let satisfied = after.lifecycle === 'satisfied';
     if (allDone && !satisfied) {
+      // Synthesize a short, requester-facing outcome summary from the step deliverables (the note is
+      // recorded as the EndeavorSatisfied outcome ref). Falls back to a plain count if no model.
+      let outcomeNote = `Completed ${after.plan!.steps.length} plan steps.`;
+      try {
+        const sum = await executeEndeavorStep(this.env, {
+          principal, endeavorId, goal,
+          stepKind: 'aggregation',
+          stepDescription: 'Write a short outcome summary (2-3 sentences) of the results for the person who requested this, in plain language.',
+          priorOutputs,
+        });
+        if (sum.output.trim()) outcomeNote = sum.output.trim();
+      } catch { /* keep the deterministic count */ }
       await this.interactionsInternal(principal, 'internal.endeavor.satisfy', {
-        endeavorId, note: `All ${after.plan!.steps.length} plan steps completed by the agent.`,
+        endeavorId, note: outcomeNote,
       }).catch(() => undefined);
       const final = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId }).catch(() => ({}))) as { lifecycle?: string };
       satisfied = final.lifecycle === 'satisfied';

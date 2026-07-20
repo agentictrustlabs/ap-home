@@ -285,6 +285,10 @@ export function MyWorkView() {
                 const endeavorId = q.endeavorId ?? b.endeavors.find((e) => e.requestRef === q.requestId)?.endeavorId;
                 const endeavor = endeavorId ? b.endeavors.find((e) => e.endeavorId === endeavorId) : undefined;
                 const status = q.status ?? 'pending';
+                // The requester isn't a participant, so the endeavor rarely appears in b.endeavors —
+                // fall back to the lifecycle the serving plane attaches to the request row.
+                const lifecycle = endeavor?.lifecycle ?? q.endeavorLifecycle;
+                const completed = lifecycle === 'satisfied';
                 return (
                   <div key={`${b.org}:${q.requestId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
                     <div style={{ minWidth: 0 }}>
@@ -294,14 +298,21 @@ export function MyWorkView() {
                         {new Date(q.submittedAt).toLocaleString()}
                         {status === 'pending' && ' · awaiting a decision'}
                         {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
-                        {status === 'adopted' && endeavor && ` · accepted — ${LIFECYCLE_LABEL[endeavor.lifecycle]}`}
-                        {status === 'adopted' && !endeavor && ' · accepted as an endeavor'}
+                        {status === 'adopted' && !completed && (lifecycle ? ` · accepted — ${LIFECYCLE_LABEL[lifecycle]}` : ' · accepted as an endeavor')}
+                        {status === 'adopted' && completed && (
+                          <> · <span style={{ color: 'var(--color-sage-700, #047857)', fontWeight: 600 }}>✓ the agent completed this</span></>
+                        )}
                       </div>
                     </div>
                     {status === 'adopted' && endeavorId && (
                       <a href={`/org/${b.org}/work/${encodeURIComponent(endeavorId)}`} className="btn" style={{ width: 'auto', fontSize: '0.76rem', textDecoration: 'none' }}>
-                        View endeavor
+                        {completed ? 'View result' : 'View endeavor'}
                       </a>
+                    )}
+                    {q.outcomeSummary && (
+                      <div style={{ flexBasis: '100%', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--color-border)', fontSize: '0.83rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                        <span style={{ fontWeight: 600 }}>Outcome: </span>{q.outcomeSummary}
+                      </div>
                     )}
                   </div>
                 );

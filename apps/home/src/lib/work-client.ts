@@ -31,6 +31,10 @@ export interface EndeavorRequestRow {
   endeavorId?: string;
   /** Set when declined — the steward's recorded reason. */
   reason?: string;
+  /** Lifecycle of the endeavor this request became (so the requester sees "completed"). */
+  endeavorLifecycle?: EndeavorLifecycle;
+  /** The agent's outcome summary once the endeavor is satisfied (requester-facing result). */
+  outcomeSummary?: string;
 }
 
 export interface EndeavorRow {
@@ -55,6 +59,8 @@ export interface PlanStepRow {
   kind: 'contribution' | 'interaction' | 'decision' | 'aggregation' | 'validation';
   description: string;
   satisfied?: boolean;
+  /** The recorded completion deliverable for this step (decoded evidence note), when satisfied. */
+  evidence?: string;
 }
 
 export interface PlanRow {
@@ -162,6 +168,8 @@ export interface WorkDetailResponse {
   error?: string;
   steward?: boolean;
   endeavor?: EndeavorRow & { outcome?: { description?: string; criteria?: string[] } };
+  /** The agent/coordinator's outcome summary recorded when the endeavor was satisfied. */
+  outcomeSummary?: string;
   plan?: PlanRow | null;
   /** EVERY plan revision — proposed ones await the steward's adoption. */
   plans?: PlanRevisionRow[];
