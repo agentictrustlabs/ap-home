@@ -38,7 +38,7 @@ import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
-import { executeEndeavorStep, synthesizeEndeavorOutcome } from './endeavor-work-skill.js';
+import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
 import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
@@ -719,7 +719,8 @@ export class A2aTaskDO {
       const principal = p.principal!.toLowerCase();
       const endeavorId = p.endeavorId!;
       try {
-        const draft = await draftEndeavorPlan(this.env, { principal, endeavorId, goal: String(p.goal).trim() });
+        const playbook = await this.readOrgPlaybook(principal);
+        const draft = await draftEndeavorPlan(this.env, { principal, endeavorId, goal: String(p.goal).trim(), playbook });
         const out = (await this.interactionsInternal(principal, 'internal.endeavor.proposePlan', {
           endeavorId,
           steps: draft.steps.map((s, i) => ({ stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`, kind: s.kind, description: s.description })),
@@ -809,6 +810,17 @@ export class A2aTaskDO {
   // ── spec 329 W3 — the org-side routing engine (ask → poll → synthesize) ────────────────────────
 
   /** In-Worker call to a principal's InteractionsDO internal op (ARCH-H2 marker). */
+  /** spec 327 §4b / 334 §6 — the org's steward-authored playbook (SKILL.md), read once per
+   *  coordination dispatch so the plan-draft and work turns speak in the org's own voice/policy.
+   *  Best-effort ENRICHMENT: a missing doc or a read failure returns '' and the turn keeps its
+   *  built-in contract unchanged — never fail a draft or a step over the playbook. */
+  private async readOrgPlaybook(principal: string): Promise<string> {
+    try {
+      const out = (await this.interactionsInternal(principal, 'internal.assistantSkill.get', {})) as { skillMarkdown?: string };
+      return String(out.skillMarkdown ?? '').trim();
+    } catch { return ''; }
+  }
+
   private async interactionsInternal(principal: string, op: string, payload: unknown): Promise<Record<string, unknown>> {
     const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
     if (!secret) throw new Error('no internal marker configured');
@@ -839,6 +851,23 @@ export class A2aTaskDO {
     let state = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId })) as StateOut & { ok?: boolean };
     if (state.lifecycle !== 'adopted' && state.lifecycle !== 'active') return { adopted: false, stepsDone: 0, satisfied: state.lifecycle === 'satisfied' };
 
+    // The org's playbook applies to every step turn and the synthesis, so read it ONCE for the run
+    // (spec 327 §4b / 334 §6). '' when the steward authored none — the turns keep their built-ins.
+    const playbook = await this.readOrgPlaybook(principal);
+
+    // spec 334 §6 gather phase — the agent authors read-only queries against the PUBLIC graph AND
+    // reads the org's OWN records (via the read-only coordination grant, if the steward enabled it),
+    // collecting the facts the goal needs ONCE per run (shared by every step + the synthesis). Pure
+    // enrichment: no endpoint/grant/LLM ⇒ '' and the run proceeds exactly as before.
+    const references = await gatherReferenceContext(this.env, {
+      goal: state.goal || 'the endeavor goal', playbook, principal, endeavorId,
+      // Fulfil read_org_record through the InteractionsDO, which holds the coordination-read grant.
+      readOrgRecord: (recordType) =>
+        this.interactionsInternal(principal, 'internal.coordination.vaultRead', { recordType })
+          .then((r) => ({ ok: r.ok === true, data: (r as { data?: unknown }).data, error: (r as { error?: string }).error, needsEnable: (r as { needsEnable?: boolean }).needsEnable }))
+          .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+    }).catch(() => '');
+
     // 1) Adopt the latest proposed plan if nothing is adopted yet (the org adopting its own draft).
     let adopted = !!state.adoptedPlanRef;
     if (!adopted && state.latestPlan) {
@@ -868,7 +897,7 @@ export class A2aTaskDO {
       let output: string;
       try {
         const turn = await executeEndeavorStep(this.env, {
-          principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs,
+          principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs, playbook, references,
         });
         output = turn.output;
       } catch {
@@ -899,7 +928,7 @@ export class A2aTaskDO {
       let outcomeNote = `Completed ${after.plan!.steps.length} plan steps for "${goal}".`;
       try {
         if (!firstTurn) await pace(); // don't burst straight from the last step turn into synthesis
-        const synth = await synthesizeEndeavorOutcome(this.env, { principal, endeavorId, goal, deliverables: priorOutputs });
+        const synth = await synthesizeEndeavorOutcome(this.env, { principal, endeavorId, goal, deliverables: priorOutputs, playbook, references });
         if (synth.answer.trim()) outcomeNote = synth.answer.trim();
       } catch { /* keep the deterministic count */ }
       await this.interactionsInternal(principal, 'internal.endeavor.satisfy', {

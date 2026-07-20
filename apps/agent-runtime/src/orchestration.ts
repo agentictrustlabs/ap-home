@@ -90,6 +90,18 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 /** The env subset the planner selection needs. */
 export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL'>;
 
+/** spec 327 §4b / 334 §6 — prepend the org's steward-authored playbook AS CONTEXT, keeping the
+ *  turn's mechanical contract AFTER it so the must-call-the-tool / never-prose guarantee always wins
+ *  no matter what the steward wrote (the same org-voice-first ordering the discussion turn uses).
+ *  Absent/blank playbook ⇒ the contract alone, byte-identical to the pre-playbook behaviour. Shared
+ *  by the plan-draft and work turns so one SKILL.md governs discussion AND coordination. */
+export function withPlaybook(playbook: string | undefined, contract: string): string {
+  const p = (playbook ?? '').trim();
+  return p
+    ? `Your organization's guidance (apply it; the tool contract that follows is non-negotiable):\n${p}\n\n${contract}`
+    : contract;
+}
+
 /** Select the planner per env: the Anthropic LLM planner when explicitly enabled + keyed, else deterministic.
  *  `opts.systemPrompt` overrides the LLM planner's system prompt for turns whose contract differs from the
  *  default single-tool selection job (spec 327: the discussion turn MUST post) — ignored on rule-based.

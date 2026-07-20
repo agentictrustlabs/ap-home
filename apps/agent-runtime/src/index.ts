@@ -245,6 +245,13 @@ export interface Env {
    *  Unreachable/unset ⇒ find_members degrades to the un-enriched eligible set (spec 329 §4). */
   DISCOVERY_MCP_BASE?: string;
 
+  /** spec 334 §6 gather phase — a PUBLIC read-only SPARQL endpoint the coordination agent may query
+   *  to gather reference facts (domain-agnostic: the query is model-authored per the org playbook,
+   *  this is only the endpoint). Unset ⇒ the gather phase is simply not offered. `PUBLIC_GRAPH_BASIC`
+   *  is the optional Basic credential the endpoint requires. */
+  PUBLIC_GRAPH_URL?: string;
+  PUBLIC_GRAPH_BASIC?: string;
+
   // Contract addresses (.dev.vars locally; wrangler secret put for production)
   ENTRY_POINT: string;
   DELEGATION_MANAGER: string;

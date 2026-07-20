@@ -223,6 +223,13 @@ interface StoredState {
    *  stored wire is a bearer secret; the DO is the delegate-service side, spec 322 §2). The DO is
    *  now the sole holder+wielder for dm-body writes — no app (not even the Home) keeps it. */
   deliveryGrant?: IncomingDelegation;
+  /** spec 334 §6 — a READ-ONLY grant (principal → INTERACTIONS_SERVICE_SA) that authorizes the
+   *  coordination agent to read the principal's OWN app-specific vault records while doing work. A
+   *  SECOND wire (like `deliveryGrant`), custodied here (a stored wire is a bearer secret). Its scope
+   *  is app-declared and OPAQUE to this DO — the recordType strings live in the signing app, never
+   *  here; demo-mcp's generic record-scope gate enforces them. Absent ⇒ coordination reads are not
+   *  enabled (a clean signal, never a stale-interactions error). */
+  coordinationReadGrant?: IncomingDelegation;
   /** Issuance ledger (spec 322 W3e): every grant ever custodied here, hash/metadata only. */
   ledger?: GrantLedgerRowV1[];
   /** subject(lowercase caip10) → highest publishedAt accepted (replay guard) + tombstone flag. */
@@ -823,9 +830,34 @@ export class InteractionsDO {
       await this.state.storage.put('state', st);
       return json({ ok: true });
     }
+    // spec 334 §6 — custody the READ-ONLY coordination-read wire (verified exactly like /grant and
+    // grant.delivery: ERC-1271 against the delegator + delegate pinned to the interactions service SA,
+    // which is what `vaultFor` runs every op as). The wire's scope (which app records it may read) is
+    // opaque to this DO — the recordType strings arrive inside the signed grant and never appear here.
+    if (op === 'grant.coordination.put' && request.method === 'POST') {
+      const wire = body.delegation as IncomingDelegation | undefined;
+      if (!wire?.signature || wire.delegator.toLowerCase() !== principal) return json({ error: 'coordination-read delegation with delegator = principal required' }, 400);
+      const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return json({ error: 'coordination-read grant signature failed verification against the delegator' }, 403);
+      const expectedInteractionsSa = (this.env.INTERACTIONS_SERVICE_SA ?? '').toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(expectedInteractionsSa) && wire.delegate.toLowerCase() !== expectedInteractionsSa) {
+        return json({ error: 'coordination-read grant delegate must be the configured interactions service SA' }, 403);
+      }
+      let resources: string[] = [];
+      try {
+        const cav = wire.caveats.find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+        if (cav?.terms) resources = decodeVaultRecordScopeTerms(cav.terms as Hex).flatMap((g) => g.resources);
+      } catch { /* undecodable scope → empty resources row */ }
+      const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      st.coordinationReadGrant = wire;
+      st.ledger = [...(st.ledger ?? []), { hash: digest, delegate: wire.delegate.toLowerCase(), resources: resources.length ? resources : ['(coordination:read-only)'], storedAt: new Date().toISOString() }].slice(-50);
+      await this.state.storage.put('state', st);
+      return json({ ok: true });
+    }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant });
+      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant, coordinationReadGranted: !!st.coordinationReadGrant });
     }
 
     // ── 1-1 inbox residency (spec 322 W3f) — the Home-server channel + in-Worker delivery. ──
@@ -833,7 +865,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -885,6 +917,33 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        // spec 327 §4b / spec 334 §6 — the org playbook, read for the COORDINATION turns (plan-draft
+        // + work), which have no board channel to carry it the way internal.channels.read does. Same
+        // org-level doc as the discussion assistant, so ONE steward-authored SKILL.md governs both the
+        // @ask assistant and the endeavor agent. Absent ⇒ no markdown (the turn keeps its built-in
+        // contract, unchanged). Read-only, in-Worker marker only.
+        if (op === 'internal.assistantSkill.get') {
+          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null);
+          return json({ ok: true, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });
+        }
+        // spec 334 §6 — the coordination agent reads ONE of the principal's OWN app records by
+        // recordType, using the SEPARATE read-only coordination grant (not `g`, the interactions
+        // grant, whose scope deliberately excludes app records). recordType is opaque here — an
+        // unauthorized one is denied per-record at demo-mcp and surfaced as {ok:false}. No grant
+        // provisioned ⇒ needsEnable, so the caller can prompt the steward's one-time enable.
+        if (op === 'internal.coordination.vaultRead') {
+          const recordType = String(body.recordType ?? '').trim();
+          if (!recordType) return json({ error: 'recordType required' }, 400);
+          const cg = st0.coordinationReadGrant;
+          if (!cg) return json({ ok: false, needsEnable: true, error: 'coordination reads not enabled' });
+          try {
+            const data = await this.readDoc<unknown>(cg, recordType, null);
+            return json({ ok: true, recordType, data });
+          } catch (e) {
+            // A record-scope denial (recordType outside the grant) or a throttle — report, never throw.
+            return json({ ok: false, recordType, error: e instanceof Error ? e.message : String(e) });
+          }
         }
         // ── spec 327 — the org-assistant pipeline's two internal ops (in-Worker marker only). ──
         if (op === 'internal.channels.read') {

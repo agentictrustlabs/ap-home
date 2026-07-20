@@ -8,12 +8,16 @@
 // principal, so the reducer's participant gate passes) and the steward reviews/edits/adopts it.
 // Authority is unchanged (ADR-0041): drafting composes no MCP tools and grants nothing.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
 
 export interface EndeavorPlanDraftInput {
   principal: string;
   endeavorId: string;
   goal: string;
+  /** spec 327 §4b / 334 §6 — the org's steward-authored playbook (the SAME SKILL.md the discussion
+   *  assistant uses). Prepended to the planning contract so the draft reflects the org's own domain,
+   *  policy, and voice. Absent/empty ⇒ the built-in contract alone (unchanged behaviour). */
+  playbook?: string;
 }
 
 export type DraftStepKind = 'contribution' | 'interaction' | 'decision' | 'aggregation' | 'validation';
@@ -87,7 +91,7 @@ export async function draftEndeavorPlan(
   env: PlannerEnv,
   input: EndeavorPlanDraftInput,
 ): Promise<{ steps: DraftStep[]; plannerKind: 'anthropic' | 'rule-based' }> {
-  const { planner, kind } = selectPlanner(env, { systemPrompt: PLAN_CONTRACT });
+  const { planner, kind } = selectPlanner(env, { systemPrompt: withPlaybook(input.playbook, PLAN_CONTRACT) });
 
   let captured: DraftStep[] = [];
   const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {

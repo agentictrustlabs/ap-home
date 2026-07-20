@@ -97,6 +97,14 @@ CHAIN_ID = "84532"
 # here (not a --var) so it survives targeted deploys. Key: `wrangler secret put ANTHROPIC_API_KEY
 # --env production`. Optional ORCHESTRATION_MODEL overrides the planner default model.
 ORCHESTRATION_LLM = "anthropic"
+# spec 334 §6 gather phase — OPTIONAL public reference-graph endpoint. Left UNSET here on purpose:
+# the coordination agent's gather phase is inert until this is configured, so enabling it (and thereby
+# pointing the platform at a specific public graph) is a deliberate deploy choice, not a default. To
+# enable: set PUBLIC_GRAPH_URL to a read-only SPARQL endpoint and, if it needs one, the Basic credential
+#   wrangler secret put PUBLIC_GRAPH_BASIC --env production
+# The tool is domain-agnostic (SELECT/ASK only, mutation/SERVICE refused, timeout + row cap enforced in
+# public-graph.ts); the QUERY is authored by the model from the org's playbook, so no ontology lives here.
+# PUBLIC_GRAPH_URL = "https://…/repositories/…"
 # CRIT-2 (audit 2026-07-13) — server-mint RETIRED: DEMO_ALLOW_SERVER_MINT is removed entirely (the
 # callMcpToolViaDelegation path is deleted). Every vault path client-mints — interactions/messaging via
 # the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation proof, the A2aTaskDO seams +

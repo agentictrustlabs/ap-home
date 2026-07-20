@@ -10,7 +10,8 @@
 // a text artifact the agent authored, recorded as evidence; any real-world effect still flows through
 // an explicit, separately-authorized capability, never inferred from this note.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
+import { QUERY_PUBLIC_GRAPH_TOOL, runPublicSparql, digestRows, type PublicGraphEnv } from './public-graph.js';
 
 export interface EndeavorStepWorkInput {
   principal: string;
@@ -22,6 +23,96 @@ export interface EndeavorStepWorkInput {
   stepDescription: string;
   /** Deliverables produced by earlier steps in this run (short context, in order). */
   priorOutputs?: Array<{ description: string; output: string }>;
+  /** spec 327 §4b / 334 §6 — the org's steward-authored playbook (the SAME SKILL.md the discussion
+   *  assistant uses), prepended to the work contract so the deliverable reflects the org's own
+   *  domain, policy, and voice. Absent/empty ⇒ the built-in contract alone (unchanged behaviour). */
+  playbook?: string;
+  /** spec 334 §6 gather phase — reference facts the model gathered from the public graph BEFORE
+   *  writing (a compact digest, produced once per run by `gatherReferenceContext`). Read-only public
+   *  data, embedded as context; the model still writes through the single `submit_work` sink. */
+  references?: string;
+}
+
+const GATHER_CONTRACT =
+  "You are gathering reference facts for a coordination task. Use query_public_graph to pull PUBLIC " +
+  'data relevant to the goal, and read_org_record to read your organization\'s OWN stored records ' +
+  '(e.g. its claims/attestations) when the goal needs them — your organization guidance above ' +
+  'describes the graph vocabulary and which record types exist. Gather only what the goal needs; ' +
+  'call the tools as many times as you need, then stop. If nothing is relevant, make no calls.';
+
+/** The tool the model composes to read ONE of the org's own vault records by recordType (fulfilled by
+ *  the caller against the read-only coordination grant). The recordType names live in the org's
+ *  playbook, not here — the platform stays domain-agnostic. */
+const READ_ORG_RECORD_TOOL: ToolSpec = {
+  id: 'read_org_record',
+  description:
+    "Read one of your organization's OWN stored records by its record type (as named in your " +
+    'organization guidance above — e.g. an attestations/claims record). Returns the stored JSON, or ' +
+    'an error if that record type is not readable. Use it to ground the work in what your ' +
+    'organization has actually recorded — never invent a claim or a figure.',
+  inputSchema: {
+    type: 'object',
+    properties: { recordType: { type: 'string', description: "The record type to read (from your org guidance)." } },
+    required: ['recordType'],
+  },
+};
+
+/** spec 334 §6 gather phase — let the model author read-only queries against the PUBLIC graph and
+ *  collect the results into a compact digest that the write turn reasons over. Runs ONLY with an LLM
+ *  planner and a configured public endpoint (the rule-based planner cannot author SPARQL); otherwise
+ *  returns '' and the run proceeds with no reference data — a pure enrichment, never a dependency.
+ *  The query is the MODEL's (guided by the playbook); this function only guards + executes + digests,
+ *  so no domain vocabulary lives in the platform. */
+export async function gatherReferenceContext(
+  env: PlannerEnv & PublicGraphEnv,
+  input: {
+    goal: string; playbook?: string; principal: string; endeavorId: string;
+    /** Fulfils read_org_record — reads one of the org's OWN records by recordType via the read-only
+     *  coordination grant. Omitted ⇒ the tool is not offered (org-record reads simply unavailable). */
+    readOrgRecord?: (recordType: string) => Promise<{ ok: boolean; data?: unknown; error?: string; needsEnable?: boolean }>;
+  },
+): Promise<string> {
+  const graphOn = !!String(env.PUBLIC_GRAPH_URL ?? '').trim();
+  const orgReadsOn = !!input.readOrgRecord;
+  if (!graphOn && !orgReadsOn) return '';
+  const { planner, kind } = selectPlanner(env, { systemPrompt: withPlaybook(input.playbook, GATHER_CONTRACT), maxTokens: 1500 });
+  if (kind !== 'anthropic') return ''; // only the LLM can author a query / pick a record; the template cannot.
+
+  const tools: ToolSpec[] = [];
+  if (graphOn) tools.push(QUERY_PUBLIC_GRAPH_TOOL);
+  if (orgReadsOn) tools.push(READ_ORG_RECORD_TOOL);
+
+  const digests: string[] = [];
+  let n = 0;
+  const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (toolId === 'query_public_graph') {
+      if (!graphOn) throw new Error('public graph not available');
+      n += 1;
+      const run = await runPublicSparql(env, String(args.query ?? ''));
+      if (!run.ok) return { ok: false, error: run.error }; // surfaced to the planner as an observation
+      digests.push(digestRows(`Query ${n}`, run.rows ?? [], run.truncated));
+      return { ok: true, rows: (run.rows ?? []).length, truncated: !!run.truncated };
+    }
+    if (toolId === 'read_org_record') {
+      if (!input.readOrgRecord) throw new Error('org records not available');
+      const recordType = String(args.recordType ?? '').trim();
+      const r = await input.readOrgRecord(recordType);
+      if (!r.ok) return { ok: false, error: r.error ?? (r.needsEnable ? 'org reads not enabled' : 'not readable') };
+      // A compact JSON digest, hard-capped so a big record can't blow the downstream context budget.
+      digests.push(`Org record "${recordType}":\n${JSON.stringify(r.data ?? null).slice(0, 1500)}`);
+      return { ok: true, recordType };
+    }
+    throw new Error(`unknown tool: ${toolId}`);
+  };
+
+  try {
+    await runIntent(
+      { goal: `Gather the reference facts needed for: "${input.goal}".`, context: { principal: input.principal, endeavorId: input.endeavorId } },
+      { planner, tools, invoke, maxSteps: 5 },
+    );
+  } catch { /* gather is best-effort enrichment — a failed turn just yields no reference data */ }
+
+  return digests.join('\n\n').slice(0, 4500);
 }
 
 const WORK_TOOLS: ToolSpec[] = [
@@ -183,13 +274,15 @@ export async function executeEndeavorStep(
   input: EndeavorStepWorkInput,
 ): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
   const priorText = clipPrior(input.priorOutputs ?? []);
+  const refs = (input.references ?? '').trim();
   return runSingleToolTurn(env, {
-    contract: WORK_CONTRACT,
+    contract: withPlaybook(input.playbook, WORK_CONTRACT),
     tools: WORK_TOOLS,
     toolId: 'submit_work',
     argKey: 'output',
     goal:
       `Endeavor goal: "${input.goal}".\nExecute this ${input.stepKind} step: "${input.stepDescription}".` +
+      (refs ? `\n\nReference data (from the public graph):\n${refs}` : '') +
       (priorText ? `\n\nDeliverables so far:\n${priorText}` : ''),
     context: { principal: input.principal, endeavorId: input.endeavorId },
     fallback: (kind, err) => deterministicOutput(input, kind, err),
@@ -202,7 +295,7 @@ export async function executeEndeavorStep(
  *  delivered to the requester's inbox). */
 export async function synthesizeEndeavorOutcome(
   env: PlannerEnv,
-  input: { principal: string; endeavorId: string; goal: string; deliverables: Array<{ description: string; output: string }> },
+  input: { principal: string; endeavorId: string; goal: string; deliverables: Array<{ description: string; output: string }>; playbook?: string; references?: string },
 ): Promise<{ answer: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
   const body = input.deliverables
     .map((d, i) => `Step ${i + 1} — ${d.description}\n${d.output}`)
@@ -216,12 +309,13 @@ export async function synthesizeEndeavorOutcome(
         'planned step(s) and recorded a deliverable for each (see the per-step results). No model is ' +
         'configured on this deployment, so a person should review the deliverables to produce the final answer.';
   const { output, plannerKind, fellBack } = await runSingleToolTurn(env, {
-    contract: ANSWER_CONTRACT,
+    contract: withPlaybook(input.playbook, ANSWER_CONTRACT),
     tools: ANSWER_TOOLS,
     toolId: 'submit_answer',
     argKey: 'answer',
     goal:
       `The requester's goal: "${input.goal}".\n\n` +
+      ((input.references ?? '').trim() ? `Reference data (from the public graph):\n${(input.references ?? '').trim()}\n\n` : '') +
       `Deliverables produced across the plan:\n\n${body}\n\n` +
       'Write the final answer to the requester now — first sentence = the direct verdict.',
     context: { principal: input.principal, endeavorId: input.endeavorId },
