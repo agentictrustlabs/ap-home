@@ -303,6 +303,15 @@ export const ORG_MEMBERSHIP_WILDCARD_SCOPE = 'vault:org.membership:*' as const;
  *  + appended by applicants, both via the Home over the interactions grant. A plain org-vault doc (not inbox). */
 export const ORG_APPLICATIONS_RESOURCE_SCOPE = 'vault:org.applications' as const;
 
+/** spec 334 §3 — the coordination serving plane's vault docs (spec 332 §5 catalog): the intake doc,
+ *  the endeavor index, and the per-endeavor event log + projected state (`coordination.endeavor:*`
+ *  covers both `coordination.endeavor:<id>` and `coordination.endeavor:events:<id>`). ADDITIVE
+ *  scopes, same precedent as org.applications: a grant lacking them is denied per-record at
+ *  demo-mcp (endeavor.* ops surface "re-enable"), never blanket-staled. */
+export const COORDINATION_REQUESTS_RESOURCE_SCOPE = 'vault:coordination.requests' as const;
+export const COORDINATION_INDEX_RESOURCE_SCOPE = 'vault:coordination.index' as const;
+export const COORDINATION_ENDEAVOR_WILDCARD_SCOPE = 'vault:coordination.endeavor:*' as const;
+
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
  * by the steward's credential AS the principal at the enable ceremony. Exercised only by the
@@ -323,7 +332,7 @@ function buildInteractionsStruct(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE], ops: ['read', 'write'] },
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
