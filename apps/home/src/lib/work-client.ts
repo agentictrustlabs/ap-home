@@ -62,6 +62,8 @@ export interface PlanRow {
   revision: number;
   contentHash: string;
   status: 'proposed' | 'adopted' | 'superseded' | 'rejected';
+  /** Who proposed this revision — the ORG address itself means the org agent's suggested draft. */
+  proposedBy?: string;
   steps: PlanStepRow[];
 }
 
@@ -150,6 +152,8 @@ export interface PlanRevisionRow {
   revision: number;
   contentHash: string;
   status: 'proposed' | 'adopted' | 'superseded' | 'rejected';
+  /** Who proposed this revision — the ORG address itself means the org agent's suggested draft. */
+  proposedBy?: string;
   steps: Array<{ stepId: string; kind: string; description: string }>;
 }
 
@@ -339,6 +343,38 @@ export async function commitContribution(
     ...draft,
     signature: { payloadHash: digest, signer: draft.participant, scheme: 'erc1271', signature },
   });
+}
+
+/** Mark ONE plan step done (endeavor.satisfyStep) — evidence note required; recorded by the
+ *  managing principal or an active participant (re-gated by the reducer). */
+export async function markStepDone(
+  token: string,
+  org: string,
+  endeavorId: string,
+  stepId: string,
+  evidence: string,
+): Promise<void> {
+  await postWork(token, { action: 'satisfyStep', org: org.toLowerCase(), endeavorId, stepId, evidence });
+}
+
+/** Mark the whole endeavor complete (endeavor.satisfy) — coordinator/steward act. */
+export async function completeEndeavor(
+  token: string,
+  org: string,
+  endeavorId: string,
+  note?: string,
+): Promise<void> {
+  await postWork(token, { action: 'satisfy', org: org.toLowerCase(), endeavorId, ...(note ? { note } : {}) });
+}
+
+/** Close the endeavor without completing it (endeavor.abandon) — recorded with a reason. */
+export async function closeEndeavor(
+  token: string,
+  org: string,
+  endeavorId: string,
+  reason?: string,
+): Promise<void> {
+  await postWork(token, { action: 'abandon', org: org.toLowerCase(), endeavorId, ...(reason ? { reason } : {}) });
 }
 
 /** Record a decision (endeavor.decide) — only the declared approver's session passes the DO gate. */

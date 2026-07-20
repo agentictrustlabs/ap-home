@@ -43,6 +43,7 @@ import {
   type PlanStepV1,
   type SignedPayloadRef,
 } from '@agenticprimitives/coordination';
+import type { EntityRef } from '@agenticprimitives/situations';
 import {
   appendBoardPost,
   canonicalizeMessage,
@@ -118,6 +119,10 @@ export interface EndeavorOpDeps {
   writeAudit(action: string, subject: { type: string; id: string }, timestamp?: string): Promise<void>;
   /** Persist a fabric message body at the envelope's own resource (hash-bound). */
   putTopicBody(envelope: MessageEnvelopeV1, bodyText: string): Promise<void>;
+  /** OPTIONAL — fire-and-forget hand-off to the org's own agent to DRAFT a multi-step plan from the
+   *  adopted goal (spec 327 planner reused; the org is the actor via internal.endeavor.proposePlan).
+   *  Absent (internal doors, unconfigured LLM) ⇒ no auto-draft, the steward authors the plan by hand. */
+  draftPlanForGoal?(endeavorId: string, goal: string): void;
 }
 
 const json = (b: unknown, s = 200): Response =>
@@ -199,7 +204,7 @@ export function indexEntryFromState(state: CoordinationStateV1, updatedAt: strin
 /** Adopted plan (exact revision) — or, when none is adopted yet, the newest revision, so the
  *  detail view can render the proposal honestly (its `status` says which it is). */
 function planProjection(state: CoordinationStateV1): {
-  planId: string; revision: number; contentHash: string; status: string;
+  planId: string; revision: number; contentHash: string; status: string; proposedBy: string;
   steps: Array<{ stepId: string; kind: string; description: string; satisfied: boolean }>;
 } | null {
   const adoptedRef = state.endeavor?.adoptedPlanRef;
@@ -213,6 +218,7 @@ function planProjection(state: CoordinationStateV1): {
     revision: plan.revision,
     contentHash: plan.contentHash,
     status: plan.status,
+    proposedBy: plan.proposedBy.toLowerCase(),
     steps: plan.steps.map((s) => ({
       stepId: s.stepId,
       kind: s.kind,
@@ -220,6 +226,19 @@ function planProjection(state: CoordinationStateV1): {
       satisfied: !!state.satisfiedSteps[s.stepId],
     })),
   };
+}
+
+/** Decode the free-text note encoded by `parseEvidenceRefs` / endeavor.satisfy back to display
+ *  text (`urn:ap:evidence:` / `urn:ap:outcome:`); other refs render as their iri/id. */
+function decodeEvidenceNote(refs: EntityRef[]): string | undefined {
+  for (const r of refs) {
+    if (r.kind !== 'resource') continue;
+    const m = /^urn:ap:(?:evidence|outcome):(.*)$/.exec(r.iri);
+    if (m) {
+      try { return decodeURIComponent(m[1]!); } catch { return m[1]; }
+    }
+  }
+  return undefined;
 }
 
 /** The Provenance-trail rows: the ordered event log projected to display facts only. */
@@ -242,7 +261,8 @@ export function eventTrail(events: CoordinationEventV1[]): Array<{ type: string;
       : e.kind === 'EndeavorAdopted' ? e.title
       : e.kind === 'PlanProposed' ? `revision ${e.planRevision}`
       : e.kind === 'PlanAdopted' ? `revision ${e.planRef.revision}`
-      : e.kind === 'PlanStepSatisfied' ? e.stepId
+      : e.kind === 'PlanStepSatisfied' ? decodeEvidenceNote(e.evidenceRefs) ?? e.stepId
+      : e.kind === 'EndeavorSatisfied' ? decodeEvidenceNote([e.outcomeValidationRef])
       : 'reason' in e && e.reason ? e.reason
       : undefined;
     return {
@@ -317,7 +337,7 @@ export function commitmentPayloadDigest(payload: {
 /** Command validation rejects map to HTTP: actor-gate rejects ("only the …") are 403; state
  *  conflicts (stale hash, wrong status, duplicates) are 409. Never a weaker retry path. */
 export function commandRejectStatus(reason: string): number {
-  return /^only /i.test(reason) ? 403 : 409;
+  return /^only /i.test(reason) || /must be (recorded|proposed) by/i.test(reason) || /proposer must be/i.test(reason) ? 403 : 409;
 }
 
 // ── Fail-closed wire parsing (shape pinning — junk never reaches the log) ──
@@ -440,6 +460,15 @@ function parseCriteria(raw: unknown, goal: string): OutcomeCriterionV1[] | null 
 function parseEndeavorId(raw: unknown): string | null {
   const id = String(raw ?? '');
   return id.startsWith('end_') && id.length > 4 ? id : null;
+}
+
+/** Evidence for step/endeavor completion: a free-text note from the UI becomes ONE resource
+ *  EntityRef (`urn:ap:evidence:<encoded>`), so the reducer's "requires evidence" invariant is met
+ *  without inventing a vault artifact for a demo note. The provenance projection decodes it back. */
+function parseEvidenceRefs(note: unknown): EntityRef[] {
+  const text = String(note ?? '').trim();
+  if (!text) return [];
+  return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, 500))}` }];
 }
 
 // ── The mutation spine: validate command → append events → re-reduce → persist projections. ──
@@ -659,7 +688,10 @@ export async function handleEndeavorOp(
       row.endeavorId = endeavorId;
       row.decidedAt = now;
       await deps.writeDoc(COORDINATION_REQUESTS_RESOURCE, doc);
-      return json({ ok: true, endeavorId, revision: next.revision });
+      // The org's OWN agent drafts a first plan revision from the goal (fire-and-forget; the steward
+      // reviews/edits/adopts it). No auto-draft when the hook is absent (unconfigured / internal door).
+      deps.draftPlanForGoal?.(endeavorId, goal);
+      return json({ ok: true, endeavorId, revision: next.revision, planDraftRequested: !!deps.draftPlanForGoal });
     });
   }
 
@@ -892,6 +924,71 @@ export async function handleEndeavorOp(
   // ── endeavor.decide — spec 333 wave. @agenticprimitives/coordination ships NO RecordDecision
   //    command yet (`/decisions` is a reserved stub), so this op fails honestly rather than faking
   //    a decision record outside the reducer (ADR-0013: one mechanism, no imitation path). ──
+  // ── endeavor.satisfyStep — record a plan step as satisfied with completion evidence. Gated by
+  //    the reducer to the managing principal or an active participant (execution is done by the
+  //    people doing the work, not only the steward). ──
+  if (op === 'endeavor.satisfyStep') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const stepId = String(body.stepId ?? '');
+    if (!stepId.startsWith('step_') || stepId.length <= 5) return json({ error: 'stepId (step_*) required' }, 400);
+    const evidenceRefs = parseEvidenceRefs(body.evidence);
+    if (evidenceRefs.length === 0) return json({ error: 'evidence (a short note of what was done) is required to mark a step done' }, 400);
+    const command: CoordinationCommandV1 = {
+      kind: 'RecordStepSatisfied',
+      actor: viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      stepId: stepId as PlanStepId,
+      evidenceRefs,
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.satisfyStep', endeavorId, command, { type: 'plan-step', id: stepId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, stepId });
+    });
+  }
+
+  // ── endeavor.satisfy — mark the whole endeavor complete (outcome validated). Managing principal
+  //    or sponsor/coordinator only (reducer-gated). ──
+  if (op === 'endeavor.satisfy') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const note = String(body.note ?? '').trim() || 'Outcome confirmed by the coordinator';
+    const command: CoordinationCommandV1 = {
+      kind: 'SatisfyEndeavor',
+      actor: viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, 500))}` },
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.satisfy', endeavorId, command, { type: 'endeavor', id: endeavorId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, endeavorId, lifecycle: r.state.endeavor?.lifecycle ?? null });
+    });
+  }
+
+  // ── endeavor.abandon — close the endeavor without satisfying it. Managing principal or
+  //    sponsor/coordinator only (reducer-gated). ──
+  if (op === 'endeavor.abandon') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const reason = String(body.reason ?? '').trim();
+    const command: CoordinationCommandV1 = {
+      kind: 'AbandonEndeavor',
+      actor: viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      ...(reason ? { reason } : {}),
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.abandon', endeavorId, command, { type: 'endeavor', id: endeavorId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, endeavorId, lifecycle: r.state.endeavor?.lifecycle ?? null });
+    });
+  }
+
   if (op === 'endeavor.decide') {
     return json({ error: 'decision recording ships with the spec 333 wave — @agenticprimitives/coordination has no RecordDecision command yet' }, 501);
   }

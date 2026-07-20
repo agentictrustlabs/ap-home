@@ -325,6 +325,91 @@ describe('endeavor.* serving plane', () => {
     expect(endeavor.outcome?.criteria?.length).toBeGreaterThan(0);
   });
 
+  // ── Execution ops (spec 332 §6): satisfyStep / satisfy / abandon ──
+  it('marks a step done with evidence, then completes the endeavor', async () => {
+    const h = makeHarness();
+    const { endeavorId, planRef, allocationId } = await driveToAllocation(h);
+    const digest = await commitmentPayloadDigest({ endeavorId, allocationRef: allocationId, planRef, steps: ['step_draft'] });
+    await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.commit', {
+      endeavorId, allocationRef: allocationId, planRef, steps: ['step_draft'],
+      signature: { payloadHash: digest, signer: STEWARD, scheme: 'erc1271', signature: '0xdeadbeef' },
+    });
+
+    // Evidence is REQUIRED.
+    const noEvidence = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.satisfyStep', { endeavorId, stepId: 'step_draft' });
+    expect(noEvidence.status).toBe(400);
+
+    const done1 = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.satisfyStep', {
+      endeavorId, stepId: 'step_draft', evidence: 'Draft written and shared',
+    }));
+    expect(done1.ok).toBe(true);
+    const done2 = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.satisfyStep', {
+      endeavorId, stepId: 'step_review', evidence: 'Reviewed and approved',
+    }));
+    expect(done2.ok).toBe(true);
+
+    const satisfied = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.satisfy', {
+      endeavorId, note: 'Report published',
+    }));
+    expect(satisfied.ok).toBe(true);
+    expect(satisfied.lifecycle).toBe('satisfied');
+
+    // The evidence note round-trips into the event trail.
+    const got = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    const events = got.events as Array<{ type: string; summary?: string }>;
+    expect(events.find((e) => e.type === 'PlanStepSatisfied')?.summary).toBe('Draft written and shared');
+    expect(events.find((e) => e.type === 'EndeavorSatisfied')?.summary).toBe('Report published');
+  });
+
+  it('rejects satisfyStep from a non-participant session', async () => {
+    const h = makeHarness();
+    const { endeavorId } = await driveToAllocation(h);
+    const res = await handleEndeavorOp(h.as(STRANGER, { member: 'Member' }), 'endeavor.satisfyStep', {
+      endeavorId, stepId: 'step_draft', evidence: 'nope',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('abandons an endeavor with a recorded reason', async () => {
+    const h = makeHarness();
+    const { endeavorId } = await driveToAllocation(h);
+    const res = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.abandon', {
+      endeavorId, reason: 'requester withdrew',
+    }));
+    expect(res.ok).toBe(true);
+    expect(res.lifecycle).toBe('abandoned');
+    const got = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    const events = got.events as Array<{ type: string; summary?: string }>;
+    expect(events.find((e) => e.type === 'EndeavorAbandoned')?.summary).toBe('requester withdrew');
+  });
+
+  // spec 334 §6 — the org agent's plan-draft return path: the ORG ITSELF (actor = managing
+  // principal) proposes a plan revision, which the reducer's ProposePlan gate admits.
+  it('admits a plan proposed BY the org principal (the agent-drafted suggestion)', async () => {
+    const h = makeHarness();
+    const req = await out(await handleEndeavorOp(h.as(REQUESTER), 'endeavor.request', { goal: 'Plan the retreat' }));
+    const created = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.create', {
+      requestId: req.requestId, decision: 'adopt',
+    }));
+    const endeavorId = String(created.endeavorId);
+    // The internal door: sessionSa = ORG, memberName = 'Organization agent'.
+    const proposed = await out(await handleEndeavorOp(h.as(ORG, { member: 'Organization agent' }), 'endeavor.proposePlan', {
+      endeavorId,
+      steps: [
+        { stepId: 'step_1', kind: 'interaction', description: 'Gather details from the requester' },
+        { stepId: 'step_2', kind: 'contribution', description: 'Draft the retreat itinerary' },
+        { stepId: 'step_3', kind: 'validation', description: 'Confirm the outcome with the requester' },
+      ],
+    }));
+    expect(proposed.ok).toBe(true);
+    const got = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    const plans = got.plans as Array<{ proposedBy: string; status: string }>;
+    expect(plans[0]?.proposedBy).toBe(ORG);
+    expect(plans[0]?.status).toBe('proposed');
+    const plan = got.plan as { proposedBy: string; status: string };
+    expect(plan.proposedBy).toBe(ORG);
+  });
+
   it('applies §12 visibility on list/get', async () => {
     const h = makeHarness();
     const { endeavorId } = await driveToAllocation(h);

@@ -277,6 +277,29 @@ export class InteractionsDO {
     });
   }
 
+  /** spec 334 §6 — hand the just-adopted goal to the org's OWN agent to DRAFT a first plan
+   *  revision (fire-and-forget; the A2aTaskDO runs the spec-327 planner and posts the draft back
+   *  through `internal.endeavor.proposePlan`, org = actor). Every failure is AUDITED and DROPPED
+   *  (ADR-0013): the steward can always author the plan by hand — no retry, no queue. */
+  private dispatchEndeavorPlanDraft(principal: string, endeavorId: string, goal: string): void {
+    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) return;
+    const audit = buildAuditSink(this.env);
+    void (async () => {
+      const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
+      const resp = await stub.fetch(new Request(`https://do/internal/endeavor-plan?agent=${principal}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        body: JSON.stringify({ principal, endeavorId, goal }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!resp.ok || out.ok === false) throw new Error(out.error ?? `plan draft failed (${resp.status})`);
+      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.planDraftDispatch', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'endeavor', id: endeavorId } });
+    })().catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.endeavor.planDraftFailed', outcome: 'error', actor: { type: 'service', id: principal }, subject: { type: 'endeavor', id: endeavorId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
+    });
+  }
+
   /** spec 328 §3 — post-commit person-inbox assistant scan. Called (fire-and-forget) after ANY
    *  inbox.data commit — the in-Worker a2a merge (`internal.deliver`) and the Home's whole-doc
    *  write (`inbox.put`) — so every ingress triggers identically. The seen-ledger RMW rides the
@@ -716,7 +739,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -990,6 +1013,34 @@ export class InteractionsDO {
               await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
             },
           }, 'endeavor.request', body);
+        }
+        // ── spec 334 §6 — the org agent's plan-draft return path. Pinned to exactly
+        // `endeavor.proposePlan` with the ORG ITSELF as actor (the reducer's managing-principal
+        // gate admits it); the internal marker is the authorization — this is the org's own
+        // substrate posting its own draft, never a caller-supplied actor. ──
+        if (op === 'internal.endeavor.proposePlan') {
+          const chainId = Number(this.env.CHAIN_ID ?? 84532);
+          const doorAudit = buildAuditSink(this.env);
+          return handleEndeavorOp({
+            principal,
+            principalCaip: caip10(chainId, principal as Address),
+            sessionSa: principal,
+            sessionCaip: caip10(chainId, principal as Address),
+            readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(g, resource, empty),
+            writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(g, resource, data),
+            serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
+            // The org agent at its own internal door: identified as the organization itself (the
+            // DO-level member gate admits it; the reducer's actor gate is the real authority).
+            memberName: async () => 'Organization agent',
+            isSteward: async () => false,
+            verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
+            writeAudit: (action, subject, timestamp) =>
+              doorAudit.write({ id: crypto.randomUUID(), timestamp: timestamp ?? new Date().toISOString(), action, outcome: 'success', actor: { type: 'service', id: principal }, subject }),
+            putTopicBody: async (envelope, bodyText) => {
+              const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
+              await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
+            },
+          }, 'endeavor.proposePlan', body);
         }
         if (op === 'invite.get' || op === 'invite.put') {
           // spec 323 W3.2 — the org's invite records (`org.invite:*`) read/written via the DO-held
@@ -1308,6 +1359,7 @@ export class InteractionsDO {
             const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
             await store.putBody({ messageId: envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: envelope.body.resource });
           },
+          draftPlanForGoal: (endeavorId, goal) => this.dispatchEndeavorPlanDraft(principal, endeavorId, goal),
         }, op, body);
         } catch (e) {
           // The ONLY mapped failure: the interactions grant predates the coordination scopes

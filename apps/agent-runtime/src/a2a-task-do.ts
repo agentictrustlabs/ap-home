@@ -37,6 +37,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
+import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
 import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
@@ -694,6 +695,35 @@ export class A2aTaskDO {
           return Response.json({ ok: false, error: turn.result.error ?? 'assistant turn completed without sending a reply', plannerKind: turn.plannerKind }, { status: 502 });
         }
         return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      }
+    }
+    // ── spec 334 §6 — the org agent's coordination-plan DRAFT turn. IN-WORKER ONLY: dispatched by
+    // the org's InteractionsDO right after a steward adopted an EndeavorRequest. Runs the spec-327
+    // single-tool planner over the goal, then posts the drafted steps back as a plan PROPOSAL via
+    // `internal.endeavor.proposePlan` (org = actor; the steward reviews/edits/adopts).
+    if (url.pathname === '/internal/endeavor-plan') {
+      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string; goal?: string } | null;
+      if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.endeavorId ?? '').startsWith('end_') || !String(p.goal ?? '').trim()) {
+        return Response.json({ ok: false, error: 'principal + endeavorId + goal required' }, { status: 400 });
+      }
+      const principal = p.principal!.toLowerCase();
+      try {
+        const draft = await draftEndeavorPlan(this.env, { principal, endeavorId: p.endeavorId!, goal: String(p.goal).trim() });
+        const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(principal));
+        const resp = await stub.fetch(new Request(`https://do/interactions/${principal}/internal.endeavor.proposePlan`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+          body: JSON.stringify({
+            endeavorId: p.endeavorId,
+            steps: draft.steps.map((s, i) => ({ stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`, kind: s.kind, description: s.description })),
+          }),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string; planId?: string; revision?: number };
+        if (!resp.ok || out.ok === false) throw new Error(out.error ?? `proposePlan failed (${resp.status})`);
+        return Response.json({ ok: true, planId: out.planId, revision: out.revision, steps: draft.steps.length, plannerKind: draft.plannerKind });
       } catch (e) {
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }

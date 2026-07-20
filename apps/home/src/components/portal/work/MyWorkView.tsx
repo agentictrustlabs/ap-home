@@ -223,6 +223,54 @@ export function MyWorkView() {
         <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>Loading…</p>
       ) : (
         <>
+          {/* Action-priority inbox: everything that NEEDS this person, first and unmissable. */}
+          {(awaiting.length > 0 || decisions.length > 0) && (
+            <div className="chat-attention" style={{ marginBottom: '1rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                Needs your attention ({awaiting.length + decisions.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                {awaiting.map(({ b, e }) => (
+                  <EntryCard
+                    key={`attn:${b.org}:${e.allocationId}`}
+                    entry={e}
+                    {...(b.orgName ? { orgName: b.orgName } : {})}
+                    action={
+                      <BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void commit(b, e)}>
+                        Commit to this work
+                      </BusyButton>
+                    }
+                  />
+                ))}
+                {decisions.map(({ b, c }) => (
+                  <div key={`attn:${b.org}:${c.decisionId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{c.title}</div>
+                      <div style={{ fontSize: '0.73rem', opacity: 0.65 }}>
+                        {b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}
+                        {c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}
+                      </div>
+                    </div>
+                    <span style={{ display: 'flex', gap: '0.4rem' }}>
+                      {c.allowedActions.map((a) => (
+                        <BusyButton
+                          key={a.actionId}
+                          busy={busyId === c.decisionId}
+                          busyLabel="…"
+                          className={a.style === 'destructive' ? 'btn-danger' : 'btn-primary'}
+                          style={{ width: 'auto' }}
+                          onClick={() => void decide(b, c, a.transition === 'approve' ? 'approved' : 'rejected')}
+                        >
+                          {a.label}
+                        </BusyButton>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <h3 className="subhead">Your requests</h3>
           {myRequests.length === 0 ? (
             <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>
@@ -260,62 +308,11 @@ export function MyWorkView() {
             </div>
           )}
 
-          <h3 className="subhead">Awaiting your commitment</h3>
-          {awaiting.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>No allocations awaiting your commitment.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginBottom: '0.9rem' }}>
-              {awaiting.map(({ b, e }) => (
-                <EntryCard
-                  key={`${b.org}:${e.allocationId}`}
-                  entry={e}
-                  {...(b.orgName ? { orgName: b.orgName } : {})}
-                  action={
-                    <BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void commit(b, e)}>
-                      Commit
-                    </BusyButton>
-                  }
-                />
-              ))}
-            </div>
-          )}
-
-          <h3 className="subhead">Decisions awaiting you</h3>
-          {decisions.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>No pending decision requests.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginBottom: '0.9rem' }}>
-              {decisions.map(({ b, c }) => (
-                <div key={`${b.org}:${c.decisionId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{c.title}</div>
-                    <div style={{ fontSize: '0.73rem', opacity: 0.65 }}>
-                      {b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}
-                      {c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}
-                    </div>
-                  </div>
-                  <span style={{ display: 'flex', gap: '0.4rem' }}>
-                    {c.allowedActions.map((a) => (
-                      <BusyButton
-                        key={a.actionId}
-                        busy={busyId === c.decisionId}
-                        busyLabel="…"
-                        className={a.style === 'destructive' ? 'btn-danger' : 'btn-primary'}
-                        style={{ width: 'auto' }}
-                        onClick={() => void decide(b, c, a.transition === 'approve' ? 'approved' : 'rejected')}
-                      >
-                        {a.label}
-                      </BusyButton>
-                    ))}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <h3 className="subhead">Active commitments</h3>
+          <h3 className="subhead">Work you committed to</h3>
           {active.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>No active commitments.</p>
+            <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+              Nothing yet — when a coordinator assigns you plan steps and you commit, they appear here.
+            </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
               {active.map(({ b, e }) => (

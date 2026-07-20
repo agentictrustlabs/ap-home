@@ -88,6 +88,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         planSteps?: Array<{ stepId: string; kind: string; description: string }>;
         proposalRef?: string;
         note?: string;
+        stepId?: string;
+        evidence?: string;
       }
     | null;
   if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
@@ -199,6 +201,35 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       planRef: body.planRef ?? null,
       steps: body.steps ?? [],
       signature: body.signature,
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Execution (spec 332 §6): mark ONE step done with completion evidence — recorded by the
+  // managing principal or an active participant (the reducer's gate, not ours).
+  if (body.action === 'satisfyStep') {
+    if (!body.endeavorId?.trim() || !body.stepId?.trim() || !body.evidence?.trim()) {
+      return jsonCors({ error: 'endeavorId, stepId, evidence required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.satisfyStep', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      stepId: body.stepId,
+      evidence: body.evidence,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Mark the whole endeavor complete (outcome validated) / close it — coordinator or steward.
+  if (body.action === 'satisfy' || body.action === 'abandon') {
+    if (!body.endeavorId?.trim()) return jsonCors({ error: 'endeavorId required' }, request, 400);
+    const r = await callInteractions(env, org, body.action === 'satisfy' ? 'endeavor.satisfy' : 'endeavor.abandon', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      ...(body.note ? { note: body.note } : {}),
+      ...(body.reason ? { reason: body.reason } : {}),
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }

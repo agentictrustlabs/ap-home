@@ -21,6 +21,7 @@
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/coordination": "workspace:*",
+    "@agenticprimitives/situations": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/fabric": "workspace:*",
