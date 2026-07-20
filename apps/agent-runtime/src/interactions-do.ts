@@ -1287,7 +1287,7 @@ export class InteractionsDO {
       //    closures so the op family shares this DO's exact mechanisms (one mechanism, ADR-0013). ──
       //    The coordination scopes are ADDITIVE (the org.applications precedent, see REQUIRED_SCOPES
       //    note): a grant signed before the coordination wave is denied per-record at demo-mcp
-      //    (`record_scope_n`) — surfaced here as an explicit 409 re-enable signal, never a 500 and
+      //    (`record_scope_denied`) — surfaced here as an explicit 409 re-enable signal, never a 500 and
       //    never a weaker read path.
       if (op.startsWith('endeavor.')) {
         try {
@@ -1311,10 +1311,10 @@ export class InteractionsDO {
         }, op, body);
         } catch (e) {
           // The ONLY mapped failure: the interactions grant predates the coordination scopes
-          // (demo-mcp per-record `record_scope_n`) ⇒ the steward re-signs via the Enable ceremony.
+          // (demo-mcp per-record `record_scope_denied`) ⇒ the steward re-signs via the Enable ceremony.
           // Anything else rethrows — no blanket catch downgrading real faults.
           const msg = e instanceof Error ? e.message : String(e);
-          if (/record_scope_n/.test(msg)) {
+          if (/record_scope_denied/.test(msg)) {
             return json({ ok: false, error: 'interactions grant is stale for coordination — a steward must re-enable discussion storage to add the vault:coordination.* scopes', needsReEnable: true }, 409);
           }
           throw e;

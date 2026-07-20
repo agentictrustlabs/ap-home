@@ -57,7 +57,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     ...(endeavorId ? { endeavorId } : {}),
     ...(stewardship ? { stewardship } : {}),
   });
-  if (r.status !== 200) return jsonCors(r.body, request, r.status);
+  // Attach the steward flag on EVERY status: the stale-grant 409 (needsReEnable) must tell the UI
+  // whether this viewer can run the re-enable ceremony.
+  if (r.status !== 200) return jsonCors({ ...r.body, steward: r.body.steward === true || !!stewardship }, request, r.status);
   return jsonCors({ ...r.body, steward: r.body.steward === true || !!stewardship }, request);
 };
 

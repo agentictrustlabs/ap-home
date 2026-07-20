@@ -5,10 +5,12 @@
 // to the target principal's serving plane (endeavor.request); it lands as a
 // pending row in the target's Requests / Triage view.
 import { useCallback, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
-import { submitEndeavorRequest } from '../../../lib/work-client';
+import { isReEnableError, submitEndeavorRequest } from '../../../lib/work-client';
 import { searchAgentsKb, type AgentSearchHit } from '../../../lib/agent-search';
-import { useRelatedOrgs } from './useWork';
+import { BusyButton } from '../../shared/BusyButton';
+import { useRelatedOrgs, useReEnableInteractions } from './useWork';
 
 export function NewRequestComposer({
   /** When set (org Work section), the org is the default target. */
@@ -31,6 +33,11 @@ export function NewRequestComposer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  // Stale-grant signal from the target's serving plane (the grant predates the coordination
+  // scopes). If THIS viewer stewards the target org, they can re-sign inline and resend.
+  const [staleTarget, setStaleTarget] = useState(false);
+  const reEnable = useReEnableInteractions();
+  const stewardOfTarget = !!target && orgs.some((o) => o.orgAgent === target.sa && o.relationship === 'steward');
 
   const runSearch = useCallback(async () => {
     if (!personQuery.trim()) return;
@@ -41,16 +48,30 @@ export function NewRequestComposer({
 
   const submit = useCallback(async () => {
     if (!session || !target || !goal.trim()) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setStaleTarget(false);
     try {
       const r = await submitEndeavorRequest(session.token, target.sa, goal.trim());
       setSent(true);
       setGoal('');
       onSubmitted?.(r.requestId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (isReEnableError(e)) {
+        setStaleTarget(true);
+        setError(`${target.label}'s storage grant predates coordination — a steward of ${target.label} must re-enable storage before requests can land.`);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally { setBusy(false); }
   }, [session, target, goal, onSubmitted]);
+
+  const reEnableAndResend = useCallback(async () => {
+    if (!target) return;
+    setBusy(true); setError(null);
+    const r = await reEnable(target.sa as Address);
+    if (!r.ok) { setError(r.error ?? 'could not re-enable storage'); setBusy(false); return; }
+    setStaleTarget(false); setBusy(false);
+    await submit();
+  }, [target, reEnable, submit]);
 
   if (!session) return null;
 
@@ -149,6 +170,13 @@ export function NewRequestComposer({
         {busy ? 'Sending…' : 'Send request'}
       </button>
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem', margin: '0.4rem 0 0' }}>{error}</p>}
+      {staleTarget && stewardOfTarget && (
+        <div style={{ marginTop: '0.5rem' }}>
+          <BusyButton busy={busy} busyLabel="Re-enabling…" className="btn" style={{ width: 'auto' }} onClick={() => void reEnableAndResend()}>
+            Re-enable storage and resend
+          </BusyButton>
+        </div>
+      )}
     </div>
   );
 }

@@ -114,6 +114,8 @@ export interface EndeavorEventRow {
 export interface WorkListResponse {
   ok?: boolean;
   error?: string;
+  /** The interactions grant predates the vault:coordination.* scopes — a steward re-enables (re-signs) it. */
+  needsReEnable?: boolean;
   steward?: boolean;
   member?: boolean;
   you?: string;
@@ -177,9 +179,19 @@ async function postWork(
     headers: authed(token),
     body: JSON.stringify(payload),
   });
-  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; requestId?: string; endeavorId?: string };
-  if (!res.ok || body.ok === false) throw new Error(body.error ?? `work op failed (${res.status})`);
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; needsReEnable?: boolean; requestId?: string; endeavorId?: string };
+  if (!res.ok || body.ok === false) {
+    // Carry the serving plane's stale-grant signal so the UI can offer the steward re-enable ceremony.
+    const err = new Error(body.error ?? `work op failed (${res.status})`) as Error & { needsReEnable?: boolean };
+    if (body.needsReEnable === true) err.needsReEnable = true;
+    throw err;
+  }
   return body;
+}
+
+/** True when a thrown work-op error carries the serving plane's stale-grant re-enable signal. */
+export function isReEnableError(e: unknown): boolean {
+  return e instanceof Error && (e as Error & { needsReEnable?: boolean }).needsReEnable === true;
 }
 
 /** Home Request (spec 334 §5): a free-text GOAL posted to the target principal's
