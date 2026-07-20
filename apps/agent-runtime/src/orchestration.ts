@@ -92,14 +92,18 @@ export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | '
 
 /** Select the planner per env: the Anthropic LLM planner when explicitly enabled + keyed, else deterministic.
  *  `opts.systemPrompt` overrides the LLM planner's system prompt for turns whose contract differs from the
- *  default single-tool selection job (spec 327: the discussion turn MUST post) — ignored on rule-based. */
-export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string }): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
+ *  default single-tool selection job (spec 327: the discussion turn MUST post) — ignored on rule-based.
+ *  `opts.maxTokens` MUST be raised for turns whose tool argument carries a long artifact (work
+ *  deliverables, outcome answers): the 1024 default silently truncates the tool input mid-emit and
+ *  the turn yields an empty capture with NO error. */
+export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number }): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
   if (env.ORCHESTRATION_LLM === 'anthropic' && env.ANTHROPIC_API_KEY) {
     const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY });
     const planner = createAnthropicPlanner({
       client,
       ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
     });
     return { planner, kind: 'anthropic' };
   }

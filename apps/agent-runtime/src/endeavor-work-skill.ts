@@ -120,7 +120,10 @@ async function runSingleToolTurn(
     fallback: (kind: 'anthropic' | 'rule-based', lastError?: string) => string;
   },
 ): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
-  const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract });
+  // maxTokens 4096: the deliverable/answer rides INSIDE the tool call's input, so the output budget
+  // must cover the whole artifact — the planner's 1024 default truncated long answers mid-emit,
+  // which surfaced as an empty capture with no error (the "model calls failed" fallback with no reason).
+  const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract, maxTokens: 4096 });
 
   let captured = '';
   const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
@@ -154,7 +157,9 @@ async function runSingleToolTurn(
       result = { outcome: 'failed', plan: { steps: [] }, steps: [], error: e instanceof Error ? e.message : String(e) };
     }
     if (captured.length > 0) return { output: captured, plannerKind: kind, fellBack: false };
-    lastError = result.error ?? lastError;
+    // A "successful" run with nothing captured = the model emitted an empty/truncated tool input;
+    // name it so the fallback note carries a real reason instead of silence.
+    lastError = result.error ?? lastError ?? 'model returned an empty tool output';
     if (attempt < 2) {
       const rateLimited = /429|529|rate.?limit|overloaded/i.test(lastError ?? '');
       await sleep(rateLimited ? 20_000 + attempt * 15_000 : 1_500 * (attempt + 1));
