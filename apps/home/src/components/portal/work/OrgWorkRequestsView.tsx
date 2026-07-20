@@ -11,12 +11,13 @@ import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
 import { adoptEndeavorRequest, declineEndeavorRequest, type EndeavorRequestRow } from '../../../lib/work-client';
 import { agentLabel, shortId } from '../../../home/use-inbox';
-import { useWorkList } from './useWork';
+import { useOrgMemberNames, useWorkList } from './useWork';
 
 export function OrgWorkRequestsView({ org }: { org: Address }) {
   const { session } = useSession();
   const communityId = org.toLowerCase();
   const { data, member, steward, error, refresh } = useWorkList(session, communityId);
+  const names = useOrgMemberNames(session, communityId);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [declining, setDeclining] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export function OrgWorkRequestsView({ org }: { org: Address }) {
             <div key={r.requestId} className="manage-card" style={{ padding: '0.75rem 0.95rem' }}>
               <div style={{ fontSize: '0.88rem' }}>{r.goal}</div>
               <div style={{ fontSize: '0.72rem', opacity: 0.6, margin: '0.25rem 0 0.5rem' }}>
-                From {agentLabel(r.requester)} · via {r.entryPoint} · {new Date(r.submittedAt).toLocaleString()} · request {shortId(r.requestId)}
+                From {agentLabel(r.requester, names)} · via {r.entryPoint} · {new Date(r.submittedAt).toLocaleString()} · request {shortId(r.requestId)}
               </div>
               {steward ? (
                 declining === r.requestId ? (

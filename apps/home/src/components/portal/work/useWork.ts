@@ -42,6 +42,31 @@ export function useRelatedOrgs(session: Session | null): RelatedOrg[] {
   return orgs;
 }
 
+/** Directory displayName per member SA (lowercased address → name) — the same roster read
+ *  Discussions uses, so Work surfaces render agent names, never bare addresses. */
+export function useOrgMemberNames(session: Session | null, org: string): Record<string, string> {
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!session || !org) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch(`/connect/directory?communityId=${org.toLowerCase()}`, { headers: { authorization: `Bearer ${session.token}` } });
+        const b = (await r.json().catch(() => ({}))) as { listings?: Array<{ listing?: { subject?: string; displayName?: string } }> };
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const row of b.listings ?? []) {
+          const addr = row.listing?.subject?.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+          if (addr && row.listing?.displayName) map[addr] = row.listing.displayName;
+        }
+        setNames(map);
+      } catch { /* names stay short-address */ }
+    })();
+    return () => { cancelled = true; };
+  }, [session, org]);
+  return names;
+}
+
 export interface WorkListState {
   data: WorkListResponse | null;
   member: boolean | null;

@@ -84,6 +84,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         planRef?: { planId: string; revision: number; hash: string };
         steps?: string[];
         signature?: { signer: string; scheme: string; signature: string };
+        /** proposePlan: full step records (the DO validates stepId/kind/description). */
+        planSteps?: Array<{ stepId: string; kind: string; description: string }>;
+        proposalRef?: string;
+        note?: string;
       }
     | null;
   if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
@@ -117,6 +121,64 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       decision: body.action === 'adopt' ? 'adopt' : 'decline',
       ...(body.title ? { title: body.title } : {}),
       ...(body.reason ? { reason: body.reason } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Plan authoring (spec 332 §6): proposePlan is participant-or-member gated; adoptPlan is
+  // steward-only. Both re-gated by the DO — the stewardship wire lets an unlisted steward act.
+  if (body.action === 'proposePlan') {
+    if (!body.endeavorId?.trim() || !Array.isArray(body.planSteps) || body.planSteps.length === 0) {
+      return jsonCors({ error: 'endeavorId and planSteps required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.proposePlan', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      steps: body.planSteps,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  if (body.action === 'adoptPlan') {
+    if (!body.endeavorId?.trim() || !body.planRef) return jsonCors({ error: 'endeavorId and planRef required' }, request, 400);
+    const r = await callInteractions(env, org, 'endeavor.adoptPlan', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      planRef: body.planRef,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // A participant OFFERS a contribution against plan steps (spec 332 §9.1).
+  if (body.action === 'offer') {
+    if (!body.endeavorId?.trim() || !body.planRef || !Array.isArray(body.steps) || body.steps.length === 0) {
+      return jsonCors({ error: 'endeavorId, planRef, steps required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.propose', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      planRef: body.planRef,
+      steps: body.steps,
+      ...(body.note ? { note: body.note } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Steward SELECTION of a proposal (spec 334 §3 rule 2a — records the decision, grants nothing).
+  if (body.action === 'allocate') {
+    if (!body.endeavorId?.trim() || !body.proposalRef?.trim() || !body.participant?.trim() || !Array.isArray(body.steps) || body.steps.length === 0) {
+      return jsonCors({ error: 'endeavorId, proposalRef, participant, steps required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.allocate', {
+      session: who.token,
+      endeavorId: body.endeavorId,
+      proposalRef: body.proposalRef,
+      participant: body.participant,
+      steps: body.steps,
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);

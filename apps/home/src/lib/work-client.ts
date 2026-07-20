@@ -133,13 +133,36 @@ export interface WorkListResponse {
   };
 }
 
+/** One contribution proposal row (spec 332 §9.1 — an OFFER, allocated by the steward). */
+export interface ProposalRow {
+  proposalId: string;
+  proposer: string;
+  planRef: PlanRevisionRef;
+  steps: string[];
+  note?: string;
+  proposedAt: string;
+  status: 'open' | 'allocated' | 'declined';
+}
+
+/** One plan revision (proposed/adopted/superseded/rejected) with its content hash. */
+export interface PlanRevisionRow {
+  planId: string;
+  revision: number;
+  contentHash: string;
+  status: 'proposed' | 'adopted' | 'superseded' | 'rejected';
+  steps: Array<{ stepId: string; kind: string; description: string }>;
+}
+
 export interface WorkDetailResponse {
   ok?: boolean;
   error?: string;
   steward?: boolean;
   endeavor?: EndeavorRow & { outcome?: { description?: string; criteria?: string[] } };
   plan?: PlanRow | null;
+  /** EVERY plan revision — proposed ones await the steward's adoption. */
+  plans?: PlanRevisionRow[];
   participations?: ParticipationRow[];
+  proposals?: ProposalRow[];
   allocations?: AllocationRow[];
   commitments?: CommitmentRow[];
   decisions?: DecisionRow[];
@@ -226,6 +249,53 @@ export async function declineEndeavorRequest(
   reason?: string,
 ): Promise<void> {
   await postWork(token, { action: 'decline', org: org.toLowerCase(), requestId, ...(reason ? { reason } : {}) });
+}
+
+/** Propose a plan revision (endeavor.proposePlan) — participant-or-member gated.
+ *  Returns the proposed revision's binding triple for immediate adoption. */
+export async function proposePlan(
+  token: string,
+  org: string,
+  endeavorId: string,
+  steps: Array<{ stepId: string; kind: string; description: string }>,
+): Promise<{ planId?: string; revision?: number; contentHash?: string }> {
+  return postWork(token, { action: 'proposePlan', org: org.toLowerCase(), endeavorId, planSteps: steps }) as Promise<{
+    planId?: string; revision?: number; contentHash?: string;
+  }>;
+}
+
+/** Adopt a proposed plan revision (endeavor.adoptPlan) — steward-only; binds the exact hash. */
+export async function adoptPlan(
+  token: string,
+  org: string,
+  endeavorId: string,
+  planRef: PlanRevisionRef,
+): Promise<void> {
+  await postWork(token, { action: 'adoptPlan', org: org.toLowerCase(), endeavorId, planRef });
+}
+
+/** Offer a contribution against adopted plan steps (endeavor.propose). */
+export async function offerContribution(
+  token: string,
+  org: string,
+  endeavorId: string,
+  planRef: PlanRevisionRef,
+  steps: string[],
+  note?: string,
+): Promise<{ proposalId?: string }> {
+  return postWork(token, { action: 'offer', org: org.toLowerCase(), endeavorId, planRef, steps, ...(note ? { note } : {}) }) as Promise<{ proposalId?: string }>;
+}
+
+/** Steward selection of a proposal (endeavor.allocate) — records the decision, grants nothing. */
+export async function allocateContribution(
+  token: string,
+  org: string,
+  endeavorId: string,
+  proposalRef: string,
+  participant: string,
+  steps: string[],
+): Promise<void> {
+  await postWork(token, { action: 'allocate', org: org.toLowerCase(), endeavorId, proposalRef, participant, steps });
 }
 
 /** The commitment payload the PARTICIPANT signs — binds the exact adopted plan
