@@ -500,19 +500,30 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
 
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
 
-  // Keep the thread pinned to the LATEST message: jump to the bottom whenever a topic is
-  // (re)opened, and stick to the bottom as new messages/bodies arrive — but never yank the
-  // reader down while they've scrolled up into history (near-bottom guard).
+  // Keep the thread pinned to the LATEST message. `atBottomRef` tracks (via onScroll) whether the
+  // reader is stuck to the bottom BEFORE new content lands — measuring after the DOM grew would
+  // read as "not at bottom" and never re-pin. On topic (re)open we force a jump; otherwise we only
+  // follow when the reader was already at the bottom, and we scroll in rAF so the newly-rendered
+  // messages/bodies are laid out first.
   const threadRef = useRef<HTMLDivElement | null>(null);
   const lastTopicRef = useRef<string | null>(null);
-  useEffect(() => {
+  const atBottomRef = useRef(true);
+  const onThreadScroll = useCallback(() => {
     const el = threadRef.current;
-    if (!el || !channel) return;
+    if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
+  const msgCount = channel?.messages.length ?? 0;
+  useEffect(() => {
+    if (!channel) return;
     const topicChanged = lastTopicRef.current !== channel.descriptor.id;
     lastTopicRef.current = channel.descriptor.id;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
-    if (topicChanged || nearBottom) el.scrollTop = el.scrollHeight;
-  }, [channel, bodies]);
+    if (topicChanged) atBottomRef.current = true;
+    if (!(topicChanged || atBottomRef.current)) return;
+    requestAnimationFrame(() => {
+      const el = threadRef.current;
+      if (el) { el.scrollTop = el.scrollHeight; atBottomRef.current = true; }
+    });
+  }, [channel, msgCount, bodies]);
 
   if (!session || !agentAddress) return <SectionShell title="Discussions"><p>Not signed in.</p></SectionShell>;
 
@@ -779,7 +790,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 </div>
               )}
 
-              <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef}>
+              <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef} onScroll={onThreadScroll}>
                 {channel.messages.map((m, idx) => {
                   const l = listingBySubject.get(m.envelope.from.toLowerCase());
                   const mine = m.authorName === you;

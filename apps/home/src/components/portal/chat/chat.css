@@ -170,7 +170,9 @@
 .chat-bubble-wrap {
   display: flex;
   flex-direction: column;
-  max-width: min(75%, 480px);
+  /* Wide content: each side may exceed half the pane, so a long left (theirs) and right (mine)
+     message can visually overlap the centre line — intentional, gives the text room to breathe. */
+  max-width: min(88%, 820px);
   margin-top: 0.35rem;
 }
 
