@@ -31,7 +31,7 @@ export function SectionShell({
   comingSoon?: { icon?: ReactNode; title: string; body: string; cta?: { label: string; href: string } };
   /** Optional content to show even when status='soon' (e.g. a teaser). */
   preview?: ReactNode;
-  /** Full-bleed section (no --portal-max cap) — for multi-column workspaces like Discussions/Messages. */
+  /** DEPRECATED no-op — every section is full-width now (2026-07-20); kept so callers don't break. */
   wide?: boolean;
   children?: ReactNode;
 }) {

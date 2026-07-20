@@ -1029,11 +1029,10 @@
       .address-chip-copied { position: absolute; right: 0; top: calc(100% + 3px); font-family: var(--font-brand-stack); font-size: .68rem; color: var(--color-sage-700); }
 
       /* Section shell */
-      /* Left-anchored (not centered): content aligns under the sidebar like GitHub/Linear —
-         the max-width only caps line length, it never floats the page in the middle. */
-      .section-shell { max-width: var(--portal-max); margin: 0; }
-      /* Multi-column workspaces (Discussions/Messages) use the whole viewport width —
-         the --portal-max cap only exists to bound prose line length. */
+      /* Left-anchored (not centered) AND full-width (product direction 2026-07-20): every portal
+         view uses the whole viewport width to the right of the sidebar — no --portal-max cap.
+         Individual prose blocks/forms bound their own line length locally where needed. */
+      .section-shell { max-width: none; margin: 0; }
       .section-shell--wide { max-width: none; }
       .section-head { margin-bottom: 1.25rem; }
       .section-head h1 { font-size: 1.6rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.03em; margin: 0; }
@@ -1048,7 +1047,7 @@
       .coming-soon-cta { margin-top: .5rem; }
 
       /* Dashboard */
-      .dashboard { max-width: var(--portal-max); margin: 0; display: flex; flex-direction: column; gap: 1.75rem; }
+      .dashboard { max-width: none; margin: 0; display: flex; flex-direction: column; gap: 1.75rem; }
       .dashboard > .section-head { margin-bottom: -0.5rem; }
       .welcome-banner {
         background: linear-gradient(135deg, var(--color-amber-50), var(--color-sage-50));
