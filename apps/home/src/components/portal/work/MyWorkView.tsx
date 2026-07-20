@@ -7,6 +7,7 @@
 // HomeDecisionCardV1) and rendered as action-card-style rows: pressing an
 // action only PROPOSES a signed lifecycle transition — it grants nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
 import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimitives/home';
 import { validateHomeContributionEntry, validateHomeDecisionCard } from '@agenticprimitives/home';
 import { useSession } from '../../../context/session';
@@ -23,7 +24,7 @@ import {
   type AllocationRow,
 } from '../../../lib/work-client';
 import { NewRequestComposer } from './NewRequestComposer';
-import { useRelatedOrgs } from './useWork';
+import { useRelatedOrgs, useReEnableInteractions } from './useWork';
 
 interface OrgWorkBundle {
   org: string;
@@ -31,6 +32,14 @@ interface OrgWorkBundle {
   allocations: AllocationRow[];
   entries: HomeContributionEntryV1[];
   decisions: HomeDecisionCardV1[];
+}
+
+/** An org whose interactions grant predates the vault:coordination.* scopes (the serving
+ *  plane's 409 needsReEnable signal) — a steward re-signs via the re-enable ceremony. */
+interface StaleOrg {
+  org: string;
+  orgName?: string;
+  steward: boolean;
 }
 
 const saOf = (caip: string): string => caip.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? caip;
@@ -67,16 +76,23 @@ export function MyWorkView() {
   const { session, profile: homeProfile, agentAddress } = useSession();
   const orgs = useRelatedOrgs(session);
   const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
+  const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
+  const reEnable = useReEnableInteractions();
 
   const load = useCallback(async () => {
     if (!session || !agentAddress) return;
+    const stale: StaleOrg[] = [];
     try {
       const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
         try {
           const r = await fetchWorkList(session.token, o.orgAgent);
+          if (r.needsReEnable === true) {
+            stale.push({ org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), steward: r.steward === true || o.relationship === 'steward' });
+            return null;
+          }
           if (r.member === false || r.ok === false) return null;
           const allocations = r.mine?.allocations ?? [];
           const entries = [
@@ -95,11 +111,20 @@ export function MyWorkView() {
         } catch { return null; }
       }));
       setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
+      setStaleOrgs(stale);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [session, agentAddress, orgs]);
+
+  const runReEnable = useCallback(async (s: StaleOrg) => {
+    setBusyId(`reenable:${s.org}`); setError(null);
+    const r = await reEnable(s.org as Address);
+    if (!r.ok) setError(r.error ?? 'could not re-enable storage');
+    else await load();
+    setBusyId(null);
+  }, [reEnable, load]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -155,6 +180,28 @@ export function MyWorkView() {
       }
     >
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+
+      {staleOrgs.length > 0 && (
+        <div className="manage-card" style={{ padding: '0.8rem 1rem', marginBottom: '0.9rem', border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)' }}>
+          <p style={{ fontSize: '0.83rem', margin: '0 0 0.5rem' }}>
+            Storage was upgraded for coordination — these organizations&rsquo; grants must be re-signed before their work loads:
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            {staleOrgs.map((s) => (
+              <div key={s.org} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.orgName ?? `${s.org.slice(0, 10)}…`}</span>
+                {s.steward ? (
+                  <BusyButton busy={busyId === `reenable:${s.org}`} busyLabel="Re-enabling…" className="btn" style={{ width: 'auto', fontSize: '0.76rem', padding: '0.25rem 0.6rem' }} onClick={() => void runReEnable(s)}>
+                    Re-enable storage
+                  </BusyButton>
+                ) : (
+                  <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>ask a steward to re-enable</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {composerOpen && (
         <div style={{ marginBottom: '1rem' }}>
