@@ -16,6 +16,7 @@ export function SectionShell({
   status = 'live',
   comingSoon,
   preview,
+  wide = false,
   children,
 }: {
   title: string;
@@ -30,10 +31,12 @@ export function SectionShell({
   comingSoon?: { icon?: ReactNode; title: string; body: string; cta?: { label: string; href: string } };
   /** Optional content to show even when status='soon' (e.g. a teaser). */
   preview?: ReactNode;
+  /** Full-bleed section (no --portal-max cap) — for multi-column workspaces like Discussions/Messages. */
+  wide?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <section className="section-shell" aria-labelledby="section-title">
+    <section className={`section-shell${wide ? ' section-shell--wide' : ''}`} aria-labelledby="section-title">
       <header
         className="section-head"
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', margin: '0 0 0.9rem', minHeight: 0 }}

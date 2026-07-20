@@ -4,7 +4,7 @@
 // Telegram-style member→DM slide-over, group avatars, rich messages (emoji + images), amber design system.
 // NOTE: the internal transport keys (`/connect/channels`, `channelId`, `communityId`, CSS `channels-*`) are
 // unchanged pending the W6 record-key migration; only the user-facing vocabulary is Discussions/Topics here.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
@@ -500,6 +500,20 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
 
   const channel = channels?.find((c) => c.descriptor.id === active) ?? null;
 
+  // Keep the thread pinned to the LATEST message: jump to the bottom whenever a topic is
+  // (re)opened, and stick to the bottom as new messages/bodies arrive — but never yank the
+  // reader down while they've scrolled up into history (near-bottom guard).
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const lastTopicRef = useRef<string | null>(null);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el || !channel) return;
+    const topicChanged = lastTopicRef.current !== channel.descriptor.id;
+    lastTopicRef.current = channel.descriptor.id;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (topicChanged || nearBottom) el.scrollTop = el.scrollHeight;
+  }, [channel, bodies]);
+
   if (!session || !agentAddress) return <SectionShell title="Discussions"><p>Not signed in.</p></SectionShell>;
 
   if (member === false) {
@@ -555,7 +569,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   }
 
   return (
-    <SectionShell title="Discussions" description="Topic discussion inside this organization">
+    <SectionShell title="Discussions" description="Topic discussion inside this organization" wide>
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
 
       {/* SEC-H1 regression fix — a steward can reach channels without a directory listing, so they show
@@ -765,7 +779,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 </div>
               )}
 
-              <div className="chat-thread-body" style={{ flex: 1 }}>
+              <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef}>
                 {channel.messages.map((m, idx) => {
                   const l = listingBySubject.get(m.envelope.from.toLowerCase());
                   const mine = m.authorName === you;

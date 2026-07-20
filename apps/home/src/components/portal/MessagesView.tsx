@@ -300,7 +300,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
 
   if (!session) {
     return (
-      <SectionShell title="Messages">
+      <SectionShell title="Messages" wide>
         <p>Not signed in.</p>
       </SectionShell>
     );

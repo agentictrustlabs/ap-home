@@ -1032,6 +1032,9 @@
       /* Left-anchored (not centered): content aligns under the sidebar like GitHub/Linear —
          the max-width only caps line length, it never floats the page in the middle. */
       .section-shell { max-width: var(--portal-max); margin: 0; }
+      /* Multi-column workspaces (Discussions/Messages) use the whole viewport width —
+         the --portal-max cap only exists to bound prose line length. */
+      .section-shell--wide { max-width: none; }
       .section-head { margin-bottom: 1.25rem; }
       .section-head h1 { font-size: 1.6rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.03em; margin: 0; }
       .section-desc { color: var(--color-text-muted); font-size: .9rem; margin: .4rem 0 0; line-height: 1.55; max-width: 48ch; }
