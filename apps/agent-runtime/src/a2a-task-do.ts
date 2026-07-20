@@ -38,7 +38,7 @@ import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
-import { executeEndeavorStep } from './endeavor-work-skill.js';
+import { executeEndeavorStep, synthesizeEndeavorOutcome } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
 import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
@@ -58,17 +58,22 @@ import {
   buildConsultationIntentRecord,
   consultationIntentKey,
   fixedWindowAllow,
+  generateConversationId,
+  generateMessageId,
+  messageBodyResource,
   parseConsultRequest,
   rankConsultCandidates,
   routedConsultationContextRef,
   routingPendingKey,
   sha256Hex32,
   validateConsultAnswer,
+  validateMessageEnvelope,
   type ConsultAnswerV1,
   type ConsultOutcomeV1,
   type ConsultationIntentV1,
   type EligibleConsultMemberV1,
   type FixedWindowState,
+  type MessageEnvelopeV1,
 } from '@agenticprimitives/fabric/messaging';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
@@ -826,7 +831,8 @@ export class A2aTaskDO {
   private async runEndeavorWork(principal: string, endeavorId: string): Promise<{ adopted: boolean; stepsDone: number; satisfied: boolean }> {
     type PlanStep = { stepId: string; kind: string; description: string; satisfied: boolean };
     type StateOut = {
-      lifecycle: string | null; goal: string; adoptedPlanRef: { planId: string; revision: number; hash: string } | null;
+      lifecycle: string | null; goal: string; requester: string | null;
+      adoptedPlanRef: { planId: string; revision: number; hash: string } | null;
       latestPlan: { planId: string; revision: number; contentHash: string } | null;
       plan: { planId: string; revision: number; contentHash: string; steps: PlanStep[] } | null;
     };
@@ -880,25 +886,68 @@ export class A2aTaskDO {
     const allDone = !!after.plan && after.plan.steps.length > 0 && after.plan.steps.every((s) => s.satisfied);
     let satisfied = after.lifecycle === 'satisfied';
     if (allDone && !satisfied) {
-      // Synthesize a short, requester-facing outcome summary from the step deliverables (the note is
-      // recorded as the EndeavorSatisfied outcome ref). Falls back to a plain count if no model.
-      let outcomeNote = `Completed ${after.plan!.steps.length} plan steps.`;
+      // Synthesize the requester-facing OUTCOME — the actual answer to their goal, not a process
+      // recap — from every step's deliverable. Recorded as the EndeavorSatisfied outcome ref (the
+      // "what came of it" the requester reads). Falls back to a plain count if no model is configured.
+      let outcomeNote = `Completed ${after.plan!.steps.length} plan steps for "${goal}".`;
       try {
-        const sum = await executeEndeavorStep(this.env, {
-          principal, endeavorId, goal,
-          stepKind: 'aggregation',
-          stepDescription: 'Write a short outcome summary (2-3 sentences) of the results for the person who requested this, in plain language.',
-          priorOutputs,
-        });
-        if (sum.output.trim()) outcomeNote = sum.output.trim();
+        const synth = await synthesizeEndeavorOutcome(this.env, { principal, endeavorId, goal, deliverables: priorOutputs });
+        if (synth.answer.trim()) outcomeNote = synth.answer.trim();
       } catch { /* keep the deterministic count */ }
       await this.interactionsInternal(principal, 'internal.endeavor.satisfy', {
         endeavorId, note: outcomeNote,
       }).catch(() => undefined);
       const final = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId }).catch(() => ({}))) as { lifecycle?: string };
       satisfied = final.lifecycle === 'satisfied';
+      // Notify the requester in their 1:1 inbox that the work is done, carrying the outcome (spec
+      // 334 §7). Best-effort: a requester who hasn't enabled inbox delivery simply isn't messaged —
+      // the outcome still shows in their My Work. A message is never authority (ADR-0041).
+      const requester = after.requester ?? state.requester;
+      if (satisfied && requester && requester !== principal.toLowerCase()) {
+        await this.deliverEndeavorOutcomeNotice(principal, requester, goal, outcomeNote).catch(() => undefined);
+      }
     }
     return { adopted, stepsDone, satisfied };
+  }
+
+  /** Deliver a "your request is complete" message from `fromSa` (the working agent) to the
+   *  requester's 1:1 inbox, carrying the outcome text (spec 334 §7). Constructs a valid message
+   *  envelope server-side and admits it via the recipient's InteractionsDO — the SAME
+   *  `internal.dm.body.put` + `internal.deliver` pair the a2a messaging.deliver skill uses (the
+   *  recipient's DO holds its own delivery wire; the public route refuses `internal.*`). Agent-
+   *  authored (`actor` set) so it does not trigger the requester's own auto-reply. Fail-closed:
+   *  a recipient without inbox delivery enabled simply can't receive (the caller drops the error). */
+  private async deliverEndeavorOutcomeNotice(fromSa: string, recipient: string, goal: string, outcome: string): Promise<void> {
+    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const fromCaip = caip10(chainId, fromSa.toLowerCase() as Address) as MessageEnvelopeV1['from'];
+    const toCaip = caip10(chainId, recipient.toLowerCase() as Address) as MessageEnvelopeV1['from'];
+    const now = new Date().toISOString();
+    const messageId = generateMessageId();
+    const subject = `Your request is complete: ${goal}`.slice(0, 120);
+    const bodyText = `Your request has been completed.\n\nRequest: ${goal}\n\nOutcome:\n${outcome}`;
+    const bodyBytes = new TextEncoder().encode(bodyText);
+    const envelope: MessageEnvelopeV1 = {
+      version: 'ap.message.v1',
+      id: messageId,
+      conversationId: generateConversationId(),
+      kind: 'plain',
+      from: fromCaip,
+      to: [toCaip],
+      subject,
+      createdAt: now,
+      classification: 'internal',
+      body: { resource: messageBodyResource(messageId), classification: 'internal', updatedAt: now },
+      bodyHash: await sha256Hex32(bodyBytes),
+      bodyContentType: 'text/plain',
+      actor: fromCaip,
+    };
+    const errors = validateMessageEnvelope(envelope);
+    if (errors.length > 0) throw new Error(`invalid outcome envelope: ${errors.join(', ')}`);
+    let bin = '';
+    for (const b of bodyBytes) bin += String.fromCharCode(b);
+    const stored = { b64: btoa(bin), contentType: 'text/plain', bodyHash: envelope.bodyHash };
+    await this.interactionsInternal(recipient, 'internal.dm.body.put', { resource: envelope.body.resource, data: stored });
+    await this.interactionsInternal(recipient, 'internal.deliver', { envelope });
   }
 
   /** Session-wrapped org signature over a consult-rail digest (§3.1): the interactions-session

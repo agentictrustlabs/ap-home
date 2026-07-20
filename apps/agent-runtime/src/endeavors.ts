@@ -482,7 +482,7 @@ function parseEndeavorId(raw: unknown): string | null {
 function parseEvidenceRefs(note: unknown): EntityRef[] {
   const text = String(note ?? '').trim();
   if (!text) return [];
-  return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, 500))}` }];
+  return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, 4000))}` }];
 }
 
 // ── The mutation spine: validate command → append events → re-reduce → persist projections. ──
@@ -999,7 +999,7 @@ export async function handleEndeavorOp(
       actor: viewer,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
-      outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, 500))}` },
+      outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, 6000))}` },
     };
     return deps.serialize(async () => {
       const r = await appendToEndeavorLog(deps, 'endeavor.satisfy', endeavorId, command, { type: 'endeavor', id: endeavorId });

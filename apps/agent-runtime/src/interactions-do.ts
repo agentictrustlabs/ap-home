@@ -1162,6 +1162,7 @@ export class InteractionsDO {
             ok: true,
             lifecycle: state.endeavor?.lifecycle ?? null,
             goal: state.endeavor?.title ?? state.request?.record.goal ?? '',
+            requester: state.request?.record.requester?.toLowerCase() ?? null,
             adoptedPlanRef: adoptedRef,
             latestPlan: latest ? { planId: latest.planId, revision: latest.revision, contentHash: latest.contentHash, proposedBy: latest.proposedBy.toLowerCase() } : null,
             plan: plan
