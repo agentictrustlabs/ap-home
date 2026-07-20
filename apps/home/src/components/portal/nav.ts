@@ -83,6 +83,9 @@ export function buildNav(
         heading: 'Manage',
         items: [
           { id: 'org-profile', label: 'Profile', href: orgHref(a, 'profile'), Icon: BuildingIcon, status: 'live' },
+          // Agent: the org's discussion bot ("Manage Bot" — auto-reply + member routing) + the org
+          // Playbook that shapes every discussion reply. Mirrors the person Manage → Agent tab.
+          { id: 'org-agent', label: 'Agent', href: orgHref(a, 'agent'), Icon: BotIcon, status: 'live' },
           { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
           { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },

@@ -465,7 +465,7 @@ export function AgentTab() {
             Assistant instructions (markdown; the reply contract — one reply per message — always applies
             regardless). Governs your personal 1:1 auto-replies AND how your agent answers questions
             routed from organization discussions you opted into (it may decline classes of questions).
-            Organization board playbooks are edited on each organization&rsquo;s Discussions page.
+            Organization board playbooks are edited on each organization&rsquo;s Manage → Agent → Playbook tab.
             {assistant !== null && !assistant.enabled && (
               <> The message bot is currently <b>off</b> — these instructions take effect when it&rsquo;s on.</>
             )}

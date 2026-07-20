@@ -14,7 +14,7 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { recordOrgMembership } from '../../lib/org-membership';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import { issueOrgConsultRoutingDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { type DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { BusyButton } from '../shared/BusyButton';
 import {
@@ -355,103 +355,41 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [active, communityId, authed, load, channels]);
 
-  // spec 327 §4b — the steward-authored assistant PLAYBOOK (SKILL.md projection): org-level
-  // markdown that becomes the assistant's system prompt. Loaded on opening the editor.
-  const [skillOpen, setSkillOpen] = useState(false);
-  const [skillText, setSkillText] = useState('');
-  const [skillBusy, setSkillBusy] = useState(false);
-  const openSkillEditor = useCallback(async () => {
-    setSkillOpen((o) => !o);
-    if (skillOpen) return; // just closed
-    setSkillBusy(true);
-    try {
-      const res = await fetch('/connect/channels', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({ action: 'assistantSkillGet', communityId }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; skill?: { markdown?: string } | null };
-      if (res.ok && b.ok) setSkillText(b.skill?.markdown ?? '');
-    } catch { /* editor opens empty */ } finally { setSkillBusy(false); }
-  }, [skillOpen, communityId, authed]);
-  const saveSkill = useCallback(async () => {
-    setSkillBusy(true); setError(null);
-    try {
-      const res = await fetch('/connect/channels', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({ action: 'assistantSkillPut', communityId, markdown: skillText }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
-      setSkillOpen(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setSkillBusy(false); }
-  }, [communityId, authed, skillText]);
-
-  // spec 327 — steward toggle: enable/disable the org's own assistant on the ACTIVE topic.
-  const [assistantBusy, setAssistantBusy] = useState(false);
-  const toggleAssistant = useCallback(async () => {
-    if (!active) return;
-    const enabled = !!channels?.find((c) => c.descriptor.id === active)?.assistant;
-    setAssistantBusy(true); setError(null);
-    try {
-      const res = await fetch('/connect/channels', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({ action: enabled ? 'assistantDisable' : 'assistantEnable', communityId, channelId: active, trigger: 'mention' }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `assistant ${enabled ? 'disable' : 'enable'} failed (${res.status})`);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setAssistantBusy(false); }
-  }, [active, channels, communityId, authed, load]);
-
-
-  // spec 329 §7 — steward toggle: member routing on the ACTIVE topic. Enabling runs the §3.1
-  // ceremony on first use: fetch the interactions-session key, sign the NARROW org consult wire
-  // with the org's custody credential (the steward's), and hand it to the org's execution point
-  // (which verifies + custodies it). Subsequent enables just flag the topic.
-  const [routingBusy, setRoutingBusy] = useState(false);
-  const toggleRouting = useCallback(async () => {
-    if (!active) return;
-    const enabled = !!channels?.find((c) => c.descriptor.id === active)?.routing;
-    setRoutingBusy(true); setError(null);
-    try {
-      if (enabled) {
-        const res = await fetch('/connect/channels', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ action: 'routingDisable', communityId, channelId: active }),
-        });
-        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!res.ok || !b.ok) throw new Error(b.error ?? `routing disable failed (${res.status})`);
-      } else {
-        const stRes = await fetch('/connect/channels', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ action: 'routingStatus', communityId }),
-        });
-        const st = (await stRes.json().catch(() => ({}))) as { ok?: boolean; wirePresent?: boolean; sessionKey?: string | null; error?: string };
-        if (!stRes.ok || !st.ok) throw new Error(st.error ?? `routing status failed (${stRes.status})`);
-        let delegation: DelegationWire | undefined;
-        if (!st.wirePresent) {
-          if (!st.sessionKey) throw new Error('routing is unavailable — the interactions-session key is not provisioned on this deployment');
-          if (!session) throw new Error('not signed in');
-          const via = resolveVia(homeProfile?.credential, session.via);
-          const sign = await signHashFor(via, communityId as Address, { token: session.token });
-          delegation = toWire(await issueOrgConsultRoutingDelegation(communityId as Address, st.sessionKey as Address, sign));
+  // spec 327/329 — the org's discussion assistant and member routing are ALWAYS ON; there is no
+  // per-topic toggle here (the org configures its bot once in Manage → Agent). Reconcile silently
+  // for a steward: enable the assistant on any topic missing it, and enable member routing wherever
+  // the org's consult wire is already set up (the one-time signing lives in Manage → Agent, never on
+  // the board). Idempotent + tracked per topic, so a benign failure (a nameless org can't be
+  // @-mentioned; the wire isn't set up yet) is not retried in a loop. One write per pass; `load()`
+  // refreshes and the guard refs converge.
+  const autoAsstRef = useRef<Set<string>>(new Set());
+  const autoRouteRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!steward || orgVault !== true || !channels) return;
+    let cancelled = false;
+    void (async () => {
+      for (const c of channels) {
+        const id = c.descriptor.id;
+        if (!c.assistant && !autoAsstRef.current.has(id)) {
+          autoAsstRef.current.add(id);
+          try {
+            const r = await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'assistantEnable', communityId, channelId: id, trigger: 'mention' }) });
+            const b = (await r.json().catch(() => ({}))) as { ok?: boolean };
+            if (r.ok && b.ok && !cancelled) { await load(); return; }
+          } catch { /* silent — the status chip just won't show the bot yet */ }
         }
-        const res = await fetch('/connect/channels', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ action: 'routingEnable', communityId, channelId: active, maxFanout: 3, ...(delegation ? { delegation } : {}) }),
-        });
-        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!res.ok || !b.ok) throw new Error(b.error ?? `routing enable failed (${res.status})`);
+        if (c.assistant && !c.routing && !autoRouteRef.current.has(id)) {
+          autoRouteRef.current.add(id);
+          try {
+            const r = await fetch('/connect/channels', { method: 'POST', headers: authed, body: JSON.stringify({ action: 'routingEnable', communityId, channelId: id, maxFanout: 3 }) });
+            const b = (await r.json().catch(() => ({}))) as { ok?: boolean };
+            if (r.ok && b.ok && !cancelled) { await load(); return; }
+          } catch { /* wire not set up yet — the steward turns it on in Manage → Agent */ }
+        }
       }
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setRoutingBusy(false); }
-  }, [active, channels, communityId, authed, load, session, homeProfile?.credential]);
+    })();
+    return () => { cancelled = true; };
+  }, [steward, orgVault, channels, communityId, authed, load]);
 
   const listingBySubject = useMemo(() => {
     const m = new Map<string, Listing>();
@@ -721,74 +659,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     )}
                   </div>
                 </div>
-                {steward && (
-                  <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.4rem' }}>
-                    {/* Icon-only controls — the labels were eating the header row; full text lives in title/aria. */}
-                    <BusyButton
-                      busy={assistantBusy}
-                      busyLabel="…"
-                      onClick={() => void toggleAssistant()}
-                      className="manage-btn manage-btn--ghost"
-                      aria-label={channel.assistant ? 'Assistant on — disable' : 'Enable assistant'}
-                      aria-pressed={Boolean(channel.assistant)}
-                      style={channel.assistant ? undefined : { opacity: 0.45 }}
-                      title={channel.assistant
-                        ? 'Assistant on — click to disable it in this topic'
-                        : 'Let the organization’s own agent reply when it is @-mentioned in this topic'}
-                    >
-                      🤖
-                    </BusyButton>
-                    {channel.assistant && (
-                      <BusyButton
-                        busy={routingBusy}
-                        busyLabel="…"
-                        onClick={() => void toggleRouting()}
-                        className="manage-btn manage-btn--ghost"
-                        aria-label={channel.routing ? 'Member routing on — disable' : 'Enable member routing'}
-                        aria-pressed={Boolean(channel.routing)}
-                        style={channel.routing ? undefined : { opacity: 0.45 }}
-                        title={channel.routing
-                          ? 'Member routing on — the assistant may consult opted-in members’ agents. Click to disable.'
-                          : 'Let the assistant consult opted-in members’ agents about questions in this topic (spec 329 — signs the routing authorization on first use)'}
-                      >
-                        🧭
-                      </BusyButton>
-                    )}
-                    <BusyButton
-                      busy={skillBusy && !skillOpen}
-                      onClick={() => void openSkillEditor()}
-                      className="manage-btn manage-btn--ghost"
-                      aria-label="Assistant instructions"
-                      title="Assistant instructions (the playbook — shapes every reply the assistant writes for this organization)"
-                    >
-                      📝
-                    </BusyButton>
-                  </span>
-                )}
               </div>
-
-              {skillOpen && (
-                <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-raised)' }}>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
-                    Assistant instructions (markdown, applies to every topic in this organization; the reply
-                    contract — one reply per mention — always applies regardless).
-                  </div>
-                  <textarea
-                    value={skillText}
-                    onChange={(e) => setSkillText(e.target.value)}
-                    rows={8}
-                    maxLength={8192}
-                    placeholder={'# Assistant playbook\n\nDescribe how the assistant should reply: tone, what it knows about this organization, what to defer to stewards…'}
-                    style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface)', resize: 'vertical' }}
-                  />
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', justifyContent: 'flex-end' }}>
-                    <button type="button" className="manage-btn manage-btn--ghost" onClick={() => setSkillOpen(false)}>Cancel</button>
-                    <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="manage-btn">
-                      Save instructions
-                    </BusyButton>
-                  </div>
-                </div>
-              )}
 
               <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef} onScroll={onThreadScroll}>
                 {channel.messages.map((m, idx) => {
