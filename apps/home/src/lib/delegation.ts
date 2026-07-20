@@ -312,6 +312,19 @@ export const COORDINATION_REQUESTS_RESOURCE_SCOPE = 'vault:coordination.requests
 export const COORDINATION_INDEX_RESOURCE_SCOPE = 'vault:coordination.index' as const;
 export const COORDINATION_ENDEAVOR_WILDCARD_SCOPE = 'vault:coordination.endeavor:*' as const;
 
+/** spec 334 §6 — the org's OWN app-coordination records the org agent may READ (read-only) while it
+ *  works an endeavor, so its deliverables are grounded in what the org has actually recorded rather
+ *  than invented. These are relying-app record types (the UUPG engagement app), listed here because
+ *  the interactions grant is minted at the Home; the coordination plane reads them owner-self through
+ *  that grant. READ-ONLY and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking
+ *  them denies per-record at demo-mcp, surfaced as "re-enable storage". The private companion
+ *  (`uupg:attestation-private`) is deliberately EXCLUDED — the agent reasons over public-tier claims,
+ *  never the sensitive record. */
+export const APP_COORDINATION_READ_SCOPES = [
+  'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed',
+  'vault:uupg:coalition', 'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy',
+] as const;
+
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
  * by the steward's credential AS the principal at the enable ceremony. Exercised only by the
@@ -336,6 +349,9 @@ function buildInteractionsStruct(
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
+      // spec 334 §6 — the org's own app-coordination records, READ-only: the coordination agent grounds
+      // its work in the org's recorded claims. Additive; a pre-334§6 grant re-enables to pick them up.
+      { server: mcpServerId, resources: [...APP_COORDINATION_READ_SCOPES], ops: ['read'] },
     ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
