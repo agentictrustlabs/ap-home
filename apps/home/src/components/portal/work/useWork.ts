@@ -14,12 +14,14 @@ export interface RelatedOrg {
   relationship: 'steward' | 'member';
 }
 
-/** Orgs this person belongs to (steward or member) — the Home Request target
- *  options + the My Work aggregation set. */
-export function useRelatedOrgs(session: Session | null): RelatedOrg[] {
+/** Orgs this person belongs to (steward or member) + whether the lookup has settled — the Home
+ *  Request target options + the My Work aggregation set. `loaded` lets callers hold a spinner until
+ *  the org set is known (so an empty result isn't flashed before the fetch returns). */
+export function useRelatedOrgsState(session: Session | null): { orgs: RelatedOrg[]; loaded: boolean } {
   const [orgs, setOrgs] = useState<RelatedOrg[]>([]);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    if (!session) return;
+    if (!session) { setLoaded(false); return; }
     let cancelled = false;
     void (async () => {
       try {
@@ -36,10 +38,17 @@ export function useRelatedOrgs(session: Session | null): RelatedOrg[] {
             })),
         );
       } catch { /* picker stays empty */ }
+      finally { if (!cancelled) setLoaded(true); }
     })();
     return () => { cancelled = true; };
   }, [session]);
-  return orgs;
+  return { orgs, loaded };
+}
+
+/** Orgs this person belongs to (steward or member) — the Home Request target
+ *  options + the My Work aggregation set. */
+export function useRelatedOrgs(session: Session | null): RelatedOrg[] {
+  return useRelatedOrgsState(session).orgs;
 }
 
 /** Directory displayName per member SA (lowercased address → name) — the same roster read

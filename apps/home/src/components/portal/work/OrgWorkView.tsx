@@ -9,6 +9,7 @@ import { ENDEAVOR_LIFECYCLES, type EndeavorLifecycle } from '@agenticprimitives/
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
+import { Loading } from '../../shared/Loading';
 import { type EndeavorRow } from '../../../lib/work-client';
 import { useOrgMemberNames, useReEnableInteractions, useWorkList } from './useWork';
 import { RequestsTriage } from './RequestsTriage';
@@ -143,7 +144,7 @@ export function OrgWorkView({ org }: { org: Address }) {
       </div>
 
       {data === null ? (
-        <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>Loading…</p>
+        <Loading label="Loading requests and endeavors…" />
       ) : tab === 'requests' ? (
         <RequestsTriage org={communityId} requests={requests} steward={steward} names={names} refresh={refresh} />
       ) : endeavors.length === 0 ? (

@@ -11,6 +11,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
+import { Loading } from '../../shared/Loading';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { agentLabel, shortId } from '../../../home/use-inbox';
 import {
@@ -253,7 +254,7 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
     >
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
       {detail === null ? (
-        <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>Loading…</p>
+        <Loading label="Loading endeavor…" />
       ) : !e ? (
         <p style={{ opacity: 0.7, fontSize: '0.85rem' }}>This endeavor is not visible to you.</p>
       ) : (

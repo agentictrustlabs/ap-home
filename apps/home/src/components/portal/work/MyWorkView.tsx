@@ -13,6 +13,7 @@ import { validateHomeContributionEntry, validateHomeDecisionCard } from '@agenti
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
+import { Loading } from '../../shared/Loading';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import {
   commitContribution,
@@ -26,7 +27,7 @@ import {
   type EndeavorRow,
 } from '../../../lib/work-client';
 import { NewRequestComposer } from './NewRequestComposer';
-import { useRelatedOrgs, useReEnableInteractions } from './useWork';
+import { useRelatedOrgsState, useReEnableInteractions } from './useWork';
 import { LIFECYCLE_LABEL } from './labels';
 
 interface OrgWorkBundle {
@@ -81,7 +82,7 @@ function EntryCard({
 
 export function MyWorkView() {
   const { session, profile: homeProfile, agentAddress } = useSession();
-  const orgs = useRelatedOrgs(session);
+  const { orgs, loaded: orgsLoaded } = useRelatedOrgsState(session);
   const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
   const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +91,7 @@ export function MyWorkView() {
   const reEnable = useReEnableInteractions();
 
   const load = useCallback(async () => {
-    if (!session || !agentAddress) return;
+    if (!session || !agentAddress || !orgsLoaded) return;
     const stale: StaleOrg[] = [];
     try {
       const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
@@ -124,7 +125,7 @@ export function MyWorkView() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [session, agentAddress, orgs]);
+  }, [session, agentAddress, orgs, orgsLoaded]);
 
   const runReEnable = useCallback(async (s: StaleOrg) => {
     setBusyId(`reenable:${s.org}`); setError(null);
@@ -221,7 +222,7 @@ export function MyWorkView() {
       )}
 
       {bundles === null ? (
-        <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>Loading…</p>
+        <Loading label="Loading your work across every organization…" />
       ) : (
         <>
           {/* Action-priority inbox: everything that NEEDS this person, first and unmissable. */}
