@@ -907,10 +907,12 @@ export class InteractionsDO {
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           try {
             const data = await this.readDoc<unknown>(g, recordType, null);
+            console.log(`[334§6 vaultRead] ${recordType} ok hasData=${data !== null && data !== undefined}`);
             return json({ ok: true, recordType, data });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             const needsEnable = /record_scope_denied|scope/i.test(msg);
+            console.log(`[334§6 vaultRead] ${recordType} FAILED needsEnable=${needsEnable} — ${msg.slice(0, 160)}`);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
         }

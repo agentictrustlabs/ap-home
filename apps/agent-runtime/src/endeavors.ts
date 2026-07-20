@@ -297,37 +297,47 @@ async function mineAcross(
 ): Promise<{ allocations: unknown[]; commitments: unknown[]; decisions: unknown[] }> {
   const allocations: unknown[] = [];
   const commitments: unknown[] = [];
-  for (const entry of entries) {
-    const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(entry.endeavorId), []);
-    if (log.length === 0) continue;
-    const state = reduceEventLog(log);
-    const adoptedRef = state.endeavor?.adoptedPlanRef;
-    for (const a of Object.values(state.allocations)) {
-      if (a.participant.toLowerCase() !== viewer || a.status !== 'allocated') continue;
-      allocations.push({
-        allocationId: a.allocationId,
-        endeavorId: entry.endeavorId,
-        endeavorTitle: entry.title,
-        participant: a.participant,
-        steps: a.steps,
-        ...(adoptedRef ? { planRef: adoptedRef } : {}),
-      });
-    }
-    for (const c of Object.values(state.commitments)) {
-      if (c.participant.toLowerCase() !== viewer) continue;
-      commitments.push({
-        commitmentId: c.commitmentId,
-        endeavorId: entry.endeavorId,
-        endeavorTitle: entry.title,
-        allocationRef: c.allocationRef,
-        participant: c.participant,
-        planRef: c.planRef,
-        steps: c.steps,
-        status: c.status,
-        ...(c.bounds ? { bounds: c.bounds } : {}),
-      });
-    }
-  }
+  // PARALLEL per-endeavor reads (was a sequential for-await, so wall-time was the SUM of every
+  // endeavor's log read — the dominant cost of endeavor.list, and doubly so through the /work
+  // cross-org fan-out). The vault reads are independent, so fan them out: wall-time is now the
+  // slowest single read, not their sum. Ordering is preserved by mapping then concatenating.
+  const perEntry = await Promise.all(
+    entries.map(async (entry) => {
+      const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(entry.endeavorId), []);
+      if (log.length === 0) return { allocations: [] as unknown[], commitments: [] as unknown[] };
+      const state = reduceEventLog(log);
+      const adoptedRef = state.endeavor?.adoptedPlanRef;
+      const a2: unknown[] = [];
+      const c2: unknown[] = [];
+      for (const a of Object.values(state.allocations)) {
+        if (a.participant.toLowerCase() !== viewer || a.status !== 'allocated') continue;
+        a2.push({
+          allocationId: a.allocationId,
+          endeavorId: entry.endeavorId,
+          endeavorTitle: entry.title,
+          participant: a.participant,
+          steps: a.steps,
+          ...(adoptedRef ? { planRef: adoptedRef } : {}),
+        });
+      }
+      for (const c of Object.values(state.commitments)) {
+        if (c.participant.toLowerCase() !== viewer) continue;
+        c2.push({
+          commitmentId: c.commitmentId,
+          endeavorId: entry.endeavorId,
+          endeavorTitle: entry.title,
+          allocationRef: c.allocationRef,
+          participant: c.participant,
+          planRef: c.planRef,
+          steps: c.steps,
+          status: c.status,
+          ...(c.bounds ? { bounds: c.bounds } : {}),
+        });
+      }
+      return { allocations: a2, commitments: c2 };
+    }),
+  );
+  for (const r of perEntry) { allocations.push(...r.allocations); commitments.push(...r.commitments); }
   return { allocations, commitments, decisions: [] };
 }
 
@@ -564,37 +574,27 @@ export async function handleEndeavorOp(
     const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
     const requests = await deps.readDoc<CoordinationRequestsDocV1>(COORDINATION_REQUESTS_RESOURCE, { version: 1, rows: [] });
     const endeavors = visibleEndeavorRows(Object.values(index.endeavors), viewer, { steward, member: !!name });
-    const requestRows = await Promise.all(
-      (steward ? requests.rows : requests.rows.filter((r) => r.request.requester.toLowerCase() === viewer))
-        .map(async (r) => {
-          // The requester's outcome window: for an adopted request, surface the endeavor's lifecycle
-          // + the agent's outcome summary once satisfied — so "Your requests" shows the RESULT, not
-          // just "adopted" (the requester isn't a participant, so this is their only view of it).
-          let extra: { endeavorLifecycle?: EndeavorLifecycle; outcomeSummary?: string } = {};
-          if (r.endeavorId) {
-            const elog = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(r.endeavorId), []);
-            if (elog.length > 0) {
-              const es = reduceEventLog(elog);
-              const summary = outcomeSummaryFromLog(elog);
-              extra = {
-                ...(es.endeavor?.lifecycle ? { endeavorLifecycle: es.endeavor.lifecycle } : {}),
-                ...(summary ? { outcomeSummary: summary } : {}),
-              };
-            }
-          }
-          return {
-            requestId: r.request.requestId,
-            requester: r.request.requester,
-            goal: r.request.goal,
-            entryPoint: r.request.entryPoint,
-            submittedAt: r.request.submittedAt,
-            status: r.status,
-            ...(r.endeavorId ? { endeavorId: r.endeavorId } : {}),
-            ...(r.reason ? { reason: r.reason } : {}),
-            ...extra,
-          };
-        }),
-    );
+    // METADATA-FIRST (VL-W4 parity): the requester's outcome window takes the endeavor lifecycle from
+    // the INDEX doc we already read — no per-request event-log read. `outcomeSummary` is intentionally
+    // deferred to `endeavor.get` (the detail view), so the list is 2 reads flat regardless of request
+    // count instead of 2 + N. The "Your requests" status line (adopted/completed) is driven by the
+    // lifecycle; the inline outcome text now loads on "View result".
+    const endeavorById = new Map(Object.values(index.endeavors).map((e) => [e.endeavorId, e]));
+    const requestRows = (steward ? requests.rows : requests.rows.filter((r) => r.request.requester.toLowerCase() === viewer))
+      .map((r) => {
+        const idx = r.endeavorId ? endeavorById.get(r.endeavorId) : undefined;
+        return {
+          requestId: r.request.requestId,
+          requester: r.request.requester,
+          goal: r.request.goal,
+          entryPoint: r.request.entryPoint,
+          submittedAt: r.request.submittedAt,
+          status: r.status,
+          ...(r.endeavorId ? { endeavorId: r.endeavorId } : {}),
+          ...(r.reason ? { reason: r.reason } : {}),
+          ...(idx?.lifecycle ? { endeavorLifecycle: idx.lifecycle } : {}),
+        };
+      });
     // §7 My Work: the caller's own allocations/commitments across VISIBLE endeavors only.
     const mine = await mineAcross(deps, endeavors, viewer);
     return json({ ok: true, endeavors, requests: requestRows, mine, steward, member: !!name, you: viewer });

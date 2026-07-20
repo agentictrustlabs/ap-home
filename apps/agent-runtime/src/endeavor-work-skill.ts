@@ -89,7 +89,8 @@ export async function gatherReferenceContext(
       if (!graphOn) throw new Error('public graph not available');
       n += 1;
       const run = await runPublicSparql(env, String(args.query ?? ''));
-      if (!run.ok) return { ok: false, error: run.error }; // surfaced to the planner as an observation
+      if (!run.ok) { console.log(`[334§6 graph] query FAILED — ${String(run.error).slice(0, 160)}`); return { ok: false, error: run.error }; }
+      console.log(`[334§6 graph] query ok rows=${(run.rows ?? []).length}`);
       digests.push(digestRows(`Query ${n}`, run.rows ?? [], run.truncated));
       return { ok: true, rows: (run.rows ?? []).length, truncated: !!run.truncated };
     }
