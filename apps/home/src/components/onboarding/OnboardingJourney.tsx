@@ -370,7 +370,9 @@ export function OnboardingJourney({
             Try again with a phone passkey
           </button>
         )}
-        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { setError(''); setScreen(failBack.current); }}>Try again</button>
+        {/* Plain retry: after a UV skip, ALSO drop the cache so the full picker reopens (the user
+            can pick this device again — fine where Hello isn't MS-account-synced — or a phone). */}
+        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { if (uvSkipped) clearPasskey(); setError(''); setScreen(failBack.current); }}>Try again</button>
         {api && <button className="btn-ghost onboarding-secondary" onClick={api.denyEnroll}>Cancel</button>}
       </Frame>
     );

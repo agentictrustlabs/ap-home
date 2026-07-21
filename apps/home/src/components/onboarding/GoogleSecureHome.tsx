@@ -176,7 +176,7 @@ export function GoogleSecureHome() {
             Try again with a phone passkey
           </button>
         )}
-        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { autoFired.current = false; setPhase('auto'); }}>Try again</button>
+        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { if (uvSkipped) clearPasskey(); autoFired.current = false; setPhase('auto'); }}>Try again</button>
         <button className="btn-ghost onboarding-secondary" onClick={() => setPhase('name')}>Choose a name instead</button>
       </Shell>
     );
