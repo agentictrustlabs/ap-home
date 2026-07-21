@@ -44,6 +44,7 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills } from './messaging-skills.js';
+import { skillProvenanceMetadata } from './skill-provenance.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 import { caip10 } from './custody-oidc.js';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
@@ -98,7 +99,7 @@ const echo: SkillHandler = {
 /** The `orchestrate` skill — the intent-task entry point. Reads a GOAL, plans which MCP tool composes to
  *  satisfy it (shared core in ./orchestration), runs it under the TASK's delegation (every call rides
  *  on-chain authority — the invoker wraps `ctx.mcp.callTool`), and emits the result as an artifact. */
-function makeOrchestrateSkill(env: Env): SkillHandler {
+function makeOrchestrateSkill(env: Env, agentSA: Address): SkillHandler {
   return {
     skill: 'orchestrate',
     handle: async (ctx) => {
@@ -137,6 +138,14 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
         invoke: async (toolId, toolArgs) => ctx.mcp.callTool({ tool: toolId, toolArgs, delegation: ctx.delegation }),
       });
 
+      // skill-provenance/v1 — tag the artifact with the verifiable SKILL.md that
+      // shaped it (inert unless SKILLS_CORPUS_URL is set; fail-open).
+      const provenance = await skillProvenanceMetadata(env, {
+        skill: 'orchestrate',
+        agentSA,
+        taskId: ctx.taskId,
+        reason: 'orchestration goal accepted',
+      });
       const artifactId = await ctx.emitArtifact({
         artifactKind: 'orchestration.result',
         body: {
@@ -148,6 +157,7 @@ function makeOrchestrateSkill(env: Env): SkillHandler {
           error: result.error ?? null,
           ...(endeavorRequestId ? { endeavorRequestId } : {}),
         },
+        ...(provenance ? { metadata: provenance } : {}),
       });
       return result.outcome === 'completed'
         ? { state: 'completed', artifactIds: [artifactId] }
@@ -290,10 +300,17 @@ function makeConsultSkill(env: Env, agentSA: Address, storage: DurableObjectStor
           await auditRow('a2a.consult.answered', 'error', request.context.questionId, turn.error ?? turn.result.error ?? 'turn completed without a terminal');
           return { state: 'failed', error: turn.error ?? turn.result.error ?? 'consult turn completed without posting an answer' };
         }
+        const provenance = await skillProvenanceMetadata(env, {
+          skill: CONSULT_SKILL_ID,
+          agentSA,
+          taskId: ctx.taskId,
+          reason: 'consult request accepted',
+        });
         const artifactId = await ctx.emitArtifact({
           artifactKind: 'consult.answer',
           body: turn.answer,
           bodyContentType: 'application/json',
+          ...(provenance ? { metadata: provenance } : {}),
         });
         await auditRow(turn.answer.declined ? 'a2a.consult.declined' : 'a2a.consult.answered', 'success', request.context.questionId);
         return { state: 'completed', artifactIds: [artifactId] };
@@ -487,7 +504,7 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
@@ -595,6 +612,14 @@ export class A2aTaskDO {
       try {
         const turn = await handleDiscussionRespond(this.env, p, {
           readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
+          // spec 334 §6 gather phase for the @ask turn: read ONE of the org's OWN records owner-self
+          // through the read-only coordination grant (recordType OPAQUE — the org's playbook names
+          // the domain records, never this platform). Non-throwing: a scope-denied / unenabled read
+          // maps to { ok:false } so the gather sub-turn degrades gracefully to no reference data.
+          readOrgRecord: (recordType: string) =>
+            call('internal.coordination.vaultRead', { recordType })
+              .then((r) => ({ ok: r.ok === true, data: (r as { data?: unknown }).data, error: (r as { error?: string }).error, needsEnable: (r as { needsEnable?: boolean }).needsEnable }))
+              .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
           post: async (bodyText) => (await call('internal.channels.post', {
             channelId: p.channelId, bodyText,
             // The turn-1 status post carries the routed-consultation contextRef iff asks went out

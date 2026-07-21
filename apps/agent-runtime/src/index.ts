@@ -414,6 +414,10 @@ export interface Env {
    *  demo-a2a to derive SA_expected during the OIDC callback). Constant-time
    *  compared; the user's Google authn already happened at the broker. */
   A2A_CUSTODY_BRIDGE_SECRET?: string;
+  /** skill-provenance/v1 — base URL of the skills corpus (@skills/skill-corpus).
+   *  When set, a SkillHandler tags its Artifact with the verifiable SKILL.md that
+   *  shaped it (GET {SKILLS_CORPUS_URL}/tools/skill_reference). Unset ⇒ inert. */
+  SKILLS_CORPUS_URL?: string;
   // Phase B / NEW-H6: the provisioned interactions + delivery service SAs. When set, the InteractionsDO PINS
   // the custodied grant's delegate to these — a grant to any other delegate is rejected (vaultFor runs every
   // op as requester=grant.delegate, so an unpinned grant would route the principal's whole vault through the

@@ -107,6 +107,13 @@ ORCHESTRATION_LLM = "anthropic"
 # gc-public: the same public people-group C-box repo uupg reads (GRAPHDB_QUERY_URL). Requires the Basic
 # credential — set PUBLIC_GRAPH_BASIC as a secret (the same value as uupg's GRAPHDB_BASIC).
 PUBLIC_GRAPH_URL = "https://graphdb.agentkg.io/repositories/gc-public"
+# skill-provenance/v1 — OPTIONAL skills-corpus base URL. Left UNSET on purpose: artifact
+# provenance tagging is inert until configured, so enabling it is a deliberate deploy choice.
+# To enable: point at a deployed @skills/skill-corpus and publish the matching canonical ids
+# (skill:public/orchestrate, skill:public/discussion-consult). Handlers then attach a verifiable
+# skill-provenance manifest to their Artifact.metadata; fail-open (a corpus error never blocks
+# the artifact). See src/skill-provenance.ts.
+# SKILLS_CORPUS_URL = "https://skills-corpus-production.richardpedersen3.workers.dev"
 # CRIT-2 (audit 2026-07-13) — server-mint RETIRED: DEMO_ALLOW_SERVER_MINT is removed entirely (the
 # callMcpToolViaDelegation path is deleted). Every vault path client-mints — interactions/messaging via
 # the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation proof, the A2aTaskDO seams +
