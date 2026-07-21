@@ -462,6 +462,11 @@ export function googleSignHash(sender: Address, sessionToken: string): SignHash 
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; signature?: Hex; error?: string; detail?: string };
     if (!res.ok || !body.ok || !body.signature) {
+      // A login-grade session (email/phone code on a home the code doesn't custody) can't drive the KMS
+      // signer — demo-a2a's custody gate 403s. Say what to DO, not just what failed.
+      if (res.status === 403 && /not oidc|custody-grade|onchain-confirmed/i.test(body.error ?? '')) {
+        throw new Error('Your current sign-in can\u2019t authorize this. Sign out, then sign in again with the method that secures your account (or re-enter your code) and retry.');
+      }
       throw new Error([body.error, body.detail].filter(Boolean).join(' — ') || `custody sign failed (HTTP ${res.status})`);
     }
     return body.signature;

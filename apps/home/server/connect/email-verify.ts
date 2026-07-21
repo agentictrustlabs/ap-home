@@ -83,9 +83,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // login-grade — their members onboard through the Personal Home.
   const custodyEligible = isSocialCustodyAud(rec.aud, custodyAud);
   const rotation = await readRotation(env.AUTH_CODES, EMAIL_ISS, hash);
-  const kms = custodyEligible
+  let kms = custodyEligible
     ? await resolveKmsAgent(env, EMAIL_ISS, hash, rotation)
-    : ({ ok: false } as const);
+    : ({ ok: false, reason: 'aud not custody-eligible' } as const);
+  // A transient resolve failure must NOT silently demote a returning custody-grade user to a
+  // login-grade session — that session later 403s at demo-a2a's custody sign gate mid-connect
+  // ("session principal is not oidc"), a far worse failure than asking for the code again.
+  if (custodyEligible && !kms.ok) {
+    kms = await resolveKmsAgent(env, EMAIL_ISS, hash, rotation); // one retry
+    if (!kms.ok && facet) {
+      console.error('[email-verify] KMS resolve failed for a custody-eligible subject with a facet — refusing to demote', { reason: kms.reason, facet });
+      return json({ error: 'custody service temporarily unavailable — request a new code and try again' }, 503);
+    }
+  }
 
   let agent: CanonicalAgentId;
   let custodyGrade: boolean;
@@ -99,6 +109,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   } else if (facet) {
     // Email was LINKED to another home (e.g. a passkey home, via the Security card). Respect the link:
     // issue a login-grade session — email never confers custody OVER a device-secured home (ADR-0011).
+    // Diagnosable demotion: this session CANNOT authorize a connect via the KMS signer (403 at the
+    // custody gate) — the member signs such approvals with the home's real credential.
+    console.warn('[email-verify] login-grade session (facet-linked home)', { facet, kmsOk: kms.ok, kmsAgent: kms.ok ? kms.agentId : null, reason: kms.ok ? 'facet != kms home' : (kms as { reason?: string }).reason });
     agent = facet;
     custodyGrade = false;
   } else {

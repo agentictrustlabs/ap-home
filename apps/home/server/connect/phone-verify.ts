@@ -88,7 +88,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const facet = await readPhoneFacet(env.AUTH_CODES, phone); // prior phone-home OR a linked device home
   const custodyEligible = isSocialCustodyAud(rec.aud, custodyAud);
   const rotation = await readRotation(env.AUTH_CODES, PHONE_ISS, hash);
-  const kms = custodyEligible ? await resolveKmsAgent(env, PHONE_ISS, hash, rotation) : ({ ok: false } as const);
+  let kms = custodyEligible ? await resolveKmsAgent(env, PHONE_ISS, hash, rotation) : ({ ok: false, reason: 'aud not custody-eligible' } as const);
+  // Mirror email-verify: a transient resolve failure must NOT silently demote a returning
+  // custody-grade user — the demoted session 403s later at demo-a2a's custody sign gate mid-connect.
+  if (custodyEligible && !kms.ok) {
+    kms = await resolveKmsAgent(env, PHONE_ISS, hash, rotation); // one retry
+    if (!kms.ok && facet) {
+      console.error('[phone-verify] KMS resolve failed for a custody-eligible subject with a facet — refusing to demote', { reason: kms.reason, facet });
+      return json({ error: 'custody service temporarily unavailable — request a new code and try again' }, 503);
+    }
+  }
 
   let agent: CanonicalAgentId;
   let custodyGrade: boolean;
@@ -101,6 +110,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   } else if (facet) {
     // Phone was LINKED to another home (e.g. a passkey home). Respect the link: login-grade session only —
     // phone (contact-control) never confers custody OVER a device-secured home (ADR-0011).
+    console.warn('[phone-verify] login-grade session (facet-linked home)', { facet, kmsOk: kms.ok, kmsAgent: kms.ok ? kms.agentId : null, reason: kms.ok ? 'facet != kms home' : (kms as { reason?: string }).reason });
     agent = facet;
     custodyGrade = false;
   } else {
