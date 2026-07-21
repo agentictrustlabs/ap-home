@@ -113,7 +113,7 @@ PUBLIC_GRAPH_URL = "https://graphdb.agentkg.io/repositories/gc-public"
 # (skill:public/orchestrate, skill:public/discussion-consult). Handlers then attach a verifiable
 # skill-provenance manifest to their Artifact.metadata; fail-open (a corpus error never blocks
 # the artifact). See src/skill-provenance.ts.
-# SKILLS_CORPUS_URL = "https://skills-corpus-production.richardpedersen3.workers.dev"
+SKILLS_CORPUS_URL = "https://skills-corpus.richardpedersen3.workers.dev"
 # CRIT-2 (audit 2026-07-13) — server-mint RETIRED: DEMO_ALLOW_SERVER_MINT is removed entirely (the
 # callMcpToolViaDelegation path is deleted). Every vault path client-mints — interactions/messaging via
 # the DEL-001 session leaf (NEW-C1 + spec 323 W3.2), Act6 via native invocation proof, the A2aTaskDO seams +
