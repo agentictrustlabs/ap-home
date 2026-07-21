@@ -38,6 +38,15 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
+    {
+      client_id: 'skills-corpus',
+      name: 'Skills Corpus (admin)',
+      redirect_uris: ['https://skills-corpus.richardpedersen3.workers.dev/', 'http://localhost:8996/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // spec 294 — the SIMPLE demo (apps/demo-web). Unlike the relying apps below, demo-web is a
     // self-contained demo that bootstraps its OWN Smart Agent across SIWE / passkey / social. So its
     // social (OIDC) sign-in is custody-grade (`socialCustody: true`) — the OIDC custodian deploys + signs
