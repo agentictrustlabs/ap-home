@@ -177,6 +177,20 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // OpenBook × Tyndale (openbook-tyndale.vercel.app) — Tyndale Open Bible Dictionary demo with a
+    // server-side "Sign in with Home" flow (its /api/home/start 307s here with PKCE + template=site-login;
+    // the code lands at /api/home/callback, exchanged server-side). site-login only; no PII at the broker.
+    {
+      client_id: 'openbook-tyndale',
+      name: 'OpenBook × Tyndale',
+      redirect_uris: [
+        'https://openbook-tyndale.vercel.app/api/home/callback',
+        'http://localhost:3000/api/home/callback',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
