@@ -27,6 +27,17 @@ const faithImpact: WhiteLabelConfig = {
     { id: 'data-source', label: 'Data sources', blurb: 'Records you help protect and share, with consent.', status: 'soon', verb: 'protect' },
   ],
   relyingApps: [
+    // skills-app — the SKILL.md management app (agentictrustlabs/skills). Login-grade connect via the
+    // Personal Home; site-login only, no PII held by the broker. aud = client_id; the allowed origin is
+    // derived from the exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
+    {
+      client_id: 'skills-app',
+      name: 'Skills',
+      redirect_uris: ['https://skills-web-7ar.pages.dev/', 'http://localhost:5190/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // spec 294 — the SIMPLE demo (apps/demo-web). Unlike the relying apps below, demo-web is a
     // self-contained demo that bootstraps its OWN Smart Agent across SIWE / passkey / social. So its
     // social (OIDC) sign-in is custody-grade (`socialCustody: true`) — the OIDC custodian deploys + signs
