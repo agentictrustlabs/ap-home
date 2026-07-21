@@ -18,6 +18,7 @@
 // mechanism — deploy nameless, claim on demand; no silent auto-name fallback.
 import { useEffect, useRef, useState } from 'react';
 import { secureHome, secureHomeNoName, activateVault, resolveVia, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
+import { clearPasskey, forcePhonePasskeyOnce, isUvMissingError } from '../../lib/passkey';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel, toAgentName } from '../../lib/domain';
@@ -162,12 +163,20 @@ export function GoogleSecureHome() {
   }
 
   if (phase === 'error') {
+    // UV-skipped passkey (Windows Microsoft-synced store) — same store fails identically on retry,
+    // so offer a fresh phone-created passkey (see OnboardingJourney's error screen).
+    const uvSkipped = isUvMissingError(new Error(err));
     return (
       <Shell>
         <h1 className="onboarding-h1">Something went wrong</h1>
         <div className="onboarding-error">{err}</div>
         <p className="onboarding-sub">Nothing was changed. You can try again.</p>
-        <button className="btn-primary" onClick={() => { autoFired.current = false; setPhase('auto'); }}>Try again</button>
+        {uvSkipped && (
+          <button className="btn-primary" onClick={() => { clearPasskey(); forcePhonePasskeyOnce(); autoFired.current = false; setPhase('auto'); }}>
+            Try again with a phone passkey
+          </button>
+        )}
+        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { autoFired.current = false; setPhase('auto'); }}>Try again</button>
         <button className="btn-ghost onboarding-secondary" onClick={() => setPhase('name')}>Choose a name instead</button>
       </Shell>
     );

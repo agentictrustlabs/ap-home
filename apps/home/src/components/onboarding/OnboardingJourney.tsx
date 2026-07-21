@@ -22,7 +22,7 @@ import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { hasWallet } from '../../lib/wallet';
-import type { DemoPasskey } from '../../lib/passkey';
+import { clearPasskey, forcePhonePasskeyOnce, isUvMissingError, type DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -347,12 +347,30 @@ export function OnboardingJourney({
   }
 
   if (screen === 'error') {
+    // The Windows Microsoft-synced passkey store skipped user verification (UV=0 — rejected by the
+    // custody gate). Retrying the same store fails identically, so the primary recovery is a FRESH
+    // passkey created on a phone (QR / hybrid), whose authenticator attests UV properly. Nothing was
+    // deployed, so dropping the local cache and re-creating is safe.
+    const uvSkipped = isUvMissingError(new Error(error));
     return (
       <Frame>
         <h1 className="onboarding-h1">Something went wrong</h1>
         <div className="onboarding-error">{error}</div>
         <p className="onboarding-sub">Nothing was changed. You can try again.</p>
-        <button className="btn-primary" onClick={() => { setError(''); setScreen(failBack.current); }}>Try again</button>
+        {uvSkipped && (
+          <button
+            className="btn-primary"
+            onClick={() => {
+              clearPasskey(); // drop the UV-less credential's cache — the retry must not reuse it
+              forcePhonePasskeyOnce(); // steer the next create() to a phone (QR) / security key
+              setError('');
+              setScreen(failBack.current);
+            }}
+          >
+            Try again with a phone passkey
+          </button>
+        )}
+        <button className={uvSkipped ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => { setError(''); setScreen(failBack.current); }}>Try again</button>
         {api && <button className="btn-ghost onboarding-secondary" onClick={api.denyEnroll}>Cancel</button>}
       </Frame>
     );

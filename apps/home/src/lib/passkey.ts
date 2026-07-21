@@ -50,6 +50,28 @@ const PASSKEY_ATTACHMENT: AuthenticatorAttachment | undefined = undefined;
 const PASSKEY_TRANSPORTS: AuthenticatorTransport[] | undefined = undefined;
 const PASSKEY_HINTS: string[] | undefined = undefined;
 
+/** One-shot "create the NEXT passkey on a phone" override (set by the UV-failure recovery UI).
+ *  The Microsoft-account SYNCED passkey store on Windows can skip user verification even when
+ *  `userVerification:'required'` (assertions come back with UV=0 → rejected on-chain), so the retry
+ *  path steers the create() to a phone/security key (`cross-platform` + hybrid hint), whose
+ *  authenticators do UV properly. Cleared on the next registerPasskey call. */
+let forcePhoneNextCreate = false;
+export function forcePhonePasskeyOnce(): void {
+  forcePhoneNextCreate = true;
+}
+
+/** The signature both ceremony stages throw when the provider skipped user verification. */
+export const UV_MISSING_MESSAGE =
+  'Your passkey provider skipped user verification (no PIN/biometric attested in the signature), ' +
+  'which custody-grade signing requires — this signature would be rejected on-chain. This is a ' +
+  'known issue with Microsoft-account SYNCED passkeys on Windows. Use a phone passkey, or a ' +
+  'device whose local authenticator (Windows Hello with PIN/biometric, Touch ID) holds the key.';
+
+/** Recognize a UV-skipped failure (either ceremony stage) so recovery UIs can offer the phone path. */
+export function isUvMissingError(e: unknown): boolean {
+  return e instanceof Error && /skipped user verification/i.test(e.message);
+}
+
 // [pk-probe] TEMPORARY: which build is this tab actually running? A tab opened before a Vercel
 // deploy keeps its OLD chunks until reload — this line in the console settles it instantly.
 const PK_PROBE_BUILD = 'created-transports v2 (2026-07-17)';
@@ -173,6 +195,13 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   const rpId = passkeyRpId();
   const userId = hexToBytes(keccak256(new TextEncoder().encode(`${rpId}|${label}`))).slice(0, 16);
 
+  // One-shot phone override (the UV-failure recovery path): steer this create to a phone/security
+  // key — those authenticators attest UV properly, unlike the Windows Microsoft-synced store.
+  const phoneForced = forcePhoneNextCreate;
+  forcePhoneNextCreate = false;
+  const attachment = phoneForced ? ('cross-platform' as AuthenticatorAttachment) : PASSKEY_ATTACHMENT;
+  const hints = phoneForced ? ['hybrid', 'security-key'] : PASSKEY_HINTS;
+
   const credential = (await navigator.credentials.create({
     publicKey: {
       challenge,
@@ -186,9 +215,10 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
       // excludeCredentials: that would make a repeat registration throw InvalidStateError instead of
       // cleanly overwriting — the stable userHandle is what dedupes.
       // Attachment/hints come from the PASSKEY_* test constants above (currently CHOICE MODE —
-      // both omitted, the OS offers every authenticator; see that comment block for the modes).
-      authenticatorSelection: { ...(PASSKEY_ATTACHMENT && { authenticatorAttachment: PASSKEY_ATTACHMENT }), residentKey: 'required', userVerification: 'required' },
-      ...(PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
+      // both omitted, the OS offers every authenticator; see that comment block for the modes),
+      // unless the one-shot phone override is armed.
+      authenticatorSelection: { ...(attachment && { authenticatorAttachment: attachment }), residentKey: 'required', userVerification: 'required' },
+      ...(hints ? ({ hints } as Record<string, unknown>) : {}),
       attestation: 'none',
       timeout: 60_000,
     },
@@ -197,6 +227,14 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
 
   const response = credential.response as AuthenticatorAttestationResponse;
   const parsed = parseAttestationObject(new Uint8Array(response.attestationObject));
+  // EARLY UV GATE (mirror of the sign-time check below): if the provider skipped user verification
+  // AT CREATION, its assertions will come back UV=0 too and every custody signature will be rejected
+  // on-chain. Fail HERE — before the credential is cached, the SA address derived, or a deploy
+  // attempted — so the recovery UI can steer the user to a phone passkey with nothing lost.
+  try { console.log('[pk-probe] created flags', { uv: parsed.flagUserVerified, up: parsed.flagUserPresent }); } catch { /* */ }
+  if (!parsed.flagUserVerified) {
+    throw new Error(UV_MISSING_MESSAGE);
+  }
   const createdTransports = response.getTransports?.() ?? [];
   const passkey: DemoPasskey = {
     credentialIdDigest: keccak256(bytesToHex(parsed.credentialId)),
@@ -412,12 +450,7 @@ function signAssertionFromCredential(credential: PublicKeyCredential): Hex {
   const flags = authenticatorData.length > 32 ? (authenticatorData[32] ?? 0) : 0;
   try { console.log('[pk-probe] assertion flags', { flags: `0x${flags.toString(16)}`, uv: (flags & 0x04) !== 0, backedUp: (flags & 0x10) !== 0 }); } catch { /* */ }
   if ((flags & 0x04) === 0) {
-    throw new Error(
-      'Your passkey provider skipped user verification (no PIN/biometric attested in the signature), ' +
-        'which custody-grade signing requires — this signature would be rejected on-chain. This is a ' +
-        'known issue with Microsoft-account SYNCED passkeys on Windows. Use a phone passkey, or a ' +
-        'device whose local authenticator (Windows Hello with PIN/biometric, Touch ID) holds the key.',
-    );
+    throw new Error(UV_MISSING_MESSAGE);
   }
   const assertion = buildWebAuthnAssertion({
     credentialIdBytes,
