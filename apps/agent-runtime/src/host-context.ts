@@ -148,6 +148,9 @@ export function buildA2aAgentCard(
   // this agent THROUGH the edge (which mints the GatewayAssertion). Omit ⇒ the direct subdomain
   // endpoint (edge-less / advisory deployments).
   edgeBase?: string,
+  // skill-provenance/v1 — advertise that this agent's artifacts may carry a
+  // verifiable skill-provenance manifest (set when SKILLS_CORPUS_URL is configured).
+  provenanceEnabled = false,
 ): Record<string, unknown> {
   const origin = ctx.publicOrigin.replace(/\/$/, '');
   const messageEndpoint =
@@ -167,7 +170,22 @@ export function buildA2aAgentCard(
     agentName: ctx.name ?? null,
     supportedInterfaces: [{ url: messageEndpoint, protocolBinding: 'JSONRPC' }],
     provider: { organization: 'Agentic Connect', url: origin },
-    capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: false },
+    capabilities: {
+      streaming: false,
+      pushNotifications: false,
+      stateTransitionHistory: false,
+      ...(provenanceEnabled
+        ? {
+            extensions: [
+              {
+                uri: 'https://agentictrust.io/a2a/extensions/skill-provenance/v1',
+                required: false,
+                description: 'artifacts may carry a verifiable skill-provenance manifest (who-did-what-when)',
+              },
+            ],
+          }
+        : {}),
+    },
     defaultInputModes: ['text/plain', 'application/json'],
     defaultOutputModes: ['text/plain', 'application/json'],
     skills,

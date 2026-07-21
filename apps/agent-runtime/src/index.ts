@@ -868,7 +868,7 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
       skills = skillsFromLabels(csv);
     } catch { /* best-effort — serve the card without skills */ }
   }
-  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined));
+  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined, !!c.env.SKILLS_CORPUS_URL?.trim()));
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias
