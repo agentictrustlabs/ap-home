@@ -893,8 +893,21 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
   const socialKind: 'google' | 'youversion' | 'email' | 'phone' | null =
     info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ||
     info?.connectionKind === 'email' || info?.connectionKind === 'phone' ? info.connectionKind : null;
-  // When the home publishes email/phone, auto-open the matching code card so it's the primary path.
+  // PASSKEY-FIRST DEVICE: this browser holds a local passkey for this host AND the home has a
+  // passkey custodian on-chain → the passkey is the fastest way in (the member enrolled it — via
+  // the email-card offer or elsewhere — precisely so return visits skip the code/OIDC hop). Make
+  // "Continue with passkey" the primary CTA even for an email/phone/social-custodied home, and
+  // don't auto-open the code card over it. Email/phone stay right below as the fallback: when the
+  // passkey breaks, the code signs them in and the email card offers a fresh passkey.
+  const [localPk, setLocalPk] = useState(false);
   useEffect(() => {
+    try { setLocalPk(!!loadPasskey()); } catch { /* storage blocked */ }
+  }, []);
+  const passkeyFirst = localPk && (info ? !!info.hasPasskey : false);
+  // When the home publishes email/phone, auto-open the matching code card so it's the primary path
+  // — unless this device is passkey-first (see above).
+  useEffect(() => {
+    try { if (loadPasskey()) return; } catch { /* storage blocked */ }
     if (info?.connectionKind === 'email') setShowEmail(true);
     if (info?.connectionKind === 'phone') setShowPhone(true);
   }, [info?.connectionKind]);
@@ -904,6 +917,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
   // connection record above; neither overrides the other, they both just open a card.
   useEffect(() => {
     try {
+      if (loadPasskey()) return; // passkey-first device — don't open the code card over the passkey CTA
       const last = localStorage.getItem(`ap-last-via:${nameLabel(name)}`);
       if (last === 'email') setShowEmail(true);
       if (last === 'phone') setShowPhone(true);
@@ -1017,7 +1031,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
             <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Continue with Google</button>
           )}
           {showPasskey && (
-            <button className={socialKind ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
+            <button className={socialKind && !passkeyFirst ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
           )}
           {showPasskey && (
             <button className="btn-ghost onboarding-secondary" onClick={() => go('passkey', 'discoverable')}>

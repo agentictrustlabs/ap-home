@@ -10,17 +10,40 @@
 // when a chosen name is pending and the email resolves to an existing home, the member decides:
 // continue into the existing home (optionally claiming the chosen name for it when it has none), or
 // go back and use a different email for the new named home.
+//
+// PASSKEY STEP (2026-07-21): after every successful anonymous email sign-in ON THE MEMBER'S OWN
+// SUBDOMAIN, offer to create a device passkey — added on-chain as a custodian under the email KMS
+// session (addPasskeyCredential: server-signed authorization, ONE device prompt) — so subsequent
+// visits sign in with face/fingerprint/PIN instead of an emailed code (the welcome-back screen
+// offers passkey once `hasPasskey` is true on-chain). Email stays the fallback: when a passkey
+// breaks, the member signs in by code and the offer re-appears — the fresh key OVERWRITES the
+// broken one in the authenticator (stable userHandle per (rpId, label)). Subdomain-gated because
+// passkeys are RP-scoped (spec 229 P5): a key created here is only findable on THIS host, so the
+// offer shows only where the member will return.
 import { useState } from 'react';
 import { useSession } from '../../context/session';
 import { secureHomeNoName, activateVault, signHashFor } from '../../home/onboarding';
-import { claimName, fetchProfile } from '../../connect-client';
-import { nameLabel } from '../../lib/domain';
+import { addPasskeyCredential, claimName, fetchProfile } from '../../connect-client';
+import { CENTRAL_AUTH_DOMAIN, nameLabel } from '../../lib/domain';
 import { seedImpactProfileFields } from '../../profile-store';
 import type { Address } from '@agenticprimitives/types';
 
+/** Should this host offer the passkey step for a home named `homeName`? Only on a member subdomain
+ *  (the passkey's RP = this host — it must be where the member returns), and only when the subdomain
+ *  IS the home's name (or the home is nameless — the entry flow claims this subdomain's name for it). */
+function passkeyOfferHost(homeName: string | null | undefined): boolean {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  if (h === CENTRAL_AUTH_DOMAIN || !h.endsWith(`.${CENTRAL_AUTH_DOMAIN}`)) return false;
+  const label = h.slice(0, -(CENTRAL_AUTH_DOMAIN.length + 1));
+  if (!label || label === 'www' || label.includes('.')) return false;
+  const home = homeName ? nameLabel(homeName) : '';
+  return !home || home === label;
+}
+
 export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
   const { session, openSession } = useSession();
-  const [step, setStep] = useState<'email' | 'code' | 'existing-home'>('email');
+  const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,6 +55,10 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
   const [chosenName, setChosenName] = useState<string>('');
   const [existingName, setExistingName] = useState<string>('');
   const [existingAddr, setExistingAddr] = useState<string>('');
+  /** Held while the passkey-offer step is up (the session opens AFTER the offer resolves —
+   *  opening it first would navigate away and unmount this card). */
+  const [pkToken, setPkToken] = useState<string | null>(null);
+  const [pkAgent, setPkAgent] = useState<string>('');
 
   const start = async () => {
     setBusy(true); setErr(null); setNote(null);
@@ -59,6 +86,54 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
     if (addr) void seedImpactProfileFields(addr as `0x${string}`, { email: email.trim().toLowerCase() });
   };
 
+  /** Shared tail of every ANONYMOUS issued path: on the member's own subdomain, pause on the
+   *  passkey-offer step (create a device passkey → custodian on-chain → future visits are one-tap)
+   *  before opening the session; elsewhere / after "not now", sign straight in. Re-runs on every
+   *  email sign-in — a broken passkey's owner falls back to the code and gets a fresh key here. */
+  const routeAfterIssued = async (token: string, hint?: { name?: string | null; addr?: string | null }) => {
+    let name = hint?.name ?? null;
+    let addr = hint?.addr ?? '';
+    if (!addr) {
+      const p = await fetchProfile(token).catch(() => null);
+      name = p?.name ?? null;
+      addr = p?.agent?.split(':').pop() ?? '';
+    }
+    if (addr && passkeyOfferHost(name)) {
+      setPkToken(token);
+      setPkAgent(addr);
+      setNote(null);
+      setStep('passkey-offer');
+      return;
+    }
+    await finishSignIn(token);
+  };
+
+  /** Passkey-offer action — ONE device prompt creates the key; the email KMS custodian signs the
+   *  on-chain addPasskey (server-signed, no second gesture). Failure keeps the session path open:
+   *  the member continues with email and the offer returns next time. */
+  const createPasskeyNow = async () => {
+    if (!pkToken || !pkAgent) return;
+    setBusy(true); setErr(null);
+    try {
+      setNote('Confirm with your device…');
+      const authorize = await signHashFor('email', pkAgent as Address, { token: pkToken });
+      const res = await addPasskeyCredential(pkAgent as Address, authorize, (s) => setNote(s));
+      if (!res.ok) throw new Error(res.error);
+      setNote('Passkey ready — next time this device signs you in with a tap.');
+      await finishSignIn(pkToken);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+
+  const skipPasskey = async () => {
+    if (!pkToken) return;
+    setBusy(true); setErr(null);
+    try {
+      await finishSignIn(pkToken);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+
   const verify = async () => {
     setBusy(true); setErr(null);
     try {
@@ -81,7 +156,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           const res = await secureHomeNoName({ token: d.token }, { claimPendingNameVia: 'email' });
           if (!res.ok) throw new Error(res.error);
           void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
-          await finishSignIn(d.token);
+          await routeAfterIssued(d.token, { name: res.home.name || null, addr: res.home.address });
           return;
         }
         // EXISTING home (this email is already bound to a canonical SA — ADR-0010: it opens that home,
@@ -95,7 +170,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           if (already && (nameLabel(already) || already) === (nameLabel(pending) || pending)) {
             // The existing home IS the chosen name — nothing to decide.
             sessionStorage.removeItem('pendingHomeName');
-            await finishSignIn(d.token);
+            await routeAfterIssued(d.token, { name: already, addr: profile?.agent?.split(':').pop() ?? '' });
             return;
           }
           setPendingToken(d.token);
@@ -105,7 +180,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           setStep('existing-home');
           return;
         }
-        await finishSignIn(d.token);
+        await routeAfterIssued(d.token);
       } else if (d.status === 'bootstrap') {
         setErr('We couldn’t set up a home for this email automatically — sign up with a passkey or Google, then add email.');
       }
@@ -118,7 +193,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
     setBusy(true); setErr(null);
     try {
       sessionStorage.removeItem('pendingHomeName');
-      await finishSignIn(pendingToken);
+      await routeAfterIssued(pendingToken, { name: existingName || null, addr: existingAddr });
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
 
@@ -134,13 +209,27 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
       if (!res.ok) throw new Error(res.error);
       sessionStorage.removeItem('pendingHomeName');
       setNote(null);
-      await finishSignIn(pendingToken);
+      await routeAfterIssued(pendingToken, { name: chosenName, addr: existingAddr });
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
 
   return (
     <div style={{ maxWidth: 380 }}>
-      {step === 'existing-home' ? (
+      {step === 'passkey-offer' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
+          <p style={{ fontSize: '.85rem', margin: 0, lineHeight: 1.5 }}>
+            <strong>You&rsquo;re in.</strong> Create a passkey so next time this device signs you in with a
+            face, fingerprint, or PIN — no emailed code. If it ever stops working, the code always gets you
+            back in and you can set a fresh one.
+          </p>
+          <button className="btn-primary" disabled={busy} onClick={() => void createPasskeyNow()}>
+            {busy ? '…' : 'Create a passkey'}
+          </button>
+          <button className="btn-ghost" disabled={busy} onClick={() => void skipPasskey()}>
+            Not now — continue with email
+          </button>
+        </div>
+      ) : step === 'existing-home' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
           <p style={{ fontSize: '.85rem', margin: 0, lineHeight: 1.5 }}>
             <strong>{email.trim()}</strong> already opens a home
