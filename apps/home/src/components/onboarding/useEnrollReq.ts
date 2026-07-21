@@ -8,7 +8,7 @@
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
+import { getClient, isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -42,12 +42,19 @@ export function parseEnrollReq(): EnrollReq | null {
     const clientId = p.get('client_id');
     const redirectUri = p.get('redirect_uri');
     const agentName = p.get('agent_name');
-    const delegate = p.get('delegate');
+    // `delegate` in the URL is an UNTRUSTED HINT anyway (SEC-001 — /oidc/authorize-grant returns the
+    // registry-derived delegate, which overrides this). So a registered client may OMIT it and get the
+    // registry value here too (openbook-tyndale sends a plain OIDC request with no delegate — without
+    // this default the request wasn't recognized as an enroll at all and the member was never
+    // redirected back). Unregistered client + no delegate still returns null.
+    const delegate = p.get('delegate') ?? (clientId ? (getClient(clientId)?.delegate ?? null) : null);
     const codeChallenge = p.get('code_challenge');
-    const template = p.get('delegation_template');
+    // `delegation_template` is ours; accept `template` as an alias for plain-OIDC relying apps.
+    const template = p.get('delegation_template') ?? p.get('template');
     // spec 257 §11: `agent_name` is OPTIONAL — when absent the OP runs the credential ceremony and
     // (Google) deploys a NAMELESS SA; `sub`/`canonical_agent_id` is the sole load-bearing identity.
-    // The other fields stay MANDATORY (client_id, redirect_uri, delegate, code_challenge, template).
+    // The other fields stay MANDATORY (client_id, redirect_uri, delegate, code_challenge, template) —
+    // with delegate/template satisfiable from the registry/alias as above.
     if (!clientId || !redirectUri || !delegate || !codeChallenge || !template) return null;
     const responseType = p.get('response_type');
     if (responseType && responseType !== 'code') return null; // code flow only (spec 230 §4.1)
