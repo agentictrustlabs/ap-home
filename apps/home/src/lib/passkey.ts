@@ -281,16 +281,22 @@ export async function signWithDiscoverablePasskey(
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
-  const credential = (await navigator.credentials.get({
-    publicKey: {
-      challenge: hexToBytes(digest) as BufferSource,
-      rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
-      allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
-      ...(opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
-      userVerification: 'required',
-      timeout: 60_000,
-    },
-  })) as PublicKeyCredential | null;
+  let credential: PublicKeyCredential | null = null;
+  for (let uvAttempt = 0; uvAttempt < 2; uvAttempt++) {
+    credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: hexToBytes(digest) as BufferSource,
+        rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
+        allowCredentials: [], // discoverable: let the platform offer any passkey for this RP
+        ...(opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
+        userVerification: 'required',
+        timeout: 60_000,
+      },
+    })) as PublicKeyCredential | null;
+    if (!credential || assertionHasUv(credential) || uvAttempt > 0) break;
+    // UV skipped (Windows synced-store bug) — one fresh prompt after a pause forces collection.
+    await new Promise((r) => setTimeout(r, 2000));
+  }
   if (!credential) throw new Error('no passkey available on this device');
   if (expectedCredentialIdDigest) {
     const offered = await sha256Hex(new Uint8Array(credential.rawId));
@@ -301,6 +307,12 @@ export async function signWithDiscoverablePasskey(
   // The platform tells us which credential signed — use its rawId, not a cache.
   cacheAssertionCredential(credential.rawId);
   return signAssertionFromCredential(credential);
+}
+
+/** UV bit (0x04) of an assertion's authenticatorData flags — the custody gate's requirement. */
+function assertionHasUv(credential: PublicKeyCredential): boolean {
+  const authData = new Uint8Array((credential.response as AuthenticatorAssertionResponse).authenticatorData);
+  return authData.length > 32 && ((authData[32] ?? 0) & 0x04) !== 0;
 }
 
 /** Named-CONNECT assertion (spec 233, Mechanism A): a single `get` that returns BOTH the on-chain
@@ -331,16 +343,22 @@ export async function connectAssertionDiscoverable(
   const allowCredentials: PublicKeyCredentialDescriptor[] = cached?.credentialIdB64
     ? [{ id: b64uDecode(cached.credentialIdB64) as BufferSource, type: 'public-key', ...(cachedTransports?.length ? { transports: cachedTransports } : {}) }]
     : []; // no local cache → discoverable (let the platform offer any passkey for this RP, incl. synced)
-  const credential = (await navigator.credentials.get({
-    publicKey: {
-      challenge: hexToBytes(digest) as BufferSource,
-      rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
-      allowCredentials,
-      ...(!cached && opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
-      userVerification: 'required',
-      timeout: 60_000,
-    },
-  })) as PublicKeyCredential | null;
+  let credential: PublicKeyCredential | null = null;
+  for (let uvAttempt = 0; uvAttempt < 2; uvAttempt++) {
+    credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: hexToBytes(digest) as BufferSource,
+        rpId: passkeyRpId(), // subdomain-isolated (spec 229 P5): this origin IS the credential's RP — never hop mid-ceremony
+        allowCredentials,
+        ...(!cached && opts.preferLocalDevice && PASSKEY_HINTS ? ({ hints: PASSKEY_HINTS } as Record<string, unknown>) : {}),
+        userVerification: 'required',
+        timeout: 60_000,
+      },
+    })) as PublicKeyCredential | null;
+    if (!credential || assertionHasUv(credential) || uvAttempt > 0) break;
+    // UV skipped (Windows synced-store bug) — one fresh prompt after a pause forces collection.
+    await new Promise((r) => setTimeout(r, 2000));
+  }
   if (!credential) throw new Error('no passkey available on this device');
   const credentialIdDigest = cacheAssertionCredential(credential.rawId);
   return { signature: signAssertionFromCredential(credential), credentialIdDigest };
@@ -386,6 +404,12 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
   const { justCreated = false, onRetry } = opts;
   const fastDelays = justCreated ? [500, 1000, 2000, 3000, 4000, 5000] : [350, 700, 1050]; // ms before retry N+1
   let slowRetried = false;
+  // UV-skip retry budget (Windows synced-store bug, live 2026-07-20): when the get() runs moments
+  // after the user verified (e.g. right after create), Windows can SKIP re-collecting the PIN and
+  // (buggily) report UV=0 — observed as create uv:true, assertion uv:false seconds later. A fresh
+  // prompt after a pause forces collection, so a UV-less assertion is retried before failing.
+  let uvRetries = 0;
+  const UV_RETRY_DELAYS = [2000, 4000];
   // Target the lookup at where the credential LIVES (registration-time getTransports) — a Hello key
   // stays a local-only search (fast fail → retries ride out the indexing race instead of Windows
   // re-routing to the phone QR), a phone key goes straight to hybrid. PASSKEY_* is only the fallback
@@ -432,6 +456,16 @@ async function signAssertion(digest: Hex, credentialIdBytes: Uint8Array, opts: S
     const offered = new Uint8Array(credential.rawId);
     if (offered.length !== credentialIdBytes.length || !offered.every((b, i) => b === credentialIdBytes[i])) {
       throw new Error('passkey offered by the platform does not match the registered credential (SEC-015)');
+    }
+    // UV skipped (see UV_RETRY_DELAYS note): re-prompt after a pause — the fresh dialog collects the
+    // PIN/biometric properly on providers that only skip when the user verified moments earlier.
+    if (!assertionHasUv(credential) && uvRetries < UV_RETRY_DELAYS.length) {
+      const delay = UV_RETRY_DELAYS[uvRetries]!;
+      uvRetries += 1;
+      try { console.log('[pk-probe] UV missing — re-prompting', { uvRetries, delay }); } catch { /* */ }
+      onRetry?.('Your device skipped the PIN/biometric check — asking again to verify properly…');
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
     }
     return signAssertionFromCredential(credential);
   }
