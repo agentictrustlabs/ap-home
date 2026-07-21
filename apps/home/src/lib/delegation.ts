@@ -325,6 +325,17 @@ export const APP_COORDINATION_READ_SCOPES = [
   'vault:uupg:coalition', 'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy',
 ] as const;
 
+/** The org's OWN app-record NAMESPACE, READ-only. Where APP_COORDINATION_READ_SCOPES enumerates the
+ *  uupg app's individual public-claim record types, a relying app whose ontology decomposes ALL of a
+ *  principal's data into ONE vault namespace root (newcitycase doc 10 §1: `vault:newcity:*`) grants
+ *  the org's own agent read over that ROOT — a namespace WILDCARD, never per-record. The platform
+ *  therefore never names a single domain record: which records the agent actually reads is decided
+ *  by the org's PLAYBOOK at turn time (spec 327 §4b), read owner-self through this grant. READ-ONLY
+ *  and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking it denies per-record at
+ *  demo-mcp, surfaced as "re-enable storage", never blanket-staled. Grounds the discussion @ask turn
+ *  (and coordination) in the org's own recorded figures instead of invention. */
+export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*'] as const;
+
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
  * by the steward's credential AS the principal at the enable ceremony. Exercised only by the
@@ -349,9 +360,11 @@ function buildInteractionsStruct(
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
-      // spec 334 §6 — the org's own app-coordination records, READ-only: the coordination agent grounds
-      // its work in the org's recorded claims. Additive; a pre-334§6 grant re-enables to pick them up.
-      { server: mcpServerId, resources: [...APP_COORDINATION_READ_SCOPES], ops: ['read'] },
+      // spec 334 §6 — the org's own app records, READ-only: the coordination agent AND the discussion
+      // @ask turn ground their work in the org's recorded figures. Two shapes, both read-only/additive:
+      // the uupg app's enumerated public-claim types, and any relying app's ontology namespace ROOT
+      // (e.g. vault:newcity:*) — the platform never names a domain record; the org's playbook does.
+      { server: mcpServerId, resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
     ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),

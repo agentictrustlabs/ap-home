@@ -30,6 +30,8 @@ import {
   type ConsultOutcomeV1,
 } from '@agenticprimitives/fabric/messaging';
 import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { gatherReferenceContext } from './endeavor-work-skill.js';
+import type { PublicGraphEnv } from './public-graph.js';
 
 export interface DiscussionRespondInput {
   principal: string;
@@ -64,6 +66,12 @@ export interface DiscussionRoutingOpts {
 export interface DiscussionIo {
   readTopic: () => Promise<unknown>;
   post: (bodyText: string) => Promise<{ messageId?: string }>;
+  /** spec 334 §6 gather phase, extended to the @ask turn: read ONE of the org's OWN records by
+   *  recordType (owner-self, through the read-only coordination grant). recordType is OPAQUE here —
+   *  the record vocabulary lives in the org's playbook, never in the platform. Omitted ⇒ org-record
+   *  grounding is simply not offered (the turn grounds on topic messages + playbook only). Invoked
+   *  BY THE HARNESS's gather sub-turn, never by the post planner. */
+  readOrgRecord?: (recordType: string) => Promise<{ ok: boolean; data?: unknown; error?: string; needsEnable?: boolean }>;
 }
 
 /** What `internal.channels.read` returns (the slice the goal-context builder needs). */
@@ -180,7 +188,7 @@ const ROUTING_CONTRACT =
 export interface DiscussionTurnDegraded { step: 'routed-turn'; cause: string }
 
 export async function handleDiscussionRespond(
-  env: PlannerEnv,
+  env: PlannerEnv & PublicGraphEnv,
   input: DiscussionRespondInput,
   io: DiscussionIo,
   routing?: DiscussionRoutingOpts,
@@ -198,6 +206,26 @@ export async function handleDiscussionRespond(
       topicContext = contextLines(read);
       if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
     } catch { /* trigger-only context + default playbook */ }
+    // spec 334 §6 gather phase, applied to the @ask turn (same "harness reads, model posts"
+    // construction): when the caller wired org-record reads, a gather sub-turn lets the org's own
+    // agent read its OWN records — the recordTypes it reads are the ones the PLAYBOOK above names
+    // (domain vocabulary stays in the org's guidance, never here) — and embeds a compact digest in
+    // the goal. Pure enrichment: no grant / no LLM / nothing relevant ⇒ '' and the turn is unchanged.
+    if (io.readOrgRecord) {
+      try {
+        const references = await gatherReferenceContext(env, {
+          goal: input.triggerBody, playbook, principal: input.principal,
+          endeavorId: input.channelId, // opaque correlation id for the gather sub-turn (no board here)
+          readOrgRecord: io.readOrgRecord,
+        });
+        if (references.trim()) {
+          topicContext +=
+            "\n\nReference facts from your organization's own records (ground your reply in these; " +
+            'follow your organization guidance above on how to cite and caveat them — never present a ' +
+            'figure as more verified than the record says):\n' + references.trim();
+        }
+      } catch { /* gather is best-effort enrichment — a failure just yields no reference block */ }
+    }
   }
 
   const routingOn = !!routing && routing.candidates.length > 0;
