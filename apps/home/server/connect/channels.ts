@@ -12,7 +12,7 @@
 //   POST { action:'create'|'post', … } → { ok, channelId?|messageId? } | { error }
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
 import { ensureOrgMemberLink } from './membership';
 import { orgVault } from '../lib/org-vault';
 
@@ -28,13 +28,36 @@ const jsonCors = (body: unknown, request: Request, status = 200): Response =>
 export const onRequestOptions = async ({ request }: FnContext): Promise<Response> =>
   new Response(null, { status: 204, headers: cors(request) });
 
+/** The `aud` of a JWT without verifying it (used only to pick which expectedAud to verify against). */
+function unverifiedAud(token: string): string | null {
+  try {
+    const seg = token.split('.')[1] ?? '';
+    const aud = JSON.parse(atob(seg.replace(/-/g, '+').replace(/_/g, '/'))).aud;
+    return typeof aud === 'string' ? aud : null;
+  } catch {
+    return null;
+  }
+}
+
 async function personFrom(request: Request, env: FnContext['env']): Promise<{ person: string; token: string } | null> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  const iss = ownIssuer(request, env);
+  // 1) the Home's own portal session (aud = demo-sso).
+  let v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: iss });
+  // 2) fall back to a REGISTERED relying-app id_token (e.g. skills-app), so an app
+  //    can drive the Home's channel ops on the signed-in person's behalf — same
+  //    person, same steward-wire lookup, same on-chain gate downstream. Only auds
+  //    of registered clients are accepted; everything else is refused.
+  if (!v.ok) {
+    const aud = unverifiedAud(token);
+    if (aud && getClient(aud)) {
+      v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
+    }
+  }
   if (!v.ok) return null;
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   return person ? { person, token } : null;
