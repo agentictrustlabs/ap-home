@@ -334,7 +334,12 @@ export const APP_COORDINATION_READ_SCOPES = [
  *  and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking it denies per-record at
  *  demo-mcp, surfaced as "re-enable storage", never blanket-staled. Grounds the discussion @ask turn
  *  (and coordination) in the org's own recorded figures instead of invention. */
-export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*'] as const;
+export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*'] as const;
+// `vault:family:*` is the skills-app family-office relying namespace (record types like
+// `family:portfolio`, `family:budget`; resource = `vault:` + recordType). ADDITIVE + read-only:
+// only grants built AFTER this ships carry it, so existing grants are unaffected — an org must
+// (re-)enable discussion storage to pick it up. The records themselves are owner-authored through
+// the portal's browser-vault-client (spec 288 edge); the org's playbook names which to read.
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
