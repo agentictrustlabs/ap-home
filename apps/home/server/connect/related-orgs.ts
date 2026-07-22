@@ -10,7 +10,17 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
+
+/** The `aud` of a JWT without verifying it (only used to pick which expectedAud to verify against). */
+function unverifiedAud(token: string): string | null {
+  try {
+    const aud = JSON.parse(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/'))).aud;
+    return typeof aud === 'string' ? aud : null;
+  } catch {
+    return null;
+  }
+}
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
 //  spec-275 session-authorized POST branch below — same verifier as the GET.)
@@ -46,7 +56,14 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const homeAud = env.DEMO_SSO_AUD ?? 'demo-sso';
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
+  let v = await verifyAgentSession(token, { keys, expectedAud: clientId ?? homeAud, expectedIss: ownIssuer(request, env) });
+  // Person's-own-view (no client_id): also accept a REGISTERED relying-app token (e.g.
+  // skills-app), so an app can list the connected person's own orgs — same person, their
+  // own links. Mirrors the /connect/channels relying-token fallback.
+  if (!v.ok && !clientId) {
+    const aud = unverifiedAud(token);
+    if (aud && getClient(aud)) v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
+  }
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
   const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
@@ -60,8 +77,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // synthesized (self-heal — a second app's writes surface everywhere). Reconciling a projection
   // from its source is not a fallback mechanism (ADR-0013).
   if (!clientId) {
+    // Reconcile from the authoritative vault doc when the token can read it. Best-effort:
+    // a relying token may lack the vault-read scope — the KV projection below still serves.
     const { readRelationshipsDoc } = await import('../lib/relationships-doc');
-    const doc = await readRelationshipsDoc(env, person, token);
+    const doc = await readRelationshipsDoc(env, person, token).catch(() => null);
     for (const [org, entry] of Object.entries(doc?.orgs ?? {})) {
       if (idx.some((a) => a.toLowerCase() === org.toLowerCase())) continue;
       const wire = Array.isArray(entry.delegations) ? entry.delegations[0] ?? null : null;
