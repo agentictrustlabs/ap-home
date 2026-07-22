@@ -182,9 +182,10 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     // New City AI family/advisor portal (newcitycase repo, apps/portal) — wealth reporting on the
-    // substrate; site-login only. Local dev/e2e shares port 8798 with org-site (distinct client_id,
-    // so no ambiguity — the RP always sends its own client_id). Delegate is the shared demo
-    // delegate SA for now; replace when the portal mints its own service SA.
+    // substrate; site-login + org-create (FR-48: the connecting user creates/selects a user-custodied
+    // family org at onboarding). Local dev/e2e shares port 8798 with org-site (distinct client_id, so
+    // no ambiguity — the RP always sends its own client_id). Delegate is the shared demo delegate SA
+    // for now; replace when the portal mints its own service SA.
     {
       client_id: 'newcity-portal',
       name: 'New City AI Portal',
@@ -194,7 +195,7 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:8798/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     // OpenBook × Tyndale (openbook-tyndale.vercel.app) — Tyndale Open Bible Dictionary demo with a
