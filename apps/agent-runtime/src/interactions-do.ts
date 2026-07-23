@@ -99,7 +99,7 @@ const ASSISTANT_SKILL_RESOURCE = 'conversation.topic:assistant-skill';
 // Product cap on the assistant-skill playbook markdown (stored as a vault record). Not a
 // storage/KEK limit — vault records hold much larger JSON; the only cost is LLM context per
 // turn, so this is set generously to allow rich, multi-skill, vault-leveraging playbooks.
-const ASSISTANT_SKILL_MAX_CHARS = 32768;
+const ASSISTANT_SKILL_MAX_CHARS = 65536;
 interface AssistantSkillDocV1 { version: 'ap.assistant-skill.v1'; markdown: string; updatedBy: string; updatedAt: string }
 
 // spec 327 — org-assistant dispatch bounds. Per-topic fixed window in DO storage: member-driven
