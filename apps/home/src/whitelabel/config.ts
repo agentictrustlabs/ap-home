@@ -160,8 +160,12 @@ const faithImpact: WhiteLabelConfig = {
         'https://demo-uupg-production.richardpedersen3.workers.dev/',
         'https://demo-uupg.richardpedersen3.workers.dev/',
         'https://demo-uupg-production.global-church.workers.dev/',
+        // uupg apps/tracker — the hotspot workspace (same product, its own Worker; dev on :8799).
+        'https://hotspot-tracker.richardpedersen3.workers.dev/',
         'http://127.0.0.1:8797/',
         'http://localhost:8797/',
+        'http://127.0.0.1:8799/',
+        'http://localhost:8799/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
