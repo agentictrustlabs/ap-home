@@ -79,6 +79,17 @@ const nextConfig = {
         source: '/(.*)',
         headers: securityHeaders,
       },
+      // Remote-signer arrival (?signer=remote&opener=<allowlisted> on the front door only): the
+      // opener relationship IS the transport — the relying app's tab holds the demo persona's key
+      // and signs over postMessage (src/lib/remote-signer.ts, exact-origin gated). COOP
+      // 'same-origin-allow-popups' would put this popup in a new browsing-context group and sever
+      // window.opener, so the bridge could never arm. Scope: the root document with that exact
+      // query only; every other route keeps the strict baseline.
+      {
+        source: '/',
+        has: [{ type: 'query', key: 'signer', value: 'remote' }],
+        headers: [{ key: 'Cross-Origin-Opener-Policy', value: 'unsafe-none' }],
+      },
     ];
   },
 };
