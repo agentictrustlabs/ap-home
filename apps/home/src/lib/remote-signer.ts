@@ -6,8 +6,9 @@
 // still custody-authorized by the signature the opener returns. Ported from the GC impact home.
 
 // Origins permitted to drive a remote-signer connect (relying apps whose demo personas sign
-// server-side: the uupg tracker and the New City portal, prod + local dev). Must be an
-// exact origin match — the opener param is validated against this list before we ever post to it.
+// server-side: the uupg tracker, the New City portal, and the hotspot tracker — prod + local dev).
+// Must be an exact origin match — the opener param is validated against this list before we ever
+// post to it.
 const ALLOWED_OPENER_ORIGINS = [
   'https://uupg.richardpedersen3.workers.dev',
   'http://127.0.0.1:8797',
@@ -15,6 +16,9 @@ const ALLOWED_OPENER_ORIGINS = [
   'https://newcity-portal.richardpedersen3.workers.dev',
   'http://127.0.0.1:8798',
   'http://localhost:8798',
+  'https://hotspot-tracker.richardpedersen3.workers.dev',
+  'http://127.0.0.1:8799',
+  'http://localhost:8799',
 ];
 
 interface Eip1193Request {
