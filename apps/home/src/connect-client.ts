@@ -2337,6 +2337,8 @@ export interface MyOrg {
   /** spec 275 — agent kind. The orgs view shows only `org` (or legacy undefined); the
    *  treasury kinds belong to the "Your agents" tree, not the organizations list. */
   kind?: AgentKind;
+  /** steward = custody; member = authority-only membership (no org custody). */
+  relationship?: 'steward' | 'member';
   /** The scoped org→site delegation the person granted (absent for self-governed orgs).
    *  Carries the full wire struct so /you can revoke it (revokeGrantedDelegation). */
   delegation?: DelegationWire;

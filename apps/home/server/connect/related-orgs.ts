@@ -177,6 +177,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // read/oversee the agent's vault). Persisted so OrgDetail can read a home-created org's data.
     stewardshipDelegation?: unknown;
     membershipDelegation?: unknown;
+    // steward (custody) vs member (authority-only). Defaults steward for legacy creator links.
+    // External seeds (e.g. tracker demo) MUST send relationship:'member' for non-custodians.
+    relationship?: 'steward' | 'member';
+    /** Org-context display name the member shares (shown on the steward's roster / delegated-idx). */
+    displayName?: string;
     // AUDIT NEW-RAG-2 — the ERC-1271 write path binds the signature to a one-shot nonce + short expiry.
     nonce?: string;
     expiry?: number;
@@ -279,6 +284,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // only orgName) NEVER clobbers fields it doesn't carry — delegations, proofHash, custody persist.
   const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
   const pick = <T,>(next: T | undefined, prev: unknown, dflt: T): T => (next !== undefined ? next : (prev as T) ?? dflt);
+  const relationship: 'steward' | 'member' = body?.relationship === 'member'
+    || (existing.relationship as string | undefined) === 'member'
+    ? 'member'
+    : (body?.relationship === 'steward' ? 'steward' : ((existing.relationship as 'steward' | 'member' | undefined) ?? 'steward'));
+  const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 80) : '';
   const link = {
     ...existing,
     orgAgent: org,
@@ -296,6 +306,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // spec 275 — agent kind + parent (defaults keep legacy org links person-parented).
     kind: pick(body?.kind, existing.kind, 'org'),
     parent: pick(body?.parent, existing.parent, person).toLowerCase(),
+    relationship,
+    ...(displayName ? { displayName } : {}),
     createdAt: (existing.createdAt as number) ?? Date.now(),
   };
   // Index the WHOLE tree under the person (root) so the home renders org-treasuries too (MAM-D7).
@@ -305,19 +317,36 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     idx.push(org);
     await env.AUTH_CODES.put(`related-idx:${person}`, JSON.stringify(idx));
   }
+  // Member seeds (external custodian path): also project onto the org's inbound roster so the
+  // steward's Members panel / org-directory can find them without a naming-service claim.
+  if (relationship === 'member' && link.membershipDelegation) {
+    const dKey = `delegated-idx:${org}`;
+    const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; displayName?: string; delegation: unknown }>;
+    if (!dIdx.some((x) => x.orgAgent.toLowerCase() === person)) {
+      dIdx.push({
+        orgAgent: person,
+        orgName: displayName || String(link.orgName || ''),
+        ...(displayName ? { displayName } : {}),
+        delegation: link.membershipDelegation,
+      });
+      await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
+    } else if (displayName) {
+      const row = dIdx.find((x) => x.orgAgent.toLowerCase() === person);
+      if (row) { row.displayName = displayName; await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx)); }
+    }
+  }
   // spec 323 W1 — mirror into the person's AUTHORITATIVE vault doc when this write rides their own
   // home session (the DO op is self-gated; the external-custodian sig path has no person session,
   // so its links surface in the doc at the person's next reconcile-capable ceremony).
   if (bearer) {
     const { mergeRelationshipEntry } = await import('../lib/relationships-doc');
-    const stewardish = (existing.relationship as string | undefined) !== 'member';
     await mergeRelationshipEntry(env, person, bearer, {
       org,
-      relationship: stewardish ? 'steward' : 'member',
+      relationship,
       ...(link.orgName ? { orgName: String(link.orgName) } : {}),
       ...(link.kind ? { kind: String(link.kind) } : {}),
       ...(link.parent ? { parent: String(link.parent) } : {}),
-      ...(link.stewardshipDelegation ? { delegations: [link.stewardshipDelegation] } : {}),
+      ...(link.stewardshipDelegation ? { delegations: [link.stewardshipDelegation] } : link.membershipDelegation ? { delegations: [link.membershipDelegation] } : {}),
     });
   }
   return jsonCors({ ok: true }, request);

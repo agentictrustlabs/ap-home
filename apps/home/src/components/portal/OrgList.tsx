@@ -118,13 +118,13 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
     <div className="dash-section" style={{ marginTop: heading ? '1.5rem' : 0 }}>
       {heading && <h2>Your organizations</h2>}
       <p style={{ color: 'var(--c-g500, #64748b)', fontSize: '.9rem', marginTop: heading ? '-.4rem' : 0, marginBottom: '.8rem' }}>
-        Organizations you created — each its own Smart Agent, custodied by you. This link is private to
-        your home; apps only see what you delegate to them.
+        Organizations you steward or belong to — each its own Smart Agent. Links are private to your
+        home; apps only see what you delegate to them.
       </p>
       {!loaded ? (
         <p className="manage-card-blurb">Loading…</p>
       ) : orgs.length === 0 ? (
-        <p className="manage-card-blurb">No organizations yet — create one from a community app.</p>
+        <p className="manage-card-blurb">No organizations yet — create one from a community app, or accept an invite.</p>
       ) : (
         <div className="manage-grid">
           {orgs.map((o) => (
@@ -132,12 +132,16 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
               <div className="manage-card-head">
                 <span className="manage-card-icon"><BuildingIcon size={17} /></span>
                 <span className="manage-card-label">{o.orgName || '(unnamed org)'}</span>
-                <span className="manage-card-badge live">{purposeLabel(o.purpose)}</span>
+                <span className="manage-card-badge live">{o.relationship === 'member' ? 'member' : purposeLabel(o.purpose)}</span>
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={o.orgAgent} size="sm" /></div>
               <p className="manage-card-blurb">
-                Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
-                delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a>
+                {o.relationship === 'member' ? (
+                  <>You belong to this organization as a member (no custody). <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a></>
+                ) : (
+                  <>Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
+                  delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a></>
+                )}
               </p>
               {onSelect ? (
                 <button

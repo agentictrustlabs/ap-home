@@ -214,6 +214,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         mandate?: InteractionMandateV1;
         toLabel?: string;
         toName?: string;
+        /** Direct recipient Smart Agent (0x…). Preferred for org-roster messaging when the peer
+         *  has no public naming claim — canonical identity is the SA (ADR-0041). */
+        to?: string;
         subject?: string;
         bodyText?: string;
         contextRefs?: ContextRefV1[];
@@ -236,29 +239,37 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   try {
     if (body?.action === 'send') {
-      // Composer send (spec 312): recipient by claimed name — one on-chain
-      // resolution mechanism; no listing/roster lookup here (ADR-0025).
-      // `toName` is a FULL name (any parent, e.g. alice.demo.agent — what the
-      // KB search returns); `toLabel` is a bare label under the app's default
-      // parent (what directory listings store).
-      const fullName = (body.toName ?? '').trim().toLowerCase();
-      const label = (body.toLabel ?? '').trim().toLowerCase();
-      const name = /^[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(fullName)
-        ? fullName
-        : /^[a-z0-9-]{1,63}$/.test(label)
-          ? agentNameForLabel(label)
-          : null;
-      if (!name || !body.bodyText?.trim()) {
-        return jsonCors({ error: 'toName (full) or toLabel + bodyText required' }, request, 400);
+      // Composer send (spec 312): recipient by claimed name OR by Smart Agent address.
+      // Naming remains the public discovery path; `to` (0x SA) is for known peers — e.g. org
+      // roster / member.profile — without requiring a public name claim (ADR-0041 identity).
+      // Listings are still not a public search plane here (ADR-0025).
+      if (!body.bodyText?.trim()) {
+        return jsonCors({ error: 'bodyText required' }, request, 400);
       }
-      const naming = new AgentNamingClient({
-        rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
-        chainId: CHAIN_ID,
-        registry: CONTRACTS.agentNameRegistry,
-        universalResolver: CONTRACTS.agentNameUniversalResolver,
-      });
-      const recipient = await naming.resolveName(name);
-      if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
+      let recipient: Address | null = null;
+      const toSa = (body.to ?? '').trim().toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(toSa)) {
+        recipient = toSa as Address;
+      } else {
+        const fullName = (body.toName ?? '').trim().toLowerCase();
+        const label = (body.toLabel ?? '').trim().toLowerCase();
+        const name = /^[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(fullName)
+          ? fullName
+          : /^[a-z0-9-]{1,63}$/.test(label)
+            ? agentNameForLabel(label)
+            : null;
+        if (!name) {
+          return jsonCors({ error: 'to (0x SA), toName (full), or toLabel + bodyText required' }, request, 400);
+        }
+        const naming = new AgentNamingClient({
+          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+          chainId: CHAIN_ID,
+          registry: CONTRACTS.agentNameRegistry,
+          universalResolver: CONTRACTS.agentNameUniversalResolver,
+        });
+        recipient = await naming.resolveName(name);
+        if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
+      }
       const out = await sendFromInbox(inboxKvFor, owner as Address, {
         recipient,
         subject: body.subject,
