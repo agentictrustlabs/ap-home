@@ -58,6 +58,9 @@ export function makeEnv(): Env {
     // A developer testing with no provider must OPT IN explicitly via DEV_OTP_ECHO=true (never in production).
     DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO) ?? 'false',
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
+    // Shared demo people (Nathan, David…) custodied HERE so every app can sign them in and their
+    // own portal can run ceremonies without a wallet. Demo keys only — never a real person's.
+    DEMO_PERSONA_KEYS: t(process.env.DEMO_PERSONA_KEYS),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
 }

@@ -34,6 +34,7 @@ import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
+import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
@@ -435,6 +436,11 @@ export async function openHome(
 export async function signHashFor(via: Via, sender?: Address, auth?: Auth): Promise<SignHash> {
   via = (String(via ?? '').toLowerCase() || 'passkey') as Via; // tolerate the display-form via from the session
   if (via === 'wallet') {
+    // DEMO ACCOUNTS FIRST: a seeded demo person (Nathan, David…) has a wallet CREDENTIAL but no
+    // wallet in this browser — their custodian key is held by the Home (DEMO_PERSONA_KEYS). Signing
+    // server-side gives them the same prompt-free ceremonies a KMS home has; every real wallet home
+    // probes `false` once per session and falls straight through to the injected provider below.
+    if (auth?.token && (await isDemoCustodyHome(auth.token))) return demoCustodySignHash(auth.token);
     // Sign with the wallet that CUSTODIES `sender` (the home SA) — not MetaMask's active account (which
     // may be another home's custodian, e.g. the platform deployer). This is the relying-app GRANT signer,
     // so the site/session/payment delegations must be signed by the home's actual custodian. Falls back to

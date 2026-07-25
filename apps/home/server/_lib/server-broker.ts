@@ -104,6 +104,13 @@ export interface Env {
    *  default — a CONFIGURED provider (SendGrid/Twilio) NEVER echoes. Never enable on a real deployment. */
   DEV_OTP_ECHO?: string;
 
+  // ─── Demo accounts (shared demo people, custodied here) ────────────
+  /** JSON registry of the seeded DEMO personas this Home custodies: either the apps' seed shape
+   *  `{handle: {sa, eoaPrivateKey, name, blurb}}` or a flat `{"0x<sa>": "0x<privateKey>"}` map.
+   *  Its presence enables /connect/demo-personas, /connect/demo-signin and /connect/persona-sign —
+   *  demo keys ONLY (see server/_lib/demo-custody.ts). Unset ⇒ all three are inert. */
+  DEMO_PERSONA_KEYS?: string;
+
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.
    *  When unset, defaults to the production patterns (impact-agent.me + its subdomains

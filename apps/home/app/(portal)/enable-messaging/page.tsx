@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
-import { activateInteractionsIfNeeded, activateInboxDeliveryIfNeeded, isKmsVia, type Via } from '../../../src/home/onboarding';
+import { activateInteractionsIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 
 export default function EnableMessagingPage() {
@@ -34,7 +34,8 @@ export default function EnableMessagingPage() {
       // but isKmsVia/signHashFor match lowercase — without this a SOCIAL home falls through to the passkey
       // signer and prompts a device challenge instead of signing gesture-free via KMS.
       const via = (String(session.via ?? '').toLowerCase() || 'passkey') as Via;
-      const auth = isKmsVia(via) ? { token: session.token } : undefined;
+      // Token always passed — KMS and demo-account homes both sign server-side with it.
+      const auth = { token: session.token };
       // Principals to refresh: the person + every ORG they STEWARD (custodial control — a 'member' link is
       // authority-only and its owner enables its own planes). The person's credential custodies these orgs
       // (org-create deploys them under the same custodian), so it can sign their grants.

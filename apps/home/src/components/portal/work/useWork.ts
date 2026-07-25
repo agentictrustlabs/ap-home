@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
-import { activateInteractionsIfNeeded, isKmsVia, resolveVia } from '../../../home/onboarding';
+import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
 import { fetchWorkList, type WorkListResponse } from '../../../lib/work-client';
 
 export interface RelatedOrg {
@@ -95,7 +95,9 @@ export function useReEnableInteractions(): (principal: Address) => Promise<{ ok:
   return useCallback(async (principal: Address) => {
     if (!session) return { ok: false, error: 'not signed in' };
     const via = resolveVia(profile?.credential, session.via);
-    const auth = isKmsVia(via) ? { token: session.token } : undefined;
+    // Token always passed: KMS and demo-account homes both sign server-side with it; the wallet
+    // and passkey paths ignore it.
+    const auth = { token: session.token };
     const r = await activateInteractionsIfNeeded(principal, via, auth, true);
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not re-enable storage' };
   }, [session, profile]);

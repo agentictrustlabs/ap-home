@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { claimName } from '../../connect-client';
-import { isKmsVia, signHashFor, type Via } from '../../home/onboarding';
+import { signHashFor, type Via } from '../../home/onboarding';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, toAgentName } from '../../lib/domain';
 import { whitelabel } from '../../whitelabel/config';
 import { BrandShield } from '../shared/BrandShield';
@@ -63,7 +63,9 @@ export function RequiredNameGate({
     setBusy(true);
     setErr('');
     try {
-      const auth = isKmsVia(via) ? { token } : undefined;
+      // Always carry the session token: KMS homes sign with it, demo-account homes sign with it
+      // (server-held custodian), and wallet/passkey homes ignore it.
+      const auth = { token };
       const sign = await signHashFor(via, agent, auth);
       const res = await claimName(agent, sign, label);
       if (!res.ok) {

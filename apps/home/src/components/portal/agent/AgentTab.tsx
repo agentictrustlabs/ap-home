@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
-import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../../home/onboarding';
+import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, resolveVia, signHashFor, type Via } from '../../../home/onboarding';
 import { DELIVERY_SERVICE_SA } from '../../../lib/inbox-delivery';
 import { issueConsultabilityDelegation, toWire, type DelegationWire } from '../../../lib/delegation';
 import { issueDirectoryListing } from '../../../home/directory';
@@ -68,7 +68,10 @@ export function useMessagingDelivery(targetAgent?: Address): {
       // org when a targetAgent is set).
       const owner = (targetAgent ?? agentAddress) as Address;
       const via = (String(session.via ?? '').toLowerCase() || 'passkey') as Via;
-      const auth = isKmsVia(via) ? { token: session.token } : undefined;
+      // Token always passed: a KMS home signs with it, and so does a DEMO account (its custodian
+      // key lives at the Home) — which is what keeps 'Enable vault storage' from opening a wallet
+      // prompt no demo user can satisfy. Wallet/passkey homes ignore it.
+      const auth = { token: session.token };
       const a = await activateInteractionsIfNeeded(owner, via, auth, true);
       const b = await activateInboxDeliveryIfNeeded(owner, via, auth, true);
       if (a.ok && b.ok) setEnabled(true);

@@ -316,7 +316,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // connected custodian signs the enable ceremony SERVER-SIDE (no passkey prompt). Matches join() above;
       // the old raw-via path popped a passkey for KMS/social homes (sign-by-credential-not-via).
       const via = resolveVia(homeProfile?.credential, session.via);
-      const auth = isKmsVia(via) ? { token: session.token } : undefined;
+      // Token always passed — KMS and demo-account homes both sign server-side with it.
+      const auth = { token: session.token };
       const bound = await activateVaultIfNeeded(org, via, auth);
       if (!bound.ok) throw new Error(bound.error);
       const grant = await activateInboxDeliveryIfNeeded(org, via, auth);
