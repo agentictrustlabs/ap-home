@@ -7,7 +7,7 @@
 // The invitation is a bearer claim: whoever redeems the link + confirms that email joins the org as a
 // MEMBER (authority-only, ADR-0025). Redemption lives in org-invite-redeem.ts. Email is delivered via the
 // gated SendGrid sender (log-only until configured).
-import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { verifyStewardship } from '../_lib/verify-stewardship';
 import type { IncomingDelegation } from '../_lib/verify-delegation';
@@ -19,6 +19,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
+import { getClient } from '../../src/lib/oidc-clients';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -29,16 +30,37 @@ export const onRequestOptions = async (): Promise<Response> => new Response(null
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
-/** Steward-control gate (same as the inbox `?agent` scope): the org is in the person's managed set. */
-export async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
+/** Resolve the caller person SA from a Home session OR a registered relying-app id_token
+ *  (same ingress as /connect/inbox — e.g. hotspot-tracker / uupg-tracker). */
+async function personFromInviteAuth(env: FnContext['env'], request: Request): Promise<string | null> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) return false;
+  if (!token) return null;
   const { jwks } = await getServer(env);
   const keys = await importJwks(jwks);
-  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
-  if (!v.ok) return false;
-  const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  const issOk = ownIssuer(request, env);
+  const home = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: issOk });
+  if (home.ok) {
+    return (home.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+  }
+  // Relying-app id_token (aud = registered client_id, e.g. uupg-tracker). Signature still pinned
+  // to this Home's JWKS; stewardship is re-checked on-chain below — aud alone never grants control.
+  let iss: string | undefined, aud: string | undefined;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)))) as { iss?: string; aud?: string };
+    iss = typeof payload.iss === 'string' ? payload.iss : undefined;
+    aud = typeof payload.aud === 'string' ? payload.aud : undefined;
+  } catch { return null; }
+  if (!iss || !issOk(iss) || !aud || !getClient(aud)) return null;
+  const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
+  if (!idv.ok) return null;
+  const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
+  return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+}
+
+/** Steward-control gate (same as the inbox `?agent` scope): the org is in the person's managed set. */
+export async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
+  const person = await personFromInviteAuth(env, request);
   if (!person) return false;
   // SEC-H2 — authority comes from an ON-CHAIN stewardship delegation, NOT the self-writable KV
   // `relationship` field. The stewardship wire lives in the related link (a cache reconciled from
