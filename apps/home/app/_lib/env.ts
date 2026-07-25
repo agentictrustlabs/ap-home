@@ -61,6 +61,7 @@ export function makeEnv(): Env {
     // Shared demo people (Nathan, David…) custodied HERE so every app can sign them in and their
     // own portal can run ceremonies without a wallet. Demo keys only — never a real person's.
     DEMO_PERSONA_KEYS: t(process.env.DEMO_PERSONA_KEYS),
+    DEMO_SIGNER_SECRET: t(process.env.DEMO_SIGNER_SECRET),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
   };
 }

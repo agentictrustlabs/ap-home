@@ -110,6 +110,10 @@ export interface Env {
    *  Its presence enables /connect/demo-personas, /connect/demo-signin and /connect/persona-sign —
    *  demo keys ONLY (see server/_lib/demo-custody.ts). Unset ⇒ all three are inert. */
   DEMO_PERSONA_KEYS?: string;
+  /** Shared secret a demo APP presents to `PUT /connect/demo-sign` when it runs a ceremony on a demo
+   *  person's behalf (org deploy, vault-key, admissions) — there is no person session in those flows.
+   *  Unset ⇒ that route is off (the session-gated /connect/persona-sign is unaffected). */
+  DEMO_SIGNER_SECRET?: string;
 
   /** SEC-006: comma-separated allowlist of inbound `Host` headers the broker will
    *  mint id_tokens for. Wildcards like `*.impact-agent.me` match exactly one label.

@@ -28,7 +28,16 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from '@agenticprimitives/types';
 import type { Env } from './server-broker';
 
-export type DemoPersona = { handle: string; sa: string; name?: string; blurb?: string; privateKey: Hex };
+export type DemoPersona = {
+  handle: string;
+  sa: string;
+  name?: string;
+  blurb?: string;
+  /** Orgs this demo person custodies, carried through from the app seeds (uupg's alliance gates
+   *  read it). Opaque here — the Home stores and returns it, it never interprets it. */
+  custodies?: { sa: string; name: string }[];
+  privateKey: Hex;
+};
 
 /** Accepts the apps' seed shape `{handle: {sa, eoaPrivateKey, name}}` AND a flat
  *  `{"0x<sa>": "0x<privateKey>"}` map, so either can be pasted into the secret. */
@@ -45,11 +54,11 @@ function parseRegistry(raw: string | undefined): Map<string, DemoPersona> {
       }
       continue;
     }
-    const v = value as { sa?: string; eoaPrivateKey?: string; privateKey?: string; name?: string; blurb?: string };
+    const v = value as { sa?: string; eoaPrivateKey?: string; privateKey?: string; name?: string; blurb?: string; custodies?: { sa: string; name: string }[] };
     const sa = (v.sa ?? '').toLowerCase();
     const pk = v.eoaPrivateKey ?? v.privateKey ?? '';
     if (!/^0x[0-9a-f]{40}$/.test(sa) || !/^0x[0-9a-fA-F]{64}$/.test(pk)) continue;
-    out.set(sa, { handle: key, sa, name: v.name, blurb: v.blurb, privateKey: pk as Hex });
+    out.set(sa, { handle: key, sa, name: v.name, blurb: v.blurb, custodies: Array.isArray(v.custodies) ? v.custodies : undefined, privateKey: pk as Hex });
   }
   return out;
 }
@@ -82,4 +91,10 @@ export function listDemoPersonas(env: Env): DemoPersona[] {
  *  authorizations all verify unchanged. */
 export async function signDigestAsDemoPersona(persona: DemoPersona, digest: Hex): Promise<Hex> {
   return privateKeyToAccount(persona.privateKey).signMessage({ message: { raw: digest } });
+}
+
+/** The custodian EOA address — PUBLIC (it's the on-chain custodian of the person's SA, and a deploy
+ *  ceremony needs it as `custodians: [...]`). Derived from the key; the key itself never leaves. */
+export function demoCustodianAddress(persona: DemoPersona): string {
+  return privateKeyToAccount(persona.privateKey).address;
 }

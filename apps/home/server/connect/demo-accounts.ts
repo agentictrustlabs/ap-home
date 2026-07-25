@@ -1,8 +1,10 @@
 // DEMO ACCOUNTS — one registry of demo people, shared by every relying app.
 //
-//   GET  /connect/demo-personas                    → { personas: [{handle, sa, name, blurb}] }
+//   GET  /connect/demo-personas   → { personas: [{handle, sa, name, blurb, custodian, custodies}] }
 //   POST /connect/demo-signin { handle|sa, client_id }
 //        → { sub, agent_name, id_token, delegation, homeSession }
+//   PUT  /connect/demo-sign   { handle|agent, digest }   (Bearer DEMO_SIGNER_SECRET)
+//        → { signature }   — for ceremonies an app runs on their behalf (org deploy, admissions)
 //
 // Why this lives at the HOME. A demo person (Nathan, David…) is a real on-chain Smart Agent whose
 // custodian is a seeded EOA. Apps used to hold that key so they could mint the persona a session —
@@ -26,7 +28,7 @@ import { hashDelegation } from '@agenticprimitives/delegation';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
-import { demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
+import { demoCustodianAddress, demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueSiteDelegation, toWire } from '../../src/lib/delegation';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { getClient } from '../../src/lib/oidc-clients';
@@ -43,9 +45,45 @@ const json = (b: unknown, s = 200): Response =>
 
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
 
-/** The roster an app renders on its "step in as a demo user" screen. Never includes keys. */
+/** The roster an app renders on its "step in as a demo user" screen, plus what an app needs to run
+ *  ceremonies FOR these people: `custodian` is the on-chain custodian EOA (public — a gasless deploy
+ *  names it in `custodians: [...]`), `custodies` is the seed's list of orgs they hold. Never keys. */
 export const onRequestGet = async ({ env }: FnContext): Promise<Response> =>
-  json({ ok: true, personas: listDemoPersonas(env).map((p) => ({ handle: p.handle, sa: p.sa, name: p.name ?? p.handle, blurb: p.blurb ?? '' })) });
+  json({
+    ok: true,
+    personas: listDemoPersonas(env).map((p) => ({
+      handle: p.handle,
+      sa: p.sa,
+      name: p.name ?? p.handle,
+      blurb: p.blurb ?? '',
+      custodian: demoCustodianAddress(p),
+      ...(p.custodies ? { custodies: p.custodies } : {}),
+    })),
+  });
+
+/** POST /connect/demo-sign — the SERVER-TO-SERVER signer, for ceremonies an app runs on a demo
+ *  person's behalf where there is no person session to authenticate: deploying their org gasless,
+ *  the vault-key ceremony, minting the org-acting wires an admission needs. Same custodian, same
+ *  EIP-191 digest signature; the app just no longer holds the key.
+ *
+ *  Gated by `DEMO_SIGNER_SECRET` (a shared secret between the Home and its demo apps) because there
+ *  is no user in the loop — unlike /connect/persona-sign, which is gated by the person's OWN Home
+ *  session. Unset ⇒ the route is off. Only registry accounts sign; a digest for anyone else 404s. */
+export const onRequestPut = async ({ request, env }: FnContext): Promise<Response> => {
+  const secret = env.DEMO_SIGNER_SECRET;
+  if (!secret) return json({ error: 'demo signer not enabled' }, 404);
+  if ((request.headers.get('authorization') ?? '') !== `Bearer ${secret}`) return json({ error: 'unauthorized' }, 401);
+  const body = (await request.json().catch(() => null)) as { handle?: string; agent?: string; digest?: string } | null;
+  const persona = demoPersonaFor(env, (body?.agent ?? body?.handle ?? '').trim());
+  if (!persona) return json({ error: 'unknown demo account' }, 404);
+  const digest = (body?.digest ?? '').trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(digest)) return json({ error: 'digest must be a 32-byte hex string' }, 400);
+  try {
+    return json({ ok: true, handle: persona.handle, agent: persona.sa, custodian: demoCustodianAddress(persona), signature: await signDigestAsDemoPersona(persona, digest as Hex) });
+  } catch (e) {
+    return json({ error: `could not sign: ${e instanceof Error ? e.message : String(e)}` }, 500);
+  }
+};
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; client_id?: string } | null;
