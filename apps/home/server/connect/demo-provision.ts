@@ -17,8 +17,11 @@
 // `target` lets one call provision an ORG the demo person custodies (a hotspot org's discussion board
 // needs the org's own planes); it must be in that person's `custodies` list, so this can never be
 // pointed at someone else's agent.
+import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { Address, Hex } from '@agenticprimitives/types';
 import type { FnContext } from '../_lib/server-broker';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { demoCustodianAddress } from '../_lib/demo-custody';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueInboxDeliveryDelegation, issueInteractionsDelegation, issueSessionDelegation, toWire } from '../../src/lib/delegation';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../../src/lib/inbox-delivery';
@@ -48,7 +51,19 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
   let principal = persona.sa as Address;
   if (target) {
     if (!/^0x[0-9a-f]{40}$/.test(target)) return json({ error: 'target must be an address' }, 400);
-    const owns = (persona.custodies ?? []).some((o) => o.sa.toLowerCase() === target) || target === persona.sa.toLowerCase();
+    // The seed's `custodies` list is a CACHE of what this person held when they were seeded — an org
+    // they created since (a new hotspot) can't be in it. The chain is the authority: ask the account
+    // whether this demo custodian is one of its custodians. Fail-closed on a read error.
+    let owns = target === persona.sa.toLowerCase() || (persona.custodies ?? []).some((o) => o.sa.toLowerCase() === target);
+    if (!owns) {
+      try {
+        const accounts = new AgentAccountClient({
+          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+          entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory,
+        });
+        owns = await accounts.isCustodian(target as Address, demoCustodianAddress(persona) as Address);
+      } catch { owns = false; }
+    }
     if (!owns) return json({ error: 'that agent is not custodied by this demo account' }, 403);
     principal = target as Address;
   }
