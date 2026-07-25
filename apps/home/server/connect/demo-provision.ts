@@ -21,7 +21,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import type { FnContext } from '../_lib/server-broker';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueInboxDeliveryDelegation, issueInteractionsDelegation, issueSessionDelegation, toWire } from '../../src/lib/delegation';
-import { MCP_SERVER_ID } from '../../src/lib/inbox-delivery';
+import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../../src/lib/inbox-delivery';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -53,8 +53,11 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
     principal = target as Address;
   }
 
-  const interactionsSa = serviceSa(process.env.NEXT_PUBLIC_INTERACTIONS_SERVICE_SA);
-  const deliverySa = serviceSa(process.env.NEXT_PUBLIC_DELIVERY_SERVICE_SA ?? env.DELIVERY_SERVICE_SA);
+  // Take the service SAs from the shared module, not raw env: the interactions SA is a COMMITTED
+  // deployment constant there (only the delivery SA comes from a Vercel var), and reading env alone
+  // silently reported "service-not-configured" for every principal.
+  const interactionsSa = serviceSa(INTERACTIONS_SERVICE_SA);
+  const deliverySa = serviceSa(DELIVERY_SERVICE_SA ?? env.DELIVERY_SERVICE_SA);
   const base = a2aBase(env);
   const sign = (digest: Hex): Promise<Hex> => signDigestAsDemoPersona(persona, digest);
 
