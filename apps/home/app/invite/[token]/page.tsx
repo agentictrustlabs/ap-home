@@ -29,7 +29,7 @@ const asMsg = (x: unknown, fallback: string): string => {
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const { session, profile, agentAddress, agentName, openSession } = useSession();
-  const [invite, setInvite] = useState<{ org: string; orgName: string } | null>(null);
+  const [invite, setInvite] = useState<{ org: string; orgName: string; returnUrl?: string; appName?: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState('');
@@ -39,9 +39,20 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     const org = new URLSearchParams(window.location.search).get('o') ?? '';
     void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}&o=${encodeURIComponent(org)}`)
       .then((r) => r.json())
-      .then((d) => { if (d.ok) setInvite({ org: d.org, orgName: d.orgName }); else setErr(d.error ?? 'invalid invitation'); })
+      .then((d) => { if (d.ok) setInvite({ org: d.org, orgName: d.orgName, returnUrl: d.returnUrl, appName: d.appName ?? null }); else setErr(d.error ?? 'invalid invitation'); })
       .catch(() => setErr('could not load this invitation'));
   }, [token]);
+
+  /** Where the invitee continues once they've joined: back into the app the invitation was raised
+   *  from (origin-checked against that app when the invite was created) carrying the name they just
+   *  chose and the person agent they joined as — otherwise the org's own space at this Home. */
+  const goOn = (org: string, member: string, name: string) => {
+    if (!invite?.returnUrl) { window.location.assign(orgHref(org, 'discussions')); return; }
+    const u = new URL(invite.returnUrl);
+    u.searchParams.set('n', name);
+    u.searchParams.set('sa', member);
+    window.location.assign(u.toString());
+  };
 
   const accept = async () => {
     if (!session || !agentAddress || !invite) return;
@@ -63,7 +74,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
       await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token, null, name);
-      window.location.assign(orgHref(invite.org, 'discussions'));
+      goOn(invite.org.toLowerCase(), agentAddress, name);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
@@ -100,7 +111,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
       await openSession(d.token, 'email', false);
-      window.location.assign(orgHref(invite.org, 'discussions'));
+      goOn(invite.org.toLowerCase(), res.home.address, name);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
@@ -116,8 +127,9 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
             <>
               <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
                 Accepting publishes a listing you sign — you become a member (you can leave anytime). Your keys
-                stay yours; the org gets no custody.
+                stay yours; the org gets no custody.{invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
               </p>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>The name your team sees in {invite.orgName}</label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
@@ -144,7 +156,9 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
               <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
                 You were invited by email — that&rsquo;s all we need. Accept and we&rsquo;ll set up your home
                 automatically, no app to install. Your keys stay yours; the org gets no custody.
+                {invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
               </p>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>The name your team sees in {invite.orgName}</label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}

@@ -23,12 +23,14 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!/^0x[0-9a-f]{40}$/.test(org)) return json({ error: 'invite link missing its organization' }, 400);
   // Validate against the org vault (delegation-gated read of the org's own tracking record).
   const vault = await orgVault(env, org);
-  const rec = vault ? ((await vault.get(`org.invite:${token}`)) as { expiresAt?: number; status?: string } | null) : null;
+  const rec = vault ? ((await vault.get(`org.invite:${token}`)) as { expiresAt?: number; status?: string; returnUrl?: string; appName?: string } | null) : null;
   if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
   if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
   const orgName = await new AgentNamingClient({
     rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
   }).reverseResolve(org as Address).then((n) => (n ? nameLabel(n) : null)).catch(() => null);
-  return json({ ok: true, org, orgName: orgName ?? org });
+  // `returnUrl`/`appName` (when the invite was raised from a relying app) tell the redeem page where
+  // the invitee continues after joining — the URL was origin-checked against that app at invite time.
+  return json({ ok: true, org, orgName: orgName ?? org, ...(rec.returnUrl ? { returnUrl: rec.returnUrl, appName: rec.appName ?? null } : {}) });
 };

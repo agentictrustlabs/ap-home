@@ -67,13 +67,16 @@ export function otpEmail(to: string, otp: string, brand: string): OutboundEmail 
   };
 }
 
-export function inviteEmail(to: string, joinUrl: string, orgName: string, brand: string): OutboundEmail {
+/** `appName` (optional) names the relying app the invitation was raised from — the invitee joins
+ *  the org here and continues there (org-invite `returnUrl`), so the email says where they land. */
+export function inviteEmail(to: string, joinUrl: string, orgName: string, brand: string, appName?: string | null): OutboundEmail {
+  const where = appName ? ` and start working in ${appName}` : '';
   return {
     to,
     subject: `You're invited to join ${orgName}`,
-    text: `You've been invited to join ${orgName} on ${brand}. Join here: ${joinUrl}`,
+    text: `You've been invited to join ${orgName} on ${brand}${where}. Join here: ${joinUrl}`,
     html: wrap(`<p style="font-size:15px"><b>You're invited to join ${orgName}.</b></p>
-      <p style="font-size:13px;color:#6b7280;margin:8px 0 16px">Click below to accept — you'll confirm your email, then join.</p>
+      <p style="font-size:13px;color:#6b7280;margin:8px 0 16px">Click below to accept — you'll confirm your email, choose the name your team sees, then join${appName ? ` and continue in ${appName}` : ''}.</p>
       <a href="${joinUrl}" style="display:inline-block;background:#4338ca;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Accept invitation</a>`, brand),
   };
 }

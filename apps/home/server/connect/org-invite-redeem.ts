@@ -39,13 +39,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // the bootstrap to the invited address; without it (or if unreachable) the invitee verifies via OTP.
   let emailHash: string | null = null;
   let memberAccessDelegation: unknown = null; // spec 321 W2 — the steward's pre-signed org→invitee grant
+  let inviteRec: Record<string, unknown> | null = null;
   try {
     const vault = await orgVault(env, org);
-    const rec = vault ? ((await vault.get(`org.invite:${token}`)) as { emailHash?: string; expiresAt?: number; status?: string; memberAccessDelegation?: unknown } | null) : null;
+    const rec = vault ? ((await vault.get(`org.invite:${token}`)) as ({ emailHash?: string; expiresAt?: number; status?: string; memberAccessDelegation?: unknown } & Record<string, unknown>) | null) : null;
     if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
     if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
     emailHash = rec.emailHash ?? null;
     memberAccessDelegation = rec.memberAccessDelegation ?? null;
+    inviteRec = rec;
   } catch { /* vault unreachable — fall through to needs-otp */ }
   if (!emailHash) return json({ status: 'needs-otp', org });
 
@@ -77,10 +79,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   );
 
   // Best-effort: mark the org's tracking record redeemed (who accepted). The invite is deterministic +
-  // idempotent — re-clicking derives the SAME home — so we DON'T consume the KV token here.
+  // idempotent — re-clicking derives the SAME home — so we DON'T consume the KV token here, and we
+  // MERGE rather than replace: expiry, the pre-signed grant and the app `returnUrl` must survive a
+  // re-click, or the second visit loses the journey it was part of.
   try {
     const vault = await orgVault(env, org);
-    if (vault) await vault.set(`org.invite:${token}`, { emailHash, status: 'redeemed', agent: kms.agentId, redeemedAt: Date.now() });
+    if (vault) await vault.set(`org.invite:${token}`, { ...(inviteRec ?? {}), emailHash, status: 'redeemed', agent: kms.agentId, redeemedAt: Date.now() });
   } catch { /* tracking is best-effort */ }
 
   // spec 321 W2: hand the invitee the steward's pre-signed member-access grant. Counterfactual by

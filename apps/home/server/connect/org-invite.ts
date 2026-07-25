@@ -30,9 +30,14 @@ export const onRequestOptions = async (): Promise<Response> => new Response(null
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
+/** The authenticated caller: the person SA, plus the relying client_id when the ingress was an
+ *  app id_token (null for a first-party Home session). The client_id is what scopes an app's
+ *  `returnUrl` below — never a grant of authority (stewardship is still re-verified on-chain). */
+type InviteCaller = { person: string; clientId: string | null };
+
 /** Resolve the caller person SA from a Home session OR a registered relying-app id_token
  *  (same ingress as /connect/inbox — e.g. hotspot-tracker / uupg-tracker). */
-async function personFromInviteAuth(env: FnContext['env'], request: Request): Promise<string | null> {
+async function callerFromInviteAuth(env: FnContext['env'], request: Request): Promise<InviteCaller | null> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
@@ -41,7 +46,8 @@ async function personFromInviteAuth(env: FnContext['env'], request: Request): Pr
   const issOk = ownIssuer(request, env);
   const home = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: issOk });
   if (home.ok) {
-    return (home.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+    const person = (home.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+    return person ? { person, clientId: null } : null;
   }
   // Relying-app id_token (aud = registered client_id, e.g. uupg-tracker). Signature still pinned
   // to this Home's JWKS; stewardship is re-checked on-chain below — aud alone never grants control.
@@ -55,13 +61,17 @@ async function personFromInviteAuth(env: FnContext['env'], request: Request): Pr
   const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
-  return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+  const person = (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  return person ? { person, clientId: aud } : null;
 }
 
 /** Steward-control gate (same as the inbox `?agent` scope): the org is in the person's managed set. */
 export async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
-  const person = await personFromInviteAuth(env, request);
-  if (!person) return false;
+  const caller = await callerFromInviteAuth(env, request);
+  return !!caller && stewardsOrg(env, caller.person, org);
+}
+
+async function stewardsOrg(env: FnContext['env'], person: string, org: string): Promise<boolean> {
   // SEC-H2 — authority comes from an ON-CHAIN stewardship delegation, NOT the self-writable KV
   // `relationship` field. The stewardship wire lives in the related link (a cache reconciled from
   // the person's vault relationships.data); we re-verify it against the chain (ERC-1271 by the org +
@@ -72,14 +82,42 @@ export async function controlsOrg(env: FnContext['env'], request: Request, org: 
   return verifyStewardship(env, org.toLowerCase(), person, link?.stewardshipDelegation);
 }
 
+/** An invite raised FROM a relying app can name where the invitee continues once they've joined
+ *  (e.g. back into the UUPG+ Tracker workspace they were invited to work in). CN-1 discipline: the
+ *  URL must belong to the ORIGIN of a redirect_uri registered for the CALLING client — an app can
+ *  only ever send its invitees back to itself, never to an attacker-chosen origin. */
+function appReturnUrl(clientId: string | null, raw: string | undefined): string | null {
+  if (!raw || !clientId) return null;
+  const client = getClient(clientId);
+  if (!client) return null;
+  let url: URL;
+  try { url = new URL(raw); } catch { return null; }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))) return null;
+  const origins = new Set(client.redirect_uris.map((u) => { try { return new URL(u).origin; } catch { return ''; } }));
+  if (!origins.has(url.origin)) return null;
+  return url.toString().slice(0, 500);
+}
+
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; email?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string } }
+    | {
+        org?: string;
+        email?: string;
+        memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
+        /** Where the invitee continues after joining — validated against the calling client. */
+        returnUrl?: string;
+      }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!isAddress(org) || !EMAIL_RE.test(email)) return json({ error: 'org (SA) + valid email required' }, 400);
-  if (!(await controlsOrg(env, request, org))) return json({ error: 'you must steward this organization to invite' }, 403);
+  const caller = await callerFromInviteAuth(env, request);
+  if (!caller || !(await stewardsOrg(env, caller.person, org))) {
+    return json({ error: 'you must steward this organization to invite' }, 403);
+  }
+  const returnUrl = appReturnUrl(caller.clientId, body?.returnUrl);
+  if (body?.returnUrl && !returnUrl) return json({ error: 'returnUrl must be an origin registered for your app' }, 400);
+  const appName = returnUrl ? (getClient(caller.clientId!)?.name ?? null) : null;
   // spec 321 W2 — optional pre-signed member-access grant (org → the invitee's counterfactual home,
   // from /org-invite/predict). Reject a grant whose delegator isn't THIS org — never fix up authority.
   const mad = body?.memberAccessDelegation;
@@ -99,10 +137,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const expiresAt = Date.now() + 60 * 60 * 24 * 7 * 1000;
   const vault = await orgVault(env, org);
   if (!vault) return json({ error: 'org vault storage not enabled — a steward must enable it before inviting' }, 409);
-  await vault.set(`org.invite:${token}`, { emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending', ...(mad ? { memberAccessDelegation: mad } : {}) });
+  await vault.set(`org.invite:${token}`, {
+    emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
+    ...(mad ? { memberAccessDelegation: mad } : {}),
+    ...(returnUrl ? { returnUrl, appName } : {}),
+  });
 
   const joinUrl = `${resolveOrigin(request, env)}/invite/${token}?o=${org}`;
-  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name));
+  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName));
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
-  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl });
+  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}) });
 };
