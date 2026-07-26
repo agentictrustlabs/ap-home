@@ -13,11 +13,14 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 type ArtifactSource = 'blob' | 'graphdb' | 'vault' | 'external';
 type ArtifactAction = 'read' | 'write' | 'share' | 'export' | 'delete';
 type AgentKind = 'person' | 'org' | 'service';
-import type { Address } from '@agenticprimitives/types';
+import type { Address, Hex } from '@agenticprimitives/types';
+import { signCredential } from '@agenticprimitives/verifiable-credentials';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { stewardWireFor, callInteractions } from './channels';
 import { appendControlEvent } from './control-events';
+import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
+import { CHAIN_ID } from '../../src/lib/chain';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -53,6 +56,36 @@ interface ArtifactGrant {
   resource?: string;
   /** Reference to the durable entitlement record (an AgenticEntitlementCredentialV1 downstream). */
   entitlementId?: string;
+  /** True when a signed AgenticEntitlementCredentialV1 was minted (owner ERC-1271 proof). */
+  signed?: boolean;
+}
+
+/** Mint a signed AgenticEntitlementCredentialV1 for a grant — the owner SA is the issuer (ERC-1271).
+ *  Server-side signing works when the owner is a custodied demo persona; a real user's credential is
+ *  signed in a client ceremony (returned unsigned here). */
+async function mintEntitlementCredential(env: FnContext['env'], owner: string, input: { entitlementId: string; resource: string; grantee: string; actions: ArtifactAction[]; validUntil?: number }): Promise<{ credential: unknown; signed: boolean }> {
+  const unsigned = {
+    '@context': ['https://www.w3.org/ns/credentials/v2'],
+    type: ['VerifiableCredential', 'AgenticEntitlementCredentialV1'],
+    id: `urn:ap:entitlement:${input.entitlementId}`,
+    issuer: owner,
+    validFrom: new Date().toISOString(),
+    ...(input.validUntil ? { validUntil: new Date(input.validUntil).toISOString() } : {}),
+    credentialSubject: { id: input.grantee, principal: owner, audience: env.DEMO_SSO_AUD ?? 'demo-sso', resource: input.resource, actions: input.actions },
+  };
+  const persona = demoPersonaFor(env, owner);
+  if (!persona) return { credential: unsigned, signed: false };
+  try {
+    const vc = await signCredential(unsigned as never, {
+      issuerAddress: owner as Address,
+      chainId: CHAIN_ID,
+      verifyingContract: owner as Address,
+      signDigest: (d: Hex) => signDigestAsDemoPersona(persona, d),
+    });
+    return { credential: vc, signed: true };
+  } catch {
+    return { credential: unsigned, signed: false };
+  }
 }
 
 /** A library entry — a Content Artifact reference + its access grants. `source` names where the bytes
@@ -184,15 +217,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // notification via the control-event feed — no connector, out of the box.
       const resource = `artifact:${art.id}`;
       const entitlementId = `ent-${Math.abs(hash(`${resource}${g.granteeAddress}${Date.now()}`)).toString(36)}`;
+      // Mint the SIGNED entitlement credential (owner SA = issuer, ERC-1271 proof).
+      const { credential, signed } = await mintEntitlementCredential(env, person, { entitlementId, resource, grantee: g.granteeAddress.toLowerCase(), actions, validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined });
       art.grants = art.grants.filter((x) => x.grantee.address.toLowerCase() !== g.granteeAddress!.toLowerCase());
       art.grants.push({
         grantee: { address: g.granteeAddress.toLowerCase(), kind, label: g.granteeLabel?.slice(0, 80) },
         actions, grantedAt: Date.now(), validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined,
-        resource, entitlementId,
+        resource, entitlementId, signed,
       });
       await scope.write(list);
       await appendControlEvent(env, person as Address, 'grant-issued').catch(() => undefined);
-      return jsonCors({ ok: true, artifact: art, entitlementId }, request);
+      return jsonCors({ ok: true, artifact: art, entitlementId, signed, credential }, request);
     }
     case 'revoke': {
       const art = list.find((x) => x.id === body.id);
