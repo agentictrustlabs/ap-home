@@ -134,4 +134,16 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(list.artifacts.find((a: any) => a.id === 'create-skill')).toBeUndefined();
     expect(list.artifacts.some((a: any) => a.id === 'faith-ttl')).toBe(true);
   });
+
+  it('supports folders and cascades a folder delete', async () => {
+    await post({ action: 'save', artifact: { name: 'reports', isFolder: true } });
+    await post({ action: 'save-batch', artifacts: [{ name: 'q1.md', source: 'blob', folder: 'reports', bytesB64: btoa('q1') }] });
+    let list = (await (await get()).json()).artifacts;
+    const folder = list.find((a: any) => a.isFolder && a.name === 'reports');
+    expect(folder).toBeTruthy();
+    expect(list.some((a: any) => a.name === 'q1.md' && a.folder === 'reports')).toBe(true);
+    await post({ action: 'delete', id: folder.id });
+    list = (await (await get()).json()).artifacts;
+    expect(list.some((a: any) => a.name === 'reports' || a.folder === 'reports')).toBe(false);
+  });
 });
