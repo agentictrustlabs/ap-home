@@ -19,7 +19,8 @@ type AccessMode = 'Owned' | 'Read-through' | 'Replica' | 'Public' | 'Projection'
 type Freshness = 'Live' | 'Signed' | 'Cached' | 'Stale' | 'Unavailable';
 type Lens = 'vault' | 'shared' | 'public';
 interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string; signed?: boolean; inheritedFrom?: string; delegation?: { caveats?: unknown[] } }
-interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[];
+interface Release { canonicalId: string; version: string; bundleRoot: string; owner: string; publisher: string; riskTier: string; releaseId: string; signed: boolean; publishedAt: number }
+interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
   // present on "Shared with me" rows (a federated inbound grant from another vault)
   accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[] }
 interface TreeNode { name: string; path: string; children: TreeNode[] }
@@ -200,6 +201,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
     return r.artifact as Artifact;
   }, [api]);
   const requestAccess = useCallback(async (a: Artifact, actions: string[]) => { await api('POST', { action: 'request-access', ownerScope: a.sharedBy, id: a.id, actions, artifactName: a.name }); }, [api]);
+  const publish = async (id: string) => { try { await api('POST', { action: 'publish', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
   const approveRequest = async (r: { requester: string; artifactId: string; actions: string[] }) => { await grant(r.artifactId, r.requester, 'person', r.actions.length ? r.actions : ['read']); };
 
   const writable = lens === 'vault';
@@ -289,6 +291,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
                 onOpenMember={select}
                 onOpenLive={openLive}
                 onRequestAccess={requestAccess}
+                onPublish={publish}
               />
             )}
           </div>
@@ -403,11 +406,12 @@ function FederatedPlaceholder({ lens }: { lens: Lens }) {
 
 // ── detail / workspace panel — progressive disclosure, one primary action + overflow ──
 type Tab = 'content' | 'access' | 'provenance' | 'versions';
-function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess }: {
+function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish }: {
   artifact: Artifact; items: Artifact[]; ownerLabel: string; ownerVaultKind: string; folders: string[];
   onClose: () => void; onGrant: (id: string, addr: string, kind: string, actions: string[], label?: string) => void; onRevoke: (id: string, addr: string) => void;
   onDiscuss: (id: string) => void; onMove: (a: Artifact, dest: string) => void; onRemove: (a: Artifact) => void; onOpenMember: (id: string) => void;
   onOpenLive: (a: Artifact) => Promise<Artifact>; onRequestAccess: (a: Artifact, actions: string[]) => Promise<void>;
+  onPublish: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('content');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -415,6 +419,7 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
   const [liveErr, setLiveErr] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const isBundle = artifact.isFolder || artifact.kind === 'skill';
+  const publishable = artifact.kind === 'skill' || artifact.isFolder === true;
   const owned = (artifact.accessMode ?? 'Owned') === 'Owned';
   const members = useMemo(() => (artifact.isFolder ? items.filter((x) => x.folder === fullPath(artifact)) : []), [artifact, items]);
 
@@ -436,10 +441,11 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
             <div role="menu" style={{ ...cardSty, position: 'absolute', right: 0, top: '110%', zIndex: 5, minWidth: 180, padding: 4 }} onMouseLeave={() => setMenuOpen(false)}>
               {owned ? (
                 <>
+                  {publishable && <MenuItem label="Publish release" onClick={() => { setMenuOpen(false); onPublish(artifact.id); setTab('provenance'); }} />}
                   <MenuItem label="New version" hint="Phase 1b" disabled />
                   <MenuItem label="Discuss" onClick={() => { setMenuOpen(false); onDiscuss(artifact.id); }} />
                   <MoveMenu artifact={artifact} folders={folders} onMove={(d) => { setMenuOpen(false); onMove(artifact, d); }} />
-                  <MenuItem label="Transfer ownership" hint="Phase 5" disabled />
+                  <MenuItem label="Transfer ownership" hint="Phase 5b" disabled />
                   <MenuItem label="Remove from vault" danger onClick={() => { setMenuOpen(false); onRemove(artifact); }} />
                 </>
               ) : (
@@ -470,7 +476,7 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
         {tab === 'access' && (owned
           ? <AccessTab artifact={artifact} onGrant={onGrant} onRevoke={onRevoke} />
           : <SharedAccess artifact={artifact} onRequestAccess={onRequestAccess} />)}
-        {tab === 'provenance' && <ProvenanceTab artifact={artifact} ownerLabel={owned ? ownerLabel : (artifact.sharedBy ? shortAddr(artifact.sharedBy) : 'Another vault')} ownerVaultKind={owned ? ownerVaultKind : `${artifact.sharedByKind ?? 'Person'} vault`} />}
+        {tab === 'provenance' && <ProvenanceTab artifact={artifact} ownerLabel={owned ? ownerLabel : (artifact.sharedBy ? shortAddr(artifact.sharedBy) : 'Another vault')} ownerVaultKind={owned ? ownerVaultKind : `${artifact.sharedByKind ?? 'Person'} vault`} publishable={publishable} owned={owned} onPublish={() => onPublish(artifact.id)} />}
         {tab === 'versions' && <VersionsTab version={artifact.version ?? 1} />}
       </div>
 
@@ -666,11 +672,33 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </div>
   );
 }
-function ProvenanceTab({ artifact, ownerLabel, ownerVaultKind }: { artifact: Artifact; ownerLabel: string; ownerVaultKind: string }) {
+function ProvenanceTab({ artifact, ownerLabel, ownerVaultKind, publishable, owned, onPublish }: { artifact: Artifact; ownerLabel: string; ownerVaultKind: string; publishable?: boolean; owned?: boolean; onPublish?: () => void }) {
   const resource = artifact.isFolder ? `container:${fullPath(artifact)}` : `artifact:${artifact.id}`;
+  const releases = artifact.releases ?? [];
   return (
     <div>
+      {publishable && (
+        <div style={{ marginBottom: '.8rem', paddingBottom: '.7rem', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '.4rem' }}>
+            <div style={{ ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Releases ({releases.length})</div>
+            {owned && onPublish && <button style={{ ...btnSty, marginLeft: 'auto', padding: '.2rem .5rem', fontSize: 12 }} onClick={onPublish}>Publish release</button>}
+          </div>
+          {releases.length === 0
+            ? <div style={{ ...mutedText, fontSize: 12 }}>No releases yet. Publishing signs a location-independent release (owner = publisher here).</div>
+            : [...releases].reverse().map((r) => (
+              <div key={r.releaseId} style={{ padding: '.4rem 0', borderBottom: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ ...mono, fontSize: 12, fontWeight: 700 }}>v{r.version}</span>
+                  <span style={{ ...badgeStyle(r.signed ? 'ok' : 'neutral'), fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{r.signed && <Icon name="check" size={11} />}{r.signed ? 'Signed' : 'Unsigned'}</span>
+                  <span style={{ ...badgeStyle('neutral'), fontSize: 10, marginLeft: 'auto' }}>risk: {r.riskTier}</span>
+                </div>
+                <div style={{ ...mutedText, fontSize: 11, marginTop: 2 }}>release <span style={mono}>{r.releaseId.slice(0, 10)}…</span> · publisher {shortAddr(r.publisher)}</div>
+              </div>
+            ))}
+        </div>
+      )}
       <Field label="Resource id"><span style={mono}>{resource}</span></Field>
+      {releases[0] && <Field label="Canonical id (published)"><span style={{ ...mono, fontSize: 12 }}>{releases[0].canonicalId.slice(0, 12)}…{releases[0].canonicalId.slice(-6)}</span> <span style={{ ...mutedText, fontSize: 11 }}>· location-independent</span></Field>}
       <Field label="Owner vault"><b>{ownerLabel}</b> <span style={mutedText}>· {ownerVaultKind}</span></Field>
       <Field label="Source"><span style={mono}>{artifact.source}</span>{artifact.pointer ? <> · <span style={mono}>{artifact.pointer}</span></> : null}</Field>
       <Field label="Canonical id"><span style={{ ...mutedText }}>Assigned on publish (skill:&lt;ns&gt;/&lt;name&gt;) — Phase 5</span></Field>

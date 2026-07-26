@@ -14,7 +14,7 @@ type ArtifactSource = 'blob' | 'graphdb' | 'vault' | 'external';
 type ArtifactAction = 'read' | 'write' | 'share' | 'export' | 'delete';
 type AgentKind = 'person' | 'org' | 'service';
 import type { Address, Hex } from '@agenticprimitives/types';
-import { signCredential } from '@agenticprimitives/verifiable-credentials';
+import { signCredential, canonicalHash } from '@agenticprimitives/verifiable-credentials';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { stewardWireFor, callInteractions } from './channels';
@@ -139,6 +139,50 @@ interface LibraryArtifact {
    *  tab verifies. Absent for non-blob sources (their commitment lives with the owning store). */
   contentCommitment?: string;
   grants: ArtifactGrant[];
+  /** Published skill releases (Phase 5) — a signed, append-only, version-monotonic release chain. */
+  releases?: SkillReleaseRecord[];
+}
+
+/** A published skill release — mirrors @agenticprimitives/content-storage `SkillRelease` (spec 335 §6,
+ *  ADR-0055 §5). The `releaseId` is a canonical digest over the content/authority core and is INDEPENDENT
+ *  of where the bytes live; owner and (delegated) publisher are separate; the publisher signs `releaseId`. */
+interface SkillReleaseRecord {
+  /** Location-independent skill identity — a canonical digest of the skill's stable name (demo stand-in
+   *  for skill:<ns>/<name>). */
+  canonicalId: string;
+  version: string;
+  /** The bundle's file-tree digest (a demo containment digest over member commitments). */
+  bundleRoot: string;
+  owner: string;
+  publisher: string;
+  riskTier: 'low' | 'medium' | 'high' | 'critical';
+  releaseId: string;
+  /** Publisher ERC-1271 signature over `releaseId` (present when the publisher is a custodied persona). */
+  signature?: string;
+  signed: boolean;
+  publishedAt: number;
+}
+
+/** Mint a signed skill release (Phase 5). Mirrors content-storage `buildRelease`/`computeReleaseId`: the
+ *  releaseId is `canonicalHash` over the content/authority CORE only — canonicalId (from the skill's
+ *  stable name, NOT its location), version, bundleRoot, owner, publisher, lockDigest, risk — so the same
+ *  release from any vault has the same id. The owner/publisher persona signs the releaseId (ERC-1271). */
+async function mintRelease(env: FnContext['env'], owner: string, art: LibraryArtifact, list: LibraryArtifact[]): Promise<SkillReleaseRecord> {
+  const canonicalId = canonicalHash({ skill: art.name });
+  const bundleRoot = art.isFolder
+    ? canonicalHash(list.filter((x) => x.folder === folderFullPath(art) && x.contentCommitment).map((x) => x.contentCommitment!).sort())
+    : canonicalHash({ root: art.contentCommitment ?? `blob:${art.id}` });
+  const version = `${(art.releases?.length ?? 0) + 1}.0.0`;
+  const risk = { riskTier: 'low' as const, requestedCapabilities: ['read'] };
+  const lockDigest = canonicalHash([] as unknown[]);
+  const releaseId = canonicalHash({ canonicalId, version, bundleRoot, owner, publisher: owner, lockDigest, risk });
+  const persona = demoPersonaFor(env, owner);
+  let signature: string | undefined;
+  let signed = false;
+  if (persona) {
+    try { signature = await signDigestAsDemoPersona(persona, releaseId as Hex); signed = true; } catch { /* unsigned in demo */ }
+  }
+  return { canonicalId, version, bundleRoot, owner, publisher: owner, riskTier: 'low', releaseId, signature, signed, publishedAt: Date.now() };
 }
 
 /** One INBOUND grant — the read-side index that powers "Shared with me": when owner A grants agent B,
@@ -347,6 +391,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         await writeRequests(env, ownerScope, reqs);
       }
       return jsonCors({ ok: true, status: 'requested' }, request);
+    }
+    case 'publish': {
+      // Publish a signed skill RELEASE (Phase 5) — owner-gated, append-only, version-monotonic. Only a
+      // skill or a bundle folder is publishable; the acting principal is the owner + publisher.
+      const art = list.find((x) => x.id === body.id);
+      if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
+      if (art.kind !== 'skill' && !art.isFolder) return jsonCors({ error: 'only a skill or a bundle folder can be published as a release' }, request, 400);
+      const release = await mintRelease(env, person, art, list);
+      art.releases = [...(art.releases ?? []), release];
+      await scope.write(list);
+      await appendControlEvent(env, person as Address, 'credential-issued').catch(() => undefined);
+      return jsonCors({ ok: true, artifact: art, release }, request);
     }
     case 'discuss': {
       // Bind a native discussion board to this artifact via its artifact ContextRef (spec 335 §7.1).

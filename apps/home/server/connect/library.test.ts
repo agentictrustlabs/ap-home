@@ -152,6 +152,32 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(again.artifact.version).toBe(2);
   });
 
+  it('publishes a signed, version-monotonic skill release with a location-independent id (Phase 5)', async () => {
+    await post({ action: 'save', artifact: { id: 'pub-skill', kind: 'skill', name: 'triage-skill', source: 'blob', bytesB64: btoa('# Triage\n') } });
+    const r1 = await (await post({ action: 'publish', id: 'pub-skill' })).json();
+    expect(r1.ok).toBe(true);
+    expect(r1.release.version).toBe('1.0.0');
+    expect(r1.release.canonicalId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(r1.release.releaseId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(r1.release.owner).toBe(DEMO_SA);
+    expect(r1.release.publisher).toBe(DEMO_SA);
+    // DEMO_SA is a custodied persona (DEMO_PERSONA_KEYS) → the publisher signs the releaseId
+    expect(r1.release.signed).toBe(true);
+    expect(r1.release.signature).toMatch(/^0x/);
+
+    // a second publish advances the version; the canonical id (derived from the skill name, not its
+    // location) is stable, while the release id changes
+    const r2 = await (await post({ action: 'publish', id: 'pub-skill' })).json();
+    expect(r2.release.version).toBe('2.0.0');
+    expect(r2.release.canonicalId).toBe(r1.release.canonicalId);
+    expect(r2.release.releaseId).not.toBe(r1.release.releaseId);
+    expect(r2.artifact.releases.length).toBe(2);
+
+    // a plain document is not publishable as a release (only skills / bundles)
+    await post({ action: 'save', artifact: { id: 'a-doc', kind: 'md', name: 'd.md', source: 'blob', bytesB64: btoa('x') } });
+    expect((await post({ action: 'publish', id: 'a-doc' })).status).toBe(400);
+  });
+
   it('surfaces a grant under "Shared with me" for the grantee, and withdraws it on revoke', async () => {
     const GRANTEE = '0x3333333333333333333333333333333333333333';
     await post({ action: 'save', artifact: { id: 'shared-doc', kind: 'md', name: 'shared-doc.md', source: 'blob', bytesB64: btoa('hello') } });
