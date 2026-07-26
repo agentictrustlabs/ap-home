@@ -112,7 +112,7 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(list.artifacts.some((a: any) => a.name === 'logo.png' && a.kind === 'image')).toBe(true);
   });
 
-  it('grants another agent (an organization) access to one artifact', async () => {
+  it('grants another agent (an organization) access — mints an entitlement + emits a native notification', async () => {
     const res = await post({ action: 'grant', id: 'faith-ttl', grant: { granteeAddress: TEAM_SA, granteeKind: 'org', granteeLabel: 'Laos hotspot team', actions: ['read', 'share'] } });
     expect(res.status).toBe(200);
     const b = await res.json();
@@ -120,6 +120,21 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(grant.grantee.address).toBe(TEAM_SA.toLowerCase());
     expect(grant.grantee.kind).toBe('org');
     expect(grant.actions).toEqual(['read', 'share']);
+    // entitlement minted, keyed on the artifact identity (uniform across sources)
+    expect(b.entitlementId).toMatch(/^ent-/);
+    expect(grant.entitlementId).toBe(b.entitlementId);
+    expect(grant.resource).toBe('artifact:faith-ttl');
+    // native notification landed on the control-event feed (out-of-the-box integration)
+    const ev = JSON.parse((await env.AUTH_CODES.get(`home-control:${DEMO_SA}`)) ?? '[]');
+    expect(ev.some((e: any) => e.eventType === 'grant-issued')).toBe(true);
+  });
+
+  it('binds a native discussion board to an artifact via its artifact ContextRef', async () => {
+    const res = await post({ action: 'discuss', id: 'faith-ttl' });
+    expect(res.status).toBe(200);
+    const b = await res.json();
+    expect(b.contextRef).toEqual({ kind: 'artifact', id: 'artifact:faith-ttl', label: 'faith.ttl' });
+    expect(b.discussionId).toBe('disc:artifact:faith-ttl'); // person-scope fallback binding
   });
 
   it('revokes a grant', async () => {
