@@ -56,6 +56,10 @@ interface LibraryArtifact {
   kind: 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
   name: string;
   source: ArtifactSource;
+  /** Explorer folder path this entry lives in (e.g. `reports/2026`); '' = root. */
+  folder: string;
+  /** True for a folder entry (an explorer container), not a document. */
+  isFolder?: boolean;
   /** retrievalPointer for non-blob sources (e.g. `graphdb:faith/ontology`, `vault:0x…/impact-profile`). */
   pointer?: string;
   contentType: string;
@@ -148,7 +152,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ ok: true, count: saved.length }, request);
     }
     case 'delete': {
-      const next = list.filter((x) => x.id !== body.id);
+      const target = list.find((x) => x.id === body.id);
+      let next = list.filter((x) => x.id !== body.id);
+      // Deleting a folder removes everything under it.
+      if (target?.isFolder) {
+        const full = target.folder ? `${target.folder}/${target.name}` : target.name;
+        next = next.filter((x) => x.folder !== full && !x.folder.startsWith(`${full}/`));
+      }
       await scope.write(next);
       return jsonCors({ ok: true, count: next.length }, request);
     }
@@ -190,8 +200,10 @@ function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | undefined
   const kind = KINDS.has(String(a.kind)) ? (a.kind as LibraryArtifact['kind']) : 'md';
   const source = SOURCES.has(a.source as ArtifactSource) ? (a.source as ArtifactSource) : 'blob';
   const id = a.id && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash(`${a.name}${Date.now()}${Math.random()}`)).toString(36)}`;
+  const folder = typeof a.folder === 'string' ? a.folder.replace(/^\/+|\/+$/g, '').slice(0, 256) : '';
   const entry: LibraryArtifact = {
-    id, kind, name: a.name.trim().slice(0, 120), source,
+    id, kind, name: a.name.trim().slice(0, 120), source, folder,
+    isFolder: a.isFolder === true ? true : undefined,
     pointer: typeof a.pointer === 'string' ? a.pointer.slice(0, 512) : undefined,
     contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
     bytesB64: source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined,
