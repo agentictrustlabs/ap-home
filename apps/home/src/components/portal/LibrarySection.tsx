@@ -9,8 +9,8 @@ import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty } 
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
-interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean }
-interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; contentType: string; size: number; createdAt: number; grants: Grant[] }
+interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string }
+interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; size: number; createdAt: number; grants: Grant[] }
 
 const KINDS: Kind[] = ['skill', 'ttl', 'md', 'json-ld', 'image'];
 const SOURCES: Source[] = ['blob', 'graphdb', 'vault', 'external'];
@@ -117,6 +117,15 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const remove = async (id: string) => { try { await api('POST', { action: 'delete', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
   const grant = async (id: string, addr: string, gkind: string, actions: string[], label?: string) => { try { await api('POST', { action: 'grant', org: orgSa, id, grant: { granteeAddress: addr, granteeKind: gkind, granteeLabel: label, actions } }); await load(); } catch (e) { setErr((e as Error).message); } };
   const revoke = async (id: string, addr: string) => { try { await api('POST', { action: 'revoke', org: orgSa, id, grant: { granteeAddress: addr } }); await load(); } catch (e) { setErr((e as Error).message); } };
+  const discuss = async (id: string) => {
+    try {
+      const r = await api('POST', { action: 'discuss', org: orgSa, id });
+      await load();
+      // org boards live in the org's Discussions surface; person-scope is a bound thread.
+      if (orgSa && typeof r.discussionId === 'string' && !r.discussionId.startsWith('disc:')) window.location.href = `/org/${orgSa}/discussions`;
+      else setUploadMsg(`Discussion bound to this document (${r.contextRef?.id}).`);
+    } catch (e) { setErr((e as Error).message); }
+  };
 
   const crumb = (i: number) => setPath(path.slice(0, i));
   const descend = (folderName: string) => { setPath([...path, folderName]); setOpenId(null); };
@@ -138,9 +147,10 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 18 }}>{glyph(a)}</span>
         <b>{a.name}</b>
-        <span style={{ ...mutedText, fontSize: 12 }}>{a.kind} · {a.source}{a.source === 'blob' ? ` · ${fmtSize(a.size)}` : a.pointer ? ` · ${a.pointer}` : ''}{searching && a.folder ? ` · /${a.folder}` : ''}</span>
+        <span style={{ ...mutedText, fontSize: 12 }}>{a.kind} · {a.source}{a.source === 'blob' ? ` · ${fmtSize(a.size)}` : a.pointer ? ` · ${a.pointer}` : ''}{searching && a.folder ? ` · /${a.folder}` : ''}{a.discussionId ? ' · 💬 discussion' : ''}</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: '.4rem' }}>
           <button style={btnSty} onClick={() => setOpenId(openId === a.id ? null : a.id)}>Access ({a.grants.filter((g) => !g.revoked).length})</button>
+          <button style={btnSty} onClick={() => void discuss(a.id)}>Discuss</button>
           <button style={btnSty} onClick={() => void remove(a.id)}>Remove</button>
         </span>
       </div>
@@ -226,11 +236,11 @@ function ManageAccess({ artifact, onGrant, onRevoke }: {
   const toggle = (x: string) => setActions((a) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]));
   return (
     <div style={{ marginTop: '.6rem', borderTop: '1px solid #2a2f3a', paddingTop: '.6rem' }}>
-      <div style={{ ...mutedText, fontSize: 12 }}>Give another agent (person / organization / service) access to this artifact. A grant becomes a revocable entitlement + delegation (ADR-0019).</div>
+      <div style={{ ...mutedText, fontSize: 12 }}>Give another agent (person / organization / service) access. A grant mints a revocable entitlement + delegation (ADR-0019) and sends a native notification — no connector.</div>
       {artifact.grants.map((g) => (
         <div key={g.grantee.address} style={{ display: 'flex', gap: '.5rem', alignItems: 'center', margin: '.3rem 0', opacity: g.revoked ? 0.5 : 1 }}>
           <code style={mono}>{g.grantee.label ? `${g.grantee.label} · ` : ''}{g.grantee.address.slice(0, 10)}…</code>
-          <span style={{ ...mutedText, fontSize: 12 }}>{g.grantee.kind} · {g.actions.join(', ')}{g.revoked ? ' · revoked' : ''}</span>
+          <span style={{ ...mutedText, fontSize: 12 }}>{g.grantee.kind} · {g.actions.join(', ')}{g.entitlementId ? ` · ${g.entitlementId}` : ''}{g.revoked ? ' · revoked' : ''}</span>
           {!g.revoked && <button style={btnSty} onClick={() => onRevoke(artifact.id, g.grantee.address)}>Revoke</button>}
         </div>
       ))}

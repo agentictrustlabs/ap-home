@@ -13,9 +13,11 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 type ArtifactSource = 'blob' | 'graphdb' | 'vault' | 'external';
 type ArtifactAction = 'read' | 'write' | 'share' | 'export' | 'delete';
 type AgentKind = 'person' | 'org' | 'service';
+import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
-import { stewardWireFor } from './channels';
+import { stewardWireFor, callInteractions } from './channels';
+import { appendControlEvent } from './control-events';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -47,6 +49,10 @@ interface ArtifactGrant {
   grantedAt: number;
   validUntil?: number;
   revoked?: boolean;
+  /** The entitlement resource this grant authorizes: `artifact:<id>` — uniform across sources. */
+  resource?: string;
+  /** Reference to the durable entitlement record (an AgenticEntitlementCredentialV1 downstream). */
+  entitlementId?: string;
 }
 
 /** A library entry — a Content Artifact reference + its access grants. `source` names where the bytes
@@ -62,6 +68,8 @@ interface LibraryArtifact {
   isFolder?: boolean;
   /** retrievalPointer for non-blob sources (e.g. `graphdb:faith/ontology`, `vault:0x…/impact-profile`). */
   pointer?: string;
+  /** A discussion board bound to this artifact (via its artifact ContextRef), when one exists. */
+  discussionId?: string;
   contentType: string;
   /** Small demo bytes inlined base64 (the avatar/message-body precedent); large media → R2 later. */
   bytesB64?: string;
@@ -170,15 +178,21 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const kind = AGENT_KINDS.has(g.granteeKind as AgentKind) ? (g.granteeKind as AgentKind) : 'person';
       const actions = (g.actions ?? ['read']).filter((x): x is ArtifactAction => ACTIONS.has(x as ArtifactAction));
       if (actions.length === 0) return jsonCors({ error: 'grant.actions must include a valid action' }, request, 400);
-      // The durable entitlement/delegation is minted by the entitlements/delegation layer downstream
-      // (content-storage §7.1); here we record the grant intent on the artifact (the manage-access view).
+      // Mint the durable entitlement — resource keyed on the artifact identity, uniform across sources
+      // (content-storage §7.1). The signed AgenticEntitlementCredentialV1 + cross-principal delegation
+      // land in the entitlements/delegation layer; here we record the entitlement and emit a NATIVE
+      // notification via the control-event feed — no connector, out of the box.
+      const resource = `artifact:${art.id}`;
+      const entitlementId = `ent-${Math.abs(hash(`${resource}${g.granteeAddress}${Date.now()}`)).toString(36)}`;
       art.grants = art.grants.filter((x) => x.grantee.address.toLowerCase() !== g.granteeAddress!.toLowerCase());
       art.grants.push({
         grantee: { address: g.granteeAddress.toLowerCase(), kind, label: g.granteeLabel?.slice(0, 80) },
         actions, grantedAt: Date.now(), validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined,
+        resource, entitlementId,
       });
       await scope.write(list);
-      return jsonCors({ ok: true, artifact: art }, request);
+      await appendControlEvent(env, person as Address, 'grant-issued').catch(() => undefined);
+      return jsonCors({ ok: true, artifact: art, entitlementId }, request);
     }
     case 'revoke': {
       const art = list.find((x) => x.id === body.id);
@@ -186,7 +200,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const addr = body.grant?.granteeAddress?.toLowerCase();
       art.grants = art.grants.map((x) => (x.grantee.address === addr ? { ...x, revoked: true } : x));
       await scope.write(list);
+      await appendControlEvent(env, person as Address, 'grant-revoked').catch(() => undefined);
       return jsonCors({ ok: true, artifact: art }, request);
+    }
+    case 'discuss': {
+      // Bind a native discussion board to this artifact via its artifact ContextRef (spec 335 §7.1).
+      // The same ContextRef{kind:'artifact', id:'artifact:<id>'} every messaging/discussion surface accepts.
+      const art = list.find((x) => x.id === body.id);
+      if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
+      const contextRef = { kind: 'artifact', id: `artifact:${art.id}`, label: art.name };
+      let discussionId = art.discussionId;
+      if (!discussionId && body.org) {
+        // Org scope: create a native board carrying the artifact ContextRef (best-effort; DO-mediated).
+        const r = await callInteractions(env, body.org, 'channels.create', { title: `Re: ${art.name}`, contextRefs: [contextRef] });
+        discussionId = typeof r.body.channelId === 'string' ? r.body.channelId : typeof r.body.id === 'string' ? r.body.id : undefined;
+      }
+      if (!discussionId) discussionId = `disc:${contextRef.id}`; // person scope / fallback binding
+      art.discussionId = discussionId;
+      await scope.write(list);
+      return jsonCors({ ok: true, discussionId, contextRef }, request);
     }
     default:
       return jsonCors({ error: `unknown action "${body.action}"` }, request, 400);
