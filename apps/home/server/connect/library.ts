@@ -21,6 +21,8 @@ import { stewardWireFor, callInteractions } from './channels';
 import { appendControlEvent } from './control-events';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { CHAIN_ID } from '../../src/lib/chain';
+import { issueLibraryAccessDelegation, toWire, type DelegationWire } from '../../src/lib/delegation';
+import { MCP_SERVER_ID } from '../../src/lib/inbox-delivery';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -52,12 +54,19 @@ interface ArtifactGrant {
   grantedAt: number;
   validUntil?: number;
   revoked?: boolean;
-  /** The entitlement resource this grant authorizes: `artifact:<id>` — uniform across sources. */
+  /** The entitlement resource this grant authorizes: `artifact:<id>` for a document, or
+   *  `container:<path>` for a FOLDER grant that cascades to the whole subtree (content-storage §7.2). */
   resource?: string;
+  /** Set on an effective (read-side) grant that a document inherits from an ancestor folder — the
+   *  folder's name. Absent on grants held directly on the entry. */
+  inheritedFrom?: string;
   /** Reference to the durable entitlement record (an AgenticEntitlementCredentialV1 downstream). */
   entitlementId?: string;
   /** True when a signed AgenticEntitlementCredentialV1 was minted (owner ERC-1271 proof). */
   signed?: boolean;
+  /** The paired scoped, revocable cross-principal delegation (owner → grantee, ADR-0019) — present
+   *  when the owner is custodied and could server-sign it. The grantee is a delegate, never a custodian. */
+  delegation?: DelegationWire;
 }
 
 /** Mint a signed AgenticEntitlementCredentialV1 for a grant — the owner SA is the issuer (ERC-1271).
@@ -88,6 +97,22 @@ async function mintEntitlementCredential(env: FnContext['env'], owner: string, i
   }
 }
 
+/** Mint the paired cross-principal DELEGATION for a grant (content-storage §7.2, ADR-0019): the owner's
+ *  custody signs a value-0, read-only, revocable delegation scoped to the container subtree
+ *  (`vault:library.<path>:*`) or the single document — so the grantee is a *delegate, never a custodian*.
+ *  Only minted when the owner is a custodied demo persona (a real owner signs client-side). */
+async function mintAccessDelegation(env: FnContext['env'], owner: string, grantee: string, scope: { folderPath?: string; artifactId?: string }, validUntil?: number): Promise<DelegationWire | undefined> {
+  const persona = demoPersonaFor(env, owner);
+  if (!persona) return undefined;
+  const validitySeconds = validUntil ? Math.max(60, Math.floor((validUntil - Date.now()) / 1000)) : undefined;
+  try {
+    const d = await issueLibraryAccessDelegation(owner as Address, grantee as Address, MCP_SERVER_ID, scope, (dig: Hex) => signDigestAsDemoPersona(persona, dig), validitySeconds);
+    return toWire(d);
+  } catch {
+    return undefined;
+  }
+}
+
 /** A library entry — a Content Artifact reference + its access grants. `source` names where the bytes
  *  live (blob/graphdb/vault/external); only `blob` inlines `bytesB64` in this demo. */
 interface LibraryArtifact {
@@ -108,7 +133,30 @@ interface LibraryArtifact {
   bytesB64?: string;
   size: number;
   createdAt: number;
+  /** Monotonic version — the append-only axis. Bumps on every re-save; starts at 1. */
+  version: number;
+  /** SHA-256 of the stored bytes (`0x…`), for blob artifacts — the content commitment the Provenance
+   *  tab verifies. Absent for non-blob sources (their commitment lives with the owning store). */
+  contentCommitment?: string;
   grants: ArtifactGrant[];
+}
+
+/** One INBOUND grant — the read-side index that powers "Shared with me": when owner A grants agent B,
+ *  a pointer is written to B's inbound index so B discovers the artifact across vaults (federated lens).
+ *  Keyed in KV by the grantee address; the authoritative grant still lives on the owner's artifact. */
+interface InboundGrant {
+  ownerScope: string;
+  ownerKind: AgentKind;
+  artifactId: string;
+  artifactName: string;
+  kind: LibraryArtifact['kind'];
+  source: ArtifactSource;
+  isFolder?: boolean;
+  actions: ArtifactAction[];
+  entitlementId: string;
+  resource: string;
+  grantedAt: number;
+  revoked?: boolean;
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
@@ -157,10 +205,20 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
-  const org = new URL(request.url).searchParams.get('org') ?? undefined;
+  const url = new URL(request.url);
+  const org = url.searchParams.get('org') ?? undefined;
   const scope = await scopeFor(request, env, person, org);
   if (!scope.ok) return scope.res;
-  return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts: await scope.read() }, request);
+  // "Shared with me" — the federated inbound lens: artifacts OTHER vaults granted to this principal.
+  if (url.searchParams.get('lens') === 'shared') {
+    const inbound = JSON.parse((await env.AUTH_CODES.get(`library:inbound:${scope.owner}`)) ?? '[]') as InboundGrant[];
+    const artifacts = inbound.filter((x) => !x.revoked).map(toSharedArtifact);
+    return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, lens: 'shared', artifacts }, request);
+  }
+  const artifacts = withEffectiveGrants(await scope.read());
+  // Pending access requests addressed to this owner (the "someone wants access" inbox).
+  const requests = (await readRequests(env, scope.owner)).filter((r) => r.status === 'pending');
+  return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts, requests }, request);
 };
 
 // POST — one of: save (upsert artifact), delete (by id), grant (give an agent access to an artifact),
@@ -171,6 +229,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const body = (await request.json().catch(() => null)) as {
     action?: string; org?: string; artifact?: Partial<LibraryArtifact>; artifacts?: Partial<LibraryArtifact>[]; id?: string;
     grant?: { granteeAddress?: string; granteeKind?: string; granteeLabel?: string; actions?: string[]; validUntil?: number };
+    // cross-vault read / request-access (Phase 3): the OWNER whose vault holds the artifact.
+    ownerScope?: string; ownerKind?: string; actions?: string[]; artifactName?: string;
   } | null;
   if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
 
@@ -180,7 +240,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   switch (body.action) {
     case 'save': {
-      const entry = upsert(list, body.artifact);
+      const entry = await upsert(list, body.artifact);
       if (!entry) return jsonCors({ error: 'artifact.name required' }, request, 400);
       await scope.write(list.slice(0, 200));
       return jsonCors({ ok: true, artifact: entry }, request);
@@ -188,7 +248,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     case 'save-batch': {
       // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
       if (!Array.isArray(body.artifacts) || body.artifacts.length === 0) return jsonCors({ error: 'artifacts[] required' }, request, 400);
-      const saved = body.artifacts.slice(0, 200).map((a) => upsert(list, a)).filter(Boolean);
+      const saved = (await Promise.all(body.artifacts.slice(0, 200).map((a) => upsert(list, a)))).filter(Boolean);
       await scope.write(list.slice(0, 200));
       return jsonCors({ ok: true, count: saved.length }, request);
     }
@@ -215,28 +275,78 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // (content-storage §7.1). The signed AgenticEntitlementCredentialV1 + cross-principal delegation
       // land in the entitlements/delegation layer; here we record the entitlement and emit a NATIVE
       // notification via the control-event feed — no connector, out of the box.
-      const resource = `artifact:${art.id}`;
+      //
+      // CONTAINMENT (content-storage §7.2): granting on a FOLDER mints a container-scoped entitlement
+      // (`container:<path>`) that cascades to everything under it — the ancestor-walk in GET turns that
+      // one grant into effective access for every descendant document. A document grant stays leaf-scoped.
+      const resource = art.isFolder ? containerResourceId(folderFullPath(art)) : `artifact:${art.id}`;
       const entitlementId = `ent-${Math.abs(hash(`${resource}${g.granteeAddress}${Date.now()}`)).toString(36)}`;
+      const validUntil = typeof g.validUntil === 'number' ? g.validUntil : undefined;
+      const granteeAddr = g.granteeAddress.toLowerCase();
       // Mint the SIGNED entitlement credential (owner SA = issuer, ERC-1271 proof).
-      const { credential, signed } = await mintEntitlementCredential(env, person, { entitlementId, resource, grantee: g.granteeAddress.toLowerCase(), actions, validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined });
-      art.grants = art.grants.filter((x) => x.grantee.address.toLowerCase() !== g.granteeAddress!.toLowerCase());
+      const { credential, signed } = await mintEntitlementCredential(env, person, { entitlementId, resource, grantee: granteeAddr, actions, validUntil });
+      // Pair it with a scoped, revocable cross-principal DELEGATION (ADR-0019, content-storage §7.2):
+      // read-only over the container subtree (`vault:library.<path>:*`) for a folder, or the single
+      // document — so a cross-org grantee is a *delegate, never a custodian*, and folder scope cascades.
+      const delegation = await mintAccessDelegation(env, person, granteeAddr, art.isFolder ? { folderPath: folderFullPath(art) } : { artifactId: art.id }, validUntil);
+      art.grants = art.grants.filter((x) => x.grantee.address.toLowerCase() !== granteeAddr);
       art.grants.push({
-        grantee: { address: g.granteeAddress.toLowerCase(), kind, label: g.granteeLabel?.slice(0, 80) },
-        actions, grantedAt: Date.now(), validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined,
-        resource, entitlementId, signed,
+        grantee: { address: granteeAddr, kind, label: g.granteeLabel?.slice(0, 80) },
+        actions, grantedAt: Date.now(), validUntil,
+        resource, entitlementId, signed, delegation,
       });
       await scope.write(list);
+      // Federate: write an inbound pointer so the grantee discovers this under "Shared with me".
+      await writeInbound(env, granteeAddr, {
+        ownerScope: scope.owner, ownerKind: scope.ownerKind, artifactId: art.id, artifactName: art.name,
+        kind: art.kind, source: art.source, isFolder: art.isFolder, actions, entitlementId, resource, grantedAt: Date.now(),
+      }).catch(() => undefined);
+      // If this grant answers a pending access request, mark it granted (closes the request loop).
+      const reqs = await readRequests(env, scope.owner);
+      const before = reqs.length;
+      const kept = reqs.map((r) => (r.requester === granteeAddr && r.artifactId === art.id && r.status === 'pending' ? { ...r, status: 'granted' as const } : r));
+      if (kept.some((r, i) => r.status !== reqs[i]?.status) || kept.length !== before) await writeRequests(env, scope.owner, kept).catch(() => undefined);
       await appendControlEvent(env, person as Address, 'grant-issued').catch(() => undefined);
-      return jsonCors({ ok: true, artifact: art, entitlementId, signed, credential }, request);
+      return jsonCors({ ok: true, artifact: art, entitlementId, signed, credential, delegation }, request);
     }
     case 'revoke': {
       const art = list.find((x) => x.id === body.id);
       if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
       const addr = body.grant?.granteeAddress?.toLowerCase();
+      const resource = art.grants.find((x) => x.grantee.address === addr)?.resource;
       art.grants = art.grants.map((x) => (x.grantee.address === addr ? { ...x, revoked: true } : x));
       await scope.write(list);
+      // Withdraw the federated inbound pointer for the grantee.
+      if (addr) await revokeInbound(env, addr, scope.owner, resource).catch(() => undefined);
       await appendControlEvent(env, person as Address, 'grant-revoked').catch(() => undefined);
       return jsonCors({ ok: true, artifact: art }, request);
+    }
+    case 'open': {
+      // Cross-vault READ (Phase 3): the requester presents its authority; the OWNER's origin re-checks
+      // the grant against its authoritative list (fail-closed) and releases an audience-bound copy.
+      const ownerScope = typeof body.ownerScope === 'string' ? body.ownerScope : person;
+      const ownerKind: AgentKind = body.ownerKind === 'org' ? 'org' : 'person';
+      const ownerList = await readOwnerList(env, ownerScope, ownerKind);
+      const art = ownerList.find((x) => x.id === body.id);
+      if (!art) return jsonCors({ error: 'unknown artifact' }, request, 404);
+      const holds = ownerScope === person || activeEffectiveGrants(ownerList, art).some((g) => g.grantee.address.toLowerCase() === person.toLowerCase());
+      if (!holds) return jsonCors({ error: 'access to this artifact was revoked or never granted' }, request, 403);
+      await appendReadReceipt(env, ownerScope, person, art.id).catch(() => undefined);
+      return jsonCors({ ok: true, servedBy: ownerScope, artifact: { id: art.id, name: art.name, kind: art.kind, source: art.source, contentType: art.contentType, bytesB64: art.bytesB64, pointer: art.pointer, version: art.version, contentCommitment: art.contentCommitment } }, request);
+    }
+    case 'request-access': {
+      // The requester asks an owner for access to an artifact they don't yet hold — lands in the owner's
+      // requests inbox (surfaced on the owner's GET); the owner approves by issuing a grant.
+      const ownerScope = typeof body.ownerScope === 'string' ? body.ownerScope : undefined;
+      if (!ownerScope || !body.id) return jsonCors({ error: 'ownerScope and id required' }, request, 400);
+      const actions = (body.actions ?? ['read']).filter((x): x is ArtifactAction => ACTIONS.has(x as ArtifactAction));
+      const requester = person.toLowerCase();
+      const reqs = await readRequests(env, ownerScope);
+      if (!reqs.some((r) => r.requester === requester && r.artifactId === body.id && r.status === 'pending')) {
+        reqs.push({ requester, artifactId: body.id, artifactName: body.artifactName, actions: actions.length ? actions : ['read'], at: Date.now(), status: 'pending' });
+        await writeRequests(env, ownerScope, reqs);
+      }
+      return jsonCors({ ok: true, status: 'requested' }, request);
     }
     case 'discuss': {
       // Bind a native discussion board to this artifact via its artifact ContextRef (spec 335 §7.1).
@@ -260,27 +370,106 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 };
 
-/** Build + upsert one artifact into the list (mutating), preserving grants on update. Returns the
- *  entry, or null when the input is invalid (no name). Shared by `save` and `save-batch`. */
-function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | undefined): LibraryArtifact | null {
+/** SHA-256 of base64 bytes as `0x…` — the content commitment for a stored blob (the same hash the
+ *  Provenance tab shows as "verified"; content-addressed integrity, computed at the origin). */
+async function sha256Hex(b64: string): Promise<string> {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return `0x${[...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Build + upsert one artifact into the list (mutating), preserving grants on update. Bumps the version
+ *  and (for blobs) recomputes the content commitment. Returns the entry, or null when invalid (no name). */
+async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | undefined): Promise<LibraryArtifact | null> {
   if (!a || typeof a.name !== 'string' || !a.name.trim()) return null;
   const kind = KINDS.has(String(a.kind)) ? (a.kind as LibraryArtifact['kind']) : 'md';
   const source = SOURCES.has(a.source as ArtifactSource) ? (a.source as ArtifactSource) : 'blob';
   const id = a.id && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash(`${a.name}${Date.now()}${Math.random()}`)).toString(36)}`;
   const folder = typeof a.folder === 'string' ? a.folder.replace(/^\/+|\/+$/g, '').slice(0, 256) : '';
+  const idx = list.findIndex((x) => x.id === id);
+  const bytesB64 = source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined;
   const entry: LibraryArtifact = {
     id, kind, name: a.name.trim().slice(0, 120), source, folder,
     isFolder: a.isFolder === true ? true : undefined,
     pointer: typeof a.pointer === 'string' ? a.pointer.slice(0, 512) : undefined,
     contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
-    bytesB64: source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined,
+    bytesB64,
     size: typeof a.size === 'number' ? a.size : (a.bytesB64?.length ?? 0),
     createdAt: Date.now(),
+    // Append-only version axis: re-saving an existing id advances its version.
+    version: idx >= 0 ? (list[idx]!.version ?? 1) + 1 : 1,
+    contentCommitment: bytesB64 ? await sha256Hex(bytesB64) : undefined,
     grants: [],
   };
-  const idx = list.findIndex((x) => x.id === id);
   if (idx >= 0) { entry.grants = list[idx]!.grants; list[idx] = entry; } else list.push(entry);
   return entry;
+}
+
+/** Write/refresh an inbound-grant pointer in the grantee's index (the "Shared with me" federated lens). */
+async function writeInbound(env: FnContext['env'], grantee: string, entry: InboundGrant): Promise<void> {
+  const key = `library:inbound:${grantee}`;
+  const listInbound = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as InboundGrant[];
+  const i = listInbound.findIndex((x) => x.ownerScope === entry.ownerScope && x.resource === entry.resource);
+  if (i >= 0) listInbound[i] = entry; else listInbound.push(entry);
+  await env.AUTH_CODES.put(key, JSON.stringify(listInbound.slice(0, 500)));
+}
+
+/** Mark a grantee's inbound pointer revoked when the owner revokes the grant. */
+async function revokeInbound(env: FnContext['env'], grantee: string, ownerScope: string, resource?: string): Promise<void> {
+  const key = `library:inbound:${grantee}`;
+  const listInbound = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as InboundGrant[];
+  let changed = false;
+  for (const x of listInbound) if (x.ownerScope === ownerScope && (!resource || x.resource === resource) && !x.revoked) { x.revoked = true; changed = true; }
+  if (changed) await env.AUTH_CODES.put(key, JSON.stringify(listInbound));
+}
+
+/** Read the OWNER's authoritative library list — the origin acting as the owner's vault resource server
+ *  (Phase 3). In this demo the shared worker plays both A's vault and B's client; a real deployment would
+ *  make an A2A/MCP call to A's vault. Person: the KV-cached index; org: the org vault index. */
+async function readOwnerList(env: FnContext['env'], ownerScope: string, ownerKind: AgentKind): Promise<LibraryArtifact[]> {
+  if (ownerKind === 'org') {
+    const { orgVault } = await import('../lib/org-vault');
+    const vault = await orgVault(env, ownerScope.toLowerCase());
+    return vault ? (((await vault.get('library.index')) as LibraryArtifact[] | null) ?? []) : [];
+  }
+  return JSON.parse((await env.AUTH_CODES.get(`library:${ownerScope}`)) ?? '[]') as LibraryArtifact[];
+}
+
+/** All ACTIVE grants that authorize reading an artifact — its own grants plus those inherited from any
+ *  ancestor folder (the containment cascade). The origin re-runs this over the owner's list at read time. */
+function activeEffectiveGrants(list: LibraryArtifact[], art: LibraryArtifact): ArtifactGrant[] {
+  const own = art.grants.filter((g) => !g.revoked);
+  const folderGrants = new Map<string, ArtifactGrant[]>();
+  for (const f of list) if (f.isFolder && f.grants.length) folderGrants.set(folderFullPath(f), f.grants.filter((g) => !g.revoked));
+  const inherited: ArtifactGrant[] = [];
+  for (const p of ancestorFolderPaths(art.folder)) { const fg = folderGrants.get(p); if (fg) inherited.push(...fg); }
+  return [...own, ...inherited];
+}
+
+/** Append an audience-bound read receipt to the owner's read log (evidence the release happened). */
+async function appendReadReceipt(env: FnContext['env'], ownerScope: string, reader: string, artifactId: string): Promise<void> {
+  const key = `library:reads:${ownerScope}`;
+  const l = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as unknown[];
+  l.push({ reader, artifactId, at: Date.now() });
+  await env.AUTH_CODES.put(key, JSON.stringify(l.slice(-500)));
+}
+
+interface AccessRequest { requester: string; artifactId: string; artifactName?: string; actions: ArtifactAction[]; at: number; status: 'pending' | 'granted' }
+/** Pending access requests addressed to an owner (the owner's inbox for "someone wants access"). */
+async function readRequests(env: FnContext['env'], ownerScope: string): Promise<AccessRequest[]> {
+  return JSON.parse((await env.AUTH_CODES.get(`library:requests:${ownerScope}`)) ?? '[]') as AccessRequest[];
+}
+async function writeRequests(env: FnContext['env'], ownerScope: string, reqs: AccessRequest[]): Promise<void> {
+  await env.AUTH_CODES.put(`library:requests:${ownerScope}`, JSON.stringify(reqs.slice(-200)));
+}
+
+/** Project inbound grants into the artifact shape the explorer's "Shared with me" lens renders. */
+function toSharedArtifact(g: InboundGrant): Record<string, unknown> {
+  return {
+    id: g.artifactId, name: g.artifactName, kind: g.kind, source: g.source, folder: '', isFolder: g.isFolder,
+    contentType: '', size: 0, createdAt: g.grantedAt, version: 1, grants: [],
+    accessMode: 'Read-through', sharedBy: g.ownerScope, sharedByKind: g.ownerKind, myActions: g.actions, entitlementId: g.entitlementId,
+  };
 }
 
 function defaultMime(kind: LibraryArtifact['kind']): string {
@@ -290,4 +479,44 @@ function hash(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
   return h;
+}
+
+// ── Containment hierarchy: folder grants cascade to the subtree ──
+// The canonical primitive is @agenticprimitives/content-storage `containment` (containerResourceId /
+// ancestorContainerResources / resolveWithInheritance + the Merkle `containmentRoot`). These few pure
+// helpers inline the same ancestor-walk here (content-storage isn't linked into this Vercel app), so a
+// grant on a folder reaches every document under it — the "grant a folder → everything in and under it
+// is accessible" behavior, identical to the spatial country→state→…→point case.
+
+/** A folder entry's full path, e.g. folder `reports` name `2026` → `reports/2026`. */
+function folderFullPath(a: Pick<LibraryArtifact, 'folder' | 'name'>): string {
+  return a.folder ? `${a.folder}/${a.name}` : a.name;
+}
+/** The container resource id for a path — access on it cascades to the whole subtree. */
+function containerResourceId(path: string): string {
+  return `container:${path.replace(/^\/+|\/+$/g, '')}`;
+}
+/** Inclusive ancestor folder paths of a document's folder: `a/b/c` → [`a`, `a/b`, `a/b/c`]. */
+function ancestorFolderPaths(folder: string): string[] {
+  const segs = folder.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  return segs.map((_, i) => segs.slice(0, i + 1).join('/'));
+}
+
+/** Attach `effectiveGrants` to each artifact: its own grants PLUS grants inherited from any ancestor
+ *  folder (marked `inheritedFrom`). This is the read-side ancestor-walk that realizes folder cascade. */
+function withEffectiveGrants(list: LibraryArtifact[]): (LibraryArtifact & { effectiveGrants?: ArtifactGrant[] })[] {
+  // Map each ancestor folder path → the folder entry's (cascading) grants.
+  const folderGrants = new Map<string, { label: string; grants: ArtifactGrant[] }>();
+  for (const f of list) {
+    if (f.isFolder && f.grants.length) folderGrants.set(folderFullPath(f), { label: f.name, grants: f.grants });
+  }
+  return list.map((a) => {
+    if (a.isFolder) return a;
+    const inherited: ArtifactGrant[] = [];
+    for (const path of ancestorFolderPaths(a.folder)) {
+      const fg = folderGrants.get(path);
+      if (fg) for (const g of fg.grants) if (!g.revoked) inherited.push({ ...g, inheritedFrom: fg.label });
+    }
+    return inherited.length ? { ...a, effectiveGrants: [...a.grants, ...inherited] } : a;
+  });
 }

@@ -438,6 +438,46 @@ export async function issueOrganizationResourceAccessDelegation(
   return d;
 }
 
+/** The vault-record scope for a library CONTAINER — a folder/skill-bundle subtree (`vault:library.<path>:*`,
+ *  a trailing-`*` prefix that anchored-matches every record under it) or a single document
+ *  (`vault:library.<id>`, exact). Library resource ids are `container:<path>` / `artifact:<id>`; this maps
+ *  them onto the `vault:`-prefixed record family the caveat requires. */
+export function libraryVaultScope(input: { folderPath?: string; artifactId?: string }): string {
+  if (input.folderPath) return `vault:library.${input.folderPath.replace(/^\/+|\/+$/g, '')}:*`;
+  return `vault:library.${input.artifactId}`;
+}
+
+/**
+ * content-storage §7.2 — the cross-principal library grant `owner → grantee`, signed by the content
+ * owner's custody. When an owner shares a FOLDER (or skill-bundle) with another agent — especially a
+ * cross-org / external one — the durable `AgenticEntitlementCredentialV1` is paired with this scoped,
+ * revocable DELEGATION so the grantee is a *delegate, never a custodian* (ADR-0019). Read-only over the
+ * container's record subtree (`vault:library.<path>:*`, so it cascades to everything under the folder,
+ * exactly like the entitlement's ancestor-walk); value-0; time-boxed; on-chain revocable.
+ */
+export async function issueLibraryAccessDelegation(
+  ownerSA: Address,
+  grantee: Address,
+  mcpServerId: string,
+  scope: { folderPath?: string; artifactId?: string },
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildVaultRecordScopeCaveat([{ server: mcpServerId, resources: [libraryVaultScope(scope)], ops: ['read'] }]),
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: ownerSA, delegate: grantee, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the content owner's custody grants the delegate read access
+  return d;
+}
+
 /**
  * spec 321 W1 — the membership delegation `member → org`, signed by the member's connection
  * custodian at invite ACCEPT (spec 246's deferred person→org leg). Read-only over the member's

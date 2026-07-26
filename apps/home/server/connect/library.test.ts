@@ -28,15 +28,15 @@ let token: string;
 let iss: string;
 const url = 'https://home.test/connect/library';
 
-async function mint(env: any): Promise<{ token: string; iss: string }> {
+async function mint(env: any, sa: string = DEMO_SA): Promise<{ token: string; iss: string }> {
   const { getServer } = await import('../_lib/server-broker');
   const { signer } = await getServer(env);
   const req = new Request(url);
   const issuer = resolveOrigin(req, env);
   const t = await mintAgentSession(
     {
-      sub: `eip155:84532:${DEMO_SA}` as any,
-      principal: { kind: 'siwe-eoa', id: DEMO_SA, assurance: 'onchain-confirmed', role: 'custody-grade' } as any,
+      sub: `eip155:84532:${sa}` as any,
+      principal: { kind: 'siwe-eoa', id: sa, assurance: 'onchain-confirmed', role: 'custody-grade' } as any,
       assurance: 'onchain-confirmed',
       aud: 'demo-sso',
       iss: issuer,
@@ -88,12 +88,15 @@ describe('/connect/library — as a demo user (person scope)', () => {
     const skill = await (await post({ action: 'save', artifact: { id: 'create-skill', kind: 'skill', name: 'create-skill', source: 'blob', bytesB64: btoa('# Create Skill\n') } })).json();
     expect(skill.ok).toBe(true);
     expect(skill.artifact.source).toBe('blob');
+    expect(skill.artifact.version).toBe(1); // append-only version axis starts at 1
+    expect(skill.artifact.contentCommitment).toMatch(/^0x[0-9a-f]{64}$/); // SHA-256 content commitment for a blob
 
     // A .ttl that lives in GraphDB — a non-unstructured source (spec 335 §5.1).
     const ttl = await (await post({ action: 'save', artifact: { id: 'faith-ttl', kind: 'ttl', name: 'faith.ttl', source: 'graphdb', pointer: 'graphdb:faith/ontology' } })).json();
     expect(ttl.ok).toBe(true);
     expect(ttl.artifact.source).toBe('graphdb');
     expect(ttl.artifact.pointer).toBe('graphdb:faith/ontology');
+    expect(ttl.artifact.contentCommitment).toBeUndefined(); // non-blob: commitment lives with the owning store
 
     const list = await (await get()).json();
     expect(list.artifacts.map((a: any) => a.id).sort()).toEqual(['create-skill', 'faith-ttl']);
@@ -132,9 +135,72 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(b.credential.issuer).toBe(DEMO_SA);
     expect(b.credential.credentialSubject.resource).toBe('artifact:faith-ttl');
     expect(b.credential.proof).toBeTruthy();
+    // a paired scoped, revocable cross-principal DELEGATION was minted (owner → grantee, ADR-0019)
+    expect(b.delegation).toBeTruthy();
+    expect(b.delegation.delegator).toBe(DEMO_SA);
+    expect(b.delegation.delegate.toLowerCase()).toBe(TEAM_SA.toLowerCase());
+    expect(b.delegation.signature).toMatch(/^0x/);
+    expect(grant.delegation?.delegator).toBe(DEMO_SA);
     // native notification landed on the control-event feed (out-of-the-box integration)
     const ev = JSON.parse((await env.AUTH_CODES.get(`home-control:${DEMO_SA}`)) ?? '[]');
     expect(ev.some((e: any) => e.eventType === 'grant-issued')).toBe(true);
+  });
+
+  it('advances the version on every re-save (append-only axis)', async () => {
+    await post({ action: 'save', artifact: { id: 'versioned', kind: 'md', name: 'v.md', source: 'blob', bytesB64: btoa('one') } });
+    const again = await (await post({ action: 'save', artifact: { id: 'versioned', kind: 'md', name: 'v.md', source: 'blob', bytesB64: btoa('two') } })).json();
+    expect(again.artifact.version).toBe(2);
+  });
+
+  it('surfaces a grant under "Shared with me" for the grantee, and withdraws it on revoke', async () => {
+    const GRANTEE = '0x3333333333333333333333333333333333333333';
+    await post({ action: 'save', artifact: { id: 'shared-doc', kind: 'md', name: 'shared-doc.md', source: 'blob', bytesB64: btoa('hello') } });
+    await post({ action: 'grant', id: 'shared-doc', grant: { granteeAddress: GRANTEE, granteeKind: 'person', actions: ['read'] } });
+
+    const granteeTok = (await mint(env, GRANTEE)).token;
+    const sharedGet = () => onRequestGet({ request: new Request(`${url}?lens=shared`, { headers: { authorization: `Bearer ${granteeTok}` } }), env } as any);
+    const granteePost = (b: unknown) => onRequestPost({ request: new Request(url, { method: 'POST', headers: { authorization: `Bearer ${granteeTok}`, 'content-type': 'application/json' }, body: JSON.stringify(b) }), env } as any);
+
+    let shared = await (await sharedGet()).json();
+    expect(shared.lens).toBe('shared');
+    const row = shared.artifacts.find((a: any) => a.id === 'shared-doc');
+    expect(row).toBeTruthy();
+    expect(row.accessMode).toBe('Read-through');
+    expect(row.sharedBy).toBe(DEMO_SA); // the owning (person) vault
+    expect(row.myActions).toEqual(['read']);
+
+    // Phase 3 — cross-vault READ: the owner's origin re-checks the grant and releases a copy.
+    const opened = await (await granteePost({ action: 'open', ownerScope: DEMO_SA, ownerKind: 'person', id: 'shared-doc' })).json();
+    expect(opened.ok).toBe(true);
+    expect(opened.servedBy).toBe(DEMO_SA);
+    expect(opened.artifact.bytesB64).toBe(btoa('hello'));
+
+    // Revoking withdraws the federated inbound pointer AND fails a later read (fail-closed).
+    await post({ action: 'revoke', id: 'shared-doc', grant: { granteeAddress: GRANTEE } });
+    shared = await (await sharedGet()).json();
+    expect(shared.artifacts.find((a: any) => a.id === 'shared-doc')).toBeUndefined();
+    const denied = await granteePost({ action: 'open', ownerScope: DEMO_SA, ownerKind: 'person', id: 'shared-doc' });
+    expect(denied.status).toBe(403);
+  });
+
+  it('lets an agent request access, surfaces it to the owner, and clears it on approve', async () => {
+    const REQ = '0x4444444444444444444444444444444444444444';
+    await post({ action: 'save', artifact: { id: 'req-doc', kind: 'md', name: 'req-doc.md', source: 'blob', bytesB64: btoa('x') } });
+    const reqTok = (await mint(env, REQ)).token;
+    const reqPost = (b: unknown) => onRequestPost({ request: new Request(url, { method: 'POST', headers: { authorization: `Bearer ${reqTok}`, 'content-type': 'application/json' }, body: JSON.stringify(b) }), env } as any);
+
+    // A read before any grant is refused (fail-closed).
+    expect((await reqPost({ action: 'open', ownerScope: DEMO_SA, ownerKind: 'person', id: 'req-doc' })).status).toBe(403);
+    // The requester asks the owner.
+    expect((await (await reqPost({ action: 'request-access', ownerScope: DEMO_SA, id: 'req-doc', actions: ['read'] })).json()).status).toBe('requested');
+    // The owner sees the pending request on their GET.
+    const withReq = await (await get()).json();
+    expect(withReq.requests.some((x: any) => x.requester === REQ && x.artifactId === 'req-doc')).toBe(true);
+    // Owner approves by granting; the request clears and the read now succeeds.
+    await post({ action: 'grant', id: 'req-doc', grant: { granteeAddress: REQ, granteeKind: 'person', actions: ['read'] } });
+    const afterGrant = await (await get()).json();
+    expect(afterGrant.requests.some((x: any) => x.requester === REQ && x.artifactId === 'req-doc')).toBe(false);
+    expect((await (await reqPost({ action: 'open', ownerScope: DEMO_SA, ownerKind: 'person', id: 'req-doc' })).json()).ok).toBe(true);
   });
 
   it('binds a native discussion board to an artifact via its artifact ContextRef', async () => {
@@ -156,6 +222,40 @@ describe('/connect/library — as a demo user (person scope)', () => {
     const list = await (await get()).json();
     expect(list.artifacts.find((a: any) => a.id === 'create-skill')).toBeUndefined();
     expect(list.artifacts.some((a: any) => a.id === 'faith-ttl')).toBe(true);
+  });
+
+  it('cascades a FOLDER grant to every document under it (containment §7.2)', async () => {
+    // Build reports/ → reports/2026 → a doc inside the nested folder.
+    await post({ action: 'save', artifact: { name: 'briefs', isFolder: true } });
+    await post({ action: 'save', artifact: { name: '2026', isFolder: true, folder: 'briefs' } });
+    await post({ action: 'save-batch', artifacts: [{ name: 'jan.md', source: 'blob', folder: 'briefs/2026', bytesB64: btoa('jan') }] });
+
+    // Grant an org on the TOP folder only.
+    let list = (await (await get()).json()).artifacts;
+    const top = list.find((a: any) => a.isFolder && a.name === 'briefs');
+    const res = await post({ action: 'grant', id: top.id, grant: { granteeAddress: TEAM_SA, granteeKind: 'org', actions: ['read'] } });
+    const b = await res.json();
+    // The folder grant mints a CONTAINER-scoped entitlement, not a leaf artifact one.
+    expect(b.artifact.grants[0].resource).toBe('container:briefs');
+    // …paired with a folder-subtree-scoped delegation (read cascades to everything under it):
+    // three caveats — vault-record scope (vault:library.briefs:*), timestamp, value-0.
+    expect(b.delegation).toBeTruthy();
+    expect(b.delegation.delegator).toBe(DEMO_SA);
+    expect(b.delegation.delegate.toLowerCase()).toBe(TEAM_SA.toLowerCase());
+    expect(b.delegation.caveats.length).toBe(3);
+
+    // The nested document now shows the grant as an EFFECTIVE (inherited) grant.
+    list = (await (await get()).json()).artifacts;
+    const doc = list.find((a: any) => a.name === 'jan.md');
+    expect(doc.grants).toEqual([]); // no direct grant on the doc
+    const eff = doc.effectiveGrants ?? [];
+    expect(eff.some((g: any) => g.grantee.address === TEAM_SA.toLowerCase() && g.inheritedFrom === 'briefs')).toBe(true);
+
+    // Revoking the folder grant withdraws the cascaded access.
+    await post({ action: 'revoke', id: top.id, grant: { granteeAddress: TEAM_SA } });
+    list = (await (await get()).json()).artifacts;
+    const doc2 = list.find((a: any) => a.name === 'jan.md');
+    expect((doc2.effectiveGrants ?? []).length).toBe(0);
   });
 
   it('supports folders and cascades a folder delete', async () => {
