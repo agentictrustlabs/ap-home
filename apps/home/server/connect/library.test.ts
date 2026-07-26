@@ -56,6 +56,8 @@ beforeAll(async () => {
     BROKER_KID: 'test-broker',
     DEMO_SSO_AUD: 'demo-sso',
     RPC_URL: 'http://localhost:0',
+    // Register the demo user as a custodied persona so the grant can server-side-sign the entitlement VC.
+    DEMO_PERSONA_KEYS: JSON.stringify({ [DEMO_SA]: `0x${'11'.repeat(32)}` }),
     // no A2A_CUSTODY_URL → capability-record read/write no-op; the KV cache is authoritative for the test.
   };
   ({ token, iss } = await mint(env));
@@ -124,6 +126,12 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(b.entitlementId).toMatch(/^ent-/);
     expect(grant.entitlementId).toBe(b.entitlementId);
     expect(grant.resource).toBe('artifact:faith-ttl');
+    // a SIGNED AgenticEntitlementCredentialV1 was minted (owner is the issuer)
+    expect(b.signed).toBe(true);
+    expect(grant.signed).toBe(true);
+    expect(b.credential.issuer).toBe(DEMO_SA);
+    expect(b.credential.credentialSubject.resource).toBe('artifact:faith-ttl');
+    expect(b.credential.proof).toBeTruthy();
     // native notification landed on the control-event feed (out-of-the-box integration)
     const ev = JSON.parse((await env.AUTH_CODES.get(`home-control:${DEMO_SA}`)) ?? '[]');
     expect(ev.some((e: any) => e.eventType === 'grant-issued')).toBe(true);
