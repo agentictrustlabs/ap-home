@@ -1,0 +1,201 @@
+// /connect/library — a person's or organization's Content Artifact LIBRARY (spec 335).
+//
+// Leverages @agenticprimitives/content-storage: each library entry is a Content Artifact — a SKILL.md,
+// a .ttl (which may live in GraphDB), a .md, a JSON-LD record (which may live in a vault), or an image —
+// and access is managed PER ARTIFACT by granting other agents (person/org/service) entitlements to it,
+// uniform across sources (content-storage §5.1/§7.1). The library index is authoritative in the
+// principal's vault (`library.index`, the skills.data pattern, spec 323); KV is a rebuildable cache.
+// Person scope = the session subject; org scope = steward-gated, DO-mediated (spec 315).
+import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+// Mirrors @agenticprimitives/content-storage {ArtifactSource, ArtifactAction, AgentKind} (spec 335
+// §5.1/§7.1) — inlined here until the content-storage workspace dep is installed/built for this
+// Vercel app; the model (multi-source artifacts + per-artifact access grants) is identical.
+type ArtifactSource = 'blob' | 'graphdb' | 'vault' | 'external';
+type ArtifactAction = 'read' | 'write' | 'share' | 'export' | 'delete';
+type AgentKind = 'person' | 'org' | 'service';
+import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { stewardWireFor } from './channels';
+
+function cors(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') ?? '';
+  return origin && isAllowedClientOrigin(origin)
+    ? { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization, content-type', vary: 'Origin' }
+    : {};
+}
+const jsonCors = (body: unknown, request: Request, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...cors(request) } });
+
+export const onRequestOptions = async ({ request }: FnContext): Promise<Response> =>
+  new Response(null, { status: 204, headers: cors(request) });
+
+async function personFrom(request: Request, env: FnContext['env']): Promise<string | null> {
+  const auth = request.headers.get('authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return null;
+  const { jwks } = await getServer(env);
+  const keys = await importJwks(jwks);
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  if (!v.ok) return null;
+  return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
+}
+
+/** One access grant on an artifact — the "give agent X access" record (content-storage §7.1). */
+interface ArtifactGrant {
+  grantee: { address: string; kind: AgentKind; label?: string };
+  actions: ArtifactAction[];
+  grantedAt: number;
+  validUntil?: number;
+  revoked?: boolean;
+}
+
+/** A library entry — a Content Artifact reference + its access grants. `source` names where the bytes
+ *  live (blob/graphdb/vault/external); only `blob` inlines `bytesB64` in this demo. */
+interface LibraryArtifact {
+  id: string;
+  kind: 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
+  name: string;
+  source: ArtifactSource;
+  /** retrievalPointer for non-blob sources (e.g. `graphdb:faith/ontology`, `vault:0x…/impact-profile`). */
+  pointer?: string;
+  contentType: string;
+  /** Small demo bytes inlined base64 (the avatar/message-body precedent); large media → R2 later. */
+  bytesB64?: string;
+  size: number;
+  createdAt: number;
+  grants: ArtifactGrant[];
+}
+
+const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
+const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
+const SOURCES = new Set<ArtifactSource>(['blob', 'graphdb', 'vault', 'external']);
+const ACTIONS = new Set<ArtifactAction>(['read', 'write', 'share', 'export', 'delete']);
+const AGENT_KINDS = new Set<AgentKind>(['person', 'org', 'service']);
+
+/** Resolve the acting scope: a person (session subject) or an org (steward-gated). Returns the read/
+ *  write seam over the right vault + the KV cache key, or an error Response. */
+async function scopeFor(request: Request, env: FnContext['env'], person: string, org?: string): Promise<
+  | { ok: true; owner: string; ownerKind: AgentKind; read: () => Promise<LibraryArtifact[]>; write: (list: LibraryArtifact[]) => Promise<void> }
+  | { ok: false; res: Response }
+> {
+  const bearer = (request.headers.get('authorization') ?? '').slice(7);
+  if (org) {
+    const orgSA = org.toLowerCase();
+    // Authorization to act FOR the org is a stewardship wire, re-verified downstream by the org DO.
+    const wire = await stewardWireFor(env, person, orgSA);
+    if (!wire) return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
+    const { orgVault } = await import('../lib/org-vault');
+    const vault = await orgVault(env, orgSA);
+    if (!vault) return { ok: false, res: jsonCors({ error: 'organization storage not enabled' }, request, 503) };
+    return {
+      ok: true, owner: orgSA, ownerKind: 'org',
+      read: async () => ((await vault.get('library.index')) as LibraryArtifact[] | null) ?? [],
+      write: async (list) => { await vault.set('library.index', list); },
+    };
+  }
+  // Person scope — authoritative vault record + KV cache (skills.data pattern).
+  const { readCapabilityRecord, writeCapabilityRecord } = await import('../lib/capability-record');
+  return {
+    ok: true, owner: person, ownerKind: 'person',
+    read: async () => {
+      const auth = await readCapabilityRecord<LibraryArtifact[]>(env, person, bearer, 'library.index');
+      if (Array.isArray(auth)) { await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(auth)); return auth; }
+      return JSON.parse((await env.AUTH_CODES.get(`library:${person}`)) ?? '[]') as LibraryArtifact[];
+    },
+    write: async (list) => {
+      await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(list));
+      await writeCapabilityRecord(env, person, bearer, 'library.index', list);
+    },
+  };
+}
+
+export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
+  const person = await personFrom(request, env);
+  if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  const org = new URL(request.url).searchParams.get('org') ?? undefined;
+  const scope = await scopeFor(request, env, person, org);
+  if (!scope.ok) return scope.res;
+  return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts: await scope.read() }, request);
+};
+
+// POST — one of: save (upsert artifact), delete (by id), grant (give an agent access to an artifact),
+// revoke (a grant). The index is small; each is an atomic read-modify-write.
+export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  const person = await personFrom(request, env);
+  if (!person) return jsonCors({ error: 'home session required' }, request, 401);
+  const body = (await request.json().catch(() => null)) as {
+    action?: string; org?: string; artifact?: Partial<LibraryArtifact>; id?: string;
+    grant?: { granteeAddress?: string; granteeKind?: string; granteeLabel?: string; actions?: string[]; validUntil?: number };
+  } | null;
+  if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
+
+  const scope = await scopeFor(request, env, person, body.org);
+  if (!scope.ok) return scope.res;
+  const list = await scope.read();
+
+  switch (body.action) {
+    case 'save': {
+      const a = body.artifact;
+      if (!a || typeof a.name !== 'string' || !a.name.trim()) return jsonCors({ error: 'artifact.name required' }, request, 400);
+      const kind = KINDS.has(String(a.kind)) ? (a.kind as LibraryArtifact['kind']) : 'md';
+      const source = SOURCES.has(a.source as ArtifactSource) ? (a.source as ArtifactSource) : 'blob';
+      const id = a.id && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash(a.name + Date.now())).toString(36)}`;
+      const entry: LibraryArtifact = {
+        id, kind, name: a.name.trim().slice(0, 120), source,
+        pointer: typeof a.pointer === 'string' ? a.pointer.slice(0, 512) : undefined,
+        contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
+        bytesB64: source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined,
+        size: typeof a.size === 'number' ? a.size : (a.bytesB64?.length ?? 0),
+        createdAt: Date.now(),
+        grants: [],
+      };
+      const idx = list.findIndex((x) => x.id === id);
+      if (idx >= 0) entry.grants = list[idx]!.grants; // preserve existing access on update
+      if (idx >= 0) list[idx] = entry; else list.push(entry);
+      await scope.write(list.slice(0, 200));
+      return jsonCors({ ok: true, artifact: entry }, request);
+    }
+    case 'delete': {
+      const next = list.filter((x) => x.id !== body.id);
+      await scope.write(next);
+      return jsonCors({ ok: true, count: next.length }, request);
+    }
+    case 'grant': {
+      const art = list.find((x) => x.id === body.id);
+      const g = body.grant;
+      if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
+      if (!g?.granteeAddress || !/^0x[0-9a-fA-F]{40}$/.test(g.granteeAddress)) return jsonCors({ error: 'grant.granteeAddress (0x…) required' }, request, 400);
+      const kind = AGENT_KINDS.has(g.granteeKind as AgentKind) ? (g.granteeKind as AgentKind) : 'person';
+      const actions = (g.actions ?? ['read']).filter((x): x is ArtifactAction => ACTIONS.has(x as ArtifactAction));
+      if (actions.length === 0) return jsonCors({ error: 'grant.actions must include a valid action' }, request, 400);
+      // The durable entitlement/delegation is minted by the entitlements/delegation layer downstream
+      // (content-storage §7.1); here we record the grant intent on the artifact (the manage-access view).
+      art.grants = art.grants.filter((x) => x.grantee.address.toLowerCase() !== g.granteeAddress!.toLowerCase());
+      art.grants.push({
+        grantee: { address: g.granteeAddress.toLowerCase(), kind, label: g.granteeLabel?.slice(0, 80) },
+        actions, grantedAt: Date.now(), validUntil: typeof g.validUntil === 'number' ? g.validUntil : undefined,
+      });
+      await scope.write(list);
+      return jsonCors({ ok: true, artifact: art }, request);
+    }
+    case 'revoke': {
+      const art = list.find((x) => x.id === body.id);
+      if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
+      const addr = body.grant?.granteeAddress?.toLowerCase();
+      art.grants = art.grants.map((x) => (x.grantee.address === addr ? { ...x, revoked: true } : x));
+      await scope.write(list);
+      return jsonCors({ ok: true, artifact: art }, request);
+    }
+    default:
+      return jsonCors({ error: `unknown action "${body.action}"` }, request, 400);
+  }
+};
+
+function defaultMime(kind: LibraryArtifact['kind']): string {
+  return kind === 'ttl' ? 'text/turtle' : kind === 'json-ld' ? 'application/ld+json' : kind === 'image' ? 'image/png' : 'text/markdown';
+}
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return h;
+}
