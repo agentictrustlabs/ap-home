@@ -35,7 +35,7 @@ async function mint(env: any): Promise<{ token: string; iss: string }> {
   const issuer = resolveOrigin(req, env);
   const t = await mintAgentSession(
     {
-      sub: `eip155:84532:${DEMO_SA}`,
+      sub: `eip155:84532:${DEMO_SA}` as any,
       principal: { kind: 'siwe-eoa', id: DEMO_SA, assurance: 'onchain-confirmed', role: 'custody-grade' } as any,
       assurance: 'onchain-confirmed',
       aud: 'demo-sso',
