@@ -124,7 +124,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const person = await personFrom(request, env);
   if (!person) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as {
-    action?: string; org?: string; artifact?: Partial<LibraryArtifact>; id?: string;
+    action?: string; org?: string; artifact?: Partial<LibraryArtifact>; artifacts?: Partial<LibraryArtifact>[]; id?: string;
     grant?: { granteeAddress?: string; granteeKind?: string; granteeLabel?: string; actions?: string[]; validUntil?: number };
   } | null;
   if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
@@ -135,25 +135,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   switch (body.action) {
     case 'save': {
-      const a = body.artifact;
-      if (!a || typeof a.name !== 'string' || !a.name.trim()) return jsonCors({ error: 'artifact.name required' }, request, 400);
-      const kind = KINDS.has(String(a.kind)) ? (a.kind as LibraryArtifact['kind']) : 'md';
-      const source = SOURCES.has(a.source as ArtifactSource) ? (a.source as ArtifactSource) : 'blob';
-      const id = a.id && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash(a.name + Date.now())).toString(36)}`;
-      const entry: LibraryArtifact = {
-        id, kind, name: a.name.trim().slice(0, 120), source,
-        pointer: typeof a.pointer === 'string' ? a.pointer.slice(0, 512) : undefined,
-        contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
-        bytesB64: source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined,
-        size: typeof a.size === 'number' ? a.size : (a.bytesB64?.length ?? 0),
-        createdAt: Date.now(),
-        grants: [],
-      };
-      const idx = list.findIndex((x) => x.id === id);
-      if (idx >= 0) entry.grants = list[idx]!.grants; // preserve existing access on update
-      if (idx >= 0) list[idx] = entry; else list.push(entry);
+      const entry = upsert(list, body.artifact);
+      if (!entry) return jsonCors({ error: 'artifact.name required' }, request, 400);
       await scope.write(list.slice(0, 200));
       return jsonCors({ ok: true, artifact: entry }, request);
+    }
+    case 'save-batch': {
+      // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
+      if (!Array.isArray(body.artifacts) || body.artifacts.length === 0) return jsonCors({ error: 'artifacts[] required' }, request, 400);
+      const saved = body.artifacts.slice(0, 200).map((a) => upsert(list, a)).filter(Boolean);
+      await scope.write(list.slice(0, 200));
+      return jsonCors({ ok: true, count: saved.length }, request);
     }
     case 'delete': {
       const next = list.filter((x) => x.id !== body.id);
@@ -190,6 +182,27 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ error: `unknown action "${body.action}"` }, request, 400);
   }
 };
+
+/** Build + upsert one artifact into the list (mutating), preserving grants on update. Returns the
+ *  entry, or null when the input is invalid (no name). Shared by `save` and `save-batch`. */
+function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | undefined): LibraryArtifact | null {
+  if (!a || typeof a.name !== 'string' || !a.name.trim()) return null;
+  const kind = KINDS.has(String(a.kind)) ? (a.kind as LibraryArtifact['kind']) : 'md';
+  const source = SOURCES.has(a.source as ArtifactSource) ? (a.source as ArtifactSource) : 'blob';
+  const id = a.id && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash(`${a.name}${Date.now()}${Math.random()}`)).toString(36)}`;
+  const entry: LibraryArtifact = {
+    id, kind, name: a.name.trim().slice(0, 120), source,
+    pointer: typeof a.pointer === 'string' ? a.pointer.slice(0, 512) : undefined,
+    contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
+    bytesB64: source === 'blob' && typeof a.bytesB64 === 'string' ? a.bytesB64.slice(0, 2_000_000) : undefined,
+    size: typeof a.size === 'number' ? a.size : (a.bytesB64?.length ?? 0),
+    createdAt: Date.now(),
+    grants: [],
+  };
+  const idx = list.findIndex((x) => x.id === id);
+  if (idx >= 0) { entry.grants = list[idx]!.grants; list[idx] = entry; } else list.push(entry);
+  return entry;
+}
 
 function defaultMime(kind: LibraryArtifact['kind']): string {
   return kind === 'ttl' ? 'text/turtle' : kind === 'json-ld' ? 'application/ld+json' : kind === 'image' ? 'image/png' : 'text/markdown';

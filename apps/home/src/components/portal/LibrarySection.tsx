@@ -3,7 +3,7 @@
 // and grant other agents access to a specific artifact. Backed by /connect/library; person scope by
 // default, org scope when `orgSa` is set (steward-gated server-side). Artifacts are multi-source:
 // a .ttl may come from GraphDB, a JSON-LD record from a vault — not just unstructured blobs.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty } from './theme';
@@ -16,6 +16,26 @@ interface Artifact { id: string; kind: Kind; name: string; source: Source; point
 const KINDS: Kind[] = ['skill', 'ttl', 'md', 'json-ld', 'image'];
 const SOURCES: Source[] = ['blob', 'graphdb', 'vault', 'external'];
 const ACTIONS = ['read', 'write', 'share', 'export', 'delete'];
+const MAX_UPLOAD_BYTES = 1_400_000; // backend inlines base64 (~2 MB cap); larger media → object store later
+
+/** Infer the artifact kind from a dropped/picked file. */
+function kindFor(file: File): Kind {
+  const n = file.name.toLowerCase();
+  if (file.type.startsWith('image/')) return 'image';
+  if (n.endsWith('.ttl')) return 'ttl';
+  if (n.endsWith('.jsonld') || n.endsWith('.json')) return 'json-ld';
+  if (n === 'skill.md' || n.includes('skill')) return 'skill';
+  return 'md';
+}
+
+/** Read a File as base64 (handles binary — images — correctly). */
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => { const s = String(r.result); res(s.slice(s.indexOf(',') + 1)); };
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(file);
+  });
 
 export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const { session } = useSession();
@@ -26,10 +46,16 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // add-artifact form
+  // drag-and-drop upload
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+
+  // add-by-reference form (GraphDB / vault / typed content)
   const [name, setName] = useState('');
   const [kind, setKind] = useState<Kind>('md');
-  const [source, setSource] = useState<Source>('blob');
+  const [source, setSource] = useState<Source>('graphdb');
   const [pointer, setPointer] = useState('');
   const [body, setBody] = useState('');
 
@@ -51,6 +77,25 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
     finally { setLoading(false); }
   }, [api]);
   useEffect(() => { if (token) void load(); }, [token, load]);
+
+  // Bulk drag-and-drop / file-picker upload — reads each file to base64 and saves them in one batch.
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true); setUploadMsg(null); setErr(null);
+    const artifacts: Record<string, unknown>[] = [];
+    const skipped: string[] = [];
+    for (const f of Array.from(files)) {
+      if (f.size > MAX_UPLOAD_BYTES) { skipped.push(f.name); continue; }
+      try { artifacts.push({ name: f.name, kind: kindFor(f), source: 'blob', bytesB64: await fileToBase64(f), contentType: f.type || undefined, size: f.size }); }
+      catch { skipped.push(f.name); }
+    }
+    try {
+      if (artifacts.length) await api('POST', { action: 'save-batch', org: orgSa, artifacts });
+      setUploadMsg(`Uploaded ${artifacts.length}${skipped.length ? ` · skipped ${skipped.length} over 1.4 MB (${skipped.join(', ')})` : ''}`);
+      await load();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setUploading(false); }
+  };
 
   const add = async () => {
     if (!name.trim()) return;
@@ -78,8 +123,38 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
       </p>
       {err && <p style={errorText}>{err}</p>}
 
-      <div style={{ ...cardSty, marginTop: '1rem' }}>
-        <b>Add an artifact</b>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFiles(e.dataTransfer.files); }}
+        onClick={() => fileInputRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+        style={{
+          ...cardSty, marginTop: '1rem', padding: '1.6rem', textAlign: 'center', cursor: 'pointer',
+          border: `2px dashed ${dragOver ? '#6ea8fe' : '#39414f'}`,
+          background: dragOver ? 'rgba(110,168,254,0.10)' : undefined,
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>{uploading ? 'Uploading…' : 'Drag & drop files here'}</div>
+        <div style={{ ...mutedText, fontSize: 12, marginTop: 4 }}>
+          images, SKILL.md, <code style={mono}>.ttl</code>, <code style={mono}>.md</code>, JSON-LD — or click to browse. Drop many at once.
+          Files over 1.4&nbsp;MB are skipped in this demo (large media → object store later).
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => { void handleFiles(e.target.files); (e.target as HTMLInputElement).value = ''; }}
+        />
+        {uploadMsg && <div style={{ ...mutedText, fontSize: 12, marginTop: 8 }}>{uploadMsg}</div>}
+      </div>
+
+      <div style={{ ...cardSty, marginTop: '.6rem' }}>
+        <b>Or add by reference — GraphDB / vault / typed content</b>
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginTop: '.5rem', alignItems: 'center' }}>
           <input style={inputSty} placeholder="name (e.g. create-skill, faith.ttl)" value={name} onChange={(e) => setName(e.target.value)} />
           <select style={inputSty} value={kind} onChange={(e) => setKind(e.target.value as Kind)}>{KINDS.map((k) => <option key={k} value={k}>{k}</option>)}</select>
