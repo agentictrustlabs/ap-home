@@ -97,6 +97,21 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(list.artifacts.map((a: any) => a.id).sort()).toEqual(['create-skill', 'faith-ttl']);
   });
 
+  it('bulk-uploads many files in one save-batch (drag-and-drop)', async () => {
+    const artifacts = [
+      { name: 'a.md', kind: 'md', source: 'blob', bytesB64: btoa('a') },
+      { name: 'logo.png', kind: 'image', source: 'blob', bytesB64: btoa('img') },
+      { name: 'notes.md', kind: 'md', source: 'blob', bytesB64: btoa('n') },
+    ];
+    const res = await post({ action: 'save-batch', artifacts });
+    expect(res.status).toBe(200);
+    expect((await res.json()).count).toBe(3);
+    const list = await (await get()).json();
+    // the two originals + the three uploaded
+    expect(list.artifacts.length).toBe(5);
+    expect(list.artifacts.some((a: any) => a.name === 'logo.png' && a.kind === 'image')).toBe(true);
+  });
+
   it('grants another agent (an organization) access to one artifact', async () => {
     const res = await post({ action: 'grant', id: 'faith-ttl', grant: { granteeAddress: TEAM_SA, granteeKind: 'org', granteeLabel: 'Laos hotspot team', actions: ['read', 'share'] } });
     expect(res.status).toBe(200);
@@ -116,6 +131,7 @@ describe('/connect/library — as a demo user (person scope)', () => {
   it('deletes an artifact', async () => {
     await post({ action: 'delete', id: 'create-skill' });
     const list = await (await get()).json();
-    expect(list.artifacts.map((a: any) => a.id)).toEqual(['faith-ttl']);
+    expect(list.artifacts.find((a: any) => a.id === 'create-skill')).toBeUndefined();
+    expect(list.artifacts.some((a: any) => a.id === 'faith-ttl')).toBe(true);
   });
 });
