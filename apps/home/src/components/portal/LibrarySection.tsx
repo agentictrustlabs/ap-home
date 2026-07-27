@@ -31,12 +31,12 @@ const ACTIONS = ['read', 'write', 'share', 'export', 'delete'];
 const MAX_UPLOAD_BYTES = 1_400_000;
 
 // Kind → the WORD the UI shows + its icon. Words carry meaning; icons aid scanning (paired, never alone).
-const KIND_META: Record<Kind, { label: string; icon: IconName }> = {
-  skill: { label: 'Skill', icon: 'skill' },
-  ttl: { label: 'Ontology', icon: 'ontology' },
-  'json-ld': { label: 'Record', icon: 'record' },
-  image: { label: 'Image', icon: 'image' },
-  md: { label: 'Document', icon: 'document' },
+const KIND_META: Record<Kind, { label: string; plural: string; icon: IconName }> = {
+  skill: { label: 'Skill', plural: 'Skills', icon: 'skill' },
+  ttl: { label: 'Ontology', plural: 'Ontologies', icon: 'ontology' },
+  'json-ld': { label: 'Record', plural: 'Records', icon: 'record' },
+  image: { label: 'Image', plural: 'Images', icon: 'image' },
+  md: { label: 'Document', plural: 'Documents', icon: 'document' },
 };
 const ACCESS_TONE: Record<AccessMode, BadgeKind> = { Owned: 'ok', Public: 'ok', 'Read-through': 'neutral', Replica: 'neutral', Projection: 'warn' };
 const FRESH_TONE: Record<Freshness, BadgeKind> = { Live: 'ok', Signed: 'ok', Cached: 'neutral', Stale: 'warn', Unavailable: 'err' };
@@ -219,7 +219,9 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
 
   return (
     <SectionShell title={title}>
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+      {/* Explicit text color so every descendant inherits a defined token — never a white ambient
+          (e.g. a browser/OS dark-mode default) on our light surfaces. */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
         <ScopeRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); }} orgLabel={orgSa ? shortAddr(orgSa) : undefined} ownerLabel={ownerLabel} sharedCount={0} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -239,7 +241,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
               <div style={{ display: 'inline-flex', border: '1px solid var(--color-border-strong)', borderRadius: 8, overflow: 'hidden' }}>
                 {(['all', ...KINDS] as const).map((k) => (
-                  <button key={k} style={segSty(kindFilter === k)} onClick={() => setKindFilter(k)}>{k === 'all' ? 'All' : KIND_META[k].label + 's'}</button>
+                  <button key={k} style={segSty(kindFilter === k)} onClick={() => setKindFilter(k)}>{k === 'all' ? 'All' : KIND_META[k].plural}</button>
                 ))}
               </div>
               <div style={{ flex: 1 }} />

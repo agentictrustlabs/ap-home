@@ -76,6 +76,8 @@ export function buildNav(
           { id: 'org-discussions', label: 'Discussions', href: orgHref(a, 'discussions'), Icon: HashIcon, status: 'live' },
           // spec 334 §6 — Requests/Triage, Endeavor list/board, Endeavor detail, New request.
           { id: 'org-work', label: 'Work', href: orgHref(a, 'work'), Icon: CheckCircleIcon, status: 'live' },
+          // Library sits in the TOP org area (mirrors the person nav's top-group Library), not buried in Manage.
+          { id: 'org-library', label: 'Library', href: orgHref(a, 'library'), Icon: DatabaseIcon, status: 'live' },
         ],
       },
       // Manage: the old scrolling "Data" page split into its real pieces (spec 315) + Treasury.
@@ -88,7 +90,6 @@ export function buildNav(
           { id: 'org-agent', label: 'Agent', href: orgHref(a, 'agent'), Icon: BotIcon, status: 'live' },
           { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
           { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
-          { id: 'org-library', label: 'Library', href: orgHref(a, 'library'), Icon: DatabaseIcon, status: 'live' },
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-trust-graph', label: 'Trust graph', href: orgHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
