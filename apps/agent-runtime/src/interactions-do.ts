@@ -836,7 +836,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1235,6 +1235,23 @@ export class InteractionsDO {
           const resource = String(body.resource ?? '');
           if (!resource.startsWith('org.invite:')) return json({ error: 'org.invite resources only' }, 400);
           if (op === 'invite.get') {
+            const r = await this.vaultFor(dg).read<unknown>({ owner: '', resource });
+            return json({ ok: true, record: r?.data ?? null });
+          }
+          if (body.data === undefined) return json({ error: 'data required' }, 400);
+          await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
+          return json({ ok: true });
+        }
+        if (op === 'content.get' || op === 'content.put') {
+          // ADR-0055 — the ORG's own Content Artifacts (`content.*`), read/written via the DO-held delivery
+          // wire (its scope now covers vault:content.*). Steward-gated upstream (demo-sso-next scopeFor →
+          // stewardWireFor), bridge-gated here; namespace-pinned to `content.` as a belt to the wire scope.
+          // Mirrors invite.* — the org analogue of the person's self-gated record.*/content.catalog path.
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — enable storage for this org first' }, 409);
+          const resource = String(body.resource ?? '');
+          if (!resource.startsWith('content.')) return json({ error: 'content.* resources only' }, 400);
+          if (op === 'content.get') {
             const r = await this.vaultFor(dg).read<unknown>({ owner: '', resource });
             return json({ ok: true, record: r?.data ?? null });
           }

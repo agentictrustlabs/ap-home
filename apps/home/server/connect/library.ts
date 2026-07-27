@@ -221,13 +221,16 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     // Authorization to act FOR the org is a stewardship wire, re-verified downstream by the org DO.
     const wire = await stewardWireFor(env, person, orgSA);
     if (!wire) return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
+    // Storage gate: orgVault is null unless the org enabled storage (a delivery grant exists). We reuse it
+    // only as the gate; the org catalog itself rides the DO's `content.*` op (steward-bridged, ADR-0055),
+    // NOT orgVault's invite-pinned get/set — so it's the `content.catalog` VAULT record, like the person path.
     const { orgVault } = await import('../lib/org-vault');
-    const vault = await orgVault(env, orgSA);
-    if (!vault) return { ok: false, res: jsonCors({ error: 'organization storage not enabled' }, request, 503) };
+    if (!(await orgVault(env, orgSA))) return { ok: false, res: jsonCors({ error: 'organization storage not enabled' }, request, 503) };
+    const { bridgeInteractions } = await import('../lib/interactions-bridge');
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
-      read: async () => ((await vault.get('library.index')) as LibraryArtifact[] | null) ?? [],
-      write: async (list) => { await vault.set('library.index', list); },
+      read: async () => { const r = await bridgeInteractions<{ record?: unknown }>(env, orgSA, 'content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
+      write: async (list) => { const r = await bridgeInteractions(env, orgSA, 'content.put', { resource: 'content.catalog', data: list }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); },
     };
   }
   // Person scope — authoritative in the person's VAULT as the `content.catalog` record, reached over
@@ -488,9 +491,12 @@ async function revokeInbound(env: FnContext['env'], grantee: string, ownerScope:
  *  make an A2A/MCP call to A's vault. Person: the KV-cached index; org: the org vault index. */
 async function readOwnerList(env: FnContext['env'], ownerScope: string, ownerKind: AgentKind): Promise<LibraryArtifact[]> {
   if (ownerKind === 'org') {
+    const org = ownerScope.toLowerCase();
     const { orgVault } = await import('../lib/org-vault');
-    const vault = await orgVault(env, ownerScope.toLowerCase());
-    return vault ? (((await vault.get('library.index')) as LibraryArtifact[] | null) ?? []) : [];
+    if (!(await orgVault(env, org))) return [];
+    const { bridgeInteractions } = await import('../lib/interactions-bridge');
+    const r = await bridgeInteractions<{ record?: unknown }>(env, org, 'content.get', { resource: 'content.catalog' });
+    return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? [];
   }
   return JSON.parse((await env.AUTH_CODES.get(`library:${ownerScope}`)) ?? '[]') as LibraryArtifact[];
 }

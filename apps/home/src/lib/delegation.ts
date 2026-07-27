@@ -234,6 +234,8 @@ function buildInboxDeliveryStruct(
     buildVaultRecordScopeCaveat([
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE], ops: ['write'] },
       { server: mcpServerId, resources: [ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      // ADR-0055 — the org's Content Artifacts, read+write via the DO-held wire (steward-bridged content.* ops).
+      { server: mcpServerId, resources: [CONTENT_RECORDS_RESOURCE_SCOPE], ops: ['read', 'write'] },
     ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
