@@ -4,7 +4,7 @@
 // a .ttl (which may live in GraphDB), a .md, a JSON-LD record (which may live in a vault), or an image —
 // and access is managed PER ARTIFACT by granting other agents (person/org/service) entitlements to it,
 // uniform across sources (content-storage §5.1/§7.1). The library index is authoritative in the
-// principal's vault (`library.index`, the skills.data pattern, spec 323); KV is a rebuildable cache.
+// principal's vault (person: the `content.catalog` record via A2A→MCP; org: org-vault); KV is a cache.
 // Person scope = the session subject; org scope = steward-gated, DO-mediated (spec 315).
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 // Mirrors @agenticprimitives/content-storage {ArtifactSource, ArtifactAction, AgentKind} (spec 335
@@ -230,18 +230,22 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
       write: async (list) => { await vault.set('library.index', list); },
     };
   }
-  // Person scope — authoritative vault record + KV cache (skills.data pattern).
+  // Person scope — authoritative in the person's VAULT as the `content.catalog` record, reached over
+  // A2A→MCP (the InteractionsDO `record.*` seam → `get/set_vault_record`), now that the `content.*`
+  // family is allow-listed (ADR-0055; PR #489). KV is a rebuildable cache; the first write after this
+  // migration lazily moves the catalog from the legacy KV blob into the vault. `library:<person>` stays
+  // the internal cache-key name (immaterial); the DATA-model record is `content.catalog`.
   const { readCapabilityRecord, writeCapabilityRecord } = await import('../lib/capability-record');
   return {
     ok: true, owner: person, ownerKind: 'person',
     read: async () => {
-      const auth = await readCapabilityRecord<LibraryArtifact[]>(env, person, bearer, 'library.index');
+      const auth = await readCapabilityRecord<LibraryArtifact[]>(env, person, bearer, 'content.catalog');
       if (Array.isArray(auth)) { await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(auth)); return auth; }
       return JSON.parse((await env.AUTH_CODES.get(`library:${person}`)) ?? '[]') as LibraryArtifact[];
     },
     write: async (list) => {
       await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(list));
-      await writeCapabilityRecord(env, person, bearer, 'library.index', list);
+      await writeCapabilityRecord(env, person, bearer, 'content.catalog', list);
     },
   };
 }
