@@ -212,6 +212,9 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(opened.ok).toBe(true);
     expect(opened.servedBy).toBe(DEMO_SA);
     expect(opened.artifact.bytesB64).toBe(btoa('hello'));
+    // a read receipt landed in the READER's OWN vault (content.receipt.*), not a shared KV log
+    const receipts = (await env.AUTH_CODES.list()).keys.map((k: any) => k.name).filter((n: string) => n.startsWith(`library:${GRANTEE}:content.receipt.`));
+    expect(receipts.length).toBeGreaterThan(0);
 
     // Revoking withdraws the federated inbound pointer AND fails a later read (fail-closed).
     await post({ action: 'revoke', id: 'shared-doc', grant: { granteeAddress: GRANTEE } });

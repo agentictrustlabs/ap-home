@@ -405,7 +405,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!art) return jsonCors({ error: 'unknown artifact' }, request, 404);
       const holds = ownerScope === person || activeEffectiveGrants(ownerList, art).some((g) => g.grantee.address.toLowerCase() === person.toLowerCase());
       if (!holds) return jsonCors({ error: 'access to this artifact was revoked or never granted' }, request, 403);
-      await appendReadReceipt(env, ownerScope, person, art.id).catch(() => undefined);
+      // Read receipt = the READER's own use-receipt (evidence *I* accessed this), written to the READER's
+      // OWN vault (`content.receipt.<id>`, tamper-evident) — vault-first (a principal writes only its own
+      // vault; no cross-principal write), closing the "receipts belong in a vault" finding (ADR-0055).
+      await scope.putRecord(`content.receipt.${crypto.randomUUID()}`, { kind: 'read', subject: art.id, servedBy: ownerScope, at: Date.now() }).catch(() => undefined);
       return jsonCors({ ok: true, servedBy: ownerScope, artifact: { id: art.id, name: art.name, kind: art.kind, source: art.source, contentType: art.contentType, bytesB64: art.bytesB64, pointer: art.pointer, version: art.version, contentCommitment: art.contentCommitment } }, request);
     }
     case 'request-access': {
@@ -547,15 +550,14 @@ function activeEffectiveGrants(list: LibraryArtifact[], art: LibraryArtifact): A
   return [...own, ...inherited];
 }
 
-/** Append an audience-bound read receipt to the owner's read log (evidence the release happened). */
-async function appendReadReceipt(env: FnContext['env'], ownerScope: string, reader: string, artifactId: string): Promise<void> {
-  const key = `library:reads:${ownerScope}`;
-  const l = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as unknown[];
-  l.push({ reader, artifactId, at: Date.now() });
-  await env.AUTH_CODES.put(key, JSON.stringify(l.slice(-500)));
-}
-
 interface AccessRequest { requester: string; artifactId: string; artifactName?: string; actions: ArtifactAction[]; at: number; status: 'pending' | 'granted' }
+// Access requests + the "Shared with me" inbound index are LEGITIMATELY non-vault (ADR-0055 exceptions),
+// not KV-as-authority: requests are short-lived operational/transport state (the vault-correct form is an
+// A2A `content.access.request` intent delivered to the owner's inbox, not a requester-write to the owner's
+// vault); the inbound index is a REBUILDABLE projection of grants across vaults (derivable from owners'
+// authoritative grant lists). Both are cross-principal writes, so they cannot become owner/grantee vault
+// records without violating "a principal writes only its own vault". Read receipts, which ARE durable
+// evidence, moved to the reader's own vault (see the `open` action).
 /** Pending access requests addressed to an owner (the owner's inbox for "someone wants access"). */
 async function readRequests(env: FnContext['env'], ownerScope: string): Promise<AccessRequest[]> {
   return JSON.parse((await env.AUTH_CODES.get(`library:requests:${ownerScope}`)) ?? '[]') as AccessRequest[];
