@@ -28,6 +28,8 @@ import {
   type SkillHandler,
 } from '@agenticprimitives/a2a';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
+// Content fabric over A2A→MCP (ADR-0055): the content intents ride the existing vault seam.
+import { A2A_CONTENT_INTENTS, parseVaultResourceId, toVaultRecordResource } from '@agenticprimitives/content-storage';
 import { createDurableObjectBudgetStore } from '@agenticprimitives/rate-control-cloudflare';
 import { createChainAuthorityReader } from '@agenticprimitives/chain-state';
 import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
@@ -94,6 +96,39 @@ const echo: SkillHandler = {
   skill: 'echo',
   handle: async (ctx) => ({ state: 'completed', artifactIds: [await ctx.emitArtifact({ artifactKind: 'echo', body: ctx.input })] }),
 };
+
+// ── Content fabric over A2A → MCP (ADR-0055) ──────────────────────────────────────────────────────────
+// The content intents are ordinary A2A skills that ride the EXISTING vault seam. Each lowers the
+// app-facing `ap-vault://<sa>/<kind>/<id>` id to the flat, principal-keyed MCP record and calls
+// get/set_vault_record under the task delegation. `toVaultRecordResource` is FAIL-CLOSED on
+// `vaultId !== principal` — a task may only address its own principal's vault. Person + service today
+// (the record.* / content.* path); org-owned content is a follow-on (org.content:* op).
+function contentRecordType(uri: string, principal: Address): string {
+  const ref = parseVaultResourceId(uri);
+  if (!ref) throw new Error(`malformed ap-vault resource: ${uri}`);
+  // strip the `vault:` prefix — get/set_vault_record take the bare recordType (demo-mcp re-adds it).
+  return toVaultRecordResource(ref, principal).replace(/^vault:/, '');
+}
+function makeContentSkills(): SkillHandler[] {
+  return [
+    {
+      skill: A2A_CONTENT_INTENTS.accessRequest,
+      handle: async (ctx) => {
+        const uri = (ctx.input as { resource?: string } | null)?.resource ?? '';
+        const record = await ctx.mcp.callTool({ tool: 'get_vault_record', toolArgs: { recordType: contentRecordType(uri, ctx.principal) }, delegation: ctx.delegation });
+        return { state: 'completed', artifactIds: [await ctx.emitArtifact({ artifactKind: 'content.record', body: record })] };
+      },
+    },
+    {
+      skill: A2A_CONTENT_INTENTS.skillPublishRequest,
+      handle: async (ctx) => {
+        const input = (ctx.input as { resource?: string; release?: unknown } | null) ?? {};
+        await ctx.mcp.callTool({ tool: 'set_vault_record', toolArgs: { recordType: contentRecordType(input.resource ?? '', ctx.principal), record: input.release ?? null }, delegation: ctx.delegation });
+        return { state: 'completed', artifactIds: [await ctx.emitArtifact({ artifactKind: 'skill.release', body: input.release ?? null })] };
+      },
+    },
+  ];
+}
 
 // ── The Ring-0 agentic model (ADR-0044) ──────────────────────────────────────────────────────────────
 /** The `orchestrate` skill — the intent-task entry point. Reads a GOAL, plans which MCP tool composes to
@@ -504,7 +539,7 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));

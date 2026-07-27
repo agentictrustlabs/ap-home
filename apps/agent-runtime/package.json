@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agenticprimitives/content-storage": "workspace:*",
     "@agenticprimitives/a2a": "workspace:*",
     "@agenticprimitives/agent-account": "workspace:*",
     "@agenticprimitives/agent-naming": "workspace:*",

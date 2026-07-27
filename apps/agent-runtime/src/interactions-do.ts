@@ -161,7 +161,7 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 // Same precedent for the spec-334 coordination docs (`vault:coordination.requests`, `vault:coordination.index`,
 // `vault:coordination.endeavor:*`): additive scopes the grant-signing ceremony (demo-sso-next) must include for
 // endeavor.* ops to reach the vault — a grant lacking them is denied per-record at demo-mcp, never blanket-staled.
-const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data', 'vault:content.*'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -1978,8 +1978,8 @@ export class InteractionsDO {
         // to demo-mcp's record-scope gate (the interactions grant's scope) so the vault viewer (spec 315)
         // can VIEW any Home-managed record; an out-of-scope record is denied at demo-mcp, never silently.
         // The self-check above + the KEK gate + the grant scope remain.
-        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType)) {
-          return json({ error: `recordType must be one of: ${[...CAPABILITY_RECORDS].join(', ')}` }, 400);
+        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.')) {
+          return json({ error: `recordType must be a capability record or a content.* record` }, 400);
         }
         if (op === 'record.get') {
           const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
