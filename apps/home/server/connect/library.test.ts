@@ -152,6 +152,18 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(again.artifact.version).toBe(2);
   });
 
+  it('writes a per-artifact content.artifact.<id> vault record on save, and clears it on delete (addressable via ap-vault)', async () => {
+    await post({ action: 'save', artifact: { id: 'addressable-doc', kind: 'md', name: 'a.md', source: 'blob', bytesB64: btoa('hello-addr') } });
+    const key = `library:${DEMO_SA}:content.artifact.addressable-doc`;
+    const rec = JSON.parse((await env.AUTH_CODES.get(key)) ?? 'null');
+    expect(rec).toBeTruthy();
+    expect(rec.bytesB64).toBe(btoa('hello-addr'));       // the servable content view
+    expect(rec.commitment).toMatch(/^0x[0-9a-f]{64}$/);  // SHA-256 content commitment
+    // deleting the artifact removes its per-artifact record too
+    await post({ action: 'delete', id: 'addressable-doc' });
+    expect(await env.AUTH_CODES.get(key)).toBeNull();
+  });
+
   it('publishes a signed, version-monotonic skill release with a location-independent id (Phase 5)', async () => {
     await post({ action: 'save', artifact: { id: 'pub-skill', kind: 'skill', name: 'triage-skill', source: 'blob', bytesB64: btoa('# Triage\n') } });
     const r1 = await (await post({ action: 'publish', id: 'pub-skill' })).json();

@@ -211,10 +211,19 @@ const AGENT_KINDS = new Set<AgentKind>(['person', 'org', 'service']);
 
 /** Resolve the acting scope: a person (session subject) or an org (steward-gated). Returns the read/
  *  write seam over the right vault + the KV cache key, or an error Response. */
-async function scopeFor(request: Request, env: FnContext['env'], person: string, org?: string): Promise<
-  | { ok: true; owner: string; ownerKind: AgentKind; read: () => Promise<LibraryArtifact[]>; write: (list: LibraryArtifact[]) => Promise<void> }
-  | { ok: false; res: Response }
-> {
+interface LibraryScope {
+  ok: true;
+  owner: string;
+  ownerKind: AgentKind;
+  /** The catalog (index) list — `content.catalog`. */
+  read: () => Promise<LibraryArtifact[]>;
+  write: (list: LibraryArtifact[]) => Promise<void>;
+  /** Per-record vault ops (ADR-0055): each artifact's content is its own addressable `content.artifact.<id>`
+   *  record, so `ap-vault://<sa>/artifacts/<id>` (the `content.access.request` skill) can serve it. */
+  putRecord: (recordType: string, data: unknown) => Promise<void>;
+  delRecord: (recordType: string) => Promise<void>;
+}
+async function scopeFor(request: Request, env: FnContext['env'], person: string, org?: string): Promise<LibraryScope | { ok: false; res: Response }> {
   const bearer = (request.headers.get('authorization') ?? '').slice(7);
   if (org) {
     const orgSA = org.toLowerCase();
@@ -222,22 +231,23 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     const wire = await stewardWireFor(env, person, orgSA);
     if (!wire) return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
     // Storage gate: orgVault is null unless the org enabled storage (a delivery grant exists). We reuse it
-    // only as the gate; the org catalog itself rides the DO's `content.*` op (steward-bridged, ADR-0055),
-    // NOT orgVault's invite-pinned get/set — so it's the `content.catalog` VAULT record, like the person path.
+    // only as the gate; content itself rides the DO's `content.*` op (steward-bridged, ADR-0055).
     const { orgVault } = await import('../lib/org-vault');
     if (!(await orgVault(env, orgSA))) return { ok: false, res: jsonCors({ error: 'organization storage not enabled' }, request, 503) };
     const { bridgeInteractions } = await import('../lib/interactions-bridge');
+    const putRecord = async (recordType: string, data: unknown) => { const r = await bridgeInteractions(env, orgSA, 'content.put', { resource: recordType, data }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); };
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
       read: async () => { const r = await bridgeInteractions<{ record?: unknown }>(env, orgSA, 'content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
-      write: async (list) => { const r = await bridgeInteractions(env, orgSA, 'content.put', { resource: 'content.catalog', data: list }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); },
+      write: async (list) => { await putRecord('content.catalog', list); },
+      putRecord,
+      delRecord: async (recordType) => { await bridgeInteractions(env, orgSA, 'content.put', { resource: recordType, data: null }); },
     };
   }
-  // Person scope — authoritative in the person's VAULT as the `content.catalog` record, reached over
-  // A2A→MCP (the InteractionsDO `record.*` seam → `get/set_vault_record`), now that the `content.*`
-  // family is allow-listed (ADR-0055; PR #489). KV is a rebuildable cache; the first write after this
-  // migration lazily moves the catalog from the legacy KV blob into the vault. `library:<person>` stays
-  // the internal cache-key name (immaterial); the DATA-model record is `content.catalog`.
+  // Person scope — authoritative in the person's VAULT via A2A→MCP (the InteractionsDO `record.*` seam,
+  // now that `content.*` is allow-listed — ADR-0055 / PR #489). KV (`library:<person>[:<rec>]`) is a
+  // rebuildable cache; the `content.catalog` index + per-artifact `content.artifact.<id>` records are
+  // the DATA model.
   const { readCapabilityRecord, writeCapabilityRecord } = await import('../lib/capability-record');
   return {
     ok: true, owner: person, ownerKind: 'person',
@@ -249,6 +259,14 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     write: async (list) => {
       await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(list));
       await writeCapabilityRecord(env, person, bearer, 'content.catalog', list);
+    },
+    putRecord: async (recordType, data) => {
+      await env.AUTH_CODES.put(`library:${person}:${recordType}`, JSON.stringify(data));
+      await writeCapabilityRecord(env, person, bearer, recordType, data);
+    },
+    delRecord: async (recordType) => {
+      await env.AUTH_CODES.delete(`library:${person}:${recordType}`);
+      await writeCapabilityRecord(env, person, bearer, recordType, null);
     },
   };
 }
@@ -294,13 +312,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const entry = await upsert(list, body.artifact);
       if (!entry) return jsonCors({ error: 'artifact.name required' }, request, 400);
       await scope.write(list.slice(0, 200));
+      await writeArtifactRecord(scope, entry);
       return jsonCors({ ok: true, artifact: entry }, request);
     }
     case 'save-batch': {
       // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
       if (!Array.isArray(body.artifacts) || body.artifacts.length === 0) return jsonCors({ error: 'artifacts[] required' }, request, 400);
-      const saved = (await Promise.all(body.artifacts.slice(0, 200).map((a) => upsert(list, a)))).filter(Boolean);
+      const saved = (await Promise.all(body.artifacts.slice(0, 200).map((a) => upsert(list, a)))).filter((e): e is LibraryArtifact => !!e);
       await scope.write(list.slice(0, 200));
+      await Promise.all(saved.map((e) => writeArtifactRecord(scope, e)));
       return jsonCors({ ok: true, count: saved.length }, request);
     }
     case 'delete': {
@@ -311,7 +331,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         const full = target.folder ? `${target.folder}/${target.name}` : target.name;
         next = next.filter((x) => x.folder !== full && !x.folder.startsWith(`${full}/`));
       }
+      const removed = list.filter((x) => !next.some((n) => n.id === x.id));
       await scope.write(next);
+      // Delete each removed artifact's per-artifact content record (folders have none).
+      await Promise.all(removed.filter((x) => !x.isFolder).map((x) => scope.delRecord(`content.artifact.${x.id}`).catch(() => undefined)));
       return jsonCors({ ok: true, count: next.length }, request);
     }
     case 'grant': {
@@ -432,6 +455,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ error: `unknown action "${body.action}"` }, request, 400);
   }
 };
+
+/** Persist an artifact's per-artifact content record — `content.artifact.<id>` (ADR-0055): the
+ *  addressable, servable content view (bytes/pointer/type/commitment). Written on save so
+ *  `ap-vault://<sa>/artifacts/<id>` (the `content.access.request` skill → `get_vault_record`) resolves
+ *  to it. Folders (containers) have no content record. Best-effort — the catalog stays authoritative. */
+async function writeArtifactRecord(scope: LibraryScope, a: LibraryArtifact): Promise<void> {
+  if (a.isFolder) return;
+  await scope.putRecord(`content.artifact.${a.id}`, {
+    id: a.id, kind: a.kind, name: a.name, source: a.source, contentType: a.contentType,
+    bytesB64: a.bytesB64, pointer: a.pointer, commitment: a.contentCommitment, version: a.version,
+  }).catch(() => undefined);
+}
 
 /** SHA-256 of base64 bytes as `0x…` — the content commitment for a stored blob (the same hash the
  *  Provenance tab shows as "verified"; content-addressed integrity, computed at the origin). */
