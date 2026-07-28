@@ -187,7 +187,11 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const goTo = (segs: string[]) => { setPath(segs); setSelectedId(null); };
   const newFolder = async () => { const name = prompt('Folder name'); if (!name?.trim()) return; try { await api('POST', { action: 'save', org: orgSa, artifact: { name: name.trim(), kind: 'md', source: 'blob', folder: cwd, isFolder: true } }); await load(); } catch (e) { setErr((e as Error).message); } };
   const removeItem = async (a: Artifact) => {
-    if (a.isFolder && items.some((x) => x.folder === fullPath(a) || x.folder.startsWith(`${fullPath(a)}/`)) && !confirm(`Delete "${a.name}" and everything inside it? This can't be undone.`)) return;
+    const hasChildren = a.isFolder && items.some((x) => x.folder === fullPath(a) || x.folder.startsWith(`${fullPath(a)}/`));
+    const question = hasChildren
+      ? `Delete "${a.name}" and everything inside it? This can't be undone.`
+      : `Delete "${a.name}"? This can't be undone.`;
+    if (!confirm(question)) return;
     try { await api('POST', { action: 'delete', org: orgSa, id: a.id }); setSelectedId(null); await load(); } catch (e) { setErr((e as Error).message); }
   };
   const move = async (a: Artifact, dest: string) => { if (dest === a.folder) return; try { await api('POST', { action: 'save', org: orgSa, artifact: { ...a, folder: dest } }); await load(); } catch (e) { setErr((e as Error).message); } };
@@ -272,7 +276,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
                     {writable && !searching && <button style={{ ...btnPrimarySty, marginTop: 8 }} onClick={() => setUploadOpen(true)}>Add to vault</button>}
                   </div>
                 ) : (
-                  <ArtifactList rows={rows} selectedId={selectedId} ownerLabel={ownerLabel} onOpen={select} onDescend={descend} />
+                  <ArtifactList rows={rows} selectedId={selectedId} ownerLabel={ownerLabel} onOpen={select} onDescend={descend}
+                    onDelete={lens === 'vault' ? removeItem : undefined} />
                 )}
             </div>
 
@@ -350,13 +355,16 @@ function Breadcrumb({ lens, path, onGo }: { lens: Lens; path: string[]; onGo: (s
 const crumbSty: CSSProperties = { ...btnSty, background: 'none', border: 'none', padding: '0 2px', fontWeight: 600, color: 'var(--color-text-primary)', cursor: 'pointer' };
 
 // ── the calm, provenance-first list ──
-function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend }: {
+function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelete }: {
   rows: Artifact[]; selectedId: string | null; ownerLabel: string; onOpen: (id: string) => void; onDescend: (name: string) => void;
+  /** Only passed for the OWNED vault lens — you cannot delete an artifact someone shared with you. */
+  onDelete?: (a: Artifact) => void;
 }) {
+  const cols = onDelete ? '2.2fr 1.1fr .8fr .8fr 1fr .5fr 2rem' : '2.2fr 1.1fr .8fr .8fr 1fr .5fr';
   return (
-    <div style={{ ...cardSty, padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1.1fr .8fr .8fr 1fr .5fr', gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
-        <span>Name</span><span>Owner</span><span>Access</span><span>Fresh</span><span>Authority</span><span>Ver</span>
+    <div style={{ ...cardSty, padding: 0, overflow: 'hidden', color: 'var(--color-text-body)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
+        <span>Name</span><span>Owner</span><span>Access</span><span>Fresh</span><span>Authority</span><span>Ver</span>{onDelete && <span />}
       </div>
       {rows.map((a) => {
         const mode: AccessMode = a.accessMode ?? 'Owned';
@@ -368,8 +376,11 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend }: {
         return (
           <div key={a.id} role="button" tabIndex={0}
             onClick={activate} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
-            style={{ display: 'grid', gridTemplateColumns: '2.2fr 1.1fr .8fr .8fr 1fr .5fr', gap: '.5rem', alignItems: 'center', padding: '.55rem .8rem', minHeight: 44, cursor: 'pointer',
-              borderBottom: '1px solid var(--color-border)', background: on ? 'var(--color-amber-50)' : 'transparent' }}
+            style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', alignItems: 'center', padding: '.55rem .8rem', minHeight: 44, cursor: 'pointer',
+              borderBottom: '1px solid var(--color-border)', background: on ? 'var(--color-amber-50)' : 'transparent',
+              // Explicit, not inherited: an ancestor that sets no colour leaves this at the browser
+              // default, which on a light surface reads as white on white.
+              color: on ? 'var(--color-amber-700)' : 'var(--color-text-primary)' }}
             onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
             onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
@@ -382,6 +393,15 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend }: {
             <span>{a.isFolder ? <span style={{ ...mutedText, fontSize: 12 }}>—</span> : <span style={{ ...badgeStyle(FRESH_TONE[fresh]), fontSize: 11 }}>{fresh}</span>}</span>
             <span style={{ ...mutedText, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authority}</span>
             <span style={{ ...mono, ...mutedText, fontSize: 12 }}>{a.isFolder ? '—' : `v${a.version ?? 1}`}</span>
+            {onDelete && (
+              <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
+                aria-label={`Delete ${a.name}`}
+                onClick={(e) => { e.stopPropagation(); onDelete(a); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 1,
+                  color: 'var(--color-text-muted)', fontSize: 15 }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-danger, #c0392b)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>×</button>
+            )}
           </div>
         );
       })}
