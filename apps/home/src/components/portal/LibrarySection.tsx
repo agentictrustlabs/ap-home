@@ -226,7 +226,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
-        <ScopeRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); }} orgLabel={orgSa ? shortAddr(orgSa) : undefined} ownerLabel={ownerLabel} sharedCount={0} />
+        <ScopeRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); }} orgLabel={orgSa ? shortAddr(orgSa) : undefined} ownerLabel={ownerLabel} sharedCount={0}
+          items={items} path={path} onGo={goTo} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* toolbar */}
@@ -311,7 +312,77 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
 }
 
 // ── scope rail — lenses, not folders ──
-function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount }: { lens: Lens; onLens: (l: Lens) => void; orgLabel?: string; ownerLabel: string; sharedCount: number }) {
+/**
+ * The folder tree. A breadcrumb tells you where you ARE; a tree tells you what EXISTS — which is the
+ * difference between navigating a vault you already know and discovering one you do not. Derived
+ * from the folder artifacts themselves via the SAME buildTree the destination picker uses, so the
+ * navigation tree and the move-target tree can never disagree about what exists.
+ */
+function FolderTree({ nodes, path, onGo }: { nodes: TreeNode[]; path: string[]; onGo: (segs: string[]) => void }) {
+  const here = path.join('/');
+  // Everything on the way to the current folder starts open, so navigating never leaves the tree
+  // collapsed around where you just went.
+  const [open, setOpen] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    path.forEach((_, i) => s.add(path.slice(0, i + 1).join('/')));
+    return s;
+  });
+  useEffect(() => {
+    setOpen((prev) => {
+      const s = new Set(prev);
+      path.forEach((_, i) => s.add(path.slice(0, i + 1).join('/')));
+      return s;
+    });
+  }, [here]);
+
+  const row = (n: TreeNode, depth: number): ReactNode => {
+    const on = n.path === here;
+    const expanded = open.has(n.path);
+    const hasKids = n.children.length > 0;
+    return (
+      <div key={n.path}>
+        <div role="treeitem" aria-selected={on} aria-expanded={hasKids ? expanded : undefined} tabIndex={0}
+          onClick={() => onGo(n.path.split('/'))}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo(n.path.split('/')); } }}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13,
+            padding: '.28rem .5rem', paddingLeft: `${0.5 + depth * 0.75}rem`,
+            background: on ? 'var(--color-amber-50)' : 'transparent',
+            color: on ? 'var(--color-amber-700)' : 'var(--color-text-body)',
+            fontWeight: on ? 700 : 500 }}>
+          <span onClick={(e) => { e.stopPropagation(); if (hasKids) setOpen((s) => { const n2 = new Set(s); n2.has(n.path) ? n2.delete(n.path) : n2.add(n.path); return n2; }); }}
+            style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
+            aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
+          <Icon name="folder" size={14} style={{ flexShrink: 0, color: on ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
+        </div>
+        {hasKids && expanded && n.children.map((c) => row(c, depth + 1))}
+      </div>
+    );
+  };
+
+  const atRoot = path.length === 0;
+  return (
+    <div role="tree" aria-label="Folders">
+      <div role="treeitem" aria-selected={atRoot} tabIndex={0}
+        onClick={() => onGo([])}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo([]); } }}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13, padding: '.28rem .5rem',
+          background: atRoot ? 'var(--color-amber-50)' : 'transparent',
+          color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-body)', fontWeight: atRoot ? 700 : 500 }}>
+        <span style={{ width: 12, flexShrink: 0 }} />
+        <Icon name="vault" size={14} style={{ flexShrink: 0, color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
+        <span>All items</span>
+      </div>
+      {nodes.map((n) => row(n, 1))}
+      {nodes.length === 0 && <p style={{ ...mutedText, fontSize: 12, padding: '.3rem .7rem' }}>No folders yet.</p>}
+    </div>
+  );
+}
+
+function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, path, onGo }: {
+  lens: Lens; onLens: (l: Lens) => void; orgLabel?: string; ownerLabel: string; sharedCount: number;
+  items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
+}) {
   const item = (key: Lens, icon: IconName, label: string, sub: string) => {
     const on = lens === key;
     return (
@@ -326,14 +397,26 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount }: { lens: 
       </button>
     );
   };
+  const heading = (s: string) => (
+    <div style={{ ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
+  );
   return (
-    <div role="listbox" aria-label="Scope" style={{ ...cardSty, padding: '.4rem 0', width: 200, flexShrink: 0 }}>
-      <div style={{ ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>Scope</div>
+    <div role="listbox" aria-label="Scope" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
+      {heading('Scope')}
       {orgLabel
         ? item('vault', 'org', ownerLabel === 'This organization' ? 'This organization' : orgLabel, 'Organization vault · Steward')
         : item('vault', 'vault', 'My vault', 'Person vault · Owner')}
       {item('shared', 'shared', 'Shared with me', sharedCount > 0 ? `${sharedCount} grants` : 'Inbound grants')}
       {item('public', 'public', 'Public releases', 'Published network-wide')}
+      {/* The tree belongs to the VAULT lens — "shared with me" and "public releases" are flat inbound
+          views with no folder hierarchy of their own to walk. */}
+      {lens === 'vault' && (
+        <>
+          <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
+          {heading('Folders')}
+          <FolderTree nodes={buildTree(items).children} path={path} onGo={onGo} />
+        </>
+      )}
     </div>
   );
 }
