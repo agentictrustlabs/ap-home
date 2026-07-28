@@ -8,6 +8,8 @@
 // agentic-content-fabric.md and the explorer UX spec. Multi-source: a .ttl may live in GraphDB, a
 // JSON-LD record in a vault — not just blobs.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
@@ -605,7 +607,7 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
       <div style={{ padding: '.8rem .9rem', overflowY: 'auto', flex: 1 }}>
         {tab === 'content' && (isBundle
           ? <Members artifact={artifact} members={members} onOpenMember={onOpenMember} />
-          : owned ? <ContentPreview artifact={artifact} />
+          : owned ? <ContentPreview artifact={artifact} items={items} />
           : <SharedContent artifact={live ?? artifact} hasLive={!!live} opening={opening} liveErr={liveErr} onOpenLive={openLive} />)}
         {tab === 'access' && (owned
           ? <AccessTab artifact={artifact} onGrant={onGrant} onRevoke={onRevoke} />
@@ -642,7 +644,7 @@ function MoveMenu({ artifact, folders, onMove }: { artifact: Artifact; folders: 
   );
 }
 
-function ContentPreview({ artifact }: { artifact: Artifact }) {
+function ContentPreview({ artifact, items }: { artifact: Artifact; items: Artifact[] }) {
   if (artifact.source !== 'blob' || !artifact.bytesB64) {
     return (
       <div>
@@ -658,12 +660,12 @@ function ContentPreview({ artifact }: { artifact: Artifact }) {
 
   const isMd = artifact.kind === 'skill' || artifact.kind === 'md' || artifact.name.toLowerCase().endsWith('.md');
   const pretty = artifact.kind === 'json-ld' ? (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() : text;
-  return <PreviewBody artifact={artifact} text={text} pretty={pretty} isMd={isMd} />;
+  return <PreviewBody artifact={artifact} items={items} text={text} pretty={pretty} isMd={isMd} />;
 }
 
 const preSty: CSSProperties = { ...mono, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: 380, overflow: 'auto', background: 'var(--color-surface-sunken)', padding: '.6rem', borderRadius: 6, color: 'var(--color-text-primary)' };
 
-function PreviewBody({ artifact, text, pretty, isMd }: { artifact: Artifact; text: string; pretty: string; isMd: boolean }) {
+function PreviewBody({ artifact, items, text, pretty, isMd }: { artifact: Artifact; items: Artifact[]; text: string; pretty: string; isMd: boolean }) {
   const [raw, setRaw] = useState(false);
   const fm = isMd ? splitFrontmatter(text) : null;
   return (
@@ -686,7 +688,7 @@ function PreviewBody({ artifact, text, pretty, isMd }: { artifact: Artifact; tex
               ))}
             </div>
           )}
-          <Markdown source={fm ? fm.body : text} />
+          <Markdown source={fm ? fm.body : text} artifact={artifact} items={items} />
         </div>
       ) : (
         <pre style={preSty}>{pretty}</pre>
@@ -715,102 +717,114 @@ function splitFrontmatter(src: string): { entries: [string, string][]; body: str
 }
 
 /**
- * A small markdown renderer producing REACT NODES — never dangerouslySetInnerHTML. The bytes are a
- * person's own file today and another vault's shared artifact tomorrow, so nothing here may become
- * markup. Covers what a SKILL.md actually uses: headings, fenced code, lists, tables, quotes, rules,
- * and inline code/bold/italic/links.
+ * Markdown via react-markdown + remark-gfm — the same pair the skills app already standardised on,
+ * rather than a second hand-rolled renderer that would drift from it. react-markdown builds React
+ * elements and does NOT render raw HTML unless rehype-raw is added, which it deliberately is not:
+ * these bytes are the owner's file today and another vault's shared artifact tomorrow.
+ *
+ * Two behaviours are specific to a VAULT preview, and are why this is not a bare <ReactMarkdown/>:
+ * images resolve against sibling artifacts, and mermaid fences render as diagrams.
  */
-function Markdown({ source }: { source: string }) {
-  const lines = source.split(/\r?\n/);
-  const out: ReactNode[] = [];
-  let i = 0;
-  const push = (n: ReactNode) => out.push(<div key={out.length}>{n}</div>);
+function Markdown({ source, artifact, items }: { source: string; artifact: Artifact; items: Artifact[] }) {
+  return (
+    <div style={{ fontSize: 13.5, lineHeight: 1.55, color: 'var(--color-text-body)' }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <div style={{ fontWeight: 800, fontSize: 17, margin: '.7rem 0 .3rem', color: 'var(--color-text-primary)' }}>{children}</div>,
+          h2: ({ children }) => <div style={{ fontWeight: 800, fontSize: 15, margin: '.7rem 0 .3rem', color: 'var(--color-text-primary)' }}>{children}</div>,
+          h3: ({ children }) => <div style={{ fontWeight: 700, fontSize: 13.5, margin: '.6rem 0 .25rem', color: 'var(--color-text-primary)' }}>{children}</div>,
+          p: ({ children }) => <p style={{ margin: '.35rem 0' }}>{children}</p>,
+          ul: ({ children }) => <ul style={{ margin: '.3rem 0 .3rem 1.1rem' }}>{children}</ul>,
+          ol: ({ children }) => <ol style={{ margin: '.3rem 0 .3rem 1.1rem' }}>{children}</ol>,
+          blockquote: ({ children }) => <div style={{ borderLeft: '3px solid var(--color-border-strong)', paddingLeft: '.6rem', ...mutedText, margin: '.4rem 0' }}>{children}</div>,
+          hr: () => <hr style={{ border: 0, borderTop: '1px solid var(--color-border)', margin: '.7rem 0' }} />,
+          table: ({ children }) => <div style={{ overflowX: 'auto', margin: '.4rem 0' }}><table style={{ borderCollapse: 'collapse', fontSize: 12.5, width: '100%' }}>{children}</table></div>,
+          th: ({ children }) => <th style={{ textAlign: 'left', padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', ...mutedText }}>{children}</th>,
+          td: ({ children }) => <td style={{ padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', verticalAlign: 'top' }}>{children}</td>,
+          a: ({ href, children }) => (/^https?:\/\//i.test(href ?? '')
+            ? <a href={href} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--color-amber-700)' }}>{children}</a>
+            : <span>{children}</span>),
+          img: ({ src, alt }) => <VaultImage src={typeof src === 'string' ? src : ''} alt={alt ?? ''} artifact={artifact} items={items} />,
+          code: ({ className, children }) => {
+            const body = String(children ?? '').replace(/\n$/, '');
+            if (/language-mermaid/.test(className ?? '')) return <MermaidDiagram chart={body} />;
+            return /language-/.test(className ?? '') || body.includes('\n')
+              ? <pre style={{ ...preSty, maxHeight: 300 }}>{body}</pre>
+              : <code style={{ ...mono, fontSize: 12, background: 'var(--color-surface-sunken)', padding: '0 .25rem', borderRadius: 3 }}>{body}</code>;
+          },
+          pre: ({ children }) => <>{children}</>,
+        }}
+      >{source}</ReactMarkdown>
+    </div>
+  );
+}
 
-  while (i < lines.length) {
-    const line = lines[i]!;
-    if (/^```/.test(line)) {
-      const buf: string[] = [];
-      i++;
-      while (i < lines.length && !/^```/.test(lines[i]!)) buf.push(lines[i++]!);
-      i++;
-      push(<pre style={{ ...preSty, maxHeight: 260 }}>{buf.join('\n')}</pre>);
-      continue;
-    }
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) {
-      const lvl = h[1]!.length;
-      push(<div style={{ fontWeight: 800, fontSize: lvl <= 1 ? 17 : lvl === 2 ? 15 : 13.5, margin: '.7rem 0 .3rem', color: 'var(--color-text-primary)' }}>{inline(h[2]!)}</div>);
-      i++; continue;
-    }
-    if (/^(-{3,}|\*{3,})$/.test(line.trim())) { push(<hr style={{ border: 0, borderTop: '1px solid var(--color-border)', margin: '.7rem 0' }} />); i++; continue; }
-    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) {
-      const cells = (r: string) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-      const head = cells(line); i += 2;
-      const body: string[][] = [];
-      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]!)) body.push(cells(lines[i++]!));
-      push(
-        <div style={{ overflowX: 'auto', margin: '.4rem 0' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12.5, width: '100%' }}>
-            <thead><tr>{head.map((c, n) => <th key={n} style={{ textAlign: 'left', padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', ...mutedText }}>{inline(c)}</th>)}</tr></thead>
-            <tbody>{body.map((r, n) => <tr key={n}>{r.map((c, m2) => <td key={m2} style={{ padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', verticalAlign: 'top' }}>{inline(c)}</td>)}</tr>)}</tbody>
-          </table>
-        </div>,
-      );
-      continue;
-    }
-    if (/^\s*>\s?/.test(line)) {
-      const buf: string[] = [];
-      while (i < lines.length && /^\s*>\s?/.test(lines[i]!)) buf.push(lines[i++]!.replace(/^\s*>\s?/, ''));
-      push(<div style={{ borderLeft: '3px solid var(--color-border-strong)', paddingLeft: '.6rem', ...mutedText, fontSize: 13, margin: '.4rem 0' }}>{inline(buf.join(' '))}</div>);
-      continue;
-    }
-    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
-      const ordered = /^\s*\d+\./.test(line);
-      const items: ReactNode[] = [];
-      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i]!)) {
-        items.push(<li key={items.length} style={{ margin: '.12rem 0' }}>{inline(lines[i++]!.replace(/^\s*([-*+]|\d+\.)\s+/, ''))}</li>);
+/**
+ * An image in a vault document usually points at a SIBLING (`assets/logo.png`), which no browser can
+ * fetch — the bytes are in a vault, not on a path. Relative sources resolve against the other
+ * artifacts in this package and render from their stored bytes; remote http(s) is left alone.
+ */
+function VaultImage({ src, alt, artifact, items }: { src: string; alt: string; artifact: Artifact; items: Artifact[] }) {
+  if (/^(https?:|data:)/i.test(src)) {
+    return <img alt={alt} src={src} style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border)' }} />;
+  }
+  const segs = src.replace(/^\.\//, '').split('/');
+  const name = segs[segs.length - 1]!;
+  const folder = [artifact.folder, ...segs.slice(0, -1)].filter(Boolean).join('/');
+  const hit = items.find((a) => !a.isFolder && a.name === name && a.folder === folder)
+    ?? items.find((a) => !a.isFolder && a.name === name && (a.folder === artifact.folder || a.folder.startsWith(`${artifact.folder}/`)));
+  if (!hit?.bytesB64) {
+    return (
+      <span style={{ ...mutedText, fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center', border: '1px dashed var(--color-border-strong)', borderRadius: 6, padding: '.3rem .5rem' }}>
+        <Icon name="image" size={13} />{alt || name} — not in this package
+      </span>
+    );
+  }
+  return <img alt={alt || name} src={`data:${hit.contentType || 'image/png'};base64,${hit.bytesB64}`} style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border)' }} />;
+}
+
+/**
+ * Mermaid, imported LAZILY. The library is well over a megabyte, and a vault preview must not pay
+ * for it on every document that contains no diagram — the import fires only when a mermaid fence is
+ * actually rendered.
+ */
+function MermaidDiagram({ chart }: { chart: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const mermaid = (await import('mermaid')).default;
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' });
+        const { svg: out } = await mermaid.render(idRef.current, chart);
+        if (live) { setSvg(out); setErr(null); }
+      } catch (e) {
+        if (live) setErr(e instanceof Error ? e.message : String(e));
       }
-      push(ordered
-        ? <ol style={{ margin: '.3rem 0 .3rem 1.1rem', fontSize: 13.5 }}>{items}</ol>
-        : <ul style={{ margin: '.3rem 0 .3rem 1.1rem', fontSize: 13.5 }}>{items}</ul>);
-      continue;
-    }
-    if (!line.trim()) { i++; continue; }
-    const buf: string[] = [];
-    while (i < lines.length && lines[i]!.trim() && !/^(#{1,6}\s|```|\s*[-*+]\s|\s*\d+\.\s|\s*>)/.test(lines[i]!)) buf.push(lines[i++]!);
-    push(<p style={{ margin: '.35rem 0', fontSize: 13.5, lineHeight: 1.5, color: 'var(--color-text-body)' }}>{inline(buf.join(' '))}</p>);
+    })();
+    return () => { live = false; };
+  }, [chart]);
+
+  // A diagram that will not parse falls back to its SOURCE rather than vanishing: the text is what
+  // the author wrote, and losing content to a rendering failure is worse than an unstyled block.
+  if (err) {
+    return (
+      <div>
+        <p style={{ ...mutedText, fontSize: 12 }}>Mermaid diagram could not be rendered ({err}). Showing the source:</p>
+        <pre style={{ ...preSty, maxHeight: 260 }}>{chart}</pre>
+      </div>
+    );
   }
-  return <div>{out}</div>;
+  if (!svg) return <p style={{ ...mutedText, fontSize: 12 }}>rendering diagram…</p>;
+  // The only markup injected anywhere in this preview, and it is MERMAID'S OWN OUTPUT rather than
+  // the document's bytes — rendered under securityLevel 'strict', which disables HTML labels.
+  return <div style={{ margin: '.5rem 0', overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-/** Inline spans, tokenised so a link's text cannot smuggle markup. */
-function inline(src: string): ReactNode {
-  const nodes: ReactNode[] = [];
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g;
-  let last = 0;
-  for (const m of src.matchAll(re)) {
-    const at = m.index!;
-    if (at > last) nodes.push(src.slice(last, at));
-    const tok = m[0];
-    if (tok.startsWith('`')) nodes.push(<code key={nodes.length} style={{ ...mono, fontSize: 12, background: 'var(--color-surface-sunken)', padding: '0 .25rem', borderRadius: 3 }}>{tok.slice(1, -1)}</code>);
-    else if (tok.startsWith('**')) nodes.push(<b key={nodes.length}>{tok.slice(2, -2)}</b>);
-    else if (tok.startsWith('*')) nodes.push(<i key={nodes.length}>{tok.slice(1, -1)}</i>);
-    else {
-      const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok)!;
-      const href = lm[2]!;
-      // Only http(s) becomes a link; javascript: and data: render as text.
-      nodes.push(/^https?:\/\//i.test(href)
-        ? <a key={nodes.length} href={href} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--color-amber-700)' }}>{lm[1]}</a>
-        : <span key={nodes.length}>{lm[1]}</span>);
-    }
-    last = at + tok.length;
-  }
-  if (last < src.length) nodes.push(src.slice(last));
-  return <>{nodes}</>;
-}
-
-// Only reached for FOLDERS now. The old non-folder branch explained that a skill was stored as one
-// entry standing in for a directory — no longer true, and it was showing instead of the file.
 function Members({ artifact, members, onOpenMember }: { artifact: Artifact; members: Artifact[]; onOpenMember: (id: string) => void }) {
   return (
     <div>
