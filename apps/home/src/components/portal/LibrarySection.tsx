@@ -548,7 +548,11 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
   const [live, setLive] = useState<Artifact | null>(null);
   const [liveErr, setLiveErr] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const isBundle = artifact.isFolder || artifact.kind === 'skill';
+  // A skill-kind artifact that HAS BYTES is a FILE and must show them. This used to treat every
+  // skill as a bundle, from when one entry stood in for a whole directory — so a real SKILL.md
+  // rendered a placeholder about directories instead of its own content. Now that packages are
+  // stored as actual folders, only a folder is a bundle.
+  const isBundle = artifact.isFolder;
   const publishable = artifact.kind === 'skill' || artifact.isFolder === true;
   const owned = (artifact.accessMode ?? 'Owned') === 'Owned';
   const members = useMemo(() => (artifact.isFolder ? items.filter((x) => x.folder === fullPath(artifact)) : []), [artifact, items]);
@@ -647,29 +651,167 @@ function ContentPreview({ artifact }: { artifact: Artifact }) {
       </div>
     );
   }
+  // UTF-8 safe: atob alone is latin-1, so an em dash in a SKILL.md renders as mojibake.
   let text = '';
-  try { text = atob(artifact.bytesB64); } catch { text = ''; }
+  try { text = new TextDecoder().decode(Uint8Array.from(atob(artifact.bytesB64), (c) => c.charCodeAt(0))); } catch { text = ''; }
   if (artifact.kind === 'image') return <img alt={artifact.name} src={`data:${artifact.contentType};base64,${artifact.bytesB64}`} style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border)' }} />;
+
+  const isMd = artifact.kind === 'skill' || artifact.kind === 'md' || artifact.name.toLowerCase().endsWith('.md');
   const pretty = artifact.kind === 'json-ld' ? (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() : text;
+  return <PreviewBody artifact={artifact} text={text} pretty={pretty} isMd={isMd} />;
+}
+
+const preSty: CSSProperties = { ...mono, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: 380, overflow: 'auto', background: 'var(--color-surface-sunken)', padding: '.6rem', borderRadius: 6, color: 'var(--color-text-primary)' };
+
+function PreviewBody({ artifact, text, pretty, isMd }: { artifact: Artifact; text: string; pretty: string; isMd: boolean }) {
+  const [raw, setRaw] = useState(false);
+  const fm = isMd ? splitFrontmatter(text) : null;
   return (
     <div>
-      <pre style={{ ...mono, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: 380, overflow: 'auto', background: 'var(--color-surface-sunken)', padding: '.6rem', borderRadius: 6 }}>{pretty}</pre>
+      {isMd && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: '.5rem' }}>
+          <button style={segSty(!raw)} onClick={() => setRaw(false)}>Formatted</button>
+          <button style={segSty(raw)} onClick={() => setRaw(true)}>Raw</button>
+        </div>
+      )}
+      {isMd && !raw ? (
+        <div style={{ maxHeight: 420, overflow: 'auto' }}>
+          {fm && fm.entries.length > 0 && (
+            <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '.5rem .6rem', marginBottom: '.7rem', background: 'var(--color-surface-sunken)' }}>
+              {fm.entries.map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', gap: '.5rem', fontSize: 12, padding: '.1rem 0' }}>
+                  <span style={{ ...mutedText, minWidth: 92, flexShrink: 0 }}>{k}</span>
+                  <span style={{ color: 'var(--color-text-primary)', minWidth: 0, wordBreak: 'break-word' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <Markdown source={fm ? fm.body : text} />
+        </div>
+      ) : (
+        <pre style={preSty}>{pretty}</pre>
+      )}
+      {artifact.kind === 'skill' && (
+        <p style={{ ...mutedText, fontSize: 12, marginTop: '.6rem' }}>
+          A skill is a <b>directory</b> — this SKILL.md plus the queries, code, schemas and media that realize it. Its siblings sit alongside it in this folder.
+        </p>
+      )}
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: '.5rem', ...badgeStyle('ok'), fontSize: 11 }}><Icon name="check" size={12} />Content commitment verified</div>
     </div>
   );
 }
 
-function Members({ artifact, members, onOpenMember }: { artifact: Artifact; members: Artifact[]; onOpenMember: (id: string) => void }) {
-  if (!artifact.isFolder) {
-    // A skill bundle is a directory of typed members (SKILL.md + queries/code/schema/media). The demo
-    // stores a skill as one entry today; directory members arrive with content-storage bundle storage.
-    return (
-      <div>
-        <p style={{ ...mutedText, fontSize: 13 }}>A skill is a <b>directory</b> — a SKILL.md plus the SPARQL queries, code, schemas, and media that realize it (typed bundle members).</p>
-        <p style={{ ...mutedText, fontSize: 12, marginTop: '.4rem' }}>This demo stores the skill as a single entry; role-typed directory members (content-storage <span style={mono}>bundle</span>) surface in Phase 1b.</p>
-      </div>
-    );
+/** YAML frontmatter, shown as fields rather than buried at the top of the prose. Flat scalars only —
+ *  anything structured stays in the raw view rather than being half-parsed here. */
+function splitFrontmatter(src: string): { entries: [string, string][]; body: string } | null {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(src);
+  if (!m) return { entries: [], body: src };
+  const entries: [string, string][] = [];
+  for (const line of m[1]!.split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (kv) entries.push([kv[1]!, kv[2]!.replace(/^["']|["']$/g, '')]);
   }
+  return { entries, body: m[2] ?? '' };
+}
+
+/**
+ * A small markdown renderer producing REACT NODES — never dangerouslySetInnerHTML. The bytes are a
+ * person's own file today and another vault's shared artifact tomorrow, so nothing here may become
+ * markup. Covers what a SKILL.md actually uses: headings, fenced code, lists, tables, quotes, rules,
+ * and inline code/bold/italic/links.
+ */
+function Markdown({ source }: { source: string }) {
+  const lines = source.split(/\r?\n/);
+  const out: ReactNode[] = [];
+  let i = 0;
+  const push = (n: ReactNode) => out.push(<div key={out.length}>{n}</div>);
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (/^```/.test(line)) {
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i]!)) buf.push(lines[i++]!);
+      i++;
+      push(<pre style={{ ...preSty, maxHeight: 260 }}>{buf.join('\n')}</pre>);
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) {
+      const lvl = h[1]!.length;
+      push(<div style={{ fontWeight: 800, fontSize: lvl <= 1 ? 17 : lvl === 2 ? 15 : 13.5, margin: '.7rem 0 .3rem', color: 'var(--color-text-primary)' }}>{inline(h[2]!)}</div>);
+      i++; continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line.trim())) { push(<hr style={{ border: 0, borderTop: '1px solid var(--color-border)', margin: '.7rem 0' }} />); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) {
+      const cells = (r: string) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const head = cells(line); i += 2;
+      const body: string[][] = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]!)) body.push(cells(lines[i++]!));
+      push(
+        <div style={{ overflowX: 'auto', margin: '.4rem 0' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12.5, width: '100%' }}>
+            <thead><tr>{head.map((c, n) => <th key={n} style={{ textAlign: 'left', padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', ...mutedText }}>{inline(c)}</th>)}</tr></thead>
+            <tbody>{body.map((r, n) => <tr key={n}>{r.map((c, m2) => <td key={m2} style={{ padding: '.25rem .45rem', borderBottom: '1px solid var(--color-border)', verticalAlign: 'top' }}>{inline(c)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i]!)) buf.push(lines[i++]!.replace(/^\s*>\s?/, ''));
+      push(<div style={{ borderLeft: '3px solid var(--color-border-strong)', paddingLeft: '.6rem', ...mutedText, fontSize: 13, margin: '.4rem 0' }}>{inline(buf.join(' '))}</div>);
+      continue;
+    }
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      const ordered = /^\s*\d+\./.test(line);
+      const items: ReactNode[] = [];
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i]!)) {
+        items.push(<li key={items.length} style={{ margin: '.12rem 0' }}>{inline(lines[i++]!.replace(/^\s*([-*+]|\d+\.)\s+/, ''))}</li>);
+      }
+      push(ordered
+        ? <ol style={{ margin: '.3rem 0 .3rem 1.1rem', fontSize: 13.5 }}>{items}</ol>
+        : <ul style={{ margin: '.3rem 0 .3rem 1.1rem', fontSize: 13.5 }}>{items}</ul>);
+      continue;
+    }
+    if (!line.trim()) { i++; continue; }
+    const buf: string[] = [];
+    while (i < lines.length && lines[i]!.trim() && !/^(#{1,6}\s|```|\s*[-*+]\s|\s*\d+\.\s|\s*>)/.test(lines[i]!)) buf.push(lines[i++]!);
+    push(<p style={{ margin: '.35rem 0', fontSize: 13.5, lineHeight: 1.5, color: 'var(--color-text-body)' }}>{inline(buf.join(' '))}</p>);
+  }
+  return <div>{out}</div>;
+}
+
+/** Inline spans, tokenised so a link's text cannot smuggle markup. */
+function inline(src: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g;
+  let last = 0;
+  for (const m of src.matchAll(re)) {
+    const at = m.index!;
+    if (at > last) nodes.push(src.slice(last, at));
+    const tok = m[0];
+    if (tok.startsWith('`')) nodes.push(<code key={nodes.length} style={{ ...mono, fontSize: 12, background: 'var(--color-surface-sunken)', padding: '0 .25rem', borderRadius: 3 }}>{tok.slice(1, -1)}</code>);
+    else if (tok.startsWith('**')) nodes.push(<b key={nodes.length}>{tok.slice(2, -2)}</b>);
+    else if (tok.startsWith('*')) nodes.push(<i key={nodes.length}>{tok.slice(1, -1)}</i>);
+    else {
+      const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok)!;
+      const href = lm[2]!;
+      // Only http(s) becomes a link; javascript: and data: render as text.
+      nodes.push(/^https?:\/\//i.test(href)
+        ? <a key={nodes.length} href={href} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--color-amber-700)' }}>{lm[1]}</a>
+        : <span key={nodes.length}>{lm[1]}</span>);
+    }
+    last = at + tok.length;
+  }
+  if (last < src.length) nodes.push(src.slice(last));
+  return <>{nodes}</>;
+}
+
+// Only reached for FOLDERS now. The old non-folder branch explained that a skill was stored as one
+// entry standing in for a directory — no longer true, and it was showing instead of the file.
+function Members({ artifact, members, onOpenMember }: { artifact: Artifact; members: Artifact[]; onOpenMember: (id: string) => void }) {
   return (
     <div>
       <div style={{ ...mutedText, fontSize: 12, marginBottom: '.4rem' }}>Members ({members.length}) — everything under this folder inherits its access.</div>
