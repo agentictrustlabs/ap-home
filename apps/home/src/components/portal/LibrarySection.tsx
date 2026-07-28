@@ -911,7 +911,7 @@ function UploadModal({ destination, folders, orgSa, api, onClose, onDone }: {
         {tab === 'upload' ? (
           <>
             <div onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); enqueue(e.dataTransfer.files); }}
-              style={{ ...cardSty, textAlign: 'center', padding: '1.4rem', border: `2px dashed ${drag ? 'var(--color-amber-500)' : 'var(--color-border-strong)'}`, background: drag ? 'var(--color-amber-50)' : undefined }}>
+              style={{ ...cardSty, textAlign: 'center', padding: '1.4rem', border: `2px dashed ${drag ? 'var(--color-amber-500)' : 'var(--color-border-strong)'}`, background: drag ? 'var(--color-amber-50)' : 'var(--color-surface)' }}>
               <div>Drag files here, or <button style={{ ...btnSty, background: 'none', border: 'none', color: 'var(--color-amber-600)', padding: 0, fontWeight: 600 }} onClick={() => inputRef.current?.click()}>browse files</button></div>
               <div style={{ ...mutedText, fontSize: 12, marginTop: 4 }}>images, SKILL.md, .ttl, .md, JSON-LD — files over 1.4&nbsp;MB are skipped in this demo.</div>
               <input ref={inputRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { enqueue(e.target.files); (e.target as HTMLInputElement).value = ''; }} />
@@ -952,4 +952,13 @@ function UploadModal({ destination, folders, orgSa, api, onClose, onDone }: {
   );
 }
 
-const segSty = (on: boolean): CSSProperties => ({ ...btnSty, borderRadius: 0, background: on ? 'var(--color-amber-50)' : 'transparent', color: on ? 'var(--color-amber-700)' : undefined, fontWeight: on ? 700 : undefined });
+// `color: undefined` REMOVES the property rather than falling back to the spread btnSty value, so
+// the unselected segments had no colour at all and rendered in the browser's default button text —
+// invisible on our light surface. Every branch names a token; none is left to inherit or default.
+const segSty = (on: boolean): CSSProperties => ({
+  ...btnSty,
+  borderRadius: 0,
+  background: on ? 'var(--color-amber-50)' : 'transparent',
+  color: on ? 'var(--color-amber-700)' : 'var(--color-text-body)',
+  fontWeight: on ? 700 : 600,
+});
