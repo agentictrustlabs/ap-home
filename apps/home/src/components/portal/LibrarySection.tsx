@@ -318,7 +318,11 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
  * from the folder artifacts themselves via the SAME buildTree the destination picker uses, so the
  * navigation tree and the move-target tree can never disagree about what exists.
  */
-function FolderTree({ nodes, path, onGo }: { nodes: TreeNode[]; path: string[]; onGo: (segs: string[]) => void }) {
+function FolderTree({ nodes, path, onGo, counts }: {
+  nodes: TreeNode[]; path: string[]; onGo: (segs: string[]) => void;
+  /** folder path -> number of FILES directly in it (not counting subfolders or their contents). */
+  counts: Map<string, number>;
+}) {
   const here = path.join('/');
   // Everything on the way to the current folder starts open, so navigating never leaves the tree
   // collapsed around where you just went.
@@ -353,7 +357,17 @@ function FolderTree({ nodes, path, onGo }: { nodes: TreeNode[]; path: string[]; 
             style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
             aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
           <Icon name="folder" size={14} style={{ flexShrink: 0, color: on ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{n.name}</span>
+          {/* DIRECT files only, deliberately. A subtree total would show 7 on a collapsed parent and
+              5 on the child inside it, which reads as double counting; direct counts stay consistent
+              however the tree is expanded. A folder holding only subfolders shows nothing, which is
+              the honest answer — its contents are the folders already visible beneath it. */}
+          {(counts.get(n.path) ?? 0) > 0 && (
+            <span style={{ ...mutedText, fontSize: 11, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
+              title={`${counts.get(n.path)} file${counts.get(n.path) === 1 ? '' : 's'} directly in this folder`}>
+              {counts.get(n.path)}
+            </span>
+          )}
         </div>
         {hasKids && expanded && n.children.map((c) => row(c, depth + 1))}
       </div>
@@ -371,7 +385,11 @@ function FolderTree({ nodes, path, onGo }: { nodes: TreeNode[]; path: string[]; 
           color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-body)', fontWeight: atRoot ? 700 : 500 }}>
         <span style={{ width: 12, flexShrink: 0 }} />
         <Icon name="vault" size={14} style={{ flexShrink: 0, color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
-        <span>All items</span>
+        <span style={{ flex: 1 }}>All items</span>
+        {(counts.get('') ?? 0) > 0 && (
+          <span style={{ ...mutedText, fontSize: 11, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
+            title={`${counts.get('')} file${counts.get('') === 1 ? '' : 's'} at the vault root`}>{counts.get('')}</span>
+        )}
       </div>
       {nodes.map((n) => row(n, 1))}
       {nodes.length === 0 && <p style={{ ...mutedText, fontSize: 12, padding: '.3rem .7rem' }}>No folders yet.</p>}
@@ -397,6 +415,13 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
       </button>
     );
   };
+  // One pass over the artifacts rather than a scan per node: a vault with many folders would
+  // otherwise walk the whole list once for every row it draws.
+  const fileCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of items) if (!a.isFolder) m.set(a.folder, (m.get(a.folder) ?? 0) + 1);
+    return m;
+  }, [items]);
   const heading = (s: string) => (
     <div style={{ ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
   );
@@ -414,7 +439,7 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
         <>
           <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
           {heading('Folders')}
-          <FolderTree nodes={buildTree(items).children} path={path} onGo={onGo} />
+          <FolderTree nodes={buildTree(items).children} path={path} onGo={onGo} counts={fileCounts} />
         </>
       )}
     </div>
