@@ -129,10 +129,24 @@ const PLANNER_ROUTING_TOOLS: ToolSpec[] = ROUTING_TOOLS.filter((t) => t.id === '
 
 /** The default playbook (spec 327 §4b) — used when the org's steward hasn't authored one. A config
  *  default, not a fallback mechanism: the load path is one read; absent means this constant. */
-const DEFAULT_ASSISTANT_SKILL_MD =
-  "You are the organization's discussion-board assistant. Be concise, warm, and concrete; answer " +
-  'the question that was actually asked, ground your reply in the recent topic messages when they ' +
-  "are relevant, and say plainly when something needs a human steward's follow-up.";
+/** NOT a playbook — a DIAGNOSTIC. The agent's operating guidance comes from the author's vault
+ *  (`conversation.topic:assistant-skill`), and nothing else. This text is what it runs on when that
+ *  read found nothing, and its job is to make that visible in the reply rather than to substitute
+ *  for it.
+ *
+ *  The previous default was a competent-sounding generic assistant prompt, which is precisely the
+ *  problem: an org whose playbook failed to load, or was never authored, got fluent answers that
+ *  looked exactly like a configured agent. The failure was invisible at the only place anyone would
+ *  notice it — the reply. A repo constant must never be able to pass for someone's authored skills. */
+const NO_PLAYBOOK_NOTICE = (reason: 'missing' | 'unreadable'): string =>
+  'You have NO operating guidance loaded. ' +
+  (reason === 'unreadable'
+    ? "This organization's playbook could not be read from its vault — a storage or grant problem, not an empty configuration. "
+    : 'No playbook has been authored into this organization\'s vault yet. ') +
+  'You therefore have no skills, no domain vocabulary and no record types. ' +
+  'Answer ONLY what the recent topic messages already contain, and OPEN your reply by stating plainly ' +
+  'that no skills are loaded for this organization so nobody mistakes this for a configured agent. ' +
+  'Do not improvise domain expertise and do not describe capabilities you do not have.';
 
 /** The NON-NEGOTIABLE tool contract, appended AFTER the playbook. The must-post guarantee is
  *  structural anyway (single tool + tool_choice any) — this line keeps the instructions coherent
@@ -199,13 +213,15 @@ export async function handleDiscussionRespond(
   // (spec 327 §4b), which becomes the planner's system prompt with the tool contract appended.
   const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
   let topicContext = '';
-  let playbook = DEFAULT_ASSISTANT_SKILL_MD;
+  let playbook = NO_PLAYBOOK_NOTICE('missing');
   if (llmConfigured) {
     try {
       const read = (await io.readTopic()) as TopicReadResult;
       topicContext = contextLines(read);
+      // The AUTHOR's vault is the only source of operating guidance. A missing playbook and an
+      // unreadable one are different problems with different fixes, so they are reported differently.
       if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
-    } catch { /* trigger-only context + default playbook */ }
+    } catch { playbook = NO_PLAYBOOK_NOTICE('unreadable'); }
     // spec 334 §6 gather phase, applied to the @ask turn (same "harness reads, model posts"
     // construction): when the caller wired org-record reads, a gather sub-turn lets the org's own
     // agent read its OWN records — the recordTypes it reads are the ones the PLAYBOOK above names
@@ -408,14 +424,14 @@ export async function handleConsultSynthesis(
   io: DiscussionIo,
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
   const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
-  let playbook = DEFAULT_ASSISTANT_SKILL_MD;
+  let playbook = NO_PLAYBOOK_NOTICE('missing');
   let topicContext = '';
   if (llmConfigured) {
     try {
       const read = (await io.readTopic()) as TopicReadResult;
       topicContext = contextLines(read);
       if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
-    } catch { /* answers-only context + default playbook */ }
+    } catch { playbook = NO_PLAYBOOK_NOTICE('unreadable'); }
   }
 
   const { planner, kind } = selectPlanner(env, { systemPrompt: playbook + SYNTHESIS_CONTRACT });

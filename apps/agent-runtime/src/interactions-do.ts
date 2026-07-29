@@ -161,7 +161,12 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 // Same precedent for the spec-334 coordination docs (`vault:coordination.requests`, `vault:coordination.index`,
 // `vault:coordination.endeavor:*`): additive scopes the grant-signing ceremony (demo-sso-next) must include for
 // endeavor.* ops to reach the vault — a grant lacking them is denied per-record at demo-mcp, never blanket-staled.
-const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data', 'vault:content.*'] as const;
+// `vault:content.*` (ADR-0055, #489) belongs to that same class and was listed here by mistake: it stranded
+// EVERY grant signed before 2026-07-26 with a blanket stale-409 across the whole interactions plane — channels,
+// directory, inbox, the assistant playbook — for want of a scope only the content.* ops use. Those ops already
+// fail closed on their own (`no delivery grant`, 409), and the vault-record-scope caveat denies an out-of-scope
+// content write at demo-mcp. Removing it restores exactly the behaviour the two paragraphs above describe.
+const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
@@ -1625,7 +1630,35 @@ export class InteractionsDO {
         const doc: AssistantSkillDocV1 = { version: 'ap.assistant-skill.v1', markdown, updatedBy: sessionSa.toLowerCase(), updatedAt: new Date().toISOString() };
         await audit.write({ id: crypto.randomUUID(), timestamp: doc.updatedAt, action: 'interactions.channels.assistantSkillPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'assistant-skill', id: principal } });
         await this.writeDoc(grant, ASSISTANT_SKILL_RESOURCE, doc);
-        return json({ ok: true });
+
+        // spec 334 §6 — the KNOWLEDGE BASE the playbook names, written in the SAME custodian act.
+        // The gather sub-turn reads these back through internal.coordination.vaultRead; until now
+        // nothing ever wrote them, so that read always came back empty and callers compensated by
+        // embedding data as prose in the playbook. Prose is not a knowledge base: it cannot be
+        // queried, it inflates every turn, and it goes stale silently.
+        //
+        // Same grant, same steward gate as the playbook — no new authority. Record scope is still
+        // enforced downstream by demo-mcp, so an out-of-scope type is DENIED there rather than
+        // trusted here.
+        const seeded: string[] = [];
+        const rejected: string[] = [];
+        const records = body.records && typeof body.records === 'object' ? body.records as Record<string, unknown> : null;
+        if (records) {
+          for (const [recordType, data] of Object.entries(records)) {
+            // A domain record must never be able to address a CONTROL document. The topic index, the
+            // playbook itself and the directory all live under these prefixes; without this guard a
+            // record type of "conversation.topic:assistant-skill" would overwrite the playbook that
+            // just authorized the write.
+            const reserved = /^(conversation\.|directory\.|dm\.|inbox\.|content\.|invite\.|applications\.)/i.test(recordType);
+            const wellFormed = /^[a-z][a-z0-9_.:-]{0,63}$/i.test(recordType);
+            if (reserved || !wellFormed || data === undefined) { rejected.push(recordType); continue; }
+            try { await this.writeDoc(grant, recordType, data); seeded.push(recordType); }
+            catch { rejected.push(recordType); }
+          }
+        }
+        // Report both. A silently-dropped record type is a knowledge base the operator believes is
+        // loaded and the agent cannot see.
+        return json({ ok: true, ...(records ? { seeded, rejected } : {}) });
       }
 
       // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──
