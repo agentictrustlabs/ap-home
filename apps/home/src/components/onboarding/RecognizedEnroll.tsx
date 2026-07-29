@@ -219,10 +219,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // a chooser-mode request carries no org_base — the choose-org step above resolved `orgSel`.
         const orgBase = enroll.orgBase ?? orgSel?.orgName;
         const existingOrg = enroll.existingOrg ?? orgSel?.existingOrg;
-        if (!orgBase) return fail('No organization was chosen for this request.');
+        // SELECT-EXISTING CARRIES NO NAME. `existing_org` names the organization by ADDRESS and
+        // deploys nothing — there is no name to claim, which is the whole point — so requiring
+        // `orgBase` refused every select-existing request from the recognized path with "No
+        // organization was chosen" while the chosen organization sat in the URL. `createOrganization`
+        // handles the existing branch first and uses `base` only as the link's display name.
+        if (!orgBase && !existingOrg) return fail('No organization was chosen for this request.');
         const created = await createOrganization(
           home,
-          orgBase,
+          orgBase ?? '',
           delegate,
           viaLower,
           auth,
