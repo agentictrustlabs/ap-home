@@ -28,14 +28,20 @@ const faithImpact: WhiteLabelConfig = {
   ],
   relyingApps: [
     // skills-app — the SKILL.md management app (agentictrustlabs/skills). Login-grade connect via the
-    // Personal Home; site-login only, no PII held by the broker. aud = client_id; the allowed origin is
-    // derived from the exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
+    // Personal Home; no PII held by the broker. aud = client_id; the allowed origin is derived from
+    // the exact-match redirect_uri (CN-1) by `src/lib/oidc-clients.ts`.
+    //
+    // `org-create` because a DOMAIN in that app is an ORGANIZATION in the member's own Home: it holds
+    // the domain's skill folders (its library), its knowledge base (its vault) and the agent that runs
+    // them. One org per domain, deployed by the member's own credential in a single consent — the app
+    // cannot mint it, which is the point. Requests arrive name-deferred (empty `agent_name`) with
+    // `org_base=<domain label>`, so they route through RecognizedEnroll's org-create leg.
     {
       client_id: 'skills-app',
       name: 'Skills',
       redirect_uris: ['https://skills-web-7ar.pages.dev/', 'http://localhost:5190/'],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
