@@ -174,7 +174,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body?.action === 'assistantSkillGet' || body?.action === 'assistantSkillPut') {
     const r = await callInteractions(env, communityId, body.action === 'assistantSkillGet' ? 'channels.assistantSkill.get' : 'channels.assistantSkill.put', {
       session: who.token,
-      ...(body.action === 'assistantSkillPut' ? { markdown: (body as { markdown?: string }).markdown ?? '' } : {}),
+      // `records` rides with the playbook: the DO writes them into the org's vault through the same
+      // steward-gated act (APP_OWN_NAMESPACE_SEED_SCOPES). Dropping it here meant an org path could
+      // never seed its own knowledge base — only the in-Worker sandbox path could.
+      ...(body.action === 'assistantSkillPut'
+        ? {
+            markdown: (body as { markdown?: string }).markdown ?? '',
+            ...((body as { records?: unknown }).records ? { records: (body as { records?: unknown }).records } : {}),
+          }
+        : {}),
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
