@@ -57,7 +57,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const communityId = (new URL(request.url).searchParams.get('communityId') ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
-  const stewardship = await stewardWireFor(env, who.person, communityId);
+  const stewardship = await stewardWireFor(env, who.person, communityId, who.token);
   const r = await callInteractions(env, communityId, 'directory.list', {
     session: who.token, ...(stewardship ? { stewardship } : {}),
   });
@@ -98,12 +98,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Delivery is name-addressed — a listing without a claimed name is unreachable.
     if (!name) return jsonCors({ error: 'claim a public name before joining — listings are name-addressed' }, request, 409);
     // spec 313 §4 — a steward publishing an ORG's listing attaches the SUBJECT's stewardship wire.
-    const subjectStewardship = subjectAddr !== who.person ? await stewardWireFor(env, who.person, subjectAddr) : null;
+    const subjectStewardship = subjectAddr !== who.person ? await stewardWireFor(env, who.person, subjectAddr, who.token) : null;
     // SEC-H1 — a SELF-join must carry the org's authorization: the org→you member-access grant (from
     // an invite) OR your stewardship wire (steward self-card). The DO requires one; it re-verifies
     // both on-chain, so these are just artifact lookups.
     const selfMemberAccess = subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person) : null;
-    const selfStewardship = subjectAddr === who.person ? await stewardWireFor(env, who.person, communityId) : null;
+    const selfStewardship = subjectAddr === who.person ? await stewardWireFor(env, who.person, communityId, who.token) : null;
     const r = await callInteractions(env, communityId, 'directory.publish', {
       session: who.token,
       listing: body.listing,

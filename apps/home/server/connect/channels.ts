@@ -67,10 +67,54 @@ const a2aBase = (env: FnContext['env']): string | undefined =>
   (env as { A2A_CUSTODY_URL?: string }).A2A_CUSTODY_URL?.replace(/\/$/, '') || undefined;
 
 /** The steward's org→person stewardship wire from their org link — the DO's steward proof. */
-export async function stewardWireFor(env: FnContext['env'], person: string, org: string): Promise<unknown | null> {
+export async function stewardWireFor(
+  env: FnContext['env'],
+  person: string,
+  org: string,
+  /** The caller's session, which lets a missing KV link be reconciled from its SOURCE. Omit and the
+   *  lookup stays KV-only — every caller that has a token should pass it. */
+  bearer?: string,
+): Promise<unknown | null> {
   const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
   const link = raw ? (JSON.parse(raw) as { relationship?: string; stewardshipDelegation?: unknown }) : null;
-  return link && link.relationship !== 'member' ? (link.stewardshipDelegation ?? null) : null;
+  if (link && link.relationship !== 'member' && link.stewardshipDelegation) return link.stewardshipDelegation;
+  // An explicit MEMBER link is an answer, not a gap: they are not a steward, and reconciling would
+  // not change that.
+  if (link?.relationship === 'member') return null;
+
+  // SELF-HEAL FROM THE AUTHORITATIVE DOC (spec 323 W1 — the person's `relationships.data` in their
+  // own vault is the source; this KV is its projection). The projection is written by several
+  // best-effort steps of the org-create ceremony, any of which can fail quietly — and when one does,
+  // the org is real, custodied and visible in the portal while every steward-gated call here answers
+  // 403. The person cannot fix that from anywhere: the repair is a link only this server writes.
+  // Reconciling a projection from its source is not a fallback mechanism (ADR-0013) — the same move
+  // `/connect/related-orgs` already makes on the person's own view, and `memberAccessWireFor` below
+  // makes from the org vault.
+  if (!bearer) return null;
+  try {
+    const { readRelationshipsDoc } = await import('../lib/relationships-doc');
+    const doc = await readRelationshipsDoc(env, person, bearer);
+    // Address keys are not case-normalized in the doc (the same reason related-orgs compares with
+    // toLowerCase when reconciling) — an exact index would miss a checksummed key and report the
+    // person as a non-steward of their own org, which is the bug this exists to fix.
+    const entry = Object.entries(doc?.orgs ?? {})
+      .find(([k]) => k.toLowerCase() === org.toLowerCase())?.[1];
+    if (!entry || entry.relationship === 'member') return null;
+    const wire = Array.isArray(entry.delegations) ? entry.delegations[0] ?? null : null;
+    if (!wire) return null;
+    await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({
+      ...(link ?? {}),
+      orgAgent: org,
+      orgName: entry.orgName ?? (link as { orgName?: string } | null)?.orgName ?? org,
+      purpose: (link as { purpose?: string } | null)?.purpose ?? 'relationships.data reconcile',
+      requestedBy: (link as { requestedBy?: string } | null)?.requestedBy ?? 'home-reconcile',
+      relationship: 'steward',
+      stewardshipDelegation: wire,
+    })).catch(() => undefined);
+    return wire;
+  } catch {
+    return null; // the doc is unreachable (plane not enabled / token can't read it) — KV stands
+  }
 }
 
 /** The org→person MEMBER-ACCESS wire (SEC-H1) — the ORG's authorization that `person` may join,
@@ -116,7 +160,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   void resolveOrigin;
 
   const channelId = url.searchParams.get('channelId');
-  const stewardship = await stewardWireFor(env, who.person, communityId);
+  const stewardship = await stewardWireFor(env, who.person, communityId, who.token);
   const r = await callInteractions(env, communityId, channelId ? 'channels.read' : 'channels.list', {
     session: who.token,
     ...(channelId ? { channelId } : {}),
@@ -151,7 +195,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const communityId = (body?.communityId ?? '').trim().toLowerCase();
   if (!communityId) return jsonCors({ error: 'communityId required' }, request, 400);
 
-  const stewardship = await stewardWireFor(env, who.person, communityId);
+  const stewardship = await stewardWireFor(env, who.person, communityId, who.token);
   if (body?.action === 'create') {
     // Participation policy (tbox/messaging.ttl): open (every org member participates — derived) or
     // restricted (invite-only, custodian-created). Legacy `visibility` still accepted from old clients.

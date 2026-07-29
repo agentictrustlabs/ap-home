@@ -51,7 +51,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!org) return jsonCors({ error: 'org required' }, request, 400);
 
   const endeavorId = url.searchParams.get('endeavorId')?.trim();
-  const stewardship = await stewardWireFor(env, who.person, org);
+  const stewardship = await stewardWireFor(env, who.person, org, who.token);
   const r = await callInteractions(env, org, endeavorId ? 'endeavor.get' : 'endeavor.list', {
     session: who.token,
     ...(endeavorId ? { endeavorId } : {}),
@@ -111,7 +111,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   const org = (body.org ?? '').trim().toLowerCase();
   if (!org) return jsonCors({ error: 'org required' }, request, 400);
-  const stewardship = await stewardWireFor(env, who.person, org);
+  const stewardship = await stewardWireFor(env, who.person, org, who.token);
 
   // Steward triage (spec 334 §6): adopt runs endeavor.create; decline is the
   // decline command on the same op — both recorded + audited, never silent.

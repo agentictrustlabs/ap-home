@@ -41,7 +41,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const vv = await vas(callerToken, { keys: await ij(jwks), expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: oi(request, env) });
   const caller = vv.ok ? ((vv.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase()) : '';
   if (caller) {
-    const stewardship = await stewardWireFor(env, caller, org);
+    const stewardship = await stewardWireFor(env, caller, org, callerToken);
     const r = await callInteractions(env, org, 'directory.remove', {
       session: callerToken, subject: member, ...(stewardship ? { stewardship } : {}),
     });

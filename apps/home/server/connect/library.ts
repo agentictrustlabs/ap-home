@@ -253,7 +253,7 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
   if (org) {
     const orgSA = org.toLowerCase();
     // Authorization to act FOR the org is a stewardship wire, re-verified downstream by the org DO.
-    const wire = await stewardWireFor(env, person, orgSA);
+    const wire = await stewardWireFor(env, person, orgSA, bearer);
     if (!wire) return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
     // Storage gate: orgVault is null unless the org enabled storage (a delivery grant exists). We reuse it
     // only as the gate; content itself rides the DO's `content.*` op (steward-bridged, ADR-0055).
