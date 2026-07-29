@@ -340,6 +340,20 @@ export const APP_COORDINATION_READ_SCOPES = [
  *  demo-mcp, surfaced as "re-enable storage", never blanket-staled. Grounds the discussion @ask turn
  *  (and coordination) in the org's own recorded figures instead of invention. */
 export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*'] as const;
+
+/** SEEDING scope — the same namespaces, read+WRITE, for provisioning a demo/sandbox org whose vault
+ *  starts empty. Deliberately narrow and deliberately separate from the read scope above.
+ *
+ *  The read-only rule exists so an agent cannot manufacture the evidence it later cites, and that
+ *  rule is NOT relaxed here: the write is reachable only through a STEWARD-GATED op
+ *  (`channels.assistantSkill.put` → isSteward), never from an agent turn. The agent's own path is
+ *  `internal.coordination.vaultRead`, which is read and stays read.
+ *
+ *  A production org should not need this — its records are owner-authored through the portal. It
+ *  exists because a shared sandbox has no owner to author them, and an empty vault makes every
+ *  grounded answer impossible to demonstrate. Grants signed before it shipped simply lack it and
+ *  deny the seed per-record, like every other additive scope. */
+export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*'] as const;
 // `vault:family:*` is the skills-app family-office relying namespace (record types like
 // `family:portfolio`, `family:budget`; resource = `vault:` + recordType). ADDITIVE + read-only:
 // only grants built AFTER this ships carry it, so existing grants are unaffected — an org must
@@ -375,6 +389,10 @@ function buildInteractionsStruct(
       // the uupg app's enumerated public-claim types, and any relying app's ontology namespace ROOT
       // (e.g. vault:newcity:*) — the platform never names a domain record; the org's playbook does.
       { server: mcpServerId, resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
+      // Seeding: the same namespace, read+write, so a sandbox org's vault can be populated once by a
+      // steward. The agent never reaches this — its read path is a different op, and the write op is
+      // steward-gated. See APP_OWN_NAMESPACE_SEED_SCOPES.
+      { server: mcpServerId, resources: [...APP_OWN_NAMESPACE_SEED_SCOPES], ops: ['read', 'write'] },
     ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
