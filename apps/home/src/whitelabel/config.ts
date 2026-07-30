@@ -43,13 +43,14 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // operational_delegate: intentionally UNSET. The Operational Intent grant is ready to mint the
-      // moment an address is put here — but the address must be an SA whose signing key is a KMS
-      // DELEGATE, never a held custodian key (ADR-0019; the demo-corpus content-signer ceremony binds
-      // `issuer SA → HSM-backed Cloud KMS key` with "no held key" and is the pattern to copy).
-      // A first attempt registered 0x76Dcd7B6…, custodied by a held EOA whose private key would have
-      // become a skills-a2a secret. That is a relying app holding a CUSTODIAN key, and it was
-      // withdrawn before any org granted it anything.
+      // skills-a2a's own service agent, custodied by an HSM-backed Cloud KMS key
+      // (a2a/skills-a2a-signer, EC_SIGN_SECP256K1_SHA256) whose private key has never existed outside
+      // the HSM and cannot be exported — the demo-corpus "No held key" property. skills-a2a signs by
+      // asking KMS, so it holds a revocable API credential rather than account-controlling material:
+      // a leak is rotated without re-minting a single grant. NOT the shared `delegate` above, which a
+      // dozen entries name. An earlier attempt used a held EOA custodian and was withdrawn under
+      // ADR-0019 before anything granted it.
+      operational_delegate: '0x2aF8853DD2fF3aEAbe73a921Dd1fC123E1F78A76',
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
