@@ -58,6 +58,9 @@ export function makeEnv(): Env {
     // A developer testing with no provider must OPT IN explicitly via DEV_OTP_ECHO=true (never in production).
     DEV_OTP_ECHO: t(process.env.DEV_OTP_ECHO) ?? 'false',
     DEMO_SSO_AUD: t(process.env.DEMO_SSO_AUD),
+    // How long a minted id_token lives. Unset → 7 days (see server/_lib/session-ttl.ts). Set it
+    // LOWER in a deployment with real users: the token is a bearer credential with no revocation.
+    ID_TOKEN_TTL_SECONDS: t(process.env.ID_TOKEN_TTL_SECONDS),
     // Shared demo people (Nathan, David…) custodied HERE so every app can sign them in and their
     // own portal can run ceremonies without a wallet. Demo keys only — never a real person's.
     DEMO_PERSONA_KEYS: t(process.env.DEMO_PERSONA_KEYS),

@@ -70,6 +70,10 @@ export interface Env {
    *  KMS-custodied session. Defaults to `'demo-sso'`. Relying-app auds stay
    *  login-grade (they onboard members through the Personal Home). */
   DEMO_SSO_AUD?: string;
+  /** How long a minted id_token stays valid, in seconds. Unset → SESSION_TTL_DEFAULT (7 days).
+   *  It is a BEARER credential with no revocation path, so the value is a deliberate trade between
+   *  how often a person re-authenticates and how long a leaked token keeps working. */
+  ID_TOKEN_TTL_SECONDS?: string;
 
   // ─── Vault message-body path (spec 317) ───────────────────────────
   /** The Agentic Edge origin (assertion signer) the server-side vault body-store routes `/mcp/vault/*`

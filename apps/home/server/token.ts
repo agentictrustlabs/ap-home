@@ -16,8 +16,8 @@ import { getServer, jsonCors, preflight, resolveOrigin, type FnContext } from '.
 import { verifyDelegation, type IncomingDelegation } from './_lib/verify-delegation';
 import { getClient, clientAllowsRedirect } from '../src/lib/oidc-clients';
 import { CHAIN_ID } from '../src/lib/chain';
+import { idTokenTtl } from './_lib/session-ttl';
 
-const ID_TOKEN_TTL = 3600;
 
 interface TokenBody {
   grant_type?: string;
@@ -34,6 +34,8 @@ interface TokenBody {
 export const onRequestOptions = ({ request }: FnContext): Response => preflight(request);
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
+  const ttl = idTokenTtl(env);
   const body = (await request.json().catch(() => ({}))) as TokenBody;
 
   // ── Delegation grant — silent re-auth (spec 230 / ADR-0019; SEC-002 closure) ──
@@ -82,14 +84,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         sub: toCanonicalAgentId(CHAIN_ID, body.delegation.delegator),
         aud: body.client_id,
         agentName: body.agent_name ?? bind.agent_name,
-        ttlSeconds: ID_TOKEN_TTL,
+        ttlSeconds: ttl,
       },
       signer,
     );
     // Refresh the binding window so a steadily-used delegation doesn't fall off the
     // cliff mid-session (same TTL semantics as the id_token).
-    await env.AUTH_CODES.put(bindKey, bindRaw, { expirationTtl: ID_TOKEN_TTL });
-    return jsonCors({ id_token: idToken, token_type: 'Bearer', expires_in: ID_TOKEN_TTL, delegation: body.delegation }, request);
+    await env.AUTH_CODES.put(bindKey, bindRaw, { expirationTtl: ttl });
+    return jsonCors({ id_token: idToken, token_type: 'Bearer', expires_in: ttl, delegation: body.delegation }, request);
   }
 
   // ── OIDC authorization_code grant (spec 230) ──
@@ -123,7 +125,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       {
         id_token: grant.id_token,
         token_type: 'Bearer',
-        expires_in: ID_TOKEN_TTL,
+        expires_in: ttl,
         delegation: grant.delegation ?? undefined,
         sessionDelegation: grant.sessionDelegation ?? undefined, // spec 270 v4 W2 — the DEL-001 leaf
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation

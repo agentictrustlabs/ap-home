@@ -25,10 +25,9 @@ import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-b
 import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delegation';
 import { CHAIN_ID } from '../../src/lib/chain';
 import type { StoredEnrollmentGrant } from './authorize-grant';
+import { idTokenTtl } from '../_lib/session-ttl';
 
-const ID_TOKEN_TTL = 3600; // session-usable for the demo (the relying app treats it as the session)
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
-const DELEG_BIND_TTL_SEC = 3600; // matches id_token TTL; renewed on each silent re-auth grant
 
 interface GrantBody {
   grant_id?: string;
@@ -57,6 +56,8 @@ interface GrantBody {
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
+  const ttl = idTokenTtl(env);
   // SEC-001 (origin check): /oidc/grant is reachable ONLY from the home SPA. A
   // non-browser caller, or a cross-origin browser caller, is rejected here.
   const iss = resolveOrigin(request, env);
@@ -113,7 +114,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       aud: grant.client_id,
       nonce: grant.nonce || undefined,
       agentName: grant.agent_name,
-      ttlSeconds: ID_TOKEN_TTL,
+      ttlSeconds: ttl,
     },
     signer,
   );
@@ -125,7 +126,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   await env.AUTH_CODES.put(
     `oidc-deleg:${v.digest.toLowerCase()}`,
     JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name }),
-    { expirationTtl: DELEG_BIND_TTL_SEC },
+    { expirationTtl: ttl },
   );
 
   // ADR-0025 / spec 246: persist the private related-agent link into the person's
