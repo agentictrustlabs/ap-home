@@ -37,7 +37,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
-import { endeavorRequestFromA2aTask, parseEndeavorRequestInput, ENDEAVOR_REQUEST_SKILL_ID } from './endeavor-intake.js';
+import { endeavorRequestFromA2aTask, parseEndeavorRequestInput, parseEndeavorStateInput, ENDEAVOR_REQUEST_SKILL_ID, ENDEAVOR_STATE_SKILL_ID } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
@@ -227,6 +227,67 @@ function makeEndeavorRequestSkill(env: Env, agentSA: Address): SkillHandler {
         body: { requestId: filed.requestId, goal, requester: sender },
         bodyContentType: 'application/json',
         ...(provenance ? { metadata: provenance } : {}),
+      });
+      return { state: 'completed', artifactIds: [artifactId] };
+    },
+  };
+}
+
+/**
+ * The `endeavor.state` skill — the READ half of the Operational Intent grant: follow an intent you
+ * submitted. Its selector is already in every minted grant, so shipping this handler makes those
+ * grants reach it with no re-mint.
+ *
+ * THE BELT THAT MAKES THIS SAFE. `internal.endeavor.state` is a RAW, UN-GATED read — it exists for
+ * the principal reading its own log, and it will happily return any endeavor of this org. Exposed
+ * to a delegate as-is, it would turn "follow the intent you raised" into "read this organization's
+ * entire coordination history", which is a far larger authority than the grant describes. So the
+ * handler compares the endeavor's RECORDED REQUESTER to the delegation-verified sender and refuses
+ * anything the caller did not raise — the same shape as the package's own "not a party to this task".
+ */
+function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
+  return {
+    skill: ENDEAVOR_STATE_SKILL_ID,
+    handle: async (ctx) => {
+      // Same delegator check as endeavor.request: the grant must be this org's own.
+      if (ctx.principal.toLowerCase() !== agentSA.toLowerCase()) {
+        return { state: 'failed', error: 'endeavor.state grant must be signed by this agent (delegator mismatch)' };
+      }
+      const parsed = parseEndeavorStateInput(ctx.input);
+      if (!parsed.ok) return { state: 'failed', error: parsed.error };
+
+      const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
+      if (!secret) return { state: 'failed', error: 'endeavor.state requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
+      const target = ctx.principal.toLowerCase();
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
+      const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.state`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        body: JSON.stringify({ endeavorId: parsed.endeavorId }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as {
+        ok?: boolean; error?: string; requester?: string | null;
+        lifecycle?: string | null; goal?: string; plan?: unknown; adoptedPlanRef?: unknown;
+      };
+      if (!resp.ok || !out.ok) {
+        // A missing endeavor and one belonging to someone else read the SAME to the caller — telling
+        // a delegate which ids exist is itself a disclosure it has no authority for.
+        return { state: 'failed', error: 'no such endeavor for this requester' };
+      }
+      if ((out.requester ?? '').toLowerCase() !== ctx.sender.toLowerCase()) {
+        return { state: 'failed', error: 'no such endeavor for this requester' };
+      }
+
+      const artifactId = await ctx.emitArtifact({
+        artifactKind: 'endeavor.state',
+        body: {
+          endeavorId: parsed.endeavorId,
+          lifecycle: out.lifecycle ?? null,
+          goal: out.goal ?? '',
+          adoptedPlanRef: out.adoptedPlanRef ?? null,
+          plan: out.plan ?? null,
+        },
+        bodyContentType: 'application/json',
       });
       return { state: 'completed', artifactIds: [artifactId] };
     },
@@ -637,7 +698,7 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));

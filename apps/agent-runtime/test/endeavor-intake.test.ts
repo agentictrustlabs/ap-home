@@ -34,7 +34,9 @@ import {
   executionInputFromTask,
   parseEndeavorRequestInput,
   parseEndeavorTaskBinding,
+  parseEndeavorStateInput,
   ENDEAVOR_REQUEST_SKILL_ID,
+  ENDEAVOR_STATE_SKILL_ID,
 } from '../src/endeavor-intake.js';
 import { skillSelector } from '@agenticprimitives/a2a';
 
@@ -271,5 +273,24 @@ describe('parseEndeavorRequestInput — fail-closed body rules', () => {
     expect(row.request.entryPoint).toBe('a2a-intent');
     expect(row.request.intakeContext).toEqual([{ kind: 'a2a-task', id: '0xfeed' }]);
     expect(row.request.requester.toLowerCase()).toBe(REQUESTER);
+  });
+});
+
+describe('endeavor.state — the read half of the same grant', () => {
+  it('is the string the grant was minted against, and derives its selector', () => {
+    expect(ENDEAVOR_STATE_SKILL_ID).toBe('endeavor.state');
+    // Already in OPERATIONAL_INTENT_SKILLS, so grants minted before the handler existed reach it.
+    expect(skillSelector(ENDEAVOR_STATE_SKILL_ID)).toBe('0x4ddc81aa');
+  });
+
+  it('accepts an endeavor id, as a string or { endeavorId }', () => {
+    expect(parseEndeavorStateInput('  end_7  ')).toEqual({ ok: true, endeavorId: 'end_7' });
+    expect(parseEndeavorStateInput({ endeavorId: 'end_7' })).toEqual({ ok: true, endeavorId: 'end_7' });
+  });
+
+  it('REFUSES anything that is not an end_ id', () => {
+    for (const bad of ['', 'plan_1', 'end', {}, { endeavorId: 42 }, null, undefined]) {
+      expect(parseEndeavorStateInput(bad).ok, JSON.stringify(bad)).toBe(false);
+    }
   });
 });

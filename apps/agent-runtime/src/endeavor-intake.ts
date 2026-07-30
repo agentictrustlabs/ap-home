@@ -74,6 +74,24 @@ export function endeavorRequestFromInboxAsk(args: {
 export const ENDEAVOR_REQUEST_SKILL_ID = 'endeavor.request' as const;
 
 /**
+ * The READ side of the same grant: follow an intent you submitted. Selector `0x4ddc81aa`, already
+ * named by `OPERATIONAL_INTENT_SKILLS` — so a grant minted before this handler existed reaches it
+ * the moment it ships, with no re-mint. Same drift rule as above: change this string and every
+ * minted grant stops matching.
+ */
+export const ENDEAVOR_STATE_SKILL_ID = 'endeavor.state' as const;
+
+/** Fail-closed parse of an `endeavor.state` body: an endeavor id and nothing else. */
+export function parseEndeavorStateInput(
+  input: unknown,
+): { ok: true; endeavorId: string } | { ok: false; error: string } {
+  const raw = input as { endeavorId?: unknown } | string | null;
+  const id = (typeof raw === 'string' ? raw : typeof raw?.endeavorId === 'string' ? raw.endeavorId : '').trim();
+  if (!id.startsWith('end_')) return { ok: false, error: 'endeavor.state requires input.endeavorId (an end_… id)' };
+  return { ok: true, endeavorId: id };
+}
+
+/**
  * Fail-closed parse of an `endeavor.request` message body. The skill accepts a bare goal string or
  * `{ goal }` — and NOTHING ELSE. A body carrying `entryPoint` or `intakeContext` is REFUSED rather
  * than sanitized: those are the door's provenance to set (spec 334 §4), so a caller supplying them
