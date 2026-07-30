@@ -326,3 +326,19 @@ export function useEnrollReq(): EnrollApi {
     denyEnroll,
   };
 }
+
+/**
+ * CEREMONY templates — the owner-operations that run ON the home session instead of minting a grant
+ * for a relying app (content-signer, subscription-collect, service-agent-wire).
+ *
+ * ONE predicate, because this used to be six hand-written `t === 'a' || t === 'b'` lists spread
+ * across EntryExperience, RecognizedEnroll and GoogleEnrollResume, and adding a template meant
+ * finding all six. Missing one does not fail loudly: the request quietly completes down the ordinary
+ * site-login pipeline — one signature, a bare `?code`, nothing stored — which looks like success from
+ * the outside. service-agent-wire was added to three of the six and lost twice to the other three.
+ */
+export const CEREMONY_TEMPLATES = ['content-signer', 'subscription-collect', 'service-agent-wire'] as const;
+
+export function isCeremonyTemplate(template: string | undefined | null): boolean {
+  return !!template && (CEREMONY_TEMPLATES as readonly string[]).includes(template);
+}

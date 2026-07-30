@@ -19,7 +19,7 @@ import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseA
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
 const youversionEnabled = whitelabel.onboarding.credentialMethods.includes('youversion');
 const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
-import { useEnrollReq, type EnrollApi } from './useEnrollReq';
+import { useEnrollReq, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { RecognizedEnroll } from './RecognizedEnroll';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
@@ -208,7 +208,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // before the name resolution below: otherwise an owner-op carrying an agent_name would route to
       // enroll-existing → OnboardingJourney, which has no owner-op branch and would silently run a
       // site-login grant (one signature → "permission granted" → bare ?code, nothing stored).
-      if (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect' || api.enroll!.template === 'service-agent-wire') {
+      if (isCeremonyTemplate(api.enroll!.template)) {
         setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
@@ -332,7 +332,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // Step 3 — signing in for an OWNER-OP ceremony establishes the home session; re-enter the
       // recognized path to run the ceremony (not a grant) on it.
       const t2 = api.enroll?.template;
-      if (t2 === 'content-signer' || t2 === 'subscription-collect' || t2 === 'service-agent-wire') setView({ k: 'enroll-recognized' });
+      if (isCeremonyTemplate(t2)) setView({ k: 'enroll-recognized' });
     }} />;
   }
   // spec 257 W1 — credential-first front door (the self-serve default). Social/passkey resolve the
@@ -364,7 +364,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           // session. The member just signed in, so ap_sso now exists: re-enter the recognized path and
           // run the ceremony on this genuine home session (no relying-app-token credential reconstruction).
           const t2 = api.enroll?.template;
-          if (t2 === 'content-signer' || t2 === 'subscription-collect') setView({ k: 'enroll-recognized' });
+          if (isCeremonyTemplate(t2)) setView({ k: 'enroll-recognized' });
         }}
       />
     );
@@ -387,7 +387,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return <NameStart enrollApi={api} reason={reason} onStart={async (name) => {
       // OWNER-ops never take the named grant path (no owner-op branch in OnboardingJourney). Sign in to
       // the named home, then resume the recognized ceremony on that session (Step 3 — SignInView onSession).
-      if (api.enroll?.template === 'content-signer' || api.enroll?.template === 'subscription-collect') {
+      if (isCeremonyTemplate(api.enroll?.template)) {
         setView({ k: 'signin', name }); return;
       }
       // Resolve the name BEFORE deciding to hop: only a PASSKEY ceremony needs the person's own RP ID

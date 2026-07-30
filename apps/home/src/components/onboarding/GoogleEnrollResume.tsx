@@ -15,7 +15,7 @@ import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setSsoCookie } from '../../lib/sso-cookie';
 import { setFedcmLoginStatus } from '../../context/session';
-import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq, isCeremonyTemplate } from './useEnrollReq';
 import { listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -100,7 +100,7 @@ export function GoogleEnrollResume() {
       // WRONG for these (it would deliver a bare ?code). The Google sign-in just established a home
       // session — persist it cross-subdomain and RE-ENTER the enroll, so the recognized ceremony runs on
       // this session (Step 3, uniform with wallet/passkey). Fail-closed: never fall through to a grant.
-      if (enroll && (enroll.template === 'content-signer' || enroll.template === 'subscription-collect')) {
+      if (enroll && isCeremonyTemplate(enroll.template)) {
         setSsoCookie(token, 'Google');
         setFedcmLoginStatus('logged-in');
         clearStash();

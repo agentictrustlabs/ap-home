@@ -28,7 +28,7 @@ import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cooki
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setFedcmLoginStatus } from '../../context/session';
-import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -98,11 +98,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       //     nameless connect shape uses) forces the chooser, drops out to `onUnrecognized`, and the request
       //     completes down the ordinary site-login pipeline — one signature, a bare `?code`, and the
       //     ceremony's own branch below never runs. That is what happened to service-agent-wire.
-      const ownerOp =
-        enroll.template === 'org-create' ||
-        enroll.template === 'subscription-collect' ||
-        enroll.template === 'content-signer' ||
-        enroll.template === 'service-agent-wire';
+      const ownerOp = enroll.template === 'org-create' || isCeremonyTemplate(enroll.template);
       const forceChooser =
         enroll.prompt === 'select_account' || enroll.prompt === 'login' || (!enroll.name && !ownerOp);
       if (forceChooser) {
@@ -140,7 +136,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // BIND the owner-op to the owner the relying app authenticated: the home session's SA MUST equal the
       // `collectToken` subject. Otherwise a relying app could start an owner-op for a DIFFERENT owner than
       // the one it authenticated. Mismatch → reject (the user must sign in as the named owner / decline).
-      if (enroll.template === 'content-signer' || enroll.template === 'subscription-collect' || enroll.template === 'service-agent-wire') {
+      if (isCeremonyTemplate(enroll.template)) {
         const want = addressOf(idTokenSub(enroll.collectToken));
         if (!want) return fail('This authorization request is missing its owner token.');
         if (want.toLowerCase() !== addr.toLowerCase()) {
