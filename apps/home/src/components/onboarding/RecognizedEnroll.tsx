@@ -19,7 +19,8 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
+import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner,
+  authorizeServiceAgentWire, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
@@ -201,6 +202,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         setSsoCookie(token, viaLower);
         setPhase('connected');
         setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: res.authorized, attempted: res.attempted }, 'content-signer'), 900);
+        return;
+      }
+      // agent-rule `service-agent-signing.md` — the custodian of a named agent authorizes a relying
+      // service's KMS key to sign AS it. No grant is minted here: what the ceremony produces is a
+      // WIRE the service stores, so the service holds a revocable delegate and never the identity.
+      if (enroll.template === 'service-agent-wire') {
+        const cfg = relyingApp?.serviceAgentConfig;
+        if (!cfg) return fail('this app is not configured for service-agent authorization');
+        if (!enroll.collectToken) return fail('missing owner token for service-agent authorization');
+        const swAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        const res = await authorizeServiceAgentWire(viaLower, swAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
+        if (!res.ok) return fail(res.error);
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: 1, attempted: 1 }, 'service-agent-wire'), 900);
         return;
       }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).

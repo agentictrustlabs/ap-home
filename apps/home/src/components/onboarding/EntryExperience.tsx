@@ -208,7 +208,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // before the name resolution below: otherwise an owner-op carrying an agent_name would route to
       // enroll-existing → OnboardingJourney, which has no owner-op branch and would silently run a
       // site-login grant (one signature → "permission granted" → bare ?code, nothing stored).
-      if (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect') {
+      if (api.enroll!.template === 'content-signer' || api.enroll!.template === 'subscription-collect' || api.enroll!.template === 'service-agent-wire') {
         setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
         return;
       }
@@ -332,7 +332,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // Step 3 — signing in for an OWNER-OP ceremony establishes the home session; re-enter the
       // recognized path to run the ceremony (not a grant) on it.
       const t2 = api.enroll?.template;
-      if (t2 === 'content-signer' || t2 === 'subscription-collect') setView({ k: 'enroll-recognized' });
+      if (t2 === 'content-signer' || t2 === 'subscription-collect' || t2 === 'service-agent-wire') setView({ k: 'enroll-recognized' });
     }} />;
   }
   // spec 257 W1 — credential-first front door (the self-serve default). Social/passkey resolve the

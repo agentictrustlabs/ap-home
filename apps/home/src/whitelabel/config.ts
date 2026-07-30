@@ -41,16 +41,21 @@ const faithImpact: WhiteLabelConfig = {
       name: 'Skills',
       redirect_uris: ['https://skills-web-7ar.pages.dev/', 'http://localhost:5190/'],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // skills-a2a's own service agent, custodied by an HSM-backed Cloud KMS key
-      // (a2a/skills-a2a-signer, EC_SIGN_SECP256K1_SHA256) whose private key has never existed outside
-      // the HSM and cannot be exported — the demo-corpus "No held key" property. skills-a2a signs by
-      // asking KMS, so it holds a revocable API credential rather than account-controlling material:
-      // a leak is rotated without re-minting a single grant. NOT the shared `delegate` above, which a
-      // dozen entries name. An earlier attempt used a held EOA custodian and was withdrawn under
-      // ADR-0019 before anything granted it.
-      operational_delegate: '0x2aF8853DD2fF3aEAbe73a921Dd1fC123E1F78A76',
+      // `skills-agent.impact` — the service agent orgs grant to and skills-a2a signs AS. It is
+      // custodied by a SIWE credential in its owner's Home, NOT by skills-a2a: the worker signs with
+      // a KMS key that the `service-agent-wire` ceremony authorizes as a DELEGATE, so a compromise of
+      // the worker yields something the custodian revokes rather than the identity itself
+      // (ADR-0019 + docs/architecture/agent-rules/service-agent-signing.md).
+      //
+      // It replaces 0x2aF8853D…, which was deployed custodied by the KMS key DIRECTLY — "no held
+      // key" but the service was still the custodian, which is the shape the rule forbids. Grants
+      // minted to that address name a delegate this worker can no longer present a wire for and must
+      // be re-minted. NOT the shared `delegate` above, which a dozen entries name.
+      operational_delegate: '0x9c9b7aDd48B001CC3b4672911972b2e6feDCC95F',
+      // Where the service-agent-wire ceremony talks to skills-a2a.
+      serviceAgentConfig: { a2aBase: 'https://skills-a2a-production.richardpedersen3.workers.dev' },
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
@@ -286,6 +291,21 @@ const faithImpact: WhiteLabelConfig = {
         'Touch sign-in methods, funds, or recovery',
       ],
       expiryDays: 1,
+    },
+    // agent-rule `service-agent-signing.md` — you authorize a service's HSM-backed KMS key to act AS
+    // an agent you custody (e.g. skills-agent.impact), for ONE kind of message, revocably. The
+    // service never holds anything that controls the agent.
+    'service-agent-wire': {
+      canDo: [
+        'Let this service act as an agent you custody, for one specific kind of request',
+        'Bind that permission to the service\u2019s HSM-backed key, revocable by you at any time',
+      ],
+      cannotDo: [
+        'Take custody of the agent, or act as it for anything else',
+        'Expose or move any signing key (it never leaves the HSM-backed Cloud KMS)',
+        'Move funds, or touch your sign-in methods or recovery',
+      ],
+      expiryDays: 90,
     },
     // spec 247 — JP's adoption program reads + writes the data it holds for you (your
     // profile + program records) in YOUR vault, through this scoped grant. The records

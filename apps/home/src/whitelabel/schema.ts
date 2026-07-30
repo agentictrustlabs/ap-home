@@ -63,6 +63,12 @@ export interface RelyingApp {
     edition: string;
     a2aBase: string;
   };
+  /** Where the `service-agent-wire` ceremony reads the service's signing key and hands back the
+   *  signed wire. Its own field rather than `collectionConfig` because nothing here is payment:
+   *  this is the agent-signing rail (agent-rules/service-agent-signing.md). */
+  serviceAgentConfig?: {
+    a2aBase: string;
+  };
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

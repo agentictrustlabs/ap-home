@@ -582,6 +582,53 @@ export async function issueConsultabilityDelegation(
   return d;
 }
 
+/** 4-byte A2A offering selector for ANY skill name — the same derivation `consultSkillSelector` and
+ *  `operationalIntentSelectors` use, factored out so a new rail cannot invent a third. */
+export function a2aSkillSelector(skill: string): Hex {
+  return keccak256(toBytes(skill)).slice(0, 10) as Hex;
+}
+
+/**
+ * The SERVICE-AGENT WIRE `identity → the relying service's KMS key` (ADR-0019; the agent-rule
+ * `service-agent-signing.md`). What lets a service sign AS a named agent it does NOT custody.
+ *
+ * The identity (e.g. `skills-agent.impact`) is custodied by its owner, here, in this ceremony. The
+ * delegate is the service's KMS SIGNING KEY — the address a raw ECDSA signature recovers to, NOT the
+ * service's agent account. Getting that wrong produces a wire that verifies nowhere, so the service
+ * reports the address rather than the operator typing one.
+ *
+ * Same shape as `issueConsultabilityDelegation` one relationship over, and the same refusals:
+ *   allowedTargets = [the identity]     usable solely to act AS this identity, never another,
+ *   allowedMethods = [one skill]        NEVER A2A_ANY_SKILL — a wire is per-rail, so a leaked key
+ *                                       signs one kind of message and nothing else,
+ *   timestamp-bounded (90 days), on-chain revocable — the custodian's revoke kills it at every gate
+ *                                       immediately, which is the property custody-by-the-service
+ *                                       cannot offer at all.
+ */
+export const SERVICE_AGENT_WIRE_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
+
+export async function issueServiceAgentWireDelegation(
+  identity: Address,
+  delegateKey: Address,
+  skill: string,
+  signHash: SignHash,
+  validitySeconds = SERVICE_AGENT_WIRE_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([identity])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([a2aSkillSelector(skill)])),
+  ];
+  const d: Delegation = { delegator: identity, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the identity's custodian authorizes the service's key
+  return d;
+}
+
 /** The A2A skills an Operational Intent grant may carry. Named here so the minting side and the
  *  org's gate derive the SAME selectors from the SAME strings — a selector computed from a drifting
  *  string list is a grant that silently authorizes nothing.

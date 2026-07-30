@@ -37,7 +37,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -864,6 +864,51 @@ export async function authorizeContentSigningForOwner(
     return { ok: true, attempted: signers.length, authorized: results.filter((r) => r.ok).length, results };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not authorize content signing' };
+  }
+}
+
+/**
+ * The SERVICE-AGENT WIRE ceremony (agent-rule `service-agent-signing.md`). The custodian of a named
+ * agent authorizes a relying service's KMS key to sign AS that agent — without the service ever
+ * custodying it.
+ *
+ * The service is ASKED what to name as delegate rather than told: `GET /admin/signer-address` reads
+ * the address straight off its signing key. Naming the service's agent account instead is the
+ * classic error, and it mints a wire that can never verify — recovery yields the KEY, always.
+ */
+export async function authorizeServiceAgentWire(
+  via: Via,
+  auth: Auth | undefined,
+  opts: { a2aBase: string; idToken: string },
+  onStep?: (s: string) => void,
+): Promise<Result<{ identity: Address; delegate: Address; skill: string; expiresAt: string | null }>> {
+  try {
+    const base = opts.a2aBase.replace(/\/$/, '');
+    const authHeader = { authorization: `Bearer ${opts.idToken}` };
+    onStep?.('Reading the service\u2019s signing key\u2026');
+    const who = (await fetch(`${base}/admin/signer-address`, { headers: authHeader })
+      .then((r) => r.json())
+      .catch(() => ({}))) as { identity?: Address; delegate?: Address; skill?: string; error?: string };
+    if (!who.identity || !who.delegate || !who.skill) {
+      return { ok: false, error: who.error ?? 'the service could not report its signing key' };
+    }
+
+    // Sign AS the identity — the custodian custodies it, which is the whole premise of the ceremony.
+    onStep?.(`Authorizing ${who.delegate.slice(0, 10)}\u2026 to act as this agent\u2026`);
+    const signHash = await signHashFor(via, who.identity, auth);
+    const wire = toWire(await issueServiceAgentWireDelegation(who.identity, who.delegate, who.skill, signHash));
+
+    onStep?.('Handing the authorization to the service\u2026');
+    const stored = (await fetch(`${base}/admin/service-wire`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeader },
+      body: JSON.stringify({ wire }),
+    }).then((r) => r.json()).catch(() => ({}))) as { ok?: boolean; expiresAt?: string | null; error?: string };
+    if (!stored.ok) return { ok: false, error: stored.error ?? 'the service refused the authorization' };
+
+    return { ok: true, identity: who.identity, delegate: who.delegate, skill: who.skill, expiresAt: stored.expiresAt ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'could not authorize the service agent' };
   }
 }
 
