@@ -572,7 +572,10 @@ export class InteractionsDO {
               if (attempt < 3) { await new Promise((r) => setTimeout(r, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1))); continue; }
               throw InteractionsDO.vaultThrottledError('read');
             }
-            throw new Error(out.error ?? `vault read failed (${resp.status})`);
+            // demo-mcp returns `{ error, detail }` — and `detail` is the only thing that says WHY.
+            // Dropping it turned every server-side vault fault into the word "internal error", which
+            // is indistinguishable from a denial and cost hours of bisecting to get back.
+            throw new Error([out.error ?? `vault read failed (${resp.status})`, (out as { detail?: string }).detail].filter(Boolean).join(' — '));
           }
           if (out.ok === false) { lastErr = out.error ?? 'vault read unauthorized'; if (attempt < 3) { await new Promise((r) => setTimeout(r, 120)); continue; } throw new Error(lastErr); }
           return out.data === null || out.data === undefined ? null : { data: out.data };
@@ -1209,7 +1212,16 @@ export class InteractionsDO {
           // 404, because "not adopted yet" and "no such thing" are different facts with different
           // next steps, and collapsing them is what makes a caller poll forever.
           if (endeavorId.startsWith('ereq_')) {
-            const reqs = await this.readDoc<CoordinationRequestsDocV1>(g, COORDINATION_REQUESTS_RESOURCE, { version: 1, rows: [] });
+            console.log('[internal.endeavor.state] resolving request', endeavorId);
+            let reqs: CoordinationRequestsDocV1;
+            try {
+              reqs = await this.readDoc<CoordinationRequestsDocV1>(g, COORDINATION_REQUESTS_RESOURCE, { version: 1, rows: [] });
+            } catch (e) {
+              // The read that fails here is the one that makes a dispatched intent unfollowable, and
+              // it surfaced to the caller as a bare 409. Name it.
+              console.error('[internal.endeavor.state] requests read FAILED', e instanceof Error ? e.message : String(e));
+              throw e;
+            }
             const row = reqs.rows.find((r) => r.request.requestId === endeavorId);
             if (!row) return json({ error: 'unknown request' }, 404);
             if (!row.endeavorId) {
@@ -1229,7 +1241,14 @@ export class InteractionsDO {
             endeavorId = row.endeavorId;
           }
           if (!endeavorId.startsWith('end_')) return json({ error: 'endeavorId required' }, 400);
-          const log = await this.readDoc<CoordinationEventV1[]>(g, coordinationEventsResource(endeavorId), []);
+          let log: CoordinationEventV1[];
+          try {
+            log = await this.readDoc<CoordinationEventV1[]>(g, coordinationEventsResource(endeavorId), []);
+          } catch (e) {
+            console.error('[internal.endeavor.state] event-log read FAILED', { endeavorId, why: e instanceof Error ? e.message : String(e) });
+            throw e;
+          }
+          console.log('[internal.endeavor.state] log read', { endeavorId, events: log.length });
           if (log.length === 0) return json({ error: 'unknown endeavor' }, 404);
           const state = reduceEventLog(log);
           const adoptedRef = state.endeavor?.adoptedPlanRef ?? null;
@@ -1240,10 +1259,20 @@ export class InteractionsDO {
             : latest;
           // The closing note the coordinator recorded when the endeavor was satisfied — the answer to
           // "what came of it", which lives on the event rather than in the reduced state.
-          const satisfiedEvent = [...log].reverse().find((e) => e.kind === 'EndeavorSatisfied') as
-            | { outcomeValidationRef?: { iri?: string } }
-            | undefined;
-          const outcome = decodeInlineRef(satisfiedEvent?.outcomeValidationRef?.iri);
+          //
+          // FAIL SOFT. This is an ENRICHMENT of a read that has to keep working: if decoding the
+          // outcome throws, the caller should still learn the lifecycle and the plan. Letting it
+          // propagate turned a state read into a 409 and made every dispatched build unfollowable —
+          // the observation broke, so the work looked broken.
+          let outcome: string | null = null;
+          try {
+            const satisfiedEvent = [...log].reverse().find((e) => e.kind === 'EndeavorSatisfied') as
+              | { outcomeValidationRef?: { iri?: string } }
+              | undefined;
+            outcome = decodeInlineRef(satisfiedEvent?.outcomeValidationRef?.iri);
+          } catch (e) {
+            console.warn('[endeavor.state] outcome decode failed', e instanceof Error ? e.message : String(e));
+          }
           return json({
             ok: true,
             endeavorId,
@@ -1264,9 +1293,13 @@ export class InteractionsDO {
                   proposedBy: plan.proposedBy.toLowerCase(),
                   steps: plan.steps.map((s) => {
                     const done = state.satisfiedSteps[s.stepId];
-                    const evidence = done?.evidenceRefs?.map((r) => decodeInlineRef((r as { iri?: string }).iri)).find((t): t is string => !!t) ?? null;
                     // The deliverable, not just a tick: a requester following its own intent needs
-                    // what the step PRODUCED, and it is already here.
+                    // what the step PRODUCED, and it is already here. Same fail-soft rule as the
+                    // outcome — a step whose evidence will not decode still reports as satisfied.
+                    let evidence: string | null = null;
+                    try {
+                      evidence = done?.evidenceRefs?.map((r) => decodeInlineRef((r as { iri?: string }).iri)).find((t): t is string => !!t) ?? null;
+                    } catch { /* enrichment only */ }
                     return { stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!done, ...(evidence ? { evidence } : {}) };
                   }),
                 }

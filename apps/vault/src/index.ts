@@ -1114,7 +1114,10 @@ app.post('/mcp/v2', async (c) => {
   const environment = typeof process !== 'undefined' && process.env?.NODE_ENV === 'production' ? 'production' : 'development';
 
   type ToolArgs = { args?: { fields?: string[]; purpose?: string } };
-  const registry = new MethodRegistry({ onError: (info) => console.error('[demo-mcp /mcp/v2]', info.method, info.correlationId) })
+  // LOG THE ERROR, not just that there was one. This handler discarded `info.error`, so a
+  // fail-closed misconfiguration surfaced as the word "internal error" with no cause anywhere —
+  // the client is told nothing by design, which makes the server log the ONLY place it can be seen.
+  const registry = new MethodRegistry({ onError: (info) => console.error('[demo-mcp /mcp/v2]', info.method, info.correlationId, info.error instanceof Error ? `${info.error.name}: ${info.error.message}` : String(info.error)) })
     .register('server/discover', () =>
       buildServerDiscover({
         serverInfo: { name: 'demo-mcp', version: '2' },

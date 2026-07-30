@@ -43,6 +43,12 @@ DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 # spec 287: enable the PUBLIC NATIVE MCP ingress (/mcp/native) requiring a per-call
 # AgenticInvocationProofV1. Fail-closed — 404s unless 'true'. Requires UNIVERSAL_SIGNATURE_VALIDATOR.
 DEMO_NATIVE_MCP_ENABLED = "true"
+# The on-chain ECDSA/ERC-1271/6492 validator. Binding enforcement FAILS CLOSED without it — the code
+# asks for it, this file only ever mentioned it in a comment, and demo-a2a has carried the same
+# address all along. It went unnoticed because the deployed build predated the enforcement: the next
+# deploy activated a check whose configuration had never been added, and every coordination vault
+# read began failing with "internal error". Same value as demo-a2a + contracts/deployments.
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Production environment — Worker name: "demo-mcp-production"
@@ -57,6 +63,12 @@ DEMO_NATIVE_MCP_ENABLED = "true"
 # ──────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
+# The on-chain ECDSA/ERC-1271/6492 validator. Binding enforcement FAILS CLOSED without it — the code
+# asks for it, this file only ever mentioned it in a comment, and demo-a2a has carried the same
+# address all along. It went unnoticed because the deployed build predated the enforcement: the next
+# deploy activated a check whose configuration had never been added, and every coordination vault
+# read began failing with "internal error". Same value as demo-a2a + contracts/deployments.
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 # RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
 # the rationale. Set as a wrangler secret instead.
 CHAIN_ID = "84532"

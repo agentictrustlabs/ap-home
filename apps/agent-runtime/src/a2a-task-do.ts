@@ -272,10 +272,20 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
       };
       if (!resp.ok || !out.ok) {
         // A missing endeavor and one belonging to someone else read the SAME to the caller — telling
-        // a delegate which ids exist is itself a disclosure it has no authority for.
+        // a delegate which ids exist is itself a disclosure it has no authority for. The operator
+        // still needs to tell them apart, so the REASON is logged rather than returned.
+        console.warn('[endeavor.state] internal read failed', {
+          asked: parsed.endeavorId, status: resp.status, error: out.error ?? null,
+        });
         return { state: 'failed', error: 'no such endeavor for this requester' };
       }
       if ((out.requester ?? '').toLowerCase() !== ctx.sender.toLowerCase()) {
+        // The caller is told nothing (an id oracle), but the OPERATOR needs to tell a genuine
+        // "not yours" from a state read that lost the requester — they are the same message here,
+        // and that ambiguity cost an afternoon.
+        console.warn('[endeavor.state] requester mismatch', {
+          asked: parsed.endeavorId, recorded: out.requester ?? null, sender: ctx.sender.toLowerCase(),
+        });
         return { state: 'failed', error: 'no such endeavor for this requester' };
       }
 
