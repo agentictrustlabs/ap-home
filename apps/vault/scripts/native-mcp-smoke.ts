@@ -18,7 +18,12 @@ import {
 const BASE = process.env.NATIVE_MCP_BASE ?? 'https://demo-mcp-production.richardpedersen3.workers.dev';
 const CHAIN_ID = 84532;
 const AUDIENCE = 'urn:mcp:server:person';
-const DELEGATION_MANAGER = '0x3a8E2cE74564f699b135db6f266ccDb563979C05';
+// The EIP-712 verifying contract for the delegation this script mints, so it MUST match the
+// DELEGATION_MANAGER the target verifies against or the digests differ and the run fails on a
+// signature mismatch that says nothing about the path under test. Canonical Base Sepolia value
+// (packages/contracts/deployments-base-sepolia.json) — it sat a generation behind, harmlessly while
+// demo-mcp had no DelegationManager configured at all, and wrongly the moment one was set.
+const DELEGATION_MANAGER = '0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5';
 
 // FRESH random EOAs each run — well-known anvil addresses carry EIP-7702
 // delegation code (0xef0100…) on Base Sepolia, which would route signature
