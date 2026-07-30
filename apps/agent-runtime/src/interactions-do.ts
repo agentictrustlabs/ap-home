@@ -64,7 +64,7 @@ import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
-import { checkConsultWireShape } from './consult-wire.js';
+import { checkSessionWireShape } from './session-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 
@@ -1761,7 +1761,10 @@ export class InteractionsDO {
           const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
           const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
           if (![tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) return json({ error: 'consult enforcers not configured — cannot verify the wire shape' }, 503);
-          const shapeErr = checkConsultWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000));
+          // Ceremony store time for the CONSULT rail specifically — pin the consult selector, the
+          // behaviour this check always had. The shape function is now skill-agnostic, so the pin
+          // has to be stated rather than assumed.
+          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: CONSULT_SKILL_ID });
           if (shapeErr) return json({ error: shapeErr }, 400);
           const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
           const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);

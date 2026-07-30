@@ -43,7 +43,7 @@ import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
-import { parseRoutedConsultSignature, verifyRoutedConsultSignature, wrapRoutedConsultSignature } from './consult-wire.js';
+import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { skillProvenanceMetadata } from './skill-provenance.js';
@@ -517,21 +517,24 @@ export class A2aTaskDO {
       ? async (d: Delegation) => (await reader.isDelegationRevoked(hashDelegation(d, chainId, dm))).revoked
       : async (d: Delegation) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean;
     const verifyDelegationSigFn = async (d: Delegation) => verifySig(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex);
-    // spec 329 §3.1 — accept the SESSION-WRAPPED consult signature alongside plain ERC-1271: an org
-    // runtime holds no org key, so its consult-rail message/tasks-get signatures are ECDSA by the
-    // interactions-session KMS key, wrapped WITH the steward-minted org consult wire. Verification
-    // is fail-closed per message (wire shape: consult selector only + timestamp; delegator = the
-    // claimed signer; ECDSA recovers to the wire's delegate; wire ERC-1271-valid against the org;
-    // wire UNREVOKED on-chain — revocation kills routing immediately at this gate). Any other
-    // signature shape takes the unchanged ERC-1271 path.
+    // spec 329 §3.1, generalized — accept a SESSION-WRAPPED signature alongside plain ERC-1271: a
+    // runtime that holds no key for the identity it acts as signs with a KMS session key and wraps
+    // the signature WITH the narrow wire that authorizes it. Two identities do this: an org on the
+    // consult rail (no org key at rest, SC-8) and a service agent it must never custody (ADR-0019).
+    // Verification is fail-closed per message (wire shape: ONE selector — the requested skill where
+    // the request names one — + timestamp; delegator = the claimed signer; ECDSA recovers to the
+    // wire's delegate; wire ERC-1271-valid against the delegator; wire UNREVOKED on-chain, so a
+    // custodian's revocation kills the authority immediately here). Any other signature shape takes
+    // the unchanged ERC-1271 path.
     const wireEnforcers = { timestamp: this.env.TIMESTAMP_ENFORCER ?? '', allowedMethods: this.env.ALLOWED_METHODS_ENFORCER ?? '' };
-    const verifySigOrRouted = async (signer: Address, digest: Hex, signature: Hex): Promise<boolean> => {
-      if (parseRoutedConsultSignature(signature)) {
-        return verifyRoutedConsultSignature({
+    const verifySigOrWired = async (signer: Address, digest: Hex, signature: Hex, skill?: string): Promise<boolean> => {
+      if (parseSessionWrappedSignature(signature)) {
+        return verifySessionWrappedSignature({
           signer, digest, signature,
           enforcers: wireEnforcers,
           verifyDelegationSig: verifyDelegationSigFn,
           isRevoked: isRevokedFn,
+          ...(skill ? { skill } : {}),
         });
       }
       return verifySig(signer, digest, signature);
@@ -540,9 +543,13 @@ export class A2aTaskDO {
       // Fail-closed: any throw propagates and the package denies (ADR-0013).
       isRevoked: isRevokedFn,
       verifyDelegationSignature: verifyDelegationSigFn,
-      verifyMessageSignature: async (msg, digest) => verifySigOrRouted(msg.sender as Address, digest, msg.signature as Hex),
-      // AUDIT NEW-A2A-2 — the read/control caller proves control of `caller` via ERC-1271 over the request digest.
-      verifyCallerSignature: async (caller, digest, signature) => verifySigOrRouted(caller as Address, digest, signature as Hex),
+      // The message NAMES its skill, so the wire is pinned to that rail — a consult wire cannot sign
+      // an endeavor message, and vice versa.
+      verifyMessageSignature: async (msg, digest) => verifySigOrWired(msg.sender as Address, digest, msg.signature as Hex, msg.skill),
+      // AUDIT NEW-A2A-2 — the read/control caller proves control of `caller` via ERC-1271 over the
+      // request digest. That digest binds a method and a taskId, never a skill, so there is no
+      // selector to pin; the package's own "not a party to this task" check is what bounds it.
+      verifyCallerSignature: async (caller, digest, signature) => verifySigOrWired(caller as Address, digest, signature as Hex),
     };
     // Vault seam (A2A-INV-04 — only refs/hashes in task state):
     //  • with a delegation (FR-3.4) → write/read the DELEGATOR's demo-mcp vault via the captured grant
@@ -1144,7 +1151,7 @@ export class A2aTaskDO {
     const signer = await interactionsSessionAccount(this.env);
     const signRaw = signer.sign;
     if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign');
-    return wrapRoutedConsultSignature(orgWire, await signRaw({ hash: digest }));
+    return wrapSessionSignature(orgWire, await signRaw({ hash: digest }));
   }
 
   /**
