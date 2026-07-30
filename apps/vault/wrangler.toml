@@ -69,6 +69,26 @@ UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 # deploy activated a check whose configuration had never been added, and every coordination vault
 # read began failing with "internal error". Same value as demo-a2a + contracts/deployments.
 UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
+# The contract every revocation read is aimed at — `Env` declares it required and four call sites read
+# it, but it was never set here, so `to: undefined` made every read THROW. The resilient reader is
+# fail-closed by construction (an unconfirmable read comes back revoked:true, source='fail-closed:*'),
+# so a missing address did not read as misconfiguration: it read as "this delegation is revoked", and
+# rejected with "revocation check unavailable; refusing to verify". Exactly the USV omission above,
+# one line down, surfaced by the same deploy — the reader is only BUILT once USV is present.
+# Canonical Base Sepolia value: packages/contracts/deployments-base-sepolia.json, matching demo-a2a.
+# (demo-edge production carries 0x3a8E2c… instead — a different deployment, and worth reconciling.)
+DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
+# The caveat enforcers, and the THIRD omission of this exact shape in this one block. The evaluator
+# keys its dispatch table by enforcer ADDRESS and denies anything it cannot name — so with these four
+# unset, every caveat on every delegation resolved to "caveat denied (unknown enforcer)" and no token
+# could authorize anything. `Env` declares all four required and baseConfig reads all four; none was
+# ever set here. Canonical values: packages/contracts/deployments-base-sepolia.json, identical to
+# demo-a2a production. A missing address is indistinguishable from a hostile one BY DESIGN (that is
+# what fail-closed means), which is why all three of these read as auth failures rather than config.
+TIMESTAMP_ENFORCER = "0xBb8fF9c82417189c6EfeBbB369e9dd9d651aa0f3"
+ALLOWED_TARGETS_ENFORCER = "0xb06252FaD1D41B9943c73ec696Af70F268581625"
+ALLOWED_METHODS_ENFORCER = "0xa076b759D6785bA5E67016e399Af651fC2ABC811"
+VALUE_ENFORCER = "0x3D2abD6c7C1319f2bbA96B3b76A7e0d92C620A39"
 # RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
 # the rationale. Set as a wrangler secret instead.
 CHAIN_ID = "84532"
