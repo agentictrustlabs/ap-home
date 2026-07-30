@@ -22,10 +22,20 @@ workers_dev = true
 [env.production.vars]
 # Public on-chain config for the /.well-known/agentic-authorization discovery doc (Base Sepolia).
 # These are public addresses (app layer, ADR-0021) — safe to inline.
+#
+# ALL THREE were a generation behind: this doc TELLS CALLERS which contracts to trust, so it was
+# advertising an older EntryPoint / DelegationManager / UniversalSignatureValidator than the ones
+# demo-a2a and demo-mcp actually verify against — a client that believed the profile would build
+# delegations no relying service would accept. Each old address is a real deployed contract of the
+# right role (the USV byte-identical, the EntryPoint the same size, the DM one build older), which is
+# why nothing ever errored: the profile was coherent, just not current.
+#
+# Now the canonical set from packages/contracts/deployments-base-sepolia.json, matching demo-a2a and
+# demo-mcp. Keep these three moving TOGETHER — a mixed-generation profile is worse than a stale one.
 CHAIN_ID = "84532"
-ENTRY_POINT = "0x9B33De9d9597de82Eb56b5B26C478Dc0a6955388"
-DELEGATION_MANAGER = "0x3a8E2cE74564f699b135db6f266ccDb563979C05"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0xe8F3e531429F44D77dC3A331C18032bfa1550D84"
+ENTRY_POINT = "0x96E37dD695840AF7781E669bdca9d79E4d7d8040"
+DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 # Per-Smart-Agent hard-budget unit cap (spec 290 §8 — demo value).
 SA_BUDGET_LIMIT_UNITS = "10"
 # OPS-EDGE-PROBE-PROD-1 (2026-07-05 completeness audit): the /budget/probe smoke-test runs BEFORE the
