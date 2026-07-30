@@ -113,7 +113,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const link = JSON.parse(raw) as {
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
       siteDelegation: unknown; proofHash: string | null; createdAt?: number;
-      membershipDelegation?: unknown; stewardshipDelegation?: unknown; memberAccessDelegation?: unknown;
+      membershipDelegation?: unknown; stewardshipDelegation?: unknown; memberAccessDelegation?: unknown; operationalDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
     const l = link as typeof link & { kind?: string; parent?: string; relationship?: string };
@@ -142,6 +142,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // member); stewardship = org→person (person reads/oversees the org).
       membershipDelegation: link.membershipDelegation ?? null,
       stewardshipDelegation: link.stewardshipDelegation ?? null,
+      // The org → app-service-agent Operational Intent grant. Returned because the ceremony is the
+      // only moment it is MINTED, and a credential that cannot be read back afterwards is one the
+      // agent it was granted to can never present.
+      operationalDelegation: link.operationalDelegation ?? null,
       // spec 321 W2 — member-access = org→member (the member reads the org's shareable info).
       memberAccessDelegation: link.memberAccessDelegation ?? null,
       // spec 275: the agent kind + its parent in the member's agent tree. Legacy org
