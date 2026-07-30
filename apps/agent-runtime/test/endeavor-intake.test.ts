@@ -288,8 +288,14 @@ describe('endeavor.state — the read half of the same grant', () => {
     expect(parseEndeavorStateInput({ endeavorId: 'end_7' })).toEqual({ ok: true, endeavorId: 'end_7' });
   });
 
-  it('REFUSES anything that is not an end_ id', () => {
-    for (const bad of ['', 'plan_1', 'end', {}, { endeavorId: 42 }, null, undefined]) {
+  it('accepts the ereq_ id the SUBMITTER was handed, not just the adopted end_ id', () => {
+    // endeavor.request returns a requestId; the end_ id only exists after the org adopts. Refusing
+    // ereq_ would mean a dispatcher can name what it raised and never follow it.
+    expect(parseEndeavorStateInput({ endeavorId: 'ereq_32ed2ad2' })).toEqual({ ok: true, endeavorId: 'ereq_32ed2ad2' });
+  });
+
+  it('REFUSES anything that is neither an end_ nor an ereq_ id', () => {
+    for (const bad of ['', 'plan_1', 'end', 'ereq', {}, { endeavorId: 42 }, null, undefined]) {
       expect(parseEndeavorStateInput(bad).ok, JSON.stringify(bad)).toBe(false);
     }
   });

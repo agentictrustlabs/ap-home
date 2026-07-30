@@ -87,7 +87,12 @@ export function parseEndeavorStateInput(
 ): { ok: true; endeavorId: string } | { ok: false; error: string } {
   const raw = input as { endeavorId?: unknown } | string | null;
   const id = (typeof raw === 'string' ? raw : typeof raw?.endeavorId === 'string' ? raw.endeavorId : '').trim();
-  if (!id.startsWith('end_')) return { ok: false, error: 'endeavor.state requires input.endeavorId (an end_… id)' };
+  // BOTH ids are valid: `ereq_…` is what the submitter was handed by endeavor.request, `end_…` only
+  // exists once the org adopts it. Refusing the former would mean a dispatcher can name what it
+  // raised and never follow it.
+  if (!id.startsWith('end_') && !id.startsWith('ereq_')) {
+    return { ok: false, error: 'endeavor.state requires input.endeavorId (an end_… endeavor or ereq_… request id)' };
+  }
   return { ok: true, endeavorId: id };
 }
 

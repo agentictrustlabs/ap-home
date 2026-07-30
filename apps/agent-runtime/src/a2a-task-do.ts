@@ -266,7 +266,8 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
         body: JSON.stringify({ endeavorId: parsed.endeavorId }),
       }));
       const out = (await resp.json().catch(() => ({}))) as {
-        ok?: boolean; error?: string; requester?: string | null;
+        ok?: boolean; error?: string; requester?: string | null; endeavorId?: string; requestId?: string;
+        status?: string; reason?: string;
         lifecycle?: string | null; goal?: string; plan?: unknown; adoptedPlanRef?: unknown;
       };
       if (!resp.ok || !out.ok) {
@@ -281,11 +282,16 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
       const artifactId = await ctx.emitArtifact({
         artifactKind: 'endeavor.state',
         body: {
-          endeavorId: parsed.endeavorId,
+          // Echo BOTH ids: the caller asked with whichever it had, and a follow-up needs the other.
+          asked: parsed.endeavorId,
+          ...(out.endeavorId ? { endeavorId: out.endeavorId } : {}),
+          ...(out.requestId ? { requestId: out.requestId } : {}),
+          status: out.status ?? null,
           lifecycle: out.lifecycle ?? null,
           goal: out.goal ?? '',
           adoptedPlanRef: out.adoptedPlanRef ?? null,
           plan: out.plan ?? null,
+          ...(out.reason ? { reason: out.reason } : {}),
         },
         bodyContentType: 'application/json',
       });

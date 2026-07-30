@@ -65,7 +65,7 @@ import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hm
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from './session-wire.js';
-import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, type EndeavorOpDeps } from './endeavors.js';
+import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
@@ -1185,7 +1185,34 @@ export class InteractionsDO {
         // `internal.endeavor.state` is a raw, un-gated read (the autopilot's own substrate reading its
         // own log — no viewer visibility gates apply to the principal reading itself).
         if (op === 'internal.endeavor.state') {
-          const endeavorId = String(body.endeavorId ?? '');
+          let endeavorId = String(body.endeavorId ?? '');
+          // ACCEPT THE ID THE SUBMITTER WAS GIVEN. `endeavor.request` hands back an `ereq_` requestId;
+          // the `end_` id only exists once the org ADOPTS it, and nothing told the submitter what it
+          // became — so a dispatcher could name what it raised and never look it up. The mapping is
+          // already on the request row (`status` + `endeavorId`); this reads it rather than adding a
+          // second source. A request that is not adopted yet answers WITH ITS STATUS instead of a
+          // 404, because "not adopted yet" and "no such thing" are different facts with different
+          // next steps, and collapsing them is what makes a caller poll forever.
+          if (endeavorId.startsWith('ereq_')) {
+            const reqs = await this.readDoc<CoordinationRequestsDocV1>(g, COORDINATION_REQUESTS_RESOURCE, { version: 1, rows: [] });
+            const row = reqs.rows.find((r) => r.request.requestId === endeavorId);
+            if (!row) return json({ error: 'unknown request' }, 404);
+            if (!row.endeavorId) {
+              return json({
+                ok: true,
+                requestId: row.request.requestId,
+                status: row.status,                       // pending | declined
+                lifecycle: null,
+                goal: row.request.goal,
+                requester: row.request.requester?.toLowerCase() ?? null,
+                adoptedPlanRef: null,
+                latestPlan: null,
+                plan: null,
+                ...(row.reason ? { reason: row.reason } : {}),
+              });
+            }
+            endeavorId = row.endeavorId;
+          }
           if (!endeavorId.startsWith('end_')) return json({ error: 'endeavorId required' }, 400);
           const log = await this.readDoc<CoordinationEventV1[]>(g, coordinationEventsResource(endeavorId), []);
           if (log.length === 0) return json({ error: 'unknown endeavor' }, 404);
@@ -1198,6 +1225,8 @@ export class InteractionsDO {
             : latest;
           return json({
             ok: true,
+            endeavorId,
+            status: 'adopted',
             lifecycle: state.endeavor?.lifecycle ?? null,
             // Prefer the FULL request goal — the endeavor title is truncated to 80 chars at adopt
             // time, and the work turns need the whole ask.
