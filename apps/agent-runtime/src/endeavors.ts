@@ -499,8 +499,12 @@ function parseEndeavorId(raw: unknown): string | null {
  *  granted `endeavor.state` is entitled to read, and a ref would put it behind a vault scope that
  *  the Operational Intent grant deliberately does not carry. The cost is a larger event log, paid by
  *  the endeavor that produced the document. If deliverables outgrow this, the answer is an artifact
- *  store with its own read authority — not a bigger number. */
-const EVIDENCE_MAX = 64_000;
+ *  store with its own read authority — not a bigger number.
+ *
+ *  EXPORTED because the work skill clips the deliverable BEFORE it ever reaches here. That clip was a
+ *  separate 4000 and this ceiling never governed anything on that path — raising this number alone
+ *  changed nothing. One constant now, so the two cannot drift again. */
+export const EVIDENCE_MAX = 64_000;
 
 function parseEvidenceRefs(note: unknown): EntityRef[] {
   const text = String(note ?? '').trim();

@@ -12,6 +12,8 @@
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
 import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
 import { QUERY_PUBLIC_GRAPH_TOOL, runPublicSparql, digestRows, type PublicGraphEnv } from './public-graph.js';
+// The log's inline ceiling — shared so the clip here can never be tighter than what the log stores.
+import { EVIDENCE_MAX } from './endeavors.js';
 
 export interface EndeavorStepWorkInput {
   principal: string;
@@ -181,9 +183,25 @@ function deterministicOutput(input: EndeavorStepWorkInput, kind: 'anthropic' | '
   return `Handled by the agent for the goal "${input.goal}": ${d}. (${why})`;
 }
 
-function sanitize(raw: unknown): string {
+/**
+ * Clip a captured deliverable to the log's inline ceiling — and SAY SO when it clips.
+ *
+ * This is the real limit on everything an endeavor produces: it applies to a step's `output` and to
+ * the final `answer`, which are the payload, not a preview of it. At 4000 characters it silently cut
+ * a document at ~45 lines of Turtle — every domain ontology in the corpus is 9× to 54× that — and
+ * the clip was invisible: the tool result said `ok: true` and nothing downstream marked the text. A
+ * truncated ontology still carries `@prefix` and an `owl:Class`, so the consumer's "does this look
+ * like Turtle?" test passes and a document that is not valid Turtle is applied as though it were.
+ *
+ * So: one ceiling shared with the log that stores it (a smaller number here can only produce a clip
+ * the log had room for), and truncation is reported to the model and the operator instead of being
+ * swallowed. A clipped deliverable is still wrong — the point is that it can no longer be silent.
+ */
+function sanitize(raw: unknown): { text: string; truncated: boolean } {
   const s = String(raw ?? '').trim();
-  return s.slice(0, 4000);
+  return s.length > EVIDENCE_MAX
+    ? { text: s.slice(0, EVIDENCE_MAX), truncated: true }
+    : { text: s, truncated: false };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -212,16 +230,25 @@ async function runSingleToolTurn(
     fallback: (kind: 'anthropic' | 'rule-based', lastError?: string) => string;
   },
 ): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
-  // maxTokens 4096: the deliverable/answer rides INSIDE the tool call's input, so the output budget
-  // must cover the whole artifact — the planner's 1024 default truncated long answers mid-emit,
-  // which surfaced as an empty capture with no error (the "model calls failed" fallback with no reason).
-  const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract, maxTokens: 4096 });
+  // The deliverable/answer rides INSIDE the tool call's input, so the output budget must cover the
+  // WHOLE artifact. This has now been raised twice for the same reason: the planner's 1024 default
+  // cut long answers mid-emit (an empty capture with no error, reported as "model calls failed"),
+  // and 4096 (~16k chars) still could not carry a document. Independent of the character clip below
+  // — the model stops emitting here whatever that ceiling allows, so both had to move.
+  // 16k tokens is well inside claude-sonnet-4-6's output limit; it is the artifact size that binds.
+  const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract, maxTokens: 16_000 });
 
   let captured = '';
   const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
     if (toolId !== opts.toolId) throw new Error(`unknown tool: ${toolId}`);
-    captured = sanitize(args[opts.argKey]);
-    return { ok: true, length: captured.length };
+    const clipped = sanitize(args[opts.argKey]);
+    captured = clipped.text;
+    if (clipped.truncated) {
+      console.warn(`[endeavor-work] deliverable clipped at ${EVIDENCE_MAX} chars for tool ${toolId}`);
+    }
+    // `truncated` goes back to the model deliberately: it is the only party that can do anything
+    // about it (split the deliverable, or say so in the text) and it previously had no way to know.
+    return { ok: true, length: captured.length, truncated: clipped.truncated };
   };
 
   if (kind !== 'anthropic') {
