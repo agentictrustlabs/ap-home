@@ -489,10 +489,23 @@ function parseEndeavorId(raw: unknown): string | null {
 /** Evidence for step/endeavor completion: a free-text note from the UI becomes ONE resource
  *  EntityRef (`urn:ap:evidence:<encoded>`), so the reducer's "requires evidence" invariant is met
  *  without inventing a vault artifact for a demo note. The provenance projection decodes it back. */
+/** How much of a step's deliverable the log keeps INLINE.
+ *
+ *  It was 4000 characters, which is fine for "booked the venue" and destroys the one case the
+ *  coordination plane now has to carry: a document. An ontology, a draft, a report — the artefact
+ *  IS the deliverable, and a silently clipped one is worse than none, because it reads as complete.
+ *
+ *  Inline is the honest shape here rather than a vault ref: the evidence is what a requester who was
+ *  granted `endeavor.state` is entitled to read, and a ref would put it behind a vault scope that
+ *  the Operational Intent grant deliberately does not carry. The cost is a larger event log, paid by
+ *  the endeavor that produced the document. If deliverables outgrow this, the answer is an artifact
+ *  store with its own read authority — not a bigger number. */
+const EVIDENCE_MAX = 64_000;
+
 function parseEvidenceRefs(note: unknown): EntityRef[] {
   const text = String(note ?? '').trim();
   if (!text) return [];
-  return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, 4000))}` }];
+  return [{ kind: 'resource', iri: `urn:ap:evidence:${encodeURIComponent(text.slice(0, EVIDENCE_MAX))}` }];
 }
 
 // ── The mutation spine: validate command → append events → re-reduce → persist projections. ──
@@ -999,7 +1012,7 @@ export async function handleEndeavorOp(
       actor: viewer,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
-      outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, 6000))}` },
+      outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, EVIDENCE_MAX))}` },
     };
     return deps.serialize(async () => {
       const r = await appendToEndeavorLog(deps, 'endeavor.satisfy', endeavorId, command, { type: 'endeavor', id: endeavorId });
