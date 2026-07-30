@@ -43,9 +43,11 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // operational_delegate: '0x…' — set once skills-a2a's OWN service SA is provisioned, and org
-      // create will mint it an Operational Intent grant. Deliberately unset: minting to the shared
-      // `delegate` above would hand operational authority to every app that names it.
+      // skills-a2a's OWN service agent — NOT the shared `delegate` above, which a dozen entries name.
+      // org-create mints it an Operational Intent grant (endeavor.* only, targets pinned to the org,
+      // 90 days, zero value), so skills-a2a can submit intents to that org's A2A endpoint directly
+      // rather than proxying through Home. Custodied by a held EOA whose key is a skills-a2a secret.
+      operational_delegate: '0x76Dcd7B68bC8F0b8D59DEcd84d64aB7bf19DD9C0',
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
