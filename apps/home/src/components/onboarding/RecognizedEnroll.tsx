@@ -93,11 +93,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       //   • a NAMELESS connect-type enroll (`agent_name` omitted on site-login / x402-pay) — the request
       //     pins NO specific home, so we must NOT assume the active session's identity. A PINNED connect
       //     (agent_name set) still one-taps. OWNER-operation templates (org-create / subscription-collect /
-      //     content-signer) deliberately reuse the recognized owner session, so they're exempt.
+      //     content-signer / service-agent-wire) deliberately reuse the recognized owner session, so
+      //     they're exempt. MISSING ONE HERE IS SILENT: an owner-op sent with no `agent_name` (which the
+      //     nameless connect shape uses) forces the chooser, drops out to `onUnrecognized`, and the request
+      //     completes down the ordinary site-login pipeline — one signature, a bare `?code`, and the
+      //     ceremony's own branch below never runs. That is what happened to service-agent-wire.
       const ownerOp =
         enroll.template === 'org-create' ||
         enroll.template === 'subscription-collect' ||
-        enroll.template === 'content-signer';
+        enroll.template === 'content-signer' ||
+        enroll.template === 'service-agent-wire';
       const forceChooser =
         enroll.prompt === 'select_account' || enroll.prompt === 'login' || (!enroll.name && !ownerOp);
       if (forceChooser) {
@@ -135,7 +140,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // BIND the owner-op to the owner the relying app authenticated: the home session's SA MUST equal the
       // `collectToken` subject. Otherwise a relying app could start an owner-op for a DIFFERENT owner than
       // the one it authenticated. Mismatch → reject (the user must sign in as the named owner / decline).
-      if (enroll.template === 'content-signer' || enroll.template === 'subscription-collect') {
+      if (enroll.template === 'content-signer' || enroll.template === 'subscription-collect' || enroll.template === 'service-agent-wire') {
         const want = addressOf(idTokenSub(enroll.collectToken));
         if (!want) return fail('This authorization request is missing its owner token.');
         if (want.toLowerCase() !== addr.toLowerCase()) {
