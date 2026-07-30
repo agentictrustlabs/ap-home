@@ -582,6 +582,90 @@ export async function issueConsultabilityDelegation(
   return d;
 }
 
+/** The A2A skills an Operational Intent grant may carry. Named here so the minting side and the
+ *  org's gate derive the SAME selectors from the SAME strings — a selector computed from a drifting
+ *  string list is a grant that silently authorizes nothing. */
+export const OPERATIONAL_INTENT_SKILLS = ['endeavor.request', 'endeavor.adoptPlan', 'endeavor.state'] as const;
+
+/** 4-byte A2A offering selectors for those skills — keccak256(utf8(skill))[:4], the same derivation
+ *  `consultSkillSelector` uses and the same one `authorizeA2aMessage` decodes against. */
+export function operationalIntentSelectors(): Hex[] {
+  return OPERATIONAL_INTENT_SKILLS.map((s) => keccak256(toBytes(s)).slice(0, 10) as Hex);
+}
+
+/** 90 days. Operational rather than structural: this authorizes an agent to submit work, so it is
+ *  re-minted often rather than held for a year like the naming/relationship site grant. */
+export const OPERATIONAL_INTENT_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
+
+/**
+ * The OPERATIONAL INTENT grant `org → agent` — see skills repo `docs/operational-intent-grant.md`.
+ *
+ * Authorizes a named agent (e.g. skills-a2a's service SA) to submit endeavor intents to THIS org's
+ * A2A endpoint and follow their progress, and nothing else. It is the concrete form of `at:Mandate`:
+ * what a `at:PlanStep` that `at:requiresMandate` presents at `at:invokedAtEndpoint`.
+ *
+ * Deliberately the same shape as `issueConsultabilityDelegation` one relationship over — that grant
+ * is the precedent, including its refusals:
+ *   allowedTargets = [the org SA]        the grant is non-replayable against another organization,
+ *   allowedMethods = [endeavor selectors] NEVER A2A_ANY_SKILL — an any-skill grant to a dispatcher
+ *                                        would also authorize rewriting the org's playbook, which
+ *                                        changes what every one of its agent turns obeys,
+ *   value = 0                            never moves funds,
+ *   timestamp-bounded, on-chain revocable — revocation is immediate at the org's gate whatever the
+ *                                        holder has cached.
+ *
+ * The org's A2A gate (`authorizeA2aMessage`, spec 269 FR-4) re-verifies ALL of it per message: this
+ * delegation IS the authority, not a hint.
+ *
+ * NOTE the delegate must be a DEDICATED service SA. The shared registry delegate that relying apps
+ * name in `whitelabel/config.ts` is used by a dozen entries; granting operational authority to it
+ * would grant it to every app on that address.
+ */
+export async function issueOperationalIntentDelegation(
+  orgSA: Address,
+  agentSA: Address,
+  signHash: SignHash,
+  validitySeconds = OPERATIONAL_INTENT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([orgSA])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms(operationalIntentSelectors())),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate: agentSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the org's custody (the steward's credential) consents
+  return d;
+}
+
+/** The approved-hash variant, for folding into the org-create deploy userOp — one more digest in the
+ *  batch, so the member is not asked for an extra signature. Mirrors `buildApprovedSiteDelegation`. */
+export function buildApprovedOperationalIntentDelegation(
+  orgSA: Address,
+  agentSA: Address,
+  validitySeconds = OPERATIONAL_INTENT_VALIDITY_SECONDS,
+): { delegation: Delegation; digest: Hex } {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([orgSA])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms(operationalIntentSelectors())),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate: agentSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = APPROVED_HASH_SENTINEL;
+  return { delegation: d, digest };
+}
+
 /**
  * spec 329 §3.1 — the ORG consult wire `org → interactions-session key`, signed by the ORG's
  * custody (the steward's credential) at the ROUTING-ENABLE ceremony. Resolves the caller-signature
