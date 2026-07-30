@@ -102,11 +102,16 @@ export function checkSessionWireShape(
   if (!amCav?.terms) return 'session wire must carry an allowedMethods caveat';
   try {
     const selectors = decodeAllowedMethodsTerms(amCav.terms as Hex).map((s) => s.toLowerCase());
+    // A PINNED SET, never the any-skill sentinel. It was "exactly one" until a service needed to both
+    // submit work and read its state — two skills, and a wire per skill meant a ceremony per skill.
+    // A named set keeps the property that matters (a leaked delegate key can send only what the
+    // custodian enumerated) while letting one approval cover a rail; `A2A_ANY_SKILL` stays refused,
+    // because that is the line between "these operations" and "anything this agent can do".
     if (selectors.some((s) => s === A2A_ANY_SKILL.toLowerCase())) return 'session wire must never carry the any-skill sentinel';
-    if (selectors.length !== 1) return 'session wire allowedMethods must name exactly one selector';
+    if (selectors.length === 0) return 'session wire allowedMethods must name at least one selector';
     if (opts?.skill) {
       const want = skillSelector(opts.skill).toLowerCase();
-      if (selectors[0] !== want) return `session wire allowedMethods must name exactly the ${opts.skill} selector`;
+      if (!selectors.includes(want)) return `session wire allowedMethods does not name the ${opts.skill} selector`;
     }
   } catch {
     return 'session wire allowedMethods terms undecodable';

@@ -881,22 +881,25 @@ export async function authorizeServiceAgentWire(
   auth: Auth | undefined,
   opts: { a2aBase: string; idToken: string },
   onStep?: (s: string) => void,
-): Promise<Result<{ identity: Address; delegate: Address; skill: string; expiresAt: string | null }>> {
+): Promise<Result<{ identity: Address; delegate: Address; skills: string[]; expiresAt: string | null }>> {
   try {
     const base = opts.a2aBase.replace(/\/$/, '');
     const authHeader = { authorization: `Bearer ${opts.idToken}` };
     onStep?.('Reading the service\u2019s signing key\u2026');
     const who = (await fetch(`${base}/admin/signer-address`, { headers: authHeader })
       .then((r) => r.json())
-      .catch(() => ({}))) as { identity?: Address; delegate?: Address; skill?: string; error?: string };
-    if (!who.identity || !who.delegate || !who.skill) {
+      .catch(() => ({}))) as { identity?: Address; delegate?: Address; skill?: string; skills?: string[]; error?: string };
+    // The service names the SET it needs. `skill` is the single-skill form kept working, because a
+    // service that reports one is asking for exactly one.
+    const skills = who.skills?.length ? who.skills : who.skill ? [who.skill] : [];
+    if (!who.identity || !who.delegate || skills.length === 0) {
       return { ok: false, error: who.error ?? 'the service could not report its signing key' };
     }
 
     // Sign AS the identity — the custodian custodies it, which is the whole premise of the ceremony.
     onStep?.(`Authorizing ${who.delegate.slice(0, 10)}\u2026 to act as this agent\u2026`);
     const signHash = await signHashFor(via, who.identity, auth);
-    const wire = toWire(await issueServiceAgentWireDelegation(who.identity, who.delegate, who.skill, signHash));
+    const wire = toWire(await issueServiceAgentWireDelegation(who.identity, who.delegate, skills, signHash));
 
     onStep?.('Handing the authorization to the service\u2026');
     const stored = (await fetch(`${base}/admin/service-wire`, {
@@ -906,7 +909,7 @@ export async function authorizeServiceAgentWire(
     }).then((r) => r.json()).catch(() => ({}))) as { ok?: boolean; expiresAt?: string | null; error?: string };
     if (!stored.ok) return { ok: false, error: stored.error ?? 'the service refused the authorization' };
 
-    return { ok: true, identity: who.identity, delegate: who.delegate, skill: who.skill, expiresAt: stored.expiresAt ?? null };
+    return { ok: true, identity: who.identity, delegate: who.delegate, skills, expiresAt: stored.expiresAt ?? null };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'could not authorize the service agent' };
   }

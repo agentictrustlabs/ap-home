@@ -610,10 +610,16 @@ export const SERVICE_AGENT_WIRE_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
 export async function issueServiceAgentWireDelegation(
   identity: Address,
   delegateKey: Address,
-  skill: string,
+  skills: string | readonly string[],
   signHash: SignHash,
   validitySeconds = SERVICE_AGENT_WIRE_VALIDITY_SECONDS,
 ): Promise<Delegation> {
+  // A PINNED SET, not a single skill. A rail is usually more than one operation — submitting work
+  // and reading its state are different skills — and a wire per skill meant a ceremony per skill.
+  // The set is still an enumeration the custodian approved; `A2A_ANY_SKILL` remains refused, which
+  // is the line between "these operations" and "anything this agent can do".
+  const list = (typeof skills === 'string' ? [skills] : [...skills]).filter(Boolean);
+  if (list.length === 0) throw new Error('a service-agent wire must name at least one skill');
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
@@ -621,7 +627,7 @@ export async function issueServiceAgentWireDelegation(
   const caveats: Caveat[] = [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([identity])),
-    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([a2aSkillSelector(skill)])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms(list.map(a2aSkillSelector))),
   ];
   const d: Delegation = { delegator: identity, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);

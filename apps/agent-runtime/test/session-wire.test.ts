@@ -50,9 +50,9 @@ describe('checkSessionWireShape', () => {
   it('REFUSES a wire minted for another rail — the whole point of the pin', () => {
     // A consult wire must not sign an endeavor message, and an endeavor wire must not consult.
     expect(checkSessionWireShape(wire({ skill: CONSULT_SKILL_ID }), ENFORCERS, now(), { skill: 'endeavor.request' }))
-      .toMatch(/must name exactly the endeavor\.request selector/);
+      .toMatch(/does not name the endeavor\.request selector/);
     expect(checkSessionWireShape(wire({ skill: 'endeavor.request' }), ENFORCERS, now(), { skill: CONSULT_SKILL_ID }))
-      .toMatch(/must name exactly the discussion\.consult selector/);
+      .toMatch(/does not name the discussion\.consult selector/);
   });
 
   it('REFUSES the any-skill sentinel whether or not a skill is pinned', () => {
@@ -62,9 +62,18 @@ describe('checkSessionWireShape', () => {
     }
   });
 
-  it('REFUSES more than one selector — narrow means one rail', () => {
-    const two = [skillSelector(CONSULT_SKILL_ID), skillSelector('endeavor.request')];
-    expect(checkSessionWireShape(wire({ selectors: two }), ENFORCERS, now())).toMatch(/exactly one selector/);
+  it('accepts a PINNED SET and pins against membership, not position', () => {
+    // One approval can cover a rail (submit + read); what stays refused is the any-skill sentinel.
+    const two = [skillSelector('endeavor.request'), skillSelector('endeavor.state')];
+    expect(checkSessionWireShape(wire({ selectors: two }), ENFORCERS, now(), { skill: 'endeavor.state' })).toBeNull();
+    expect(checkSessionWireShape(wire({ selectors: two }), ENFORCERS, now(), { skill: 'endeavor.request' })).toBeNull();
+    // A skill outside the set is still refused — the set is the boundary.
+    expect(checkSessionWireShape(wire({ selectors: two }), ENFORCERS, now(), { skill: CONSULT_SKILL_ID }))
+      .toMatch(/does not name the discussion\.consult selector/);
+  });
+
+  it('REFUSES an empty selector list', () => {
+    expect(checkSessionWireShape(wire({ selectors: [] }), ENFORCERS, now())).toMatch(/at least one selector/);
   });
 
   it('REFUSES a lapsed or unbounded wire', () => {
