@@ -14,6 +14,11 @@ export interface RelyingApp {
   allowed_scopes: string[];
   /** Delegation caveat templates this client may request (the template fixes the caveats). */
   allowed_delegation_templates: string[];
+  /** OPTIONAL — the app's dedicated service SA for OPERATIONAL INTENT grants (org → agent). When set,
+   *  org-create also mints that grant so the app can submit endeavor intents to the org's A2A endpoint
+   *  directly instead of proxying through Home. MUST NOT be `delegate`: that address is shared by
+   *  several registry entries, and operational authority granted to it is granted to all of them. */
+  operational_delegate?: string;
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;

@@ -136,7 +136,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const orgPayload = body.org as {
     orgAgent?: string; orgName?: string; person?: string; purpose?: string;
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
-    membershipDelegation?: unknown; stewardshipDelegation?: unknown;
+    membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
   } | null;
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
@@ -152,6 +152,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // member) + stewardship (org→person, person reads/oversees the org).
       membershipDelegation: orgPayload.membershipDelegation ?? null,
       stewardshipDelegation: orgPayload.stewardshipDelegation ?? null,
+      // The org → app-service-agent Operational Intent grant, when the app declared a service SA.
+      // Persisted here because the ceremony is the only moment it exists: minted into the deploy
+      // batch, handed back once, and otherwise lost.
+      operationalDelegation: orgPayload.operationalDelegation ?? null,
       proofHash: orgPayload.proofHash ?? null,
       credential: orgPayload.credential ?? null,
       createdAt: Date.now(),

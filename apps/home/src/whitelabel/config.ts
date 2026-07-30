@@ -43,6 +43,9 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // operational_delegate: '0x…' — set once skills-a2a's OWN service SA is provisioned, and org
+      // create will mint it an Operational Intent grant. Deliberately unset: minting to the shared
+      // `delegate` above would hand operational authority to every app that names it.
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

@@ -27,6 +27,7 @@ import {
   type RelationshipType,
 } from '@agenticprimitives/agent-relationships';
 import type { Address, Hex } from '@agenticprimitives/types';
+import { getClient } from './lib/oidc-clients';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { baseSepolia } from 'viem/chains';
@@ -37,7 +38,8 @@ import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership } from './lib/org-membership';
-import { buildApprovedSiteDelegation, toWire, type DelegationWire } from './lib/delegation';
+import { buildApprovedSiteDelegation,
+  buildApprovedOperationalIntentDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
@@ -1042,6 +1044,8 @@ export interface CreatedAgent {
   proofHash: Hex;
   /** Optional org → broker-org delegation (so a broker can later list its orgs). */
   brokerDelegation?: DelegationWire;
+  /** The org → app-service-agent Operational Intent grant, when the app declares a service SA. */
+  operationalDelegation?: DelegationWire;
   /** spec 246 — person↔org scoped read delegations, both signed by the ROOT (custodian
    *  of BOTH SAs). membership = person→org (the created ORG can read the MEMBER person's
    *  data); stewardship = org→person (the PERSON can read / oversee the org's data).
@@ -1135,6 +1139,17 @@ export async function createChildAgentForSite(
   }
   const stewardship = buildApprovedSiteDelegation(childAgent, personAgent);
   approveCalls.push(buildApproveHashCall(stewardship.digest));
+
+  // The OPERATIONAL INTENT grant (org → the app's service agent), folded into the same batch so it
+  // costs no extra signature. Minted ONLY when the relying app declares a dedicated service SA:
+  // absent one there is nobody to grant to, and granting to the shared registry delegate would hand
+  // operational authority to every app that names it. See skills' docs/operational-intent-grant.md.
+  const operationalSA = getClient(cOpts.requestedBy ?? '')?.operational_delegate as Address | undefined;
+  let operationalGrant: ReturnType<typeof buildApprovedOperationalIntentDelegation> | undefined;
+  if (operationalSA && operationalSA.toLowerCase() !== delegateSA.toLowerCase()) {
+    operationalGrant = buildApprovedOperationalIntentDelegation(childAgent, operationalSA);
+    approveCalls.push(buildApproveHashCall(operationalGrant.digest));
+  }
 
   // spec 321 W0 — credential mirror: the contract FORBIDS an SA as custodian (custody is
   // credential-shaped; agent→agent authority is delegation), so "the person stewards the org" must

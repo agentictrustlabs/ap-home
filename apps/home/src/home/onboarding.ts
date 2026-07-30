@@ -654,6 +654,7 @@ export async function createOrganization(
       brokerDelegation: x.brokerDelegation ?? null,
       membershipDelegation: x.membershipDelegation,   // person→org (org reads member)
       stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
+      operationalDelegation: x.operationalDelegation,  // org→app service agent (submit intents)
     },
     grant: x.delegation,
   };
