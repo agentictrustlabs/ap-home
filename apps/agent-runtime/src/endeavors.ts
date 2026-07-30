@@ -37,6 +37,7 @@ import {
   type EndeavorRequestV1,
   type MilestoneDefinitionV1,
   type OutcomeCriterionV1,
+  type CapabilityRequirementRef,
   type PlanEdgeV1,
   type PlanRevisionRef,
   type PlanStepId,
@@ -372,6 +373,7 @@ const STEP_KINDS = new Set(['contribution', 'interaction', 'decision', 'aggregat
 const EDGE_KINDS = new Set(['precedes', 'depends-on', 'alternative', 'condition', 'compensates', 'refines']);
 const ENTRY_POINTS = new Set<EndeavorEntryPoint>(['home-request', 'discussion-ask', 'inbox-ask', 'a2a-intent']);
 const SIG_SCHEMES = new Set(['erc1271', 'erc6492', 'ecdsa', 'webauthn']);
+const ASSERTION_STRENGTHS = new Set(['declared', 'claimed', 'demonstrated']);
 
 export function parsePlanSteps(raw: unknown): PlanStepV1[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -382,7 +384,26 @@ export function parsePlanSteps(raw: unknown): PlanStepV1[] | null {
     const kind = String(o.kind ?? '');
     const description = String(o.description ?? '').trim();
     if (!stepId.startsWith('step_') || stepId.length <= 5 || !STEP_KINDS.has(kind) || !description) return null;
-    steps.push({ stepId: stepId as PlanStepId, kind: kind as PlanStepV1['kind'], description });
+    // CAPABILITY REQUIREMENTS SURVIVE THE WIRE. PlanStepV1 has carried this field all along and this
+    // parser silently dropped it, so a plan could name the capability a step needs and the stored
+    // plan would not — which makes routing a step to the agent that holds the capability impossible
+    // no matter what the planner said. Shape-pinned like everything else here: a malformed entry is
+    // skipped, not trusted, and never fails the whole plan (a reference is not authority, ADR-0053).
+    const caps: CapabilityRequirementRef[] = [];
+    if (Array.isArray(o.capabilityRequirements)) {
+      for (const c of o.capabilityRequirements) {
+        const co = (c ?? {}) as Record<string, unknown>;
+        const iri = String(co.capabilityIri ?? '').trim();
+        const strength = String(co.minAssertionStrength ?? 'declared');
+        if (!iri || iri.length > 300) continue;
+        if (!ASSERTION_STRENGTHS.has(strength)) continue;
+        caps.push({ capabilityIri: iri, minAssertionStrength: strength as CapabilityRequirementRef['minAssertionStrength'] });
+      }
+    }
+    steps.push({
+      stepId: stepId as PlanStepId, kind: kind as PlanStepV1['kind'], description,
+      ...(caps.length ? { capabilityRequirements: caps } : {}),
+    });
   }
   return steps;
 }

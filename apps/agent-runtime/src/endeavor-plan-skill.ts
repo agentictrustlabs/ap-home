@@ -21,7 +21,14 @@ export interface EndeavorPlanDraftInput {
 }
 
 export type DraftStepKind = 'contribution' | 'interaction' | 'decision' | 'aggregation' | 'validation';
-export interface DraftStep { kind: DraftStepKind; description: string }
+export interface DraftStep {
+  kind: DraftStepKind;
+  description: string;
+  /** The `aps:Capability` this step needs, as an IRI the org's playbook named (ADR-0053 — a
+   *  reference, never authority). This is what lets a step be ROUTED to the agent that holds the
+   *  capability instead of being run by whoever happens to own the endeavor. */
+  capabilityIri?: string;
+}
 
 const STEP_KINDS: DraftStepKind[] = ['contribution', 'interaction', 'decision', 'aggregation', 'validation'];
 
@@ -44,6 +51,13 @@ const DRAFT_TOOLS: ToolSpec[] = [
             properties: {
               kind: { type: 'string', enum: STEP_KINDS, description: 'The step kind.' },
               description: { type: 'string', description: 'A short imperative description of the step.' },
+              capabilityIri: {
+                type: 'string',
+                description:
+                  'OPTIONAL. The capability IRI this step requires, copied EXACTLY from the roster in ' +
+                  'your instructions (e.g. urn:skills:cap:<context>:<slug>). Set it only when the roster ' +
+                  'names a capability that matches the work; omit it otherwise. Never invent an IRI.',
+              },
             },
             required: ['kind', 'description'],
           },
@@ -56,10 +70,22 @@ const DRAFT_TOOLS: ToolSpec[] = [
 
 const PLAN_CONTRACT =
   "You are an organization's coordination planner. Given a goal, break it into a small, concrete, " +
-  'ordered plan of 3-7 steps that a team could actually execute. Prefer a first step that gathers ' +
-  'any missing details (kind: interaction), middle steps that do the work (kind: contribution), and ' +
-  'a final step that confirms the outcome (kind: validation). Call draft_plan exactly once with the ' +
-  'steps. Never answer in prose.';
+  'ordered plan of 3-7 steps that a team could actually execute. Middle steps do the work ' +
+  '(kind: contribution) and a final step confirms the outcome (kind: validation). ' +
+  // A FIRST STEP THAT ASKS A HUMAN USED TO BE THE DEFAULT, unconditionally ("prefer a first step
+  // that gathers any missing details"). That is right when the goal is a sentence and wrong when
+  // the goal carries the source documents with it — there it produces an interview step nobody can
+  // answer, ahead of work that was already fully specified. So the gather step is now CONDITIONAL
+  // on the material actually being absent, which is a judgement the planner can make from the goal.
+  'Open with a gather step (kind: interaction) ONLY when the goal does not already carry the ' +
+  'material needed to start — if it includes source documents, specifications or excerpts, read ' +
+  'those and plan the work itself instead of asking someone to restate them. ' +
+  // Capability is what makes a step ROUTABLE to a specialist agent rather than run by the org
+  // itself. Optional by design: a plan that names no capability still executes, so a planner with
+  // no roster degrades to today's behaviour instead of failing or inventing IRIs.
+  'When your instructions include a capability roster, set `capabilityIri` on each step to the ' +
+  'entry that matches the work, copied exactly. Omit it when nothing matches — never invent one. ' +
+  'Call draft_plan exactly once with the steps. Never answer in prose.';
 
 /** Deterministic fallback (no LLM configured) — a generic gather → do → confirm skeleton so the
  *  steward always gets a starting draft to edit, even without a model key. */
@@ -79,7 +105,14 @@ function sanitize(raw: unknown): DraftStep[] {
     const o = (s ?? {}) as Record<string, unknown>;
     const kind = String(o.kind ?? '') as DraftStepKind;
     const description = String(o.description ?? '').trim();
-    if (STEP_KINDS.includes(kind) && description) out.push({ kind, description: description.slice(0, 280) });
+    // A capability IRI is a REFERENCE the router later resolves, so shape-pin it here rather than
+    // trusting the model: anything that is not a `urn:` / URL-shaped IRI is dropped, and the step
+    // survives without it. Dropping the step instead would let one hallucinated string cost a plan.
+    const cap = String(o.capabilityIri ?? '').trim();
+    const capabilityIri = /^(urn:[a-z0-9][a-z0-9-]*:|https?:\/\/)/i.test(cap) && cap.length <= 300 ? cap : '';
+    if (STEP_KINDS.includes(kind) && description) {
+      out.push({ kind, description: description.slice(0, 280), ...(capabilityIri ? { capabilityIri } : {}) });
+    }
     if (out.length >= 7) break;
   }
   return out;

@@ -960,7 +960,17 @@ export class A2aTaskDO {
         const draft = await draftEndeavorPlan(this.env, { principal, endeavorId, goal: String(p.goal).trim(), playbook });
         const out = (await this.interactionsInternal(principal, 'internal.endeavor.proposePlan', {
           endeavorId,
-          steps: draft.steps.map((s, i) => ({ stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`, kind: s.kind, description: s.description })),
+          steps: draft.steps.map((s, i) => ({
+            stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`,
+            kind: s.kind,
+            description: s.description,
+            // Carried onto the plan step so the capability survives adoption — it is what a later
+            // router matches an archetype agent against. 'declared' is the honest strength here:
+            // the planner is asserting what the step NEEDS, not that anyone has demonstrated it.
+            ...(s.capabilityIri
+              ? { capabilityRequirements: [{ capabilityIri: s.capabilityIri, minAssertionStrength: 'declared' as const }] }
+              : {}),
+          })),
         })) as { ok?: boolean; error?: string; planId?: string; revision?: number };
         // Auto-work: the SAME turn that drafted the plan now adopts + executes it (the agent does the
         // work). Off ⇒ draft-only, a steward reviews/adopts. Autopilot failures never fail the draft.

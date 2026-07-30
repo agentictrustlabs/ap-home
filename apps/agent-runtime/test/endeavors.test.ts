@@ -12,6 +12,7 @@ import {
   endeavorTopicResource,
   endeavorViewFor,
   handleEndeavorOp,
+  parsePlanSteps,
   reduceEventLog,
   visibleEndeavorRows,
   type CoordinationRequestsDocV1,
@@ -464,5 +465,59 @@ describe('pure visibility helpers', () => {
   it('endeavorViewFor: requester of an unadopted request gets request-only', () => {
     const state = reduceEventLog([]);
     expect(endeavorViewFor(state, STRANGER, { steward: false, member: false })).toBe('none');
+  });
+});
+
+// CAPABILITY REQUIREMENTS SURVIVE THE WIRE.
+//
+// PlanStepV1 has carried `capabilityRequirements` all along and this parser silently dropped it, so
+// a planner could name the capability a step needs and the STORED plan would not — which makes
+// routing that step to the agent holding the capability impossible regardless of what was planned.
+// The property under test is preservation, and that a malformed entry costs the entry rather than
+// the plan (a capability is a reference, never authority — ADR-0053).
+describe('parsePlanSteps — capability requirements', () => {
+  const step = (extra: Record<string, unknown> = {}) => ({
+    stepId: 'step_1_abcd1234', kind: 'contribution', description: 'Author the T-box', ...extra,
+  });
+  const CAP = 'urn:skills:cap:ontology-engineering:tbox-modeling';
+
+  it('preserves a well-formed requirement', () => {
+    const out = parsePlanSteps([step({ capabilityRequirements: [{ capabilityIri: CAP, minAssertionStrength: 'declared' }] })]);
+    expect(out?.[0]?.capabilityRequirements).toEqual([{ capabilityIri: CAP, minAssertionStrength: 'declared' }]);
+  });
+
+  it('preserves several, and every allowed strength', () => {
+    const reqs = [
+      { capabilityIri: CAP, minAssertionStrength: 'declared' },
+      { capabilityIri: `${CAP}-b`, minAssertionStrength: 'claimed' },
+      { capabilityIri: `${CAP}-c`, minAssertionStrength: 'demonstrated' },
+    ];
+    expect(parsePlanSteps([step({ capabilityRequirements: reqs })])?.[0]?.capabilityRequirements).toEqual(reqs);
+  });
+
+  it('omits the field entirely when absent — no empty array on every step', () => {
+    expect(parsePlanSteps([step()])?.[0]).not.toHaveProperty('capabilityRequirements');
+  });
+
+  it('drops a malformed entry WITHOUT failing the plan', () => {
+    const out = parsePlanSteps([step({
+      capabilityRequirements: [
+        { capabilityIri: '', minAssertionStrength: 'declared' },
+        { capabilityIri: CAP, minAssertionStrength: 'wishful' },
+        { capabilityIri: 'x'.repeat(400), minAssertionStrength: 'declared' },
+        { capabilityIri: CAP, minAssertionStrength: 'declared' },
+      ],
+    })]);
+    expect(out).not.toBeNull();
+    expect(out?.[0]?.capabilityRequirements).toEqual([{ capabilityIri: CAP, minAssertionStrength: 'declared' }]);
+  });
+
+  it('a non-array, or one that leaves nothing valid, yields a step with no requirements', () => {
+    expect(parsePlanSteps([step({ capabilityRequirements: 'nope' })])?.[0]).not.toHaveProperty('capabilityRequirements');
+    expect(parsePlanSteps([step({ capabilityRequirements: [{ capabilityIri: '' }] })])?.[0]).not.toHaveProperty('capabilityRequirements');
+  });
+
+  it('still enforces the rest of the step shape', () => {
+    expect(parsePlanSteps([{ ...step(), kind: 'invented' }])).toBeNull();
   });
 });
