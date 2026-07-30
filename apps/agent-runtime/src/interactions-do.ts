@@ -132,6 +132,21 @@ const INBOX_ASSISTANT_SEEN_CAP = 300;
 // 327 §4b grant scope — no re-enable); the DO flag is the O(1) gate cache the trigger paths read.
 const AUTO_WORK_RESOURCE = 'conversation.topic:auto-work';
 const AUTO_WORK_FLAG_KEY = 'assistant.autowork.on';
+
+/** The coordination log stores short results INLINE as `urn:ap:evidence:<text>` /
+ *  `urn:ap:outcome:<text>` refs — so a step's deliverable and an endeavor's closing note are already
+ *  in the log, not behind a vault read. Decoding them is what turns "which steps are done" into the
+ *  WORK ITSELF, which is the whole reason a requester follows an intent it dispatched. */
+function decodeInlineRef(iri: string | undefined): string | null {
+  if (!iri) return null;
+  for (const prefix of ['urn:ap:evidence:', 'urn:ap:outcome:']) {
+    if (iri.startsWith(prefix)) {
+      try { return decodeURIComponent(iri.slice(prefix.length)); } catch { return null; }
+    }
+  }
+  return null;
+}
+
 /** Bound autopilot dispatches per endeavor per window — one flight at a time; re-triggers are
  *  idempotent (the pipeline skips already-satisfied steps), this just avoids stampedes. */
 const AUTO_WORK_RATE_KEY = (endeavorId: string): string => `assistant.rate:autowork:${endeavorId}`;
@@ -1223,10 +1238,17 @@ export class InteractionsDO {
           const plan = adoptedRef
             ? all.find((p) => p.planId === adoptedRef.planId && p.revision === adoptedRef.revision) ?? null
             : latest;
+          // The closing note the coordinator recorded when the endeavor was satisfied — the answer to
+          // "what came of it", which lives on the event rather than in the reduced state.
+          const satisfiedEvent = [...log].reverse().find((e) => e.kind === 'EndeavorSatisfied') as
+            | { outcomeValidationRef?: { iri?: string } }
+            | undefined;
+          const outcome = decodeInlineRef(satisfiedEvent?.outcomeValidationRef?.iri);
           return json({
             ok: true,
             endeavorId,
             status: 'adopted',
+            ...(outcome ? { outcome } : {}),
             lifecycle: state.endeavor?.lifecycle ?? null,
             // Prefer the FULL request goal — the endeavor title is truncated to 80 chars at adopt
             // time, and the work turns need the whole ask.
@@ -1240,7 +1262,13 @@ export class InteractionsDO {
                   revision: plan.revision,
                   contentHash: plan.contentHash,
                   proposedBy: plan.proposedBy.toLowerCase(),
-                  steps: plan.steps.map((s) => ({ stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!state.satisfiedSteps[s.stepId] })),
+                  steps: plan.steps.map((s) => {
+                    const done = state.satisfiedSteps[s.stepId];
+                    const evidence = done?.evidenceRefs?.map((r) => decodeInlineRef((r as { iri?: string }).iri)).find((t): t is string => !!t) ?? null;
+                    // The deliverable, not just a tick: a requester following its own intent needs
+                    // what the step PRODUCED, and it is already here.
+                    return { stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!done, ...(evidence ? { evidence } : {}) };
+                  }),
                 }
               : null,
           });

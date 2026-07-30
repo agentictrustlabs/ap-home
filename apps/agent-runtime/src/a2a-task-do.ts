@@ -267,7 +267,7 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
       }));
       const out = (await resp.json().catch(() => ({}))) as {
         ok?: boolean; error?: string; requester?: string | null; endeavorId?: string; requestId?: string;
-        status?: string; reason?: string;
+        status?: string; reason?: string; outcome?: string;
         lifecycle?: string | null; goal?: string; plan?: unknown; adoptedPlanRef?: unknown;
       };
       if (!resp.ok || !out.ok) {
@@ -288,6 +288,8 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
           ...(out.requestId ? { requestId: out.requestId } : {}),
           status: out.status ?? null,
           lifecycle: out.lifecycle ?? null,
+          // What the work produced, when it has finished producing it.
+          ...(out.outcome ? { outcome: out.outcome } : {}),
           goal: out.goal ?? '',
           adoptedPlanRef: out.adoptedPlanRef ?? null,
           plan: out.plan ?? null,
