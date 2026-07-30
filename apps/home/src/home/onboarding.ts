@@ -36,7 +36,8 @@ import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
-import { buildApprovedSiteDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { getClient } from '../lib/oidc-clients';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -531,6 +532,17 @@ export async function createOrganization(
       const siteApp = buildApprovedSiteDelegation(org, delegate);        // org → relying app's delegate
       const stewardApp = buildApprovedSiteDelegation(org, home.address); // org → person (stewardship)
       const digests: Hex[] = [siteApp.digest, stewardApp.digest];
+      // THE RE-MINT PATH for the Operational Intent grant. Every org that existed before that grant
+      // shipped has none, and there is no other moment to issue one: it is minted by its delegator,
+      // so only a ceremony the org's own custody signs can create it. Select-existing already
+      // re-mints the site and stewardship grants for an org that is already deployed — this rides
+      // the same approved-hash batch, so re-connecting an org is still one approval.
+      const opSA = getClient(opts.requestedBy ?? '')?.operational_delegate as Address | undefined;
+      let opGrant: ReturnType<typeof buildApprovedOperationalIntentDelegation> | undefined;
+      if (opSA && opSA.toLowerCase() !== delegate.toLowerCase()) {
+        opGrant = buildApprovedOperationalIntentDelegation(org, opSA);
+        digests.push(opGrant.digest);
+      }
       let brokerApp: ReturnType<typeof buildApprovedSiteDelegation> | undefined;
       if (opts.grantOrg && opts.grantOrg.toLowerCase() !== delegate.toLowerCase()) {
         brokerApp = buildApprovedSiteDelegation(org, opts.grantOrg);     // org → broker (Switchboard)
@@ -553,6 +565,7 @@ export async function createOrganization(
           requestedBy: opts.requestedBy,
           brokerDelegation: brokerApp ? toWire(brokerApp.delegation) : null,
           stewardshipDelegation: toWire(stewardApp.delegation),
+          operationalDelegation: opGrant ? toWire(opGrant.delegation) : undefined,
         },
         grant: toWire(siteApp.delegation),
       };
