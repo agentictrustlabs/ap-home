@@ -32,8 +32,11 @@ import {
   endeavorRequestFromDiscussionAsk,
   endeavorRequestFromInboxAsk,
   executionInputFromTask,
+  parseEndeavorRequestInput,
   parseEndeavorTaskBinding,
+  ENDEAVOR_REQUEST_SKILL_ID,
 } from '../src/endeavor-intake.js';
+import { skillSelector } from '@agenticprimitives/a2a';
 
 const ORG = `0x${'a'.repeat(40)}`;
 const REQUESTER = `0x${'c'.repeat(40)}`;
@@ -209,5 +212,64 @@ describe('A2A task execution binding', () => {
     expect(artifact.ref).toBe('vault:artifact:report-draft');
     // The plan projection carries the step the run corresponds to.
     expect(rec.plans[0]!.steps.map((st) => st.id)).toEqual(['step_a']);
+  });
+});
+
+// ── The narrow `endeavor.request` skill — the door the Operational Intent grant names ────────────
+// The gate authorizes a message by the SKILL IT NAMES, so this skill's id IS an authority boundary:
+// change the string and every already-minted grant stops matching, silently. These are the guards.
+
+describe('endeavor.request — the skill id is the authority boundary', () => {
+  it('is exactly the string demo-sso-next mints the grant against', () => {
+    // OPERATIONAL_INTENT_SKILLS in demo-sso-next/src/lib/delegation.ts carries this literal. Both
+    // sides keep their own copy (the CONSULT_SKILL precedent — neither app depends on the other),
+    // so this assertion is the thing standing between them and a silent drift.
+    expect(ENDEAVOR_REQUEST_SKILL_ID).toBe('endeavor.request');
+  });
+
+  it('derives the 4-byte selector the grant encodes in allowedMethods', () => {
+    const selector = skillSelector(ENDEAVOR_REQUEST_SKILL_ID);
+    expect(selector).toMatch(/^0x[0-9a-f]{8}$/);
+    // Pinned: a grant minted before this test existed carries THIS value — keccak256(utf8(
+    // 'endeavor.request'))[:4]. If the derivation or the skill name changes, the gate rejects
+    // credentials that were correct when they were signed.
+    expect(selector).toBe('0x9db527f0');
+  });
+});
+
+describe('parseEndeavorRequestInput — fail-closed body rules', () => {
+  it('accepts a bare goal string or { goal }, trimmed', () => {
+    expect(parseEndeavorRequestInput('  Rebalance the treasury  ')).toEqual({ ok: true, goal: 'Rebalance the treasury' });
+    expect(parseEndeavorRequestInput({ goal: 'Draft the Q3 letter' })).toEqual({ ok: true, goal: 'Draft the Q3 letter' });
+  });
+
+  it('refuses an empty or absent goal', () => {
+    for (const bad of ['', '   ', {}, { goal: '' }, { goal: 42 }, null, undefined]) {
+      const out = parseEndeavorRequestInput(bad);
+      expect(out.ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('REFUSES caller-supplied provenance rather than sanitizing it', () => {
+    // A sender that names its own entryPoint is asserting which door raised the work. Dropping the
+    // field would leave the caller believing it took effect — refuse instead (ADR-0013).
+    const forged = parseEndeavorRequestInput({ goal: 'x', entryPoint: 'home-request' });
+    expect(forged.ok).toBe(false);
+    if (!forged.ok) expect(forged.error).toMatch(/entryPoint\/intakeContext/);
+    expect(parseEndeavorRequestInput({ goal: 'x', intakeContext: [{ kind: 'channel', id: 'c1' }] }).ok).toBe(false);
+  });
+
+  it('the accepted goal files as an a2a-intent with the TASK as its only context', async () => {
+    const parsed = parseEndeavorRequestInput({ goal: 'Rebalance the treasury' });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const docs = new Map<string, unknown>();
+    const body = endeavorRequestFromA2aTask({ taskId: '0xfeed', goal: parsed.goal });
+    const res = await handleEndeavorOp(makeDeps(docs, REQUESTER), 'endeavor.request', { ...body });
+    expect(((await res.json()) as { ok?: boolean }).ok).toBe(true);
+    const row = (docs.get(COORDINATION_REQUESTS_RESOURCE) as CoordinationRequestsDocV1).rows[0]!;
+    expect(row.request.entryPoint).toBe('a2a-intent');
+    expect(row.request.intakeContext).toEqual([{ kind: 'a2a-task', id: '0xfeed' }]);
+    expect(row.request.requester.toLowerCase()).toBe(REQUESTER);
   });
 });

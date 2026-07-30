@@ -584,7 +584,17 @@ export async function issueConsultabilityDelegation(
 
 /** The A2A skills an Operational Intent grant may carry. Named here so the minting side and the
  *  org's gate derive the SAME selectors from the SAME strings — a selector computed from a drifting
- *  string list is a grant that silently authorizes nothing. */
+ *  string list is a grant that silently authorizes nothing.
+ *
+ *  THE OTHER COPY IS `ENDEAVOR_REQUEST_SKILL_ID` in demo-a2a (`src/endeavor-intake.ts`), which is the
+ *  registered handler these selectors have to reach. Two copies because neither app depends on the
+ *  other (the CONSULT_SKILL precedent); demo-a2a's test pins the derived selector
+ *  (`endeavor.request` → `0x9db527f0`), so a change there fails loudly. A change HERE does not —
+ *  edit both, or every minted grant stops matching a gate that looks correct.
+ *
+ *  Only `endeavor.request` is a registered skill today. `adoptPlan` is steward-gated at the reducer
+ *  and `state` has no handler yet, so a message naming either is rejected as `unknown skill` — inert,
+ *  not dangerous, and the reason the grant is minted with room for them. */
 export const OPERATIONAL_INTENT_SKILLS = ['endeavor.request', 'endeavor.adoptPlan', 'endeavor.state'] as const;
 
 /** 4-byte A2A offering selectors for those skills — keccak256(utf8(skill))[:4], the same derivation

@@ -37,7 +37,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // planner selection live in ./orchestration, reused by the /a2a/intent relayer); the LLM binding stays
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
-import { endeavorRequestFromA2aTask } from './endeavor-intake.js';
+import { endeavorRequestFromA2aTask, parseEndeavorRequestInput, ENDEAVOR_REQUEST_SKILL_ID } from './endeavor-intake.js';
 import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
@@ -130,6 +130,109 @@ function makeContentSkills(): SkillHandler[] {
   ];
 }
 
+/**
+ * File an A2A task as an EndeavorRequest against the managing principal (spec 334 §4 door 4). ONE
+ * path, shared by the two callers that raise coordination work from a task: `orchestrate`'s opt-in
+ * (`input.endeavor: true`) and the narrow `endeavor.request` skill. The requester is always the
+ * DELEGATION-VERIFIED task sender, and the provenance (`entryPoint`, `intakeContext`) is always
+ * built here from the task — never read from caller input, which would let a sender forge which
+ * door raised the work.
+ */
+async function fileEndeavorIntake(
+  env: Env,
+  args: { principal: Address; sender: Address; taskId: Hex; goal: string },
+): Promise<{ ok: true; requestId: string } | { ok: false; error: string }> {
+  const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return { ok: false, error: 'endeavor intake requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
+  const opBody = endeavorRequestFromA2aTask({ taskId: args.taskId, goal: args.goal });
+  const target = args.principal.toLowerCase();
+  const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
+  const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.request`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+    body: JSON.stringify({ ...opBody, requester: args.sender.toLowerCase() }),
+  }));
+  const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; requestId?: string; error?: string };
+  if (!resp.ok || !out.ok || !out.requestId) {
+    return { ok: false, error: `endeavor intake failed: ${out.error ?? `status ${resp.status}`}` };
+  }
+  return { ok: true, requestId: out.requestId };
+}
+
+/**
+ * The `endeavor.request` skill — the NARROW coordination door, and the one the Operational Intent
+ * grant (`org → agent`) actually names. Its entire body is the intake: submit a goal, get a
+ * requestId. It plans nothing, calls no MCP tool, and touches no vault record.
+ *
+ * WHY IT EXISTS SEPARATELY FROM `orchestrate`. The A2A gate authorizes a message by the SKILL IT
+ * NAMES (`allowedMethods` vs `skillSelector(message.skill)`), so a grant can only be as narrow as
+ * the narrowest skill that does the job. Before this handler, the only way to reach coordination
+ * intake was `orchestrate` with `input.endeavor: true` — and `orchestrate` runs the planner over the
+ * principal's MCP tools under the task's delegation. A dispatcher granted `orchestrate` to submit an
+ * intent would also hold general agent execution. That is the over-grant the Operational Intent
+ * design refused when it refused `A2A_ANY_SKILL`; this skill is what makes refusing it possible.
+ * `discussion.consult` is the same shape one relationship over: one narrow registered skill, one
+ * selector, one grant.
+ *
+ * Registered on EVERY agent's DO, like consult — REACHABILITY is the delegation gate's alone. The
+ * belts here are the ones the gate cannot see:
+ *   • delegator === THIS agent: the grant must be the org's own (`ctx.principal === agentSA`). A
+ *     third party's grant that merely names this agent as a target is not intake authority.
+ *   • no caller-supplied provenance: `entryPoint` / `intakeContext` in the body are REFUSED rather
+ *     than ignored, because a silently-dropped forgery attempt is still a forgery attempt.
+ */
+function makeEndeavorRequestSkill(env: Env, agentSA: Address): SkillHandler {
+  return {
+    skill: ENDEAVOR_REQUEST_SKILL_ID,
+    handle: async (ctx) => {
+      const audit = buildAuditSink(env);
+      const sender = ctx.sender.toLowerCase();
+      const auditRow = (outcome: 'success' | 'denied', id: string, reason?: string) =>
+        audit.write({
+          id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'a2a.endeavor.requested', outcome,
+          actor: { type: 'service', id: sender }, subject: { type: 'endeavor-request', id },
+          ...(reason ? { reason } : {}),
+        }).catch(() => undefined);
+
+      // The grant must be the principal's OWN: org → agent, delegated by the org whose endeavor
+      // plane this is. `ctx.principal` is the delegator; this DO is the org's agent.
+      if (ctx.principal.toLowerCase() !== agentSA.toLowerCase()) {
+        await auditRow('denied', ctx.taskId, 'delegation delegator is not this agent');
+        return { state: 'failed', error: 'endeavor.request grant must be signed by this agent (delegator mismatch)' };
+      }
+      const parsed = parseEndeavorRequestInput(ctx.input);
+      if (!parsed.ok) {
+        await auditRow('denied', ctx.taskId, parsed.error);
+        return { state: 'failed', error: parsed.error };
+      }
+      const { goal } = parsed;
+
+      const filed = await fileEndeavorIntake(env, { principal: ctx.principal, sender: ctx.sender, taskId: ctx.taskId, goal });
+      if (!filed.ok) {
+        await auditRow('denied', ctx.taskId, filed.error);
+        return { state: 'failed', error: filed.error };
+      }
+      await auditRow('success', filed.requestId);
+
+      // skill-provenance/v1 — the same verifiable-SKILL.md tag the other skills carry (fail-open).
+      const provenance = await skillProvenanceMetadata(env, {
+        skill: ENDEAVOR_REQUEST_SKILL_ID,
+        agentSA,
+        taskId: ctx.taskId,
+        reason: 'endeavor intake accepted',
+      });
+      // The requestId is the whole result: it is what `endeavor.state` is later asked about.
+      const artifactId = await ctx.emitArtifact({
+        artifactKind: 'endeavor.request',
+        body: { requestId: filed.requestId, goal, requester: sender },
+        bodyContentType: 'application/json',
+        ...(provenance ? { metadata: provenance } : {}),
+      });
+      return { state: 'completed', artifactIds: [artifactId] };
+    },
+  };
+}
+
 // ── The Ring-0 agentic model (ADR-0044) ──────────────────────────────────────────────────────────────
 /** The `orchestrate` skill — the intent-task entry point. Reads a GOAL, plans which MCP tool composes to
  *  satisfy it (shared core in ./orchestration), runs it under the TASK's delegation (every call rides
@@ -149,21 +252,9 @@ function makeOrchestrateSkill(env: Env, agentSA: Address): SkillHandler {
       // unregistered (ADR-0013 — no silent skip).
       let endeavorRequestId: string | undefined;
       if (typeof raw === 'object' && raw?.endeavor === true) {
-        const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
-        if (!secret) return { state: 'failed', error: 'endeavor intake requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
-        const opBody = endeavorRequestFromA2aTask({ taskId: ctx.taskId, goal });
-        const target = ctx.principal.toLowerCase();
-        const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
-        const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.request`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
-          body: JSON.stringify({ ...opBody, requester: ctx.sender.toLowerCase() }),
-        }));
-        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; requestId?: string; error?: string };
-        if (!resp.ok || !out.ok || !out.requestId) {
-          return { state: 'failed', error: `endeavor intake failed: ${out.error ?? `status ${resp.status}`}` };
-        }
-        endeavorRequestId = out.requestId;
+        const filed = await fileEndeavorIntake(env, { principal: ctx.principal, sender: ctx.sender, taskId: ctx.taskId, goal });
+        if (!filed.ok) return { state: 'failed', error: filed.error };
+        endeavorRequestId = filed.requestId;
       }
 
       const { result, plannerKind } = await runOrchestration(env, {
@@ -539,7 +630,7 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
-      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));

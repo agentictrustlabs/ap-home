@@ -59,6 +59,39 @@ export function endeavorRequestFromInboxAsk(args: {
   };
 }
 
+/**
+ * The A2A skill name door 4 answers to, and the selector the Operational Intent grant
+ * (`org → agent`) is minted against. The gate authorizes a message by the skill it NAMES, so this
+ * string IS the authority boundary: `skillSelector('endeavor.request')` must equal the
+ * `allowedMethods` entry the minting side encoded.
+ *
+ * Kept as a local literal on both sides — the `CONSULT_SKILL` precedent: demo-sso-next's
+ * `OPERATIONAL_INTENT_SKILLS` (`src/lib/delegation.ts`) is a transport-agnostic module that takes no
+ * dependency on this app, and this app takes none on the Home. CHANGING EITHER STRING SILENTLY
+ * BREAKS EVERY MINTED GRANT — the selector stops matching and the gate refuses a credential that
+ * looks correct. Change both, or neither.
+ */
+export const ENDEAVOR_REQUEST_SKILL_ID = 'endeavor.request' as const;
+
+/**
+ * Fail-closed parse of an `endeavor.request` message body. The skill accepts a bare goal string or
+ * `{ goal }` — and NOTHING ELSE. A body carrying `entryPoint` or `intakeContext` is REFUSED rather
+ * than sanitized: those are the door's provenance to set (spec 334 §4), so a caller supplying them
+ * is asserting which door raised the work. Silently dropping a forgery attempt still leaves a
+ * caller who believes it worked (ADR-0013 — no silent skip).
+ */
+export function parseEndeavorRequestInput(
+  input: unknown,
+): { ok: true; goal: string } | { ok: false; error: string } {
+  const raw = input as { goal?: unknown; entryPoint?: unknown; intakeContext?: unknown } | string | null;
+  if (typeof raw === 'object' && raw !== null && (raw.entryPoint !== undefined || raw.intakeContext !== undefined)) {
+    return { ok: false, error: 'endeavor.request sets entryPoint/intakeContext itself — remove them from the body' };
+  }
+  const goal = (typeof raw === 'string' ? raw : typeof raw?.goal === 'string' ? raw.goal : '').trim();
+  if (!goal) return { ok: false, error: 'endeavor.request requires input.goal (a declarative goal)' };
+  return { ok: true, goal };
+}
+
 /** Door 4 — an inbound A2A intent task: the task ref is the intake context. */
 export function endeavorRequestFromA2aTask(args: { taskId: string; goal: string }): EndeavorRequestOpBody {
   return {
