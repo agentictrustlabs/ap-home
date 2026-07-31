@@ -102,8 +102,13 @@ const CATALOG: { test: (method: string, path: string) => boolean; route: Route }
   // spec 288 §6 — agent-addressed A2A task ingress: `<handle>` rides in the path so it lands in the signed
   // GatewayAssertion `path` (tamper-evident agent binding). This is how the edge conveys per-agent identity
   // to demo-a2a; the origin resolves the agent from the same path segment. Matched before the bare route.
-  { test: (m, p) => m === 'POST' && /^\/api\/a2a\/[^/]+$/.test(p), route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 256 * 1024) } },
-  { test: (m, p) => m === 'POST' && p === '/api/a2a', route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 256 * 1024) } },
+  // 1 MB, not 256 KB. An A2A TASK is not a data read: an ontology dispatch carries the domain's spec
+  // digest, the alignment digest for every ontology it must not re-mint, the package map and the
+  // ontology authored so far — all in one signed message, because the relay forwards it whole. That
+  // is legitimately six figures of bytes and 256 KB rejected it with a 413 the caller could not act
+  // on. The data routes below stay at 256 KB; only task ingress is raised, and it stays bounded.
+  { test: (m, p) => m === 'POST' && /^\/api\/a2a\/[^/]+$/.test(p), route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 1024 * 1024) } },
+  { test: (m, p) => m === 'POST' && p === '/api/a2a', route: { binding: 'A2A', descriptor: descriptor('a2a.task', 'a2a', 'high', 1024 * 1024) } },
   { test: (m, p) => m === 'GET' && p === '/.well-known/agent-card.json', route: { binding: 'A2A', descriptor: descriptor('a2a.card', 'a2a', 'low', 16 * 1024) } },
 ];
 
