@@ -483,16 +483,20 @@ export async function runArchetypeTurn(
   const { planner, kind } = selectPlanner(env, {
     systemPrompt: withPlaybook(composeArchetypePrompt(bundle), ARCHETYPE_CONTRACT),
     // The deliverable rides INSIDE the tool call's input, so the output budget must cover the whole
-    // artifact. This ceiling has now been raised four times — 1024 → 4k → 16k → 32k → 64k — and each
-    // time the symptom was identical and mute: "turn completed without posting a deliverable", an
-    // EMPTY CAPTURE WITH NO ERROR, because the model never finished the call it was making. 32k fell
-    // over on a 44 KB spec corpus after 155s.
+    // artifact. 32k, and back down from 64k deliberately.
     //
-    // 64k is claude-sonnet-4-6's output CEILING, so this is the last raise available. The next time
-    // this fails the answer cannot be a bigger number — it has to be a smaller ask (bound what the
-    // goal requests) or a split turn. Note the budget covers reasoning AND the artifact together,
-    // which is why a long deliberation on a large corpus can exhaust it before a word is emitted.
-    maxTokens: 64_000,
+    // THE RAISE TO 64K WAS A MISDIAGNOSIS, not a tuning step. The Domain Analyst was failing at
+    // ~156s with an empty capture, this file said an empty capture "usually" means the budget, and
+    // so the ceiling went up. It was HTTP 524 — a proxy killing a non-streaming request that had
+    // held a connection open with no bytes on it. A bigger budget made it strictly worse: longer
+    // generation, longer silence, same wall. The real fix was streaming, in
+    // `@agenticprimitives/orchestration-anthropic`'s fetch client.
+    //
+    // So the number goes back to what the ARTIFACT needs — the only thing that should ever set it.
+    // 32k covered every deliverable this harness produced before the 524s began, and it costs real
+    // latency to reserve headroom nothing uses. Note the budget covers reasoning AND the artifact
+    // together, which is why a long deliberation can exhaust it before a word is emitted.
+    maxTokens: 32_000,
   });
 
   let captured: ArchetypeDeliverableV1 | null = null;
