@@ -987,8 +987,19 @@ export class A2aTaskDO {
         })) as { ok?: boolean; error?: string; planId?: string; revision?: number };
         // Auto-work: the SAME turn that drafted the plan now adopts + executes it (the agent does the
         // work). Off ⇒ draft-only, a steward reviews/adopts. Autopilot failures never fail the draft.
-        let autopilot: { adopted?: boolean; stepsDone?: number; satisfied?: boolean } | undefined;
-        if (p.autoWork) autopilot = await this.runEndeavorWork(principal, endeavorId).catch(() => undefined);
+        let autopilot: { adopted?: boolean; stepsDone?: number; satisfied?: boolean; error?: string } | undefined;
+        if (p.autoWork) {
+          // The draft must still succeed if the work run fails — but a DISCARDED reason made every
+          // autopilot failure look identical to "the plan drafted and nothing ran yet". That was
+          // survivable while the work was in-worker; it is not once a step can be dispatched to
+          // another organization, where a wrong grant, a revoked grant and a host missing the role
+          // all fail here and all used to vanish.
+          autopilot = await this.runEndeavorWork(principal, endeavorId).catch((e) => {
+            const error = e instanceof Error ? e.message : String(e);
+            console.error('[endeavor autopilot] run failed:', endeavorId, error);
+            return { adopted: false, stepsDone: 0, satisfied: false, error };
+          });
+        }
         return Response.json({ ok: true, planId: out.planId, revision: out.revision, steps: draft.steps.length, plannerKind: draft.plannerKind, ...(autopilot ? { autopilot } : {}) });
       } catch (e) {
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
@@ -1160,8 +1171,16 @@ export class A2aTaskDO {
           principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs, playbook, references,
         });
         output = turn.output;
-      } catch {
-        continue; // this step couldn't be done autonomously — leave it open for a human
+      } catch (e) {
+        // Left open for a human — but WHY is posted to the endeavor rather than discarded. A step
+        // that silently stays open is indistinguishable from one nobody reached yet, and that is
+        // exactly the confusion a cross-org dispatch failure would otherwise cause.
+        const why = e instanceof Error ? e.message : String(e);
+        console.error('[endeavor step] failed:', endeavorId, step.stepId, why);
+        await this.interactionsInternal(principal, 'internal.endeavor.post', {
+          endeavorId, bodyText: `[agent] could not complete "${step.description}" — ${why}`,
+        }).catch(() => undefined);
+        continue;
       }
       // Post the deliverable to the endeavor conversation (visible provenance), then record it as the
       // step's completion evidence. A satisfyStep refusal (reducer gate) stops the run for this step.
