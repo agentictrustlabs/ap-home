@@ -14,7 +14,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
-import { buildArchetypeCatalog, resolveArchetypeMethod, type LibraryPackageMeta } from './archetype-skill.js';
+import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
 import {
   createA2aAgent,
   dispatchA2aRpc,
@@ -1117,7 +1117,10 @@ export class A2aTaskDO {
    *  All actor authority is the reducer's managing-principal gate (the org/person acting on itself).
    */
   private async runEndeavorWork(principal: string, endeavorId: string): Promise<{ adopted: boolean; stepsDone: number; satisfied: boolean }> {
-    type PlanStep = { stepId: string; kind: string; description: string; satisfied: boolean };
+    type PlanStep = {
+      stepId: string; kind: string; description: string; satisfied: boolean;
+      capabilityRequirements?: Array<{ capabilityIri: string }>;
+    };
     type StateOut = {
       lifecycle: string | null; goal: string; requester: string | null;
       adoptedPlanRef: { planId: string; revision: number; hash: string } | null;
@@ -1130,6 +1133,19 @@ export class A2aTaskDO {
     // The org's playbook applies to every step turn and the synthesis, so read it ONCE for the run
     // (spec 327 §4b / 334 §6). '' when the steward authored none — the turns keep their built-ins.
     const playbook = await this.readOrgPlaybook(principal);
+
+    // ROUTING INPUTS, read ONCE per run: the grants we hold (which hosts may we ask, for what) and
+    // the wire that lets this org sign as itself. Both fail soft to "run every step locally", which
+    // is exactly today's behaviour — so an org with no grants, or one whose steward has not widened
+    // its wire, is unaffected rather than broken.
+    const archetypeHosts = await this.interactionsInternal(principal, 'internal.archetype.hosts', {})
+      .then((r) => ((r as { hosts?: ArchetypeHostGrant[] }).hosts ?? []))
+      .catch(() => [] as ArchetypeHostGrant[]);
+    const orgWire = archetypeHosts.length
+      ? await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
+          .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
+          .catch(() => null)
+      : null;
 
     // spec 334 §6 gather phase — the agent authors read-only queries against the PUBLIC graph AND
     // reads the org's OWN records (via the read-only coordination grant, if the steward enabled it),
@@ -1172,10 +1188,22 @@ export class A2aTaskDO {
       firstTurn = false;
       let output: string;
       try {
-        const turn = await executeEndeavorStep(this.env, {
-          principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs, playbook, references,
+        // A SPECIALIST FIRST when the step declared a capability and some host granted it. Null
+        // means this step is ours; a throw means a dispatch is in flight and unfinished, which the
+        // catch below records so the next window collects rather than re-dispatching.
+        const specialist = await this.tryArchetypeStep({
+          principal, endeavorId, step,
+          hosts: archetypeHosts, orgWire,
+          material: { currentTurtle: priorOutputs.map((x) => x.output).join('\n\n').slice(0, 40_000) },
         });
-        output = turn.output;
+        if (specialist) {
+          output = specialist;
+        } else {
+          const turn = await executeEndeavorStep(this.env, {
+            principal, endeavorId, goal, stepKind: step.kind, stepDescription: step.description, priorOutputs, playbook, references,
+          });
+          output = turn.output;
+        }
       } catch (e) {
         // Left open for a human — but WHY is posted to the endeavor rather than discarded. A step
         // that silently stays open is indistinguishable from one nobody reached yet, and that is
@@ -1298,6 +1326,66 @@ export class A2aTaskDO {
       } catch { /* keep the last good list — an unreachable library is not evidence a role is gone */ }
     })();
   }
+
+  /**
+   * Try to have a SPECIALIST do this step, on another organization's agent.
+   *
+   * Returns the deliverable when a specialist produced one, or null when the step is ours to run —
+   * no capability, no archetype for it, or no host that granted us one. Those are different
+   * situations with different fixes (a plan wanting no specialist, a modelling gap, a missing
+   * ceremony); only the last is a surprise worth logging.
+   *
+   * THROWS when a dispatch is IN FLIGHT but unfinished. Not a failure — the honest answer for work
+   * someone else is still doing. The step loop posts the reason and leaves the step open, so the
+   * next window COLLECTS instead of re-dispatching.
+   */
+  private async tryArchetypeStep(args: {
+    principal: string;
+    endeavorId: string;
+    step: { stepId: string; description: string; capabilityRequirements?: Array<{ capabilityIri: string }> };
+    hosts: ArchetypeHostGrant[];
+    orgWire: IncomingDelegation | null;
+    material: { specDigest?: string; specPaths?: string[]; currentTurtle?: string };
+  }): Promise<string | null> {
+    const decision = chooseArchetypeRoute(args.step.capabilityRequirements, args.hosts);
+    if (!decision.route) {
+      if (/no host has granted/.test(decision.reason)) {
+        console.log('[archetype route] unroutable:', args.endeavorId, args.step.stepId, decision.reason);
+      }
+      return null;
+    }
+    if (!args.orgWire) {
+      // The org cannot sign as itself, so it cannot dispatch. Run locally rather than fail the step
+      // — but say so: the fix is a ceremony, and nothing else would surface it.
+      console.log('[archetype route] no org wire — running locally:', args.endeavorId, args.step.stepId);
+      return null;
+    }
+    const { host, archetype } = decision.route;
+    const key = this.archetypeDispatchKey(args.endeavorId, args.step.stepId);
+    const prior = (await this.state.storage.get(key)) as { taskId?: Hex } | undefined;
+
+    let taskId = prior?.taskId;
+    if (!taskId) {
+      const sent = await this.dispatchArchetypeWork({
+        org: args.principal as Address, orgWire: args.orgWire, host: host as Address, archetype,
+        input: {
+          stepGoal: args.step.description, endeavorId: args.endeavorId, stepId: args.step.stepId,
+          capabilityIri: decision.route.capabilityIri,
+          ...(args.material.specDigest ? { specDigest: args.material.specDigest } : {}),
+          ...(args.material.specPaths?.length ? { specPaths: args.material.specPaths } : {}),
+          ...(args.material.currentTurtle ? { currentTurtle: args.material.currentTurtle } : {}),
+        },
+      });
+      taskId = sent.taskId;
+      // Recorded BEFORE collecting: a crash between send and record re-dispatches next window and
+      // charges the host twice for the same step.
+      await this.state.storage.put(key, { host, archetype, taskId, sentAt: new Date().toISOString() });
+    }
+    return this.collectArchetypeWork({
+      org: args.principal as Address, orgWire: args.orgWire, host: host as Address, taskId,
+    });
+  }
+
 
   /**
    * The per-step dispatch record: `(endeavor, step)` → the task we raised on the host.
