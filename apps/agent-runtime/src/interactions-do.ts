@@ -864,7 +864,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1137,6 +1137,20 @@ export class InteractionsDO {
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
           return json({ ok: true, wire: rec?.wire ?? null });
+        }
+        if (op === 'internal.archetype.hosts') {
+          // THE GRANT STORE IS THE ROUTING TABLE. "Which org hosts the Ontologist?" has no general
+          // answer, but "which org has granted ME its Ontologist?" does — and it is the only one
+          // that matters, because a host we hold no grant from is not reachable anyway. Routing
+          // therefore follows authority instead of a configured directory that could disagree with it.
+          const prefix = archetypeGrantRecordKey('');
+          const rows = await this.state.storage.list({ prefix });
+          const hosts: Array<{ host: string; archetypes: string[]; grantedAt?: string }> = [];
+          for (const [, v] of rows) {
+            const r = v as { host?: string; archetypes?: string[]; grantedAt?: string };
+            if (r?.host) hosts.push({ host: r.host, archetypes: r.archetypes ?? [], ...(r.grantedAt ? { grantedAt: r.grantedAt } : {}) });
+          }
+          return json({ ok: true, hosts });
         }
         if (op === 'internal.archetype.grant') {
           // Send-time read of the HOST's dispatch opt-in, same stale-opt-in rule as consult: fetched

@@ -559,3 +559,49 @@ export function resolveArchetypeMethod(env: ArchetypeHarnessEnv, agentSA: string
     };
   };
 }
+
+
+/** One host org and the archetypes it has granted this caller. */
+export interface ArchetypeHostGrant {
+  host: string;
+  archetypes: string[];
+}
+
+export interface ArchetypeRoute {
+  host: string;
+  archetype: string;
+  capabilityIri: string;
+}
+
+/**
+ * Pick the host to send a step to, from the capabilities the step declared and the grants we hold.
+ *
+ * ROUTING FOLLOWS AUTHORITY. The candidate hosts are exactly those that granted us the archetype —
+ * a configured directory could name a host we cannot reach, and the dispatch would fail at the gate
+ * with a message about credentials rather than about routing. Here an unroutable step is knowable
+ * before anything is sent.
+ *
+ * Returns null when the step declares no capability, when no archetype answers for it, or when no
+ * host has granted that archetype. All three mean the same thing to the caller — run it yourself —
+ * but they are different situations, so `reason` says which.
+ */
+export function chooseArchetypeRoute(
+  capabilityRequirements: ReadonlyArray<{ capabilityIri: string }> | undefined,
+  hosts: readonly ArchetypeHostGrant[],
+): { route: ArchetypeRoute } | { route: null; reason: string } {
+  const caps = (capabilityRequirements ?? []).map((c) => c?.capabilityIri).filter(Boolean);
+  if (caps.length === 0) return { route: null, reason: 'step declares no capability' };
+
+  for (const capabilityIri of caps) {
+    const archetype = archetypeForCapability(capabilityIri);
+    if (!archetype) continue;
+    const host = hosts.find((h) => h.archetypes.includes(archetype.slug));
+    if (host) return { route: { host: host.host, archetype: archetype.slug, capabilityIri } };
+  }
+  // Distinguish "nothing answers for this capability" from "something does, but nobody granted it" —
+  // the first is a modelling gap, the second is a missing ceremony, and they have different fixes.
+  const known = caps.some((c) => archetypeForCapability(c));
+  return known
+    ? { route: null, reason: `no host has granted an archetype for ${caps.join(', ')}` }
+    : { route: null, reason: `no archetype answers for ${caps.join(', ')}` };
+}

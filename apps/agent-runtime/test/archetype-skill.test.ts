@@ -14,6 +14,7 @@ import {
   archetypeMethod,
   archetypeSkillReader,
   capabilityIriFor,
+  chooseArchetypeRoute,
   archetypeSlugFromMethod,
   composeArchetypePrompt,
   loadArchetypeBundle,
@@ -358,5 +359,51 @@ describe('resolveArchetypeMethod', () => {
     expect(artifacts[0]?.artifactKind).toBe('archetype.deliverable');
     // No model configured in this test env ⇒ the specialist declines rather than inventing.
     expect((artifacts[0]?.body as { declined?: boolean })?.declined).toBe(true);
+  });
+});
+
+// ROUTING FOLLOWS AUTHORITY. Candidate hosts are exactly those that granted us the archetype, so an
+// unroutable step is knowable before anything is sent — rather than failing at the host's gate with
+// a message about credentials when the real problem was routing.
+describe('chooseArchetypeRoute', () => {
+  const OE = '0xaaa';
+  const hosts = [{ host: OE, archetypes: ['ontologist', 'ontology-reviewer'] }];
+  const cap = (slug: string) => ({ capabilityIri: capabilityIriFor('ontology-engineering', slug) });
+
+  it('routes a capability to the host that granted the archetype answering it', () => {
+    const r = chooseArchetypeRoute([cap('tbox-modeling')], hosts);
+    expect(r.route).toEqual({ host: OE, archetype: 'ontologist', capabilityIri: cap('tbox-modeling').capabilityIri });
+  });
+
+  it('tries every declared capability before giving up', () => {
+    const r = chooseArchetypeRoute([cap('vocabulary-curation'), cap('ontology-review')], hosts);
+    // Taxonomist is not granted; Reviewer is — so the second capability routes.
+    expect(r.route?.archetype).toBe('ontology-reviewer');
+  });
+
+  it('does NOT route to a host that did not grant that archetype', () => {
+    // The Taxonomist exists in the roster but nobody granted it — dispatching would be refused.
+    const r = chooseArchetypeRoute([cap('vocabulary-curation')], hosts);
+    expect(r.route).toBeNull();
+    expect((r as { reason: string }).reason).toMatch(/no host has granted/);
+  });
+
+  it('distinguishes "no archetype answers" from "nobody granted it" — different fixes', () => {
+    const unknown = chooseArchetypeRoute([{ capabilityIri: 'urn:skills:cap:global-mission:field-mapping' }], hosts);
+    expect((unknown as { reason: string }).reason).toMatch(/no archetype answers/);
+    const ungranted = chooseArchetypeRoute([cap('vocabulary-curation')], hosts);
+    expect((ungranted as { reason: string }).reason).toMatch(/no host has granted/);
+  });
+
+  it('a step with no capability is not an error — it just runs locally', () => {
+    for (const c of [undefined, [] as { capabilityIri: string }[]]) {
+      const r = chooseArchetypeRoute(c, hosts);
+      expect(r.route).toBeNull();
+      expect((r as { reason: string }).reason).toMatch(/declares no capability/);
+    }
+  });
+
+  it('holding no grants at all routes nothing', () => {
+    expect(chooseArchetypeRoute([cap('tbox-modeling')], []).route).toBeNull();
   });
 });
