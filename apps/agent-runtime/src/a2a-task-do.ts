@@ -1300,6 +1300,82 @@ export class A2aTaskDO {
   }
 
   /**
+   * The per-step dispatch record: `(endeavor, step)` → the task we raised on the host.
+   *
+   * THIS IS THE CORRECTNESS PIECE, not bookkeeping. Work runs one continuation per window, so a step
+   * whose host has not finished yet WILL be revisited. Without a record the revisit dispatches
+   * again — a second task, a second turn, and a second charge against another organization's agent
+   * budget for work already in flight. With one, a revisit COLLECTS.
+   */
+  private archetypeDispatchKey(endeavorId: string, stepId: string): string {
+    return `archetype.dispatch:${endeavorId}:${stepId}`;
+  }
+
+  /**
+   * Read a dispatched archetype step's result, or say why it is not ready.
+   *
+   * Mirrors the consult rail's turn-2 collection (`processRoutingDue`): a SIGNED `tasks/get` on the
+   * host's runtime, then the artifact. The distinctions it makes are the ones that cost the consult
+   * rail to learn — a terminal failure and a still-running task are different answers, and a
+   * transient poll failure is neither, so it must not be recorded as either.
+   *
+   * Returns the deliverable text when complete; throws with a reason otherwise, which the step loop
+   * posts to the endeavor and leaves the step open for the next window.
+   */
+  private async collectArchetypeWork(args: {
+    org: Address;
+    orgWire: IncomingDelegation;
+    host: Address;
+    taskId: Hex;
+  }): Promise<string> {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const digest = hashA2aTaskRequest({
+      method: 'tasks/get', taskId: args.taskId, agentSA: args.host,
+      chainId: Number(this.env.CHAIN_ID ?? 84532), issuedAt,
+    });
+    const signature = await this.signAsOrg(args.orgWire, digest);
+    const host = args.host.toLowerCase();
+    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(host));
+    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${host}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: args.taskId, method: 'tasks/get',
+        params: { taskId: args.taskId, caller: args.org, signature, issuedAt },
+      }),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as {
+      result?: { state?: string; error?: string; artifactRefs?: Array<{ recordType?: string }> };
+      error?: { message?: string };
+    };
+    if (out.error) throw new Error(`archetype tasks/get refused by ${host}: ${out.error.message ?? 'unknown'}`);
+
+    const state = out.result?.state;
+    if (state === 'failed' || state === 'rejected' || state === 'canceled') {
+      // Terminal on the host's side — surfaced with ITS reason, so "the specialist declined" does
+      // not read as "we could not reach it".
+      throw new Error(`archetype task ${state} on ${host}${out.result?.error ? `: ${out.result.error}` : ''}`);
+    }
+    if (state !== 'completed') throw new Error(`archetype task not finished yet (${state ?? 'unknown'}) — collecting next window`);
+
+    const ref = (out.result?.artifactRefs ?? []).find((r) => r.recordType?.startsWith('a2a:artifact:'));
+    const artifactId = ref?.recordType?.slice('a2a:artifact:'.length);
+    if (!artifactId) throw new Error('archetype task completed with no artifact to read');
+
+    const body = (await this.readConsultArtifact(host, args.taskId, args.org, artifactId)) as
+      | { deliverable?: string; declined?: boolean; declineReason?: string; citedSpecs?: string[] }
+      | null;
+    if (!body) throw new Error('archetype artifact was unreadable');
+    if (body.declined) {
+      // A decline is a RESULT, not a failure to retry: the specialist judged the step outside its
+      // remit. Re-dispatching would ask the same question and get the same answer.
+      throw new Error(`archetype declined the step: ${body.declineReason ?? 'no reason given'}`);
+    }
+    const text = String(body.deliverable ?? '').trim();
+    if (!text) throw new Error('archetype returned an empty deliverable');
+    return body.citedSpecs?.length ? `${text}\n\n(cited: ${body.citedSpecs.join(', ')})` : text;
+  }
+
+  /**
    * DISPATCH ONE PLAN STEP TO A HOST ORG'S ARCHETYPE.
    *
    * The cross-org half of the archetype rail: this org asks another org's specialist to carry out
