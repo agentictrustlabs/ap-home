@@ -859,7 +859,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1353,6 +1353,45 @@ export class InteractionsDO {
           if (body.data === undefined) return json({ error: 'data required' }, 400);
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           return json({ ok: true });
+        }
+        if (op === 'internal.library.skillMd') {
+          // ONE PACKAGE FILE, READ IN PLACE. An archetype agent's SKILL.md is an artifact in THIS
+          // org's own Content Artifact library (`skills/<name>/SKILL.md`), and the A2A skill that
+          // acts as that archetype needs it as a harness read.
+          //
+          // It is read where it lives — catalog then artifact, exactly the two records
+          // `connect/library` itself writes (ADR-0055) — rather than being mirrored into a
+          // bespoke record. A copy would be a second home for the same bytes with no answer to
+          // which is authoritative, and it would go stale the moment a steward edits the package.
+          //
+          // Both hops happen INSIDE the DO because both need the delivery wire the DO holds; doing
+          // it from the caller would mean two bridge round trips and the artifact id crossing a
+          // boundary for no purpose. Marker-gated like every other `internal.` op.
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — enable storage for this org first' }, 409);
+          const name = String(body.name ?? '').trim();
+          // The folder is built here from a validated single label, never taken from the caller —
+          // a caller-supplied folder would read any artifact in the library, not just a skill.
+          if (!/^[a-z0-9][a-z0-9-]{0,60}$/.test(name)) return json({ error: 'invalid skill package name' }, 400);
+          const folder = `skills/${name}`;
+          const file = String(body.file ?? 'SKILL.md').trim() || 'SKILL.md';
+          if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(file)) return json({ error: 'invalid file name' }, 400);
+
+          const cat = await this.vaultFor(dg).read<unknown>({ owner: '', resource: 'content.catalog' });
+          const list = Array.isArray(cat?.data) ? (cat.data as Array<Record<string, unknown>>) : [];
+          const hit = list.find((a) => a?.isFolder !== true && String(a?.folder ?? '') === folder && String(a?.name ?? '') === file);
+          if (!hit?.id) return json({ ok: true, found: false, text: null });
+
+          const rec = await this.vaultFor(dg).read<Record<string, unknown>>({ owner: '', resource: `content.artifact.${String(hit.id)}` });
+          const b64 = String((rec?.data as Record<string, unknown> | undefined)?.bytesB64 ?? '');
+          if (!b64) return json({ ok: true, found: false, text: null });
+          // UTF-8 safe: atob is latin-1, and every SKILL.md in this stack has em dashes in it.
+          let text = '';
+          try {
+            const bin = atob(b64);
+            text = new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0)));
+          } catch { return json({ ok: true, found: false, text: null }); }
+          return json({ ok: true, found: true, text, artifactId: String(hit.id), version: (rec?.data as Record<string, unknown> | undefined)?.version ?? null });
         }
         if (op === 'dm.body.put' || op === 'internal.dm.body.put') {
           // spec 323 W3 — dm body WRITE via the DO-held DELIVERY wire (the only wire scoped to write

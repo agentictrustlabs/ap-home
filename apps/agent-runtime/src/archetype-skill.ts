@@ -26,11 +26,26 @@ import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type Ru
 import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
 import { EVIDENCE_MAX } from './endeavors.js';
 
-/** A2A skill id for an archetype slug — `ontologist` → `oe.ontologist`. */
-export const archetypeSkillId = (slug: string): string => `oe.${slug}`;
+/**
+ * A2A skill id for an archetype slug — `ontologist` → `archetype.ontologist`.
+ *
+ * NOT namespaced by context, deliberately. An archetype runs on the demo-a2a of the org that HOLDS
+ * its SKILL.md, so the recipient address already says which context you are asking: the
+ * ontology-engineering org answers `archetype.cluster-architect`, and a global-mission org answers
+ * whatever archetypes ITS library holds, on the same rail. Baking `oe.` into the id would have made
+ * the ontology-engineering roster the only one that could ever exist.
+ */
+export const archetypeSkillId = (slug: string): string => `archetype.${slug}`;
 
-/** The archetype's capability IRI namespace, as the ontology-engineering context registers it. */
-export const capabilityIriFor = (slug: string): string => `urn:skills:cap:ontology-engineering:${slug}`;
+/** A capability IRI in a context's namespace — the context is the org's domain, not a constant. */
+export const capabilityIriFor = (context: string, slug: string): string => `urn:skills:cap:${context}:${slug}`;
+
+/** Shape of a valid archetype slug. EXISTENCE is decided by the hosting org's library, never here —
+ *  this only bounds what may be turned into a folder path and a skill id. */
+export const isArchetypeSlug = (s: string): boolean => /^[a-z0-9][a-z0-9-]{1,60}$/.test(s);
+
+export const OE_CONTEXT = 'ontology-engineering';
+const oeCap = (slug: string): string => capabilityIriFor(OE_CONTEXT, slug);
 
 /**
  * The MVP roster. Slugs match `urn:skills:archetype:ontology-engineering:<slug>` in the
@@ -48,28 +63,36 @@ export interface ArchetypeDef {
   capabilities: string[];
 }
 
+/**
+ * The ontology-engineering roster — ONE context's archetypes, not the set of all archetypes.
+ *
+ * It is a default for routing before the ontology graph is reachable from this worker, and the
+ * ontology-engineering org's library is what actually decides which of these can answer. Another
+ * domain org hosts its own archetypes by putting `skills/<slug>/SKILL.md` in ITS library; nothing
+ * here needs to change for that to work, which is why no code path treats this list as exhaustive.
+ */
 export const OE_ARCHETYPES: readonly ArchetypeDef[] = [
   { slug: 'domain-analyst', label: 'Domain Analyst',
-    capabilities: ['domain-requirements-analysis', 'competency-question-elicitation'].map(capabilityIriFor) },
+    capabilities: ['domain-requirements-analysis', 'competency-question-elicitation'].map(oeCap) },
   { slug: 'cluster-architect', label: 'Cluster Architect',
-    capabilities: ['semantic-clustering', 'semantic-packaging'].map(capabilityIriFor) },
+    capabilities: ['semantic-clustering', 'semantic-packaging'].map(oeCap) },
   { slug: 'information-architect', label: 'Information Architect',
-    capabilities: ['ontology-documentation'].map(capabilityIriFor) },
+    capabilities: ['ontology-documentation'].map(oeCap) },
   { slug: 'ontologist', label: 'Ontologist',
-    capabilities: ['upper-ontology-grounding', 'tbox-modeling', 'shacl-contract-authoring', 'canonical-id-minting'].map(capabilityIriFor) },
+    capabilities: ['upper-ontology-grounding', 'tbox-modeling', 'shacl-contract-authoring', 'canonical-id-minting'].map(oeCap) },
   { slug: 'taxonomist', label: 'Taxonomist',
-    capabilities: ['vocabulary-curation'].map(capabilityIriFor) },
+    capabilities: ['vocabulary-curation'].map(oeCap) },
   { slug: 'ontology-reviewer', label: 'Ontology Reviewer',
-    capabilities: ['ontology-review'].map(capabilityIriFor) },
+    capabilities: ['ontology-review'].map(oeCap) },
   // The three the specs-first flow adds. They are archetypes rather than skills on an existing one
   // because each owns a decision the others should not make: how much work a wave is, what the
   // written source says, and whether a shape has ever been tested against an instance.
   { slug: 'ontology-creation-planner', label: 'Ontology Creation Planner',
-    capabilities: ['ontology-build-planning', 'endeavor-wave-design'].map(capabilityIriFor) },
+    capabilities: ['ontology-build-planning', 'endeavor-wave-design'].map(oeCap) },
   { slug: 'spec-librarian', label: 'Spec Librarian',
-    capabilities: ['spec-ingest', 'spec-citation'].map(capabilityIriFor) },
+    capabilities: ['spec-ingest', 'spec-citation'].map(oeCap) },
   { slug: 'exemplar-curator', label: 'Exemplar Curator',
-    capabilities: ['abox-exemplar-authoring', 'shape-smoke-test'].map(capabilityIriFor) },
+    capabilities: ['abox-exemplar-authoring', 'shape-smoke-test'].map(oeCap) },
 ];
 
 export const archetypeBySlug = (slug: string): ArchetypeDef | undefined =>
@@ -131,7 +154,9 @@ export function parseArchetypeWorkInput(raw: unknown, expectArchetype: string): 
   if (archetype !== expectArchetype) {
     return { ok: false, error: `body archetype "${archetype}" does not match the skill it was sent to ("${expectArchetype}")` };
   }
-  if (!archetypeBySlug(archetype)) return { ok: false, error: `unknown archetype "${archetype}"` };
+  // SHAPE ONLY. Whether this archetype exists is the hosting org's library's answer, not a constant
+  // in this worker — an org that adds an archetype to its own library must not need a redeploy here.
+  if (!isArchetypeSlug(archetype)) return { ok: false, error: `invalid archetype slug "${archetype}"` };
   const stepGoal = String(o.stepGoal ?? '').trim();
   if (!stepGoal) return { ok: false, error: 'stepGoal is required' };
 
@@ -230,8 +255,151 @@ export function archetypeGoal(input: ArchetypeWorkInputV1): string {
   return parts.join('\n\n');
 }
 
+/** What the reader needs: the co-resident InteractionsDO namespace and the in-Worker marker. */
+export interface ArchetypeLibraryEnv {
+  INTERACTIONS: DurableObjectNamespace;
+  A2A_CUSTODY_BRIDGE_SECRET?: string;
+}
+
+/**
+ * Read an archetype's SKILL.md from the agent's OWN library, in place.
+ *
+ * The package name convention is the archetype slug — `skills/ontologist/SKILL.md` — so the roster
+ * slug addresses the card, the capabilities and now the instructions without a fourth mapping.
+ *
+ * Returns null when the package is absent, which the caller turns into a refusal rather than a
+ * default: see `runArchetypeTurn`. Errors are NOT swallowed into null — "the library said no such
+ * package" and "the read failed" need different fixes, and collapsing them is what made an earlier
+ * empty-list bug undiagnosable.
+ */
+export function archetypeSkillReader(env: ArchetypeLibraryEnv, agentSA: string): (slug: string) => Promise<string | null> {
+  return async (slug: string): Promise<string | null> => {
+    const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) throw new Error('no internal marker configured — cannot read the archetype library');
+    const id = agentSA.toLowerCase();
+    const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(id));
+    const resp = await stub.fetch(new Request(`https://do/interactions/${id}/internal.library.skillMd`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+      body: JSON.stringify({ name: slug, file: 'SKILL.md' }),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; found?: boolean; text?: string | null; error?: string };
+    if (!resp.ok || out.ok === false) throw new Error(out.error ?? `archetype SKILL.md read failed (${resp.status})`);
+    return out.found && out.text ? out.text : null;
+  };
+}
+
+/**
+ * AN ARCHETYPE IS A ROLE PLUS A SET OF SKILLS, not a single document.
+ *
+ * The org's library holds skill packages. An archetype package (`skills/<slug>/SKILL.md`) states the
+ * role — its doctrine, what it owns, what it refuses — and NAMES the skills that role composes, in
+ * frontmatter:
+ *
+ *     ---
+ *     name: ontologist
+ *     skills: ontology-grounding, author-tbox-class, author-shacl-contract
+ *     ---
+ *
+ * Each named skill is another package in the SAME library, loaded and appended. That is what makes
+ * this general-purpose rather than ontology-specific: an org services `archetype.<slug>` for
+ * whatever archetypes ITS library defines, composed from whatever skills ITS library holds. The
+ * ontology-engineering org answers for a Cluster Architect; a global-mission org answers for
+ * whatever roles that domain needs, on the same rail, with no code change here.
+ *
+ * A named skill that is MISSING is reported, never silently skipped — an archetype composed from
+ * four skills of which two failed to load is a different specialist than the one the org defined,
+ * and it would answer confidently as if it were not.
+ */
+export interface ArchetypeBundle {
+  slug: string;
+  /** The archetype package's own body — the role. */
+  role: string;
+  /** Skills named by the archetype, in declaration order, that were found. */
+  skills: { name: string; body: string }[];
+  /** Named but absent from the library. */
+  missing: string[];
+}
+
+/** Frontmatter block of a SKILL.md, as `key: value` pairs. Deliberately tiny — these files are
+ *  written to a flat-key convention and a YAML dependency in a Worker bundle is not worth it. */
+export function readFrontmatter(text: string): { fm: Record<string, string>; body: string } {
+  const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
+  if (!m) return { fm: {}, body: text };
+  const fm: Record<string, string> = {};
+  let key = '';
+  for (const line of (m[1] ?? '').split('\n')) {
+    const km = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (km) { key = km[1]!; fm[key] = (km[2] ?? '').trim(); }
+    else if (key && line.trim()) fm[key] += ` ${line.trim()}`;
+  }
+  return { fm, body: m[2] ?? '' };
+}
+
+/** The skills an archetype composes, from `skills:` (comma or whitespace separated). */
+export function declaredSkills(fm: Record<string, string>): string[] {
+  const raw = fm.skills ?? fm.composes ?? '';
+  return [...new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter((x) => isArchetypeSlug(x)))].slice(0, 24);
+}
+
+/**
+ * Load an archetype and every skill it declares, from the hosting org's own library.
+ *
+ * `readPackage` is the library seam — one call per package, so this works against any store that can
+ * answer "give me `skills/<name>/SKILL.md`". Throws when the ARCHETYPE itself is absent: answering
+ * as a specialist whose definition you could not read is the failure this module exists to prevent.
+ */
+export async function loadArchetypeBundle(
+  readPackage: (name: string) => Promise<string | null>,
+  slug: string,
+): Promise<ArchetypeBundle> {
+  const root = await readPackage(slug);
+  if (!root || !root.trim()) {
+    throw new Error(`no SKILL.md for archetype "${slug}" — refusing to answer as a specialist without its definition`);
+  }
+  const { fm, body } = readFrontmatter(root);
+  const names = declaredSkills(fm).filter((n) => n !== slug);   // an archetype naming itself is a loop
+  const skills: { name: string; body: string }[] = [];
+  const missing: string[] = [];
+  for (const name of names) {
+    const text = await readPackage(name);
+    if (text && text.trim()) skills.push({ name, body: readFrontmatter(text).body.trim() });
+    else missing.push(name);
+  }
+  return { slug, role: body.trim() || root.trim(), skills, missing };
+}
+
+/**
+ * Compose the bundle into the system prompt: the ROLE first, then each skill as a named section.
+ *
+ * Order matters. The role states what this specialist owns and refuses, and the skills are methods
+ * available to it — reversed, a long method document reads as the whole job and the archetype's
+ * boundaries get lost. Missing skills are declared IN the prompt so the model knows its own
+ * toolkit is incomplete rather than quietly working around a gap it cannot see.
+ */
+export function composeArchetypePrompt(bundle: ArchetypeBundle): string {
+  const parts = [bundle.role];
+  if (bundle.skills.length) {
+    parts.push(
+      `\n\n---\n\n# Skills available to you\n\nThe following ${bundle.skills.length} skill(s) are part of this role. ` +
+      'Apply the ones relevant to the step you were given.',
+    );
+    for (const s of bundle.skills) parts.push(`\n\n## Skill: ${s.name}\n\n${s.body}`);
+  }
+  if (bundle.missing.length) {
+    parts.push(
+      `\n\n---\n\nNOTE: this role declares skill(s) that could not be loaded: ${bundle.missing.join(', ')}. ` +
+      'Work without them and say so in your deliverable if the step needed one.',
+    );
+  }
+  return parts.join('');
+}
+
 export interface ArchetypeTurnResult {
   deliverable: ArchetypeDeliverableV1 | null;
+  /** What actually answered — which skills composed the role, and which it declared but could not
+   *  load. Worth reporting: a specialist missing half its skills gives a plausible, weaker answer. */
+  bundle?: { skills: string[]; missing: string[] };
   plannerKind: 'anthropic' | 'rule-based';
   result: RunResult;
   error?: string;
@@ -251,13 +419,11 @@ export async function runArchetypeTurn(
   env: PlannerEnv,
   args: { input: ArchetypeWorkInputV1; readSkillMd: (slug: string) => Promise<string | null> },
 ): Promise<ArchetypeTurnResult> {
-  const skillMd = await args.readSkillMd(args.input.archetype);
-  if (!skillMd || !skillMd.trim()) {
-    throw new Error(`no SKILL.md for archetype "${args.input.archetype}" — refusing to answer as a specialist without its instructions`);
-  }
+  // The role AND the skills it composes, both from the hosting org's own library.
+  const bundle = await loadArchetypeBundle(args.readSkillMd, args.input.archetype);
 
   const { planner, kind } = selectPlanner(env, {
-    systemPrompt: withPlaybook(skillMd, ARCHETYPE_CONTRACT),
+    systemPrompt: withPlaybook(composeArchetypePrompt(bundle), ARCHETYPE_CONTRACT),
     // The deliverable rides inside the tool call's input, so the output budget must cover the whole
     // artifact — the same ceiling the endeavor work turn needed, for the same reason.
     maxTokens: 16_000,
@@ -294,13 +460,14 @@ export async function runArchetypeTurn(
       } },
     ]);
     const result = await runIntent({ goal, context: {} }, { planner: deterministic, tools: ARCHETYPE_TOOLS, invoke });
-    return { deliverable: captured, plannerKind: kind, result };
+    return { deliverable: captured, plannerKind: kind, result, bundle: { skills: bundle.skills.map((x) => x.name), missing: bundle.missing } };
   }
 
   try {
     const result = await runIntent({ goal, context: {} }, { planner, tools: ARCHETYPE_TOOLS, invoke });
     return {
       deliverable: captured, plannerKind: kind, result,
+      bundle: { skills: bundle.skills.map((x) => x.name), missing: bundle.missing },
       ...(captured ? {} : { error: 'turn completed without posting a deliverable' }),
     };
   } catch (e) {

@@ -12,7 +12,10 @@ import {
   archetypeForCapability,
   archetypeGoal,
   archetypeSkillId,
+  archetypeSkillReader,
   capabilityIriFor,
+  composeArchetypePrompt,
+  loadArchetypeBundle,
   parseArchetypeWorkInput,
   runArchetypeTurn,
 } from '../src/archetype-skill.js';
@@ -23,8 +26,10 @@ const body = (extra: Record<string, unknown> = {}) => ({
 
 describe('roster', () => {
   it('derives skill id and capability IRIs from one slug', () => {
-    expect(archetypeSkillId('ontologist')).toBe('oe.ontologist');
-    expect(capabilityIriFor('tbox-modeling')).toBe('urn:skills:cap:ontology-engineering:tbox-modeling');
+    expect(archetypeSkillId('ontologist')).toBe('archetype.ontologist');
+    expect(capabilityIriFor('ontology-engineering', 'tbox-modeling')).toBe('urn:skills:cap:ontology-engineering:tbox-modeling');
+    // Another domain's context yields its own namespace — the roster is not ontology-only.
+    expect(capabilityIriFor('global-mission', 'field-mapping')).toBe('urn:skills:cap:global-mission:field-mapping');
   });
 
   it('includes the six existing archetypes and the three the specs-first flow adds', () => {
@@ -46,8 +51,8 @@ describe('roster', () => {
   it('maps a capability to exactly one archetype — routing must not be ambiguous', () => {
     const all = OE_ARCHETYPES.flatMap((a) => a.capabilities);
     expect(new Set(all).size, 'a capability claimed by two archetypes has no routing answer').toBe(all.length);
-    expect(archetypeForCapability(capabilityIriFor('tbox-modeling'))?.slug).toBe('ontologist');
-    expect(archetypeForCapability(capabilityIriFor('semantic-clustering'))?.slug).toBe('cluster-architect');
+    expect(archetypeForCapability(capabilityIriFor('ontology-engineering', 'tbox-modeling'))?.slug).toBe('ontologist');
+    expect(archetypeForCapability(capabilityIriFor('ontology-engineering', 'semantic-clustering'))?.slug).toBe('cluster-architect');
     expect(archetypeForCapability('urn:skills:cap:other:thing')).toBeUndefined();
   });
 });
@@ -65,8 +70,15 @@ describe('parseArchetypeWorkInput', () => {
     expect((r as { error: string }).error).toMatch(/does not match the skill it was sent to/);
   });
 
-  it('REFUSES an unknown archetype, a wrong version, and a missing step', () => {
-    expect(parseArchetypeWorkInput(body({ archetype: 'wizard' }), 'wizard').ok).toBe(false);
+  it('accepts an archetype OUTSIDE the ontology roster — existence is the library\'s answer', () => {
+    // A global-mission org services whatever archetypes ITS library defines. Hard-coding the
+    // ontology-engineering roster here would mean a redeploy of this worker per new domain role.
+    expect(parseArchetypeWorkInput(body({ archetype: 'field-coordinator' }), 'field-coordinator').ok).toBe(true);
+  });
+
+  it('REFUSES a malformed slug, a wrong version, and a missing step', () => {
+    expect(parseArchetypeWorkInput(body({ archetype: 'Not A Slug' }), 'Not A Slug').ok).toBe(false);
+    expect(parseArchetypeWorkInput(body({ archetype: '../evil' }), '../evil').ok).toBe(false);
     expect(parseArchetypeWorkInput({ ...body(), version: 'v2' }, 'ontologist').ok).toBe(false);
     expect(parseArchetypeWorkInput(body({ stepGoal: '   ' }), 'ontologist').ok).toBe(false);
     expect(parseArchetypeWorkInput(null, 'ontologist').ok).toBe(false);
@@ -132,11 +144,139 @@ describe('runArchetypeTurn', () => {
 
   it('DECLINES rather than inventing a deliverable when no model is configured', async () => {
     // Filler that reads like ontology work would be merged; an explicit decline cannot be.
-    const out = await runArchetypeTurn({} as never, { input, readSkillMd: async () => '# Ontologist\nGround every class.' });
+    const out = await runArchetypeTurn({} as never, { input, readSkillMd: async () => '---\nname: ontologist\n---\n# Ontologist\nGround every class.' });
     expect(out.plannerKind).toBe('rule-based');
     expect(out.deliverable?.declined).toBe(true);
     expect(out.deliverable?.deliverable).toBe('');
     expect(out.deliverable?.declineReason).toMatch(/no model is configured/);
     expect(out.deliverable?.archetype).toBe('ontologist');
+  });
+});
+
+describe('archetypeSkillReader', () => {
+  const b64 = (s: string) => {
+    const bytes = new TextEncoder().encode(s);
+    let bin = ''; for (const x of bytes) bin += String.fromCharCode(x);
+    return btoa(bin);
+  };
+  const envWith = (respond: (body: Record<string, unknown>) => Response) => {
+    const calls: Record<string, unknown>[] = [];
+    return {
+      calls,
+      env: {
+        A2A_CUSTODY_BRIDGE_SECRET: 'marker',
+        INTERACTIONS: {
+          idFromName: (n: string) => n,
+          get: () => ({
+            fetch: async (req: Request) => {
+              const body = (await req.json()) as Record<string, unknown>;
+              calls.push({ url: req.url, marker: req.headers.get('x-ap-internal'), ...body });
+              return respond(body);
+            },
+          }),
+        },
+      } as never,
+    };
+  };
+  const ok = (b: Record<string, unknown>) => new Response(JSON.stringify(b), { status: 200 });
+
+  it('returns the decoded SKILL.md and carries the marker', async () => {
+    const { env, calls } = envWith(() => ok({ ok: true, found: true, text: '# Ontologist — ground every class' }));
+    const text = await archetypeSkillReader(env, '0xABC')('ontologist');
+    expect(text).toBe('# Ontologist — ground every class');
+    expect(calls[0]?.marker).toBe('marker');
+    expect(calls[0]?.name).toBe('ontologist');
+    expect(String(calls[0]?.url)).toContain('internal.library.skillMd');
+    // The DO shard is the agent, lowercased — a mixed-case SA must not address a second shard.
+    expect(String(calls[0]?.url)).toContain('0xabc');
+  });
+
+  it('round-trips UTF-8 — every SKILL.md in this stack has em dashes', () => {
+    const s = '# Ontologist — grounding, SHACL — done';
+    const bin = atob(b64(s));
+    expect(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))).toBe(s);
+  });
+
+  it('returns null when the package is absent — the caller turns that into a refusal', async () => {
+    const { env } = envWith(() => ok({ ok: true, found: false, text: null }));
+    expect(await archetypeSkillReader(env, '0xabc')('spec-librarian')).toBeNull();
+  });
+
+  it('THROWS on a failed read rather than reporting it as absent', async () => {
+    // "no such package" and "the read failed" need different fixes; collapsing them to null is what
+    // made an earlier empty-list bug undiagnosable.
+    const { env } = envWith(() => new Response(JSON.stringify({ error: 'no delivery grant' }), { status: 409 }));
+    await expect(archetypeSkillReader(env, '0xabc')('ontologist')).rejects.toThrow(/no delivery grant/);
+  });
+
+  it('refuses to read without the in-Worker marker', async () => {
+    const { env } = envWith(() => ok({ ok: true, found: true, text: 'x' }));
+    await expect(archetypeSkillReader({ ...(env as object), A2A_CUSTODY_BRIDGE_SECRET: '' } as never, '0xabc')('ontologist'))
+      .rejects.toThrow(/no internal marker/);
+  });
+});
+
+
+// AN ARCHETYPE IS A ROLE PLUS A SET OF SKILLS — the general-purpose shape. An org services
+// `archetype.<slug>` from whatever ITS library defines, composed from whatever skills ITS library
+// holds, with no code change per domain.
+describe('loadArchetypeBundle / composeArchetypePrompt', () => {
+  const lib: Record<string, string> = {
+    ontologist: '---\nname: ontologist\nskills: ontology-grounding, author-tbox-class\n---\n# Ontologist\nYou own grounding.',
+    'ontology-grounding': '---\nname: ontology-grounding\n---\nGround on PROV-O before minting.',
+    'author-tbox-class': '---\nname: author-tbox-class\n---\nOne class, one cluster.',
+    // A different domain entirely — same mechanism, no ontology vocabulary anywhere.
+    'field-coordinator': '---\nname: field-coordinator\nskills: assign-partner\n---\n# Field Coordinator\nYou own field assignment.',
+    'assign-partner': '---\nname: assign-partner\n---\nMatch a partner to a field.',
+  };
+  const read = async (n: string) => lib[n] ?? null;
+
+  it('loads the role and every declared skill, in order', async () => {
+    const b = await loadArchetypeBundle(read, 'ontologist');
+    expect(b.role).toContain('You own grounding.');
+    expect(b.skills.map((s) => s.name)).toEqual(['ontology-grounding', 'author-tbox-class']);
+    expect(b.skills[0]?.body).toContain('Ground on PROV-O');
+    expect(b.missing).toEqual([]);
+  });
+
+  it('works for a NON-ontology domain — the point of the generalization', async () => {
+    const b = await loadArchetypeBundle(read, 'field-coordinator');
+    expect(b.role).toContain('field assignment');
+    expect(b.skills.map((s) => s.name)).toEqual(['assign-partner']);
+  });
+
+  it('REPORTS a declared skill that is missing rather than skipping it silently', async () => {
+    // An archetype composed from four skills of which two failed to load is a different specialist,
+    // and it would answer just as confidently.
+    const b = await loadArchetypeBundle(
+      async (n) => (n === 'ontologist' ? '---\nname: ontologist\nskills: ontology-grounding, gone-missing\n---\nRole.' : lib[n] ?? null),
+      'ontologist',
+    );
+    expect(b.missing).toEqual(['gone-missing']);
+    expect(composeArchetypePrompt(b)).toContain('could not be loaded: gone-missing');
+  });
+
+  it('throws when the ARCHETYPE itself is absent', async () => {
+    await expect(loadArchetypeBundle(async () => null, 'ontologist')).rejects.toThrow(/refusing to answer as a specialist/);
+  });
+
+  it('ignores a self-reference and de-duplicates', async () => {
+    const b = await loadArchetypeBundle(
+      async (n) => (n === 'ontologist' ? '---\nname: ontologist\nskills: ontologist, ontology-grounding, ontology-grounding\n---\nRole.' : lib[n] ?? null),
+      'ontologist',
+    );
+    expect(b.skills.map((s) => s.name)).toEqual(['ontology-grounding']);
+  });
+
+  it('an archetype with no declared skills is valid — the role alone', async () => {
+    const b = await loadArchetypeBundle(async () => '---\nname: solo\n---\nJust a role.', 'solo');
+    expect(b.skills).toEqual([]);
+    expect(composeArchetypePrompt(b)).toBe('Just a role.');
+  });
+
+  it('puts the ROLE before the skills — reversed, the method reads as the whole job', async () => {
+    const p = composeArchetypePrompt(await loadArchetypeBundle(read, 'ontologist'));
+    expect(p.indexOf('You own grounding.')).toBeLessThan(p.indexOf('Skill: ontology-grounding'));
+    expect(p).toContain('## Skill: author-tbox-class');
   });
 });
