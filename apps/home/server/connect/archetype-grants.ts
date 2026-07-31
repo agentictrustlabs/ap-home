@@ -27,7 +27,7 @@ import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import type { DelegationWire } from '../../src/lib/delegation';
-import { callInteractions } from './channels';
+import { callInteractions, stewardWireFor } from './channels';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -66,11 +66,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const caller = (body?.caller ?? '').toLowerCase();
   if (!isAddr(caller)) return jsonCors({ error: 'caller (the dispatching org SA) required' }, request, 400);
 
+  // THE STEWARD WIRE, which every sibling endpoint resolves and this one did not. The DO gates
+  // `archetype.*` on `isSteward(caller, session, stewardship)`; without the wire that check has
+  // nothing to verify against and refuses a steward who genuinely is one — "only a steward of this
+  // organization may manage its archetype dispatch grants", to the person who stewards it.
+  const stewardship = await stewardWireFor(env, who.person, caller, who.token);
+
   if (body?.action === 'status' || body?.action === 'forget') {
     const host = (body?.host ?? '').toLowerCase();
     if (!isAddr(host)) return jsonCors({ error: 'host (SA address) required' }, request, 400);
     const op = body.action === 'status' ? 'archetype.grantStatus' : 'archetype.grantRevoke';
-    const r = await callInteractions(env, caller, op, { session: who.token, host });
+    const r = await callInteractions(env, caller, op, { session: who.token, host, ...(stewardship ? { stewardship } : {}) });
     return jsonCors(r.body, request, r.status);
   }
 
@@ -97,7 +103,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The calling org's DO owns verification (shape, ERC-1271 against the HOST, unrevoked on-chain)
   // and custody. Fail-closed pass-through — its refusal is the answer, unaltered.
   const r = await callInteractions(env, caller, 'archetype.grantPut', {
-    session: who.token, delegation: d, archetypes,
+    session: who.token, delegation: d, archetypes, ...(stewardship ? { stewardship } : {}),
   });
   return jsonCors(r.body, request, r.status);
 };
