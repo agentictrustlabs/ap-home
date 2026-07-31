@@ -730,7 +730,28 @@ export class A2aTaskDO {
       // declared SKILL.md packages. Adding a role is a library write, not a redeploy. Consulted only
       // on a registry miss, so it can never shadow a declared skill.
       resolveHandler: resolveArchetypeMethod(this.env, agentSA),
-      checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+      checks, handlers: [echo,
+        // THE RELAY, registered inline because it needs `this` — the dispatch and collect it
+        // composes are the same methods the step loop uses, so a relayed call and an endeavor-driven
+        // one take exactly one path.
+        {
+          skill: 'archetype.relay',
+          handle: async (ctx) => {
+            const out = await this.handleArchetypeRelay(ctx.input);
+            if (!out.ok) return { state: 'failed', error: out.error };
+            await ctx.emitArtifact({ artifactKind: 'archetype.relay', body: { taskId: out.taskId }, bodyContentType: 'application/json' });
+            return { state: 'completed' };
+          },
+        },
+        {
+          skill: 'archetype.relayResult',
+          handle: async (ctx) => {
+            const out = await this.handleArchetypeRelayResult(ctx.input);
+            await ctx.emitArtifact({ artifactKind: 'archetype.relayResult', body: out, bodyContentType: 'application/json' });
+            return { state: 'completed' };
+          },
+        },
+        makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
@@ -1326,6 +1347,91 @@ export class A2aTaskDO {
         this.archetypeMethods = buildArchetypeCatalog(packages).archetypes.map((a) => a.method);
       } catch { /* keep the last good list — an unreachable library is not evidence a role is gone */ }
     })();
+  }
+
+  /**
+   * THE ARCHETYPE RELAY — this org dispatching to a specialist ON BEHALF of a caller it trusts.
+   *
+   * A platform tool needs to reach a specialist to time it, but a service identity has no Durable
+   * Object and so cannot hold a grant of its own. Rather than mint one, the call flows through the
+   * DOMAIN ORG: it is already an organization, it already holds the host's grant, and everything
+   * stays org-to-org with no platform-level authority anywhere.
+   *
+   * THE CONFUSED-DEPUTY BOUND, which is the whole risk of a relay: this org will only forward to a
+   * host+archetype it ALREADY HOLDS A GRANT FOR. The relay therefore cannot exceed what this org
+   * could do itself — a caller who reaches it gains this org's reach, never more than it. The A2A
+   * gate has already verified the caller may invoke `archetype.relay` before we get here; this is
+   * the second bound, on what the relay may then do.
+   */
+  private async handleArchetypeRelay(input: unknown): Promise<{ ok: true; taskId: Hex } | { ok: false; error: string }> {
+    const o = (input ?? {}) as Record<string, unknown>;
+    const archetype = String(o.archetype ?? '').trim().toLowerCase();
+    const host = String(o.host ?? '').trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(archetype)) return { ok: false, error: 'archetype required' };
+    if (!/^0x[0-9a-f]{40}$/.test(host)) return { ok: false, error: 'host (agent address) required' };
+    if (!String(o.stepGoal ?? '').trim()) return { ok: false, error: 'stepGoal required' };
+
+    const agentSA = (await this.state.storage.get('agentSA')) as string | undefined;
+    const principal = (agentSA ?? '').toLowerCase();
+    if (!principal) return { ok: false, error: 'this agent has no identity' };
+
+    // Bound 1: do we hold a grant from that host, for that archetype?
+    const hosts = await this.interactionsInternal(principal, 'internal.archetype.hosts', {})
+      .then((r) => ((r as { hosts?: Array<{ host: string; archetypes: string[] }> }).hosts ?? []))
+      .catch(() => [] as Array<{ host: string; archetypes: string[] }>);
+    const held = hosts.find((h) => h.host.toLowerCase() === host);
+    if (!held) return { ok: false, error: `this organization holds no dispatch grant from ${host}` };
+    if (held.archetypes.length && !held.archetypes.includes(archetype)) {
+      return { ok: false, error: `the grant from ${host} does not name "${archetype}" (has: ${held.archetypes.join(', ')})` };
+    }
+
+    const orgWire = await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
+      .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
+      .catch(() => null);
+    if (!orgWire) return { ok: false, error: 'this organization has no signing wire — re-run routing-enable' };
+
+    try {
+      const sent = await this.dispatchArchetypeWork({
+        org: principal as Address, orgWire, host: host as Address, archetype,
+        input: {
+          stepGoal: String(o.stepGoal), 
+          ...(o.extra ? { extra: String(o.extra) } : {}),
+          ...(o.currentTurtle ? { currentTurtle: String(o.currentTurtle) } : {}),
+          ...(o.specDigest ? { specDigest: String(o.specDigest) } : {}),
+          ...(Array.isArray(o.specPaths) ? { specPaths: (o.specPaths as unknown[]).map(String) } : {}),
+        },
+      });
+      return { ok: true, taskId: sent.taskId };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** The RESULT half. The caller is not a party to the task the host created — this org is — so it
+   *  cannot poll the host directly and the relay has to read it back too. */
+  private async handleArchetypeRelayResult(input: unknown): Promise<Record<string, unknown>> {
+    const o = (input ?? {}) as Record<string, unknown>;
+    const host = String(o.host ?? '').trim().toLowerCase();
+    const taskId = String(o.taskId ?? '').trim();
+    if (!/^0x[0-9a-f]{40}$/.test(host) || !/^0x[0-9a-f]{64}$/i.test(taskId)) {
+      return { ok: false, error: 'host and taskId required' };
+    }
+    const agentSA = (await this.state.storage.get('agentSA')) as string | undefined;
+    const principal = (agentSA ?? '').toLowerCase();
+    const orgWire = await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
+      .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
+      .catch(() => null);
+    if (!orgWire) return { ok: false, error: 'this organization has no signing wire' };
+    try {
+      const deliverable = await this.collectArchetypeWork({
+        org: principal as Address, orgWire, host: host as Address, taskId: taskId as Hex,
+      });
+      return { ok: true, state: 'completed', deliverable };
+    } catch (e) {
+      // "not finished yet" is a normal answer here, not a failure — the caller polls.
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: true, state: /not finished yet/.test(msg) ? 'running' : 'failed', error: msg };
+    }
   }
 
   /**
