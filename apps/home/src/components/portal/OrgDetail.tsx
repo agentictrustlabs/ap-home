@@ -9,6 +9,7 @@ import { decodeAbiParameters } from 'viem';
 import type { Address } from '@agenticprimitives/types';
 import { listMyReceivedDelegations, revokeGrantedDelegation, type MyOrg, type ReceivedDelegation } from '../../connect-client';
 import { useSession } from '../../context/session';
+import { OrgArchetypeGrantsPanel } from './OrgArchetypeGrantsPanel';
 import { resolveVia, signHashFor } from '../../home/onboarding';
 import type { DelegationWire } from '../../lib/delegation';
 import { CONTRACTS } from '../../lib/chain';
@@ -425,6 +426,31 @@ export function OrgMembers({ org, token }: { org: MyOrg; token: string | null })
 
 export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | null; onBack: () => void }) {
   const created = org.createdAt ? new Date(org.createdAt).toLocaleString() : '—';
+  // The roles this org can offer, read from ITS OWN library — the same packages the harness
+  // composes from, so the panel can never offer a role whose definition the host would fail to
+  // load. A package that declares `skills:` is a role; everything else is one of their skills.
+  const [archetypes, setArchetypes] = useState<{ slug: string; description?: string }[]>([]);
+  useEffect(() => {
+    if (!token || !org.orgAgent) return;
+    void (async () => {
+      try {
+        const r = await fetch(`/connect/library?org=${org.orgAgent}`, { headers: { authorization: `Bearer ${token}` } });
+        const b = (await r.json().catch(() => ({}))) as { artifacts?: Array<{ folder?: string; name?: string; bytesB64?: string }> };
+        const roles: { slug: string; description?: string }[] = [];
+        for (const a of b.artifacts ?? []) {
+          if (a.name !== 'SKILL.md' || !a.folder?.startsWith('skills/')) continue;
+          const slug = a.folder.slice('skills/'.length);
+          if (!slug || slug.includes('/') || !a.bytesB64) continue;
+          const text = new TextDecoder().decode(Uint8Array.from(atob(a.bytesB64), (c) => c.charCodeAt(0)));
+          const fm = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? '';
+          if (!/^skills:\s*\S/m.test(fm) && !/^archetype:\s*true/m.test(fm)) continue;
+          const description = /^description:\s*(.+)$/m.exec(fm)?.[1]?.replace(/^["']|["']$/g, '').trim();
+          roles.push({ slug, ...(description ? { description } : {}) });
+        }
+        setArchetypes(roles.sort((x, y) => x.slug.localeCompare(y.slug)));
+      } catch { /* no library, no roles to offer — the panel says so */ }
+    })();
+  }, [token, org.orgAgent]);
   return (
     <div>
       <button type="button" className="btn-ghost" style={{ marginBottom: '1rem', fontSize: '.85rem' }} onClick={onBack}>
@@ -489,6 +515,14 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
           <p className="manage-card-blurb">No membership delegation on this org — nothing to read.</p>
         </div>
       )}
+
+      {/* Archetype dispatch — this org's specialists, offered to another organization.
+          Shown for every org: the archetype list is what makes it meaningful, and an org whose
+          library defines none says so in the panel rather than being hidden, which is the
+          difference between "we host nothing" and "this feature does not exist here". */}
+      <div className="dash-section" style={{ marginTop: '1.25rem' }}>
+        <OrgArchetypeGrantsPanel org={org.orgAgent as Address} archetypes={archetypes} />
+      </div>
     </div>
   );
 }
