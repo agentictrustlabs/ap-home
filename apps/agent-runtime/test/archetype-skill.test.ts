@@ -14,8 +14,10 @@ import {
   archetypeSkillId,
   archetypeSkillReader,
   capabilityIriFor,
+  archetypeSlugFromSkill,
   composeArchetypePrompt,
   loadArchetypeBundle,
+  resolveArchetypeSkill,
   parseArchetypeWorkInput,
   runArchetypeTurn,
 } from '../src/archetype-skill.js';
@@ -223,7 +225,7 @@ describe('archetypeSkillReader', () => {
 describe('loadArchetypeBundle / composeArchetypePrompt', () => {
   const lib: Record<string, string> = {
     ontologist: '---\nname: ontologist\nskills: ontology-grounding, author-tbox-class\n---\n# Ontologist\nYou own grounding.',
-    'ontology-grounding': '---\nname: ontology-grounding\n---\nGround on PROV-O before minting.',
+    'ontology-grounding': '---\nname: ontology-grounding\ndescription: Anchor a term on an existing upper ontology.\n---\nGround on PROV-O before minting.',
     'author-tbox-class': '---\nname: author-tbox-class\n---\nOne class, one cluster.',
     // A different domain entirely — same mechanism, no ontology vocabulary anywhere.
     'field-coordinator': '---\nname: field-coordinator\nskills: assign-partner\n---\n# Field Coordinator\nYou own field assignment.',
@@ -278,5 +280,83 @@ describe('loadArchetypeBundle / composeArchetypePrompt', () => {
     const p = composeArchetypePrompt(await loadArchetypeBundle(read, 'ontologist'));
     expect(p.indexOf('You own grounding.')).toBeLessThan(p.indexOf('Skill: ontology-grounding'));
     expect(p).toContain('## Skill: author-tbox-class');
+  });
+
+  it('INDEXES the skills before their bodies so the role can choose which to apply', async () => {
+    // The intent is addressed to the ROLE, not to a skill — picking is the point, and picking needs
+    // a map. The index must precede the full bodies.
+    const p = composeArchetypePrompt(await loadArchetypeBundle(read, 'ontologist'));
+    expect(p).toContain('**ontology-grounding** — Anchor a term on an existing upper ontology.');
+    expect(p).toMatch(/You were given a STEP, not a skill/);
+    expect(p.indexOf('**ontology-grounding**')).toBeLessThan(p.indexOf('## Skill: ontology-grounding'));
+  });
+});
+
+// THE HARNESS — an agent serving an A2A endpoint for a SET of archetypes rather than for itself.
+describe('resolveArchetypeSkill', () => {
+  const lib: Record<string, string> = {
+    ontologist: '---\nname: ontologist\nskills: ontology-grounding\n---\n# Ontologist\nRole.',
+    'ontology-grounding': '---\nname: ontology-grounding\n---\nGround first.',
+  };
+  const env = () => ({
+    A2A_CUSTODY_BRIDGE_SECRET: 'marker',
+    INTERACTIONS: {
+      idFromName: (n: string) => n,
+      get: () => ({
+        fetch: async (req: Request) => {
+          const b = (await req.json()) as { name?: string };
+          const text = lib[String(b.name)];
+          return new Response(JSON.stringify(text ? { ok: true, found: true, text } : { ok: true, found: false, text: null }), { status: 200 });
+        },
+      }),
+    },
+  }) as never;
+
+  const ctx = (input: unknown) => {
+    const artifacts: Record<string, unknown>[] = [];
+    return { artifacts, ctx: { input, emitArtifact: async (a: Record<string, unknown>) => { artifacts.push(a); return '0x1'; } } as never };
+  };
+
+  it('resolves an archetype id and ignores everything else', () => {
+    const r = resolveArchetypeSkill(env(), '0xabc');
+    expect(r('archetype.ontologist')?.skill).toBe('archetype.ontologist');
+    // A non-archetype skill must fall through to `unknown skill`, not be swallowed by the harness.
+    for (const s of ['echo', 'discussion.consult', 'archetype.', 'archetype.Bad Slug', 'notarchetype.x']) {
+      expect(r(s), s).toBeUndefined();
+    }
+  });
+
+  it('parses the slug out of the skill id', () => {
+    expect(archetypeSlugFromSkill('archetype.cluster-architect')).toBe('cluster-architect');
+    expect(archetypeSlugFromSkill('archetype.field-coordinator')).toBe('field-coordinator');
+    expect(archetypeSlugFromSkill('echo')).toBeNull();
+  });
+
+  it('FAILS the task with a reason when this agent does not host that archetype', async () => {
+    // Distinct from "unknown skill": "we do not host archetypes" and "we do not host THAT one" need
+    // different fixes, so the second must not masquerade as the first.
+    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.missing-role');
+    const { ctx: c } = ctx({ version: 'ap.archetype.work.v1', archetype: 'missing-role', stepGoal: 'do it' });
+    const out = await h!.handle(c);
+    expect(out.state).toBe('failed');
+    expect(String(out.error)).toMatch(/no SKILL.md for archetype "missing-role"/);
+  });
+
+  it('REFUSES a body addressed to a different archetype than the skill', async () => {
+    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.ontologist');
+    const { ctx: c } = ctx({ version: 'ap.archetype.work.v1', archetype: 'ontology-reviewer', stepGoal: 'do it' });
+    const out = await h!.handle(c);
+    expect(out.state).toBe('failed');
+    expect(String(out.error)).toMatch(/does not match the skill it was sent to/);
+  });
+
+  it('emits the deliverable as an artifact — a decline is still a result, not a crash', async () => {
+    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.ontologist');
+    const { ctx: c, artifacts } = ctx({ version: 'ap.archetype.work.v1', archetype: 'ontologist', stepGoal: 'Author the T-box' });
+    const out = await h!.handle(c);
+    expect(out.state).toBe('completed');
+    expect(artifacts[0]?.artifactKind).toBe('archetype.deliverable');
+    // No model configured in this test env ⇒ the specialist declines rather than inventing.
+    expect((artifacts[0]?.body as { declined?: boolean })?.declined).toBe(true);
   });
 });

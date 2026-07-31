@@ -14,6 +14,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
+import { resolveArchetypeSkill } from './archetype-skill.js';
 import {
   createA2aAgent,
   dispatchA2aRpc,
@@ -716,6 +717,11 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
+      // THE ARCHETYPE HARNESS. This agent also serves an A2A endpoint for every archetype its OWN
+      // library defines (`archetype.<slug>`), composed from that role's declared skills. Adding a
+      // role is a library write, not a redeploy. Consulted only on a registry miss, so it can never
+      // shadow a declared skill.
+      resolveHandler: resolveArchetypeSkill(this.env, agentSA),
       checks, handlers: [echo, makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).

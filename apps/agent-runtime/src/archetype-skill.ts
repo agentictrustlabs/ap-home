@@ -316,7 +316,7 @@ export interface ArchetypeBundle {
   /** The archetype package's own body — the role. */
   role: string;
   /** Skills named by the archetype, in declaration order, that were found. */
-  skills: { name: string; body: string }[];
+  skills: { name: string; description: string; body: string }[];
   /** Named but absent from the library. */
   missing: string[];
 }
@@ -359,12 +359,14 @@ export async function loadArchetypeBundle(
   }
   const { fm, body } = readFrontmatter(root);
   const names = declaredSkills(fm).filter((n) => n !== slug);   // an archetype naming itself is a loop
-  const skills: { name: string; body: string }[] = [];
+  const skills: { name: string; description: string; body: string }[] = [];
   const missing: string[] = [];
   for (const name of names) {
     const text = await readPackage(name);
-    if (text && text.trim()) skills.push({ name, body: readFrontmatter(text).body.trim() });
-    else missing.push(name);
+    if (text && text.trim()) {
+      const parsed = readFrontmatter(text);
+      skills.push({ name, description: (parsed.fm.description ?? '').trim(), body: parsed.body.trim() });
+    } else missing.push(name);
   }
   return { slug, role: body.trim() || root.trim(), skills, missing };
 }
@@ -380,10 +382,16 @@ export async function loadArchetypeBundle(
 export function composeArchetypePrompt(bundle: ArchetypeBundle): string {
   const parts = [bundle.role];
   if (bundle.skills.length) {
+    // AN INDEX FIRST, THEN THE BODIES. The intent arrives addressed to the ROLE, not to a skill, so
+    // choosing which skills the step needs is the harness's job to enable and the model's to do.
+    // A list of names and descriptions up front is what makes that choice possible — without it the
+    // model meets several thousand words of method with no map and applies whichever it read last.
     parts.push(
-      `\n\n---\n\n# Skills available to you\n\nThe following ${bundle.skills.length} skill(s) are part of this role. ` +
-      'Apply the ones relevant to the step you were given.',
+      `\n\n---\n\n# Skills available to you\n\nThis role composes the following ${bundle.skills.length} skill(s). ` +
+      'You were given a STEP, not a skill — decide which of these the step calls for, apply those, and ' +
+      'ignore the rest. Say in your deliverable which you used.\n',
     );
+    for (const s of bundle.skills) parts.push(`\n- **${s.name}**${s.description ? ` — ${s.description}` : ''}`);
     for (const s of bundle.skills) parts.push(`\n\n## Skill: ${s.name}\n\n${s.body}`);
   }
   if (bundle.missing.length) {
@@ -474,4 +482,68 @@ export async function runArchetypeTurn(
     const error = e instanceof Error ? e.message : String(e);
     return { deliverable: captured, plannerKind: kind, result: { steps: [], error } as unknown as RunResult, error };
   }
+}
+
+
+// ── THE HARNESS ────────────────────────────────────────────────────────────────────────────────
+//
+// An agent serves an A2A endpoint for a SET OF ARCHETYPES the way it serves one for itself. The
+// skill id names the role, the org's own library defines what that role is and which skills it
+// composes, and adding a role is a LIBRARY WRITE rather than a redeploy — which is what makes this
+// general purpose. `archetype.cluster-architect` on the ontology-engineering org and
+// `archetype.field-coordinator` on a global-mission org are the same code path.
+//
+// It plugs in through `resolveHandler`, consulted only when the static registry misses, so an
+// archetype can never shadow a skill the agent actually declared.
+
+import type { SkillHandler } from '@agenticprimitives/a2a';
+
+/** `archetype.ontologist` → `ontologist`; anything else → null. */
+export function archetypeSlugFromSkill(skill: string): string | null {
+  const m = /^archetype\.([a-z0-9][a-z0-9-]{1,60})$/.exec(skill ?? '');
+  return m ? m[1]! : null;
+}
+
+export interface ArchetypeHarnessEnv extends PlannerEnv, ArchetypeLibraryEnv {}
+
+/**
+ * Resolve an `archetype.<slug>` skill into a handler backed by this agent's own library.
+ *
+ * Returns undefined for a skill that is not an archetype id, which leaves the task rejected as
+ * `unknown skill` exactly as before. Whether the archetype EXISTS is not decided here — the handler
+ * discovers that when it reads the library, and a missing definition fails the task with a reason
+ * rather than being reported as an unknown skill. Those are different problems: "this agent does not
+ * host archetypes" and "this agent does not host THAT archetype" need different fixes.
+ */
+export function resolveArchetypeSkill(env: ArchetypeHarnessEnv, agentSA: string): (skill: string) => SkillHandler | undefined {
+  const read = archetypeSkillReader(env, agentSA);
+  return (skill: string): SkillHandler | undefined => {
+    const slug = archetypeSlugFromSkill(skill);
+    if (!slug) return undefined;
+    return {
+      skill,
+      handle: async (ctx) => {
+        const parsed = parseArchetypeWorkInput(ctx.input, slug);
+        if (!parsed.ok) return { state: 'failed', error: parsed.error };
+        let turn: ArchetypeTurnResult;
+        try {
+          turn = await runArchetypeTurn(env, { input: parsed.input, readSkillMd: read });
+        } catch (e) {
+          // A definition this agent cannot read is a FAILED task with the reason attached, never a
+          // silent default — the caller must be able to tell "you do not host this role" from "the
+          // role produced nothing".
+          return { state: 'failed', error: e instanceof Error ? e.message : String(e) };
+        }
+        if (!turn.deliverable) {
+          return { state: 'failed', error: turn.error ?? 'archetype turn produced no deliverable' };
+        }
+        await ctx.emitArtifact({
+          artifactKind: 'archetype.deliverable',
+          body: turn.deliverable,
+          bodyContentType: 'application/json',
+        });
+        return { state: 'completed' };
+      },
+    };
+  };
 }
