@@ -588,6 +588,85 @@ export function a2aSkillSelector(skill: string): Hex {
   return keccak256(toBytes(skill)).slice(0, 10) as Hex;
 }
 
+// ─── The ARCHETYPE DISPATCH grant (host org → calling org) ────────────────────────────────────
+
+/** The A2A method that addresses an archetype — `ontologist` → `archetype.ontologist`. Must derive
+ *  identically to demo-a2a's `archetypeMethod`, or a grant authorizes a method nobody calls. */
+export function archetypeMethod(slug: string): string {
+  return `archetype.${slug}`;
+}
+
+/** Selectors for a SET of archetypes. One entry per role, never a wildcard — see below. */
+export function archetypeMethodSelectors(slugs: readonly string[]): Hex[] {
+  return slugs.map((s) => a2aSkillSelector(archetypeMethod(s)));
+}
+
+/** 90 days. Operational rather than structural — this authorizes one org to spend another's agent
+ *  budget, so it is re-minted often rather than held for a year like a naming grant. */
+export const ARCHETYPE_GRANT_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
+
+/**
+ * The archetype dispatch delegation `host org → calling org`.
+ *
+ * DIRECTION IS THE THING TO GET RIGHT, and it is the opposite of intuition. The delegator is the org
+ * that HOSTS the archetypes — the one whose agent will do the work and pay for it — because in A2A
+ * the recipient's gate verifies a delegation whose delegator IS the recipient. This is an OPT-IN by
+ * the host ("ontology-engineering agrees to be asked"), exactly like `issueConsultabilityDelegation`
+ * one relationship over, where the member opts in to being consulted. A grant minted the other way
+ * round would let a caller authorize itself, which is the authority-in-a-message shape ADR-0041
+ * forbids, and the host's gate would reject it anyway.
+ *
+ *   allowedTargets = [the host org]      — non-replayable against any other agent,
+ *   allowedMethods = one selector PER ARCHETYPE  — never A2A_ANY_SKILL,
+ *   timestamp-bounded (90 days), on-chain revocable — revocation is immediate at the host's gate
+ *   regardless of what the caller has cached.
+ *
+ * PER-ARCHETYPE SELECTORS ARE THE WHOLE POINT of naming archetypes as distinct A2A methods. A host
+ * can grant its Ontologist and its Reviewer while withholding its Creation Planner, because
+ * `allowedMethods` is a `bytes4[]` the on-chain enforcer checks member-wise. A single method taking
+ * the role as an argument would have collapsed this to all-or-nothing, and the argument would have
+ * been caller-supplied.
+ *
+ * The host's A2A gate (`authorizeA2aMessage`) re-verifies all of it per message. This delegation IS
+ * the authority; nothing about the caller's identity or its endeavor grants it anything here.
+ */
+export async function issueArchetypeDispatchDelegation(
+  hostOrg: Address,
+  callerOrg: Address,
+  archetypeSlugs: readonly string[],
+  signHash: SignHash,
+  validitySeconds = ARCHETYPE_GRANT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const slugs = [...new Set(archetypeSlugs.map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  if (slugs.length === 0) {
+    // An empty method list would encode an allowedMethods caveat that permits NOTHING, which reads
+    // at the gate as a mysterious refusal rather than as a grant nobody meant to mint.
+    throw new Error('archetype dispatch grant needs at least one archetype — an empty grant authorizes nothing');
+  }
+  for (const s of slugs) {
+    if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(s)) throw new Error(`invalid archetype slug "${s}"`);
+  }
+  if (hostOrg.toLowerCase() === callerOrg.toLowerCase()) {
+    // Self-dispatch needs no grant (the host is already the principal), and minting one would put a
+    // revocable credential in the path of work that must never depend on it.
+    throw new Error('host and caller are the same org — an archetype dispatch grant is not needed for self-dispatch');
+  }
+
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([hostOrg])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms(archetypeMethodSelectors(slugs))),
+  ];
+  const d: Delegation = { delegator: hostOrg, delegate: callerOrg, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest);   // the HOST's custodian consents to being dispatched to
+  return d;
+}
+
 /**
  * The SERVICE-AGENT WIRE `identity → the relying service's KMS key` (ADR-0019; the agent-rule
  * `service-agent-signing.md`). What lets a service sign AS a named agent it does NOT custody.
