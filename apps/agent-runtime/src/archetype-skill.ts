@@ -420,6 +420,39 @@ export function composeArchetypePrompt(bundle: ArchetypeBundle): string {
   return parts.join('');
 }
 
+/**
+ * Why a turn ended with nothing posted — from the run, not from a hunch.
+ *
+ * Three causes look identical from outside and want opposite fixes: the tool call was CUT mid-emit
+ * (raise the budget or shrink the ask), the model answered in PROSE and never called the tool
+ * (a contract problem), or a step FAILED (a real error being swallowed). Naming which one it was
+ * is the difference between a fix and another guess.
+ */
+function describeEmptyCapture(result: RunResult): string {
+  const steps = result.steps ?? [];
+  const called = steps.map((s) => s.step?.toolId).filter(Boolean);
+  const failed = steps.filter((s) => !s.ok);
+  const parts = [
+    `turn completed without posting a deliverable (outcome=${result.outcome}, steps=${steps.length}`,
+    called.length ? `, tools=[${[...new Set(called)].join(', ')}]` : ', tools=[none]',
+    `)`,
+  ];
+  if (failed.length) {
+    parts.push(` — ${failed.length} step(s) FAILED: ${failed.map((f) => `${f.step?.toolId}: ${f.error ?? 'no message'}`).join('; ')}`);
+  } else if (!steps.length) {
+    // No step at all means the planner never produced a plan naming the tool. That is not a
+    // truncated artifact — it is the model declining, answering in prose, or the planning call
+    // itself being cut before it emitted a plan.
+    parts.push(' — the planner produced NO step, so the artifact was never attempted: the model answered in prose, declined, or the planning call was cut before it emitted a plan. Raising the output budget does not address this.');
+  } else if (!called.includes('post_archetype_deliverable')) {
+    parts.push(' — the deliverable tool was never called, so this is a contract failure rather than a size failure');
+  } else {
+    parts.push(' — the deliverable tool WAS called but captured nothing, which is the mid-emit cut: shrink the ask or split the turn (the output ceiling is already at the model maximum)');
+  }
+  if (result.error) parts.push(` [run error: ${result.error}]`);
+  return parts.join('');
+}
+
 export interface ArchetypeTurnResult {
   deliverable: ArchetypeDeliverableV1 | null;
   /** What actually answered — which skills composed the role, and which it declared but could not
@@ -501,9 +534,12 @@ export async function runArchetypeTurn(
     return {
       deliverable: captured, plannerKind: kind, result,
       bundle: { skills: bundle.skills.map((x) => x.name), missing: bundle.missing },
-      // Name the LIKELY cause. An empty capture almost always means the tool call was cut mid-emit
-      // by the output budget, and "completed without posting" sent me looking at authorization.
-      ...(captured ? {} : { error: 'turn completed without posting a deliverable — usually the answer exceeded the output budget and the tool call was cut mid-emit' }),
+      // REPORT WHAT THE RUN DID, DO NOT GUESS AT IT. This used to say "usually the answer exceeded
+      // the output budget", and that guess cost two debugging cycles: the budget was doubled 32k →
+      // 64k and the failure came back at the SAME 156s, which is the one thing a token ceiling
+      // cannot do. Everything needed to tell those cases apart was already in `result` and was
+      // being thrown away — the outcome, the steps that ran, the tools they called, their errors.
+      ...(captured ? {} : { error: describeEmptyCapture(result) }),
     };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
