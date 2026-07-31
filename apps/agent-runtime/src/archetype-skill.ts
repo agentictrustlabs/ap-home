@@ -46,6 +46,11 @@ import { EVIDENCE_MAX } from './endeavors.js';
  * whatever archetypes ITS library holds, on the same rail. Baking `oe.` in would have made the
  * ontology-engineering roster the only one that could ever exist.
  */
+/** How much context an archetype turn may carry. Far above `EVIDENCE_MAX` because this is the whole
+ *  working artifact (an assembled ontology runs past 200 KB), and the gateway now admits 1 MB
+ *  bodies. Kept as a named constant so the truncation notice can quote it. */
+export const ARCHETYPE_EXTRA_MAX = 400_000;
+
 export const archetypeMethod = (slug: string): string => `archetype.${slug}`;
 
 /** A capability IRI in a context's namespace — the context is the org's domain, not a constant. */
@@ -197,7 +202,28 @@ export function parseArchetypeWorkInput(raw: unknown, expectArchetype: string): 
       // first 4k, reported it as "truncated mid-sentence, no SHACL shapes present, 1 of 4 vocabulary
       // instances", and FAILED work that was complete. A caller cannot see this: the clip happens
       // after the request is accepted.
-      ...(str(o.extra, EVIDENCE_MAX) ? { extra: str(o.extra, EVIDENCE_MAX)! } : {}),
+      // SILENT TRUNCATION MADE A REVIEWER LIE. `extra` carries the material the specialist reasons
+      // over — for the Ontology Reviewer that is the whole assembled ontology. Capped at
+      // EVIDENCE_MAX (64k) it received the first third of a ~200 KB document, with NO indication
+      // that anything was missing, and reported "no duplicate or conflicting terms — PASS". Four
+      // classes were declared twice with contradictory definitions, all of them past the cut.
+      //
+      // A gate that cannot see the artifact does not fail open loudly; it passes quietly, which is
+      // worse than no gate. So: a much larger cap (the wire now admits 1 MB), and when it still
+      // does not fit, the payload SAYS SO in the text the model reads. Never trim in silence.
+      ...(() => {
+        const raw = typeof o.extra === 'string' ? o.extra : '';
+        if (!raw.trim()) return {};
+        if (raw.length <= ARCHETYPE_EXTRA_MAX) return { extra: raw };
+        return {
+          extra:
+            `!! TRUNCATED: you are seeing the first ${ARCHETYPE_EXTRA_MAX} of ${raw.length} characters ` +
+            `(${Math.round((ARCHETYPE_EXTRA_MAX / raw.length) * 100)}%). Any conclusion about ` +
+            `COMPLETENESS, DUPLICATION or CROSS-REFERENCES covers only what is below — say so ` +
+            `explicitly rather than reporting a clean result over material you were not shown.\n\n` +
+            raw.slice(0, ARCHETYPE_EXTRA_MAX),
+        };
+      })(),
     },
   };
 }
