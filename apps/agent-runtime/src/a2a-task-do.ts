@@ -1250,6 +1250,62 @@ export class A2aTaskDO {
   }
 
   /**
+   * DISPATCH ONE PLAN STEP TO A HOST ORG'S ARCHETYPE.
+   *
+   * The cross-org half of the archetype rail: this org asks another org's specialist to carry out
+   * one step, over standard `message/send`, addressed to the METHOD `archetype.<slug>`.
+   *
+   * SEND-TIME GRANT RE-READ, for the same reason consult does it: the host's opt-in is fetched fresh
+   * per send, so an on-chain revocation stops the NEXT dispatch rather than one after a cache
+   * expires. No grant, no dispatch, no exception (ADR-0013).
+   *
+   * What travels is MATERIAL — the step, the requesting domain's spec excerpts, the ontology so far.
+   * Never the specialist's instructions: the host composes those from its own library, and a caller
+   * that could supply them would be writing its own reviewer.
+   */
+  private async dispatchArchetypeWork(args: {
+    org: Address;
+    orgWire: IncomingDelegation;
+    host: Address;
+    archetype: string;
+    input: Record<string, unknown>;
+  }): Promise<{ taskId: Hex }> {
+    const grantResp = (await this.interactionsInternal(
+      args.org, 'internal.archetype.grant', { host: args.host.toLowerCase() },
+    )) as { wire?: IncomingDelegation };
+    if (!grantResp.wire) {
+      throw new Error(`no archetype dispatch grant from ${args.host} — the host organization has not opted in (or revoked)`);
+    }
+    const method = `archetype.${args.archetype}`;
+    const body = { ...args.input, version: 'ap.archetype.work.v1', archetype: args.archetype };
+
+    const idBytes = new Uint8Array(32);
+    crypto.getRandomValues(idBytes);
+    const messageId = (`0x${Array.from(idBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`) as Hex;
+    const createdAt = Math.floor(Date.now() / 1000);
+    const bodyHash = hashBody(body);
+    const digest = hashA2aMessage({ messageId, sender: args.org, skill: method, bodyHash, createdAt });
+    const signature = await this.signAsOrg(args.orgWire, digest);
+    const message = {
+      messageId, sender: args.org, skill: method,
+      bodyRef: { owner: args.host, recordType: 'pending' }, bodyHash, createdAt, signature,
+    };
+    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(args.host.toLowerCase()));
+    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${args.host.toLowerCase()}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: messageId, method: 'message/send',
+        params: { delegation: grantResp.wire, requester: args.org, message, input: body },
+      }),
+    }));
+    const out = (await resp.json().catch(() => ({}))) as { result?: { taskId?: Hex }; error?: { message?: string } };
+    if (out.error) throw new Error(`archetype dispatch rejected by ${args.host}: ${out.error.message ?? 'unknown'}`);
+    const taskId = out.result?.taskId;
+    if (!taskId) throw new Error('archetype dispatch returned no taskId');
+    return { taskId };
+  }
+
+  /**
    * `ask_member`'s executor: SEND-TIME grant re-read (member revoke is immediate — no grant, no
    * consult, no exception), the bounded ConsultRequest, the org-signed `message/send` to the
    * member's A2A endpoint (the shared demo-a2a host: every agent's endpoint terminates at its own

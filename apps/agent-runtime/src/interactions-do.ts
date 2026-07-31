@@ -132,6 +132,11 @@ const INBOX_ASSISTANT_SEEN_CAP = 300;
 // 327 §4b grant scope — no re-enable); the DO flag is the O(1) gate cache the trigger paths read.
 const AUTO_WORK_RESOURCE = 'conversation.topic:auto-work';
 const AUTO_WORK_FLAG_KEY = 'assistant.autowork.on';
+/** A HOST org's archetype dispatch grant, held by the CALLING org's DO and keyed by the host.
+ *  Mirrors `consultGrantRecordKey` one relationship over: the sender caches the recipient's opt-in
+ *  and re-reads it per send, so an on-chain revocation stops the next dispatch rather than the one
+ *  after the cache expires. */
+const archetypeGrantRecordKey = (hostSA: string): string => `archetype.grant:${hostSA.toLowerCase()}`;
 
 /** The coordination log stores short results INLINE as `urn:ap:evidence:<text>` /
  *  `urn:ap:outcome:<text>` refs — so a step's deliverable and an endeavor's closing note are already
@@ -859,7 +864,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1131,6 +1136,14 @@ export class InteractionsDO {
           const member = String(body.member ?? '').toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
+          return json({ ok: true, wire: rec?.wire ?? null });
+        }
+        if (op === 'internal.archetype.grant') {
+          // Send-time read of the HOST's dispatch opt-in, same stale-opt-in rule as consult: fetched
+          // fresh per send, so a host that revoked is refused here rather than at its own gate.
+          const host = String(body.host ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(host)) return json({ error: 'host (address) required' }, 400);
+          const rec = (await this.state.storage.get(archetypeGrantRecordKey(host))) as { wire?: IncomingDelegation } | undefined;
           return json({ ok: true, wire: rec?.wire ?? null });
         }
         // ── spec 334 §4 door 4 (W4) — the A2A intent door, in-Worker marker only. The A2aTaskDO
@@ -2204,6 +2217,92 @@ export class InteractionsDO {
       //    A2A_ANY_SKILL), timestamp caveat present, ERC-1271 + unrevoked on-chain. The MEMBER's
       //    A2A gate re-verifies everything again per message — this store is eligibility, never
       //    the authority (the delegation itself is).
+      if (op === 'archetype.grantPut' || op === 'archetype.grantStatus' || op === 'archetype.grantRevoke') {
+        // THE ARCHETYPE DISPATCH GRANT, stored by the CALLER against the HOST that minted it.
+        //
+        // Direction is the opposite of consult and worth restating: the delegator is the org that
+        // HOSTS the archetypes and will spend its agent budget, so this store holds someone else's
+        // opt-in to being asked. A steward of THIS org accepts it; nothing here can mint it.
+        //
+        // Verified before storage for the same reason consult is: an unverifiable wire stored now is
+        // a mysterious refusal at the host's gate later, and the caller would have no way to tell a
+        // bad grant from a host that changed its mind. This store is ELIGIBILITY, never authority —
+        // the host's A2A gate re-verifies all of it per message.
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only a steward of this organization may manage its archetype dispatch grants' }, 403);
+
+        if (op === 'archetype.grantStatus') {
+          const host = String(body.host ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(host)) return json({ error: 'host (address) required' }, 400);
+          // Metadata only — the wire itself never leaves the DO (capability hygiene).
+          const rec = (await this.state.storage.get(archetypeGrantRecordKey(host))) as
+            { grantedAt?: string; archetypes?: string[]; hash?: string } | undefined;
+          return json({ ok: true, granted: !!rec, grantedAt: rec?.grantedAt ?? null, archetypes: rec?.archetypes ?? [] });
+        }
+        if (op === 'archetype.grantRevoke') {
+          const host = String(body.host ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(host)) return json({ error: 'host (address) required' }, 400);
+          await this.state.storage.delete(archetypeGrantRecordKey(host));
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.archetype.grantRevoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-grant', id: `${principal}:${host}` } });
+          // Local forget only. The HOST's on-chain revocation is what actually withdraws authority;
+          // this just stops us presenting a wire we no longer intend to use.
+          return json({ ok: true, forgotten: true });
+        }
+
+        const wire = body.delegation as IncomingDelegation | undefined;
+        if (!wire?.signature || !wire.delegator || !wire.delegate) return json({ error: 'signed archetype dispatch delegation required' }, 400);
+        const host = wire.delegator.toLowerCase();
+        if (wire.delegate.toLowerCase() !== principal) return json({ error: 'archetype grant delegate must be this organization' }, 400);
+        if (host === principal) return json({ error: 'self-dispatch needs no grant — refusing to store one' }, 400);
+
+        const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+        const atEnf = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+        const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+        if (![tsEnf, atEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
+          return json({ error: 'archetype grant enforcers not configured — cannot verify the grant shape' }, 503);
+        }
+        const caveats = wire.caveats ?? [];
+        const byEnforcer = (addr: string) => caveats.find((c) => (c.enforcer ?? '').toLowerCase() === addr);
+        if (!byEnforcer(tsEnf)) return json({ error: 'archetype grant must be timestamp-bounded' }, 400);
+        const atCav = byEnforcer(atEnf);
+        const amCav = byEnforcer(amEnf);
+        if (!atCav?.terms || !amCav?.terms) return json({ error: 'archetype grant must carry allowedTargets + allowedMethods caveats' }, 400);
+        let selectors: string[] = [];
+        try {
+          const targets = decodeAllowedTargetsTerms(atCav.terms as Hex).map((t) => t.toLowerCase());
+          if (targets.length !== 1 || targets[0] !== host) {
+            return json({ error: 'archetype grant allowedTargets must name exactly the host organization' }, 400);
+          }
+          selectors = decodeAllowedMethodsTerms(amCav.terms as Hex).map((x) => x.toLowerCase());
+          if (selectors.some((x) => x === A2A_ANY_SKILL.toLowerCase())) {
+            return json({ error: 'archetype grant must never carry the any-skill sentinel' }, 400);
+          }
+          if (selectors.length === 0) return json({ error: 'archetype grant authorizes no method' }, 400);
+        } catch {
+          return json({ error: 'archetype grant caveat terms are undecodable' }, 400);
+        }
+        // Which archetypes those selectors mean, resolved by TRIAL DERIVATION over the names the
+        // caller says it expects. A selector is a one-way hash, so a grant cannot be read back into
+        // role names on its own — and storing selectors we cannot name would leave a steward unable
+        // to see what they accepted. Unmatched selectors stay authorized; they are simply unnamed.
+        const expect = Array.isArray(body.archetypes) ? body.archetypes.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter(Boolean) : [];
+        const named = expect.filter((slug) => selectors.includes(skillSelector(`archetype.${slug}`).toLowerCase()));
+
+        const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
+          return json({ error: 'archetype grant signature failed verification against the host organization' }, 403);
+        }
+        try {
+          const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+          if (revoked) return json({ error: 'archetype grant is already revoked on-chain' }, 403);
+        } catch { return json({ error: 'revocation check unavailable — grant not stored (fail-closed)' }, 503); }
+
+        const grantedAt = new Date().toISOString();
+        await this.state.storage.put(archetypeGrantRecordKey(host), { wire, host, grantedAt, hash: digest, archetypes: named, selectors });
+        await audit.write({ id: crypto.randomUUID(), timestamp: grantedAt, action: 'interactions.archetype.grantPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-grant', id: `${principal}:${host}` } });
+        return json({ ok: true, grantedAt, host, archetypes: named, methods: selectors.length });
+      }
       if (op === 'consult.grantPut' || op === 'consult.grantStatus' || op === 'consult.grantRevoke') {
         if (op === 'consult.grantPut') {
           const wire = body.delegation as IncomingDelegation | undefined;
