@@ -141,6 +141,13 @@ export async function draftEndeavorPlan(
   let captured: DraftStep[] = [];
   const invoke = async (toolId: string, args: Record<string, unknown>): Promise<unknown> => {
     if (toolId !== 'draft_plan') throw new Error(`unknown tool: ${toolId}`);
+    // DIAGNOSTIC: what the model ACTUALLY sent, before normalization. The capability chain has been
+    // misdiagnosed repeatedly by reasoning from code instead of observing — "the model answered
+    // none" and "the model sent an IRI my shape pin rejected" both collapse to '' and are
+    // indistinguishable from outside. One line makes them distinguishable.
+    console.log('[plan draft] raw capabilityIri:', JSON.stringify(
+      (Array.isArray(args.steps) ? args.steps : []).map((x) => (x as Record<string, unknown>)?.capabilityIri ?? null),
+    ));
     captured = sanitize(args.steps);
     return { ok: true, count: captured.length };
   };
