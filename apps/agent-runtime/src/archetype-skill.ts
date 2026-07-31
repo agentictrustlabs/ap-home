@@ -449,9 +449,13 @@ export async function runArchetypeTurn(
 
   const { planner, kind } = selectPlanner(env, {
     systemPrompt: withPlaybook(composeArchetypePrompt(bundle), ARCHETYPE_CONTRACT),
-    // The deliverable rides inside the tool call's input, so the output budget must cover the whole
-    // artifact — the same ceiling the endeavor work turn needed, for the same reason.
-    maxTokens: 16_000,
+    // The deliverable rides INSIDE the tool call's input, so the output budget must cover the whole
+    // artifact. 16k was enough until the prompts grew — a Domain Analyst intake with an alignment
+    // digest runs to thousands of words, and the tool call was cut mid-emit. That surfaces as
+    // "turn completed without posting a deliverable": an EMPTY CAPTURE WITH NO ERROR, because the
+    // model never finished the call it was making. Raised rather than guessed at again; well inside
+    // claude-sonnet-4-6's output limit, and the artifact size is what binds.
+    maxTokens: 32_000,
   });
 
   let captured: ArchetypeDeliverableV1 | null = null;
@@ -493,7 +497,9 @@ export async function runArchetypeTurn(
     return {
       deliverable: captured, plannerKind: kind, result,
       bundle: { skills: bundle.skills.map((x) => x.name), missing: bundle.missing },
-      ...(captured ? {} : { error: 'turn completed without posting a deliverable' }),
+      // Name the LIKELY cause. An empty capture almost always means the tool call was cut mid-emit
+      // by the output budget, and "completed without posting" sent me looking at authorization.
+      ...(captured ? {} : { error: 'turn completed without posting a deliverable — usually the answer exceeded the output budget and the tool call was cut mid-emit' }),
     };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
