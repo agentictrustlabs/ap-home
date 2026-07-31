@@ -450,12 +450,16 @@ export async function runArchetypeTurn(
   const { planner, kind } = selectPlanner(env, {
     systemPrompt: withPlaybook(composeArchetypePrompt(bundle), ARCHETYPE_CONTRACT),
     // The deliverable rides INSIDE the tool call's input, so the output budget must cover the whole
-    // artifact. 16k was enough until the prompts grew — a Domain Analyst intake with an alignment
-    // digest runs to thousands of words, and the tool call was cut mid-emit. That surfaces as
-    // "turn completed without posting a deliverable": an EMPTY CAPTURE WITH NO ERROR, because the
-    // model never finished the call it was making. Raised rather than guessed at again; well inside
-    // claude-sonnet-4-6's output limit, and the artifact size is what binds.
-    maxTokens: 32_000,
+    // artifact. This ceiling has now been raised four times — 1024 → 4k → 16k → 32k → 64k — and each
+    // time the symptom was identical and mute: "turn completed without posting a deliverable", an
+    // EMPTY CAPTURE WITH NO ERROR, because the model never finished the call it was making. 32k fell
+    // over on a 44 KB spec corpus after 155s.
+    //
+    // 64k is claude-sonnet-4-6's output CEILING, so this is the last raise available. The next time
+    // this fails the answer cannot be a bigger number — it has to be a smaller ask (bound what the
+    // goal requests) or a split turn. Note the budget covers reasoning AND the artifact together,
+    // which is why a long deliberation on a large corpus can exhaust it before a word is emitted.
+    maxTokens: 64_000,
   });
 
   let captured: ArchetypeDeliverableV1 | null = null;
