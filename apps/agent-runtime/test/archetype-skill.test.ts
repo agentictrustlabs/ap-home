@@ -16,6 +16,7 @@ import {
   capabilityIriFor,
   chooseArchetypeRoute,
   archetypeSlugFromMethod,
+  buildArchetypeCatalog,
   composeArchetypePrompt,
   loadArchetypeBundle,
   resolveArchetypeMethod,
@@ -405,5 +406,70 @@ describe('chooseArchetypeRoute', () => {
 
   it('holding no grants at all routes nothing', () => {
     expect(chooseArchetypeRoute([cap('tbox-modeling')], []).route).toBeNull();
+  });
+});
+
+// THE CATALOG — discovery, derived from the library so it cannot advertise what the harness would
+// fail to load. Not authority: publishing a role grants nobody anything.
+describe('buildArchetypeCatalog', () => {
+  const pkg = (name: string, fm: string) => ({ name, frontmatter: fm });
+  const lib = [
+    pkg('ontologist', 'name: ontologist\ndescription: Grounds and authors.\nskills: ontology-grounding, author-tbox-class'),
+    pkg('ontology-grounding', 'name: ontology-grounding\ndescription: Anchor a term.'),
+    pkg('author-tbox-class', 'name: author-tbox-class\ndescription: Author one class.'),
+    pkg('taxonomist', 'name: taxonomist\ndescription: Curates vocabularies.\nskills: curate-vocabulary'),
+    pkg('curate-vocabulary', 'name: curate-vocabulary\ndescription: SKOS scheme.'),
+  ];
+
+  it('lists roles as archetypes and everything else as skills', () => {
+    const c = buildArchetypeCatalog(lib);
+    expect(c.archetypes.map((a) => a.slug)).toEqual(['ontologist', 'taxonomist']);
+    expect(c.skills).toEqual(['author-tbox-class', 'curate-vocabulary', 'ontology-grounding']);
+  });
+
+  it('gives each archetype the METHOD a grant must authorize', () => {
+    const c = buildArchetypeCatalog(lib);
+    expect(c.archetypes[0]?.method).toBe('archetype.ontologist');
+  });
+
+  it('carries the composed skills and the roster capabilities', () => {
+    const o = buildArchetypeCatalog(lib).archetypes.find((a) => a.slug === 'ontologist')!;
+    expect(o.skills).toEqual(['ontology-grounding', 'author-tbox-class']);
+    expect(o.capabilities).toContain(capabilityIriFor('ontology-engineering', 'tbox-modeling'));
+  });
+
+  it('ADVERTISES missing skills rather than hiding them', () => {
+    // A role missing half its skills is a weaker specialist; a caller should see that before
+    // dispatching, not discover it in a thin deliverable.
+    const c = buildArchetypeCatalog([pkg('ontologist', 'name: ontologist\nskills: ontology-grounding, gone')]);
+    const o = c.archetypes[0]!;
+    expect(o.missingSkills).toEqual(['ontology-grounding', 'gone']);
+    expect(o.skills).toEqual([]);
+  });
+
+  it('honours the explicit marker for a role that composes nothing', () => {
+    const c = buildArchetypeCatalog([pkg('solo', 'name: solo\narchetype: true\ndescription: A role alone.')]);
+    expect(c.archetypes.map((a) => a.slug)).toEqual(['solo']);
+    expect(c.skills).toEqual([]);
+  });
+
+  it('never advertises a plain skill as a role — that would name a method nobody hosts', () => {
+    const c = buildArchetypeCatalog([pkg('author-tbox-class', 'name: author-tbox-class\ndescription: Author one class.')]);
+    expect(c.archetypes).toEqual([]);
+    expect(c.skills).toEqual(['author-tbox-class']);
+  });
+
+  it('works for a non-ontology domain, with no capabilities when the roster does not know it', () => {
+    const c = buildArchetypeCatalog([
+      pkg('field-coordinator', 'name: field-coordinator\ndescription: Assigns fields.\nskills: assign-partner'),
+      pkg('assign-partner', 'name: assign-partner\ndescription: Match a partner.'),
+    ]);
+    expect(c.archetypes[0]?.slug).toBe('field-coordinator');
+    expect(c.archetypes[0]?.capabilities).toEqual([]);
+    expect(c.archetypes[0]?.skills).toEqual(['assign-partner']);
+  });
+
+  it('an empty library is an empty catalog, not an error', () => {
+    expect(buildArchetypeCatalog([])).toEqual({ archetypes: [], skills: [] });
   });
 });

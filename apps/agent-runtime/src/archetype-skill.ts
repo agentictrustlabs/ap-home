@@ -605,3 +605,84 @@ export function chooseArchetypeRoute(
     ? { route: null, reason: `no host has granted an archetype for ${caps.join(', ')}` }
     : { route: null, reason: `no archetype answers for ${caps.join(', ')}` };
 }
+
+
+// ── THE ARCHETYPE CATALOG (discovery) ──────────────────────────────────────────────────────────
+//
+// DISCOVERY IS NOT AUTHORITY, and this is the file where that could most easily blur. A catalog says
+// what an organization HOSTS; a grant says what a caller may INVOKE. Publishing an archetype grants
+// nobody anything, and a caller holding a grant needs no catalog — the two answer different
+// questions and neither substitutes for the other.
+//
+// It is also not agent discovery. An agent card describes ONE agent; an org agent hosts N roles,
+// each with its own capabilities and composed skills, which the card's flat skill list cannot carry.
+// Hence a nested document.
+//
+// DERIVED FROM THE LIBRARY, never hand-maintained. A catalog that can disagree with the library
+// advertises a role whose definition the harness then fails to load — and that reaches the caller as
+// a rejected task rather than as "the advertisement was stale". Deriving it makes the two the same
+// fact by construction.
+
+/** One hosted archetype, as a caller browsing the org would see it. */
+export interface ArchetypeCatalogEntry {
+  slug: string;
+  /** The A2A method to address it — what a grant must authorize. */
+  method: string;
+  description: string;
+  /** Skills the role composes, by library package name. */
+  skills: string[];
+  /** Capability IRIs it answers for, when the roster knows this slug. */
+  capabilities: string[];
+  /** Declared skills that are NOT in this library — advertised honestly rather than hidden, because
+   *  a role missing half its skills is a weaker specialist and a caller should be able to see that
+   *  before dispatching to it. */
+  missingSkills: string[];
+}
+
+export interface ArchetypeCatalog {
+  archetypes: ArchetypeCatalogEntry[];
+  /** Package names present in the library that are skills rather than roles. */
+  skills: string[];
+}
+
+/** A library package reduced to what the catalog needs. */
+export interface LibraryPackageMeta {
+  name: string;
+  frontmatter: string;
+}
+
+/**
+ * Build the catalog from the org's library packages.
+ *
+ * A package is an ARCHETYPE when it says so (`archetype: true`) or when it composes skills
+ * (`skills:`). The explicit marker is authoritative; the implicit one exists so a library seeded
+ * before the marker still reads correctly, and so a role is never mistaken for one of its own
+ * skills — which would advertise `archetype.author-tbox-class` as a role nobody hosts.
+ */
+export function buildArchetypeCatalog(packages: readonly LibraryPackageMeta[]): ArchetypeCatalog {
+  const parsed = packages.map((p) => {
+    const { fm } = readFrontmatter(`---\n${p.frontmatter}\n---\n`);
+    return { name: p.name, fm };
+  });
+  const names = new Set(parsed.map((p) => p.name));
+  const roles = parsed.filter((p) => p.fm.archetype === 'true' || declaredSkills(p.fm).length > 0);
+  const roleNames = new Set(roles.map((r) => r.name));
+
+  const archetypes = roles
+    .filter((r) => isArchetypeSlug(r.name))
+    .map((r) => {
+      const declared = declaredSkills(r.fm).filter((n) => n !== r.name);
+      const def = archetypeBySlug(r.name);
+      return {
+        slug: r.name,
+        method: archetypeMethod(r.name),
+        description: (r.fm.description ?? '').replace(/^["']|["']$/g, '').trim(),
+        skills: declared.filter((n) => names.has(n)),
+        capabilities: def ? [...def.capabilities] : [],
+        missingSkills: declared.filter((n) => !names.has(n)),
+      };
+    })
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+
+  return { archetypes, skills: parsed.map((p) => p.name).filter((n) => !roleNames.has(n)).sort() };
+}
