@@ -89,62 +89,97 @@ export function OrgArchetypeGrantsPanel({
     }
   }
 
+  const ready = callerOk && !sameOrg && picked.length > 0;
+  // WHY the button is unavailable, said out loud. It read "Allow them to ask for no roles" and did
+  // nothing when clicked — disabled, but with no visual difference and no explanation, so the only
+  // signal was the word "no" buried mid-sentence.
+  const blocker = !callerOk ? 'Enter the agent address of the organization that may ask.'
+    : sameOrg ? 'That is this organization — it needs no grant to ask itself.'
+    : picked.length === 0 ? 'Tick at least one role to offer.'
+    : null;
+
   return (
-    <section style={{ display: 'grid', gap: '0.75rem' }}>
+    <section style={{ display: 'grid', gap: '0.85rem' }}>
       <div>
-        <h3 style={{ margin: 0 }}>Archetype dispatch</h3>
-        <p style={{ margin: '0.25rem 0 0', color: 'var(--color-text-muted)' }}>
+        <h3 className="subhead" style={{ margin: 0 }}>Archetype dispatch</h3>
+        <p className="manage-card-blurb">
           Let another organization send work to this org&apos;s specialists. They ask; this
           org&apos;s agent does the work and spends its own budget.
         </p>
       </div>
 
-      <label style={{ display: 'grid', gap: '0.25rem' }}>
-        <span>Organization that may ask (their agent address)</span>
+      <label style={{ display: 'grid', gap: '0.3rem' }}>
+        <span className="subhead" style={{ fontSize: '.85rem' }}>Organization that may ask (their agent address)</span>
         <input
           style={inputStyle}
           value={caller}
           placeholder="0x…"
+          spellCheck={false}
           onChange={(e) => setCaller(e.target.value)}
         />
       </label>
-      {caller && !callerOk && <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>That is not an agent address.</p>}
-      {sameOrg && <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>That is this organization — it needs no grant to ask itself.</p>}
 
-      <fieldset style={{ border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-8)', padding: '0.6rem' }}>
-        <legend style={{ padding: '0 0.3rem' }}>Roles they may ask for</legend>
+      <div>
+        <span className="subhead" style={{ fontSize: '.85rem' }}>Roles they may ask for</span>
         {archetypes.length === 0 && (
-          <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>
-            This organization&apos;s library defines no archetypes yet.
-          </p>
+          <p className="manage-card-blurb">This organization&apos;s library defines no archetypes yet.</p>
         )}
-        {archetypes.map((a) => (
-          <label key={a.slug} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', padding: '0.2rem 0' }}>
-            <input type="checkbox" checked={picked.includes(a.slug)} onChange={() => toggle(a.slug)} />
-            <span>
-              <code>{a.slug}</code>
-              {a.description && <span style={{ color: 'var(--color-text-muted)' }}> — {a.description}</span>}
-            </span>
-          </label>
-        ))}
-      </fieldset>
+        <div style={{ display: 'grid', gap: '.5rem', marginTop: '.4rem' }}>
+          {archetypes.map((a) => (
+            // Grid rather than flex-with-baseline: the descriptions are long, and baseline
+            // alignment dropped the checkbox to the last wrapped line instead of the first.
+            <label
+              key={a.slug}
+              style={{
+                display: 'grid', gridTemplateColumns: '1.1rem 1fr', gap: '.55rem',
+                alignItems: 'start', cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={picked.includes(a.slug)}
+                onChange={() => toggle(a.slug)}
+                style={{ marginTop: '.25rem' }}
+              />
+              <span>
+                <code>{a.slug}</code>
+                {a.description && (
+                  <span className="manage-card-blurb" style={{ display: 'block', margin: '.15rem 0 0' }}>
+                    {a.description}
+                  </span>
+                )}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
 
-      <button
-        type="button"
-        onClick={() => void grant()}
-        disabled={busy || !callerOk || sameOrg || picked.length === 0}
-        style={{ ...inputStyle, cursor: busy ? 'progress' : 'pointer' }}
-      >
-        {busy ? 'Signing…' : `Allow them to ask for ${picked.length || 'no'} role${picked.length === 1 ? '' : 's'}`}
-      </button>
+      <div style={{ display: 'flex', gap: '.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className={ready ? 'btn-primary' : 'btn'}
+          onClick={() => void grant()}
+          disabled={busy || !ready}
+          style={{ opacity: ready || busy ? 1 : 0.6 }}
+        >
+          {busy
+            ? 'Signing…'
+            : picked.length === 0
+              ? 'Allow them to ask'
+              : `Allow them to ask for ${picked.length} role${picked.length === 1 ? '' : 's'}`}
+        </button>
+        {!busy && blocker && <span className="manage-card-blurb">{blocker}</span>}
+      </div>
 
-      <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>
+      <p className="manage-card-blurb" style={{ margin: 0 }}>
         Valid 90 days. To withdraw it before then, revoke the delegation on-chain — removing it here
         would only stop them presenting it, not stop this org honouring it.
       </p>
 
       {note && (
-        <p style={{ margin: 0, color: note.ok ? 'inherit' : 'var(--color-danger, crimson)' }}>{note.text}</p>
+        <p className="manage-card-blurb" style={{ margin: 0, color: note.ok ? undefined : 'var(--color-danger, crimson)' }}>
+          {note.text}
+        </p>
       )}
     </section>
   );
