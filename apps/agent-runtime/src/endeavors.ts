@@ -540,7 +540,11 @@ function parseEndeavorId(raw: unknown): string | null {
  *  EXPORTED because the work skill clips the deliverable BEFORE it ever reaches here. That clip was a
  *  separate 4000 and this ceiling never governed anything on that path — raising this number alone
  *  changed nothing. One constant now, so the two cannot drift again. */
-export const EVIDENCE_MAX = 64_000;
+// 256k, not 64k. An ontology CHANGE PLAN is a deliverable, not a note: Update produced one and it
+// arrived at EXACTLY 64,000 characters — cut mid-triple, so the editor refused to save it and the
+// number was the only clue. The gateway admits 1 MB and the archetype path already carries 400k;
+// this was the last 64k cap in the chain.
+export const EVIDENCE_MAX = 256_000;
 
 function parseEvidenceRefs(note: unknown): EntityRef[] {
   const text = String(note ?? '').trim();

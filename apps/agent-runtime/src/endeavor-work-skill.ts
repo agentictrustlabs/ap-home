@@ -199,8 +199,11 @@ function deterministicOutput(input: EndeavorStepWorkInput, kind: 'anthropic' | '
  */
 function sanitize(raw: unknown): { text: string; truncated: boolean } {
   const s = String(raw ?? '').trim();
+  // SAY SO IN THE TEXT, not only in a flag. The flag is read by the worker; the person reading the
+  // deliverable in an editor sees only the bytes. A clip that announces itself is a clip someone can
+  // act on — a silent one just looks like the model stopped mid-sentence.
   return s.length > EVIDENCE_MAX
-    ? { text: s.slice(0, EVIDENCE_MAX), truncated: true }
+    ? { text: `${s.slice(0, EVIDENCE_MAX)}\n\n# !! TRUNCATED at ${EVIDENCE_MAX} of ${s.length} characters — this document is INCOMPLETE and must not be saved as-is.`, truncated: true }
     : { text: s, truncated: false };
 }
 
