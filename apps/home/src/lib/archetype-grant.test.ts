@@ -11,6 +11,7 @@ import {
   archetypeMethod,
   archetypeMethodSelectors,
   issueArchetypeDispatchDelegation,
+  issueOrgConsultRoutingDelegation,
 } from './delegation';
 
 const HOST = '0x1111111111111111111111111111111111111111' as const;
@@ -103,5 +104,44 @@ describe('issueArchetypeDispatchDelegation', () => {
     const a = await issueArchetypeDispatchDelegation(HOST, CALLER, ['ontologist'], sign);
     const b = await issueArchetypeDispatchDelegation(HOST, CALLER, ['ontologist'], sign);
     expect(a.salt).not.toBe(b.salt);
+  });
+});
+
+// THE ORG SIGNING WIRE — the second credential, and the one that was missed.
+//
+// The dispatch GRANT says a caller may invoke a method. This wire says the org can SIGN AS ITSELF
+// for that method. A caller holding a perfect grant still cannot dispatch if its own wire names only
+// discussion.consult: the host's gate verifies the session-wrapped signature against the wire and
+// finds the method absent. Grants without this are a credential that verifies nowhere.
+describe('issueOrgConsultRoutingDelegation — archetype methods', () => {
+  const ORG = '0x3333333333333333333333333333333333333333' as const;
+  const KEY = '0x4444444444444444444444444444444444444444' as const;
+  const methods = async (archetypes?: string[]) => {
+    const d = await issueOrgConsultRoutingDelegation(ORG, KEY, sign, undefined, archetypes);
+    const amCav = d.caveats[2]!;
+    return (decodeAbiParameters([{ type: 'bytes4[]' }], amCav.terms)[0] as readonly string[]).map((x) => x.toLowerCase());
+  };
+
+  it('still names consult when no archetypes are given — the existing rail is unchanged', async () => {
+    const m = await methods();
+    expect(m).toHaveLength(1);
+    expect(m[0]).toBe(keccak256(toBytes('discussion.consult')).slice(0, 10).toLowerCase());
+  });
+
+  it('adds the archetype methods ALONGSIDE consult, in one wire', async () => {
+    const m = await methods(['ontologist', 'taxonomist']);
+    expect(m).toHaveLength(3);
+    expect(m).toContain(keccak256(toBytes('discussion.consult')).slice(0, 10).toLowerCase());
+    expect(m).toContain(archetypeMethodSelectors(['ontologist'])[0]!.toLowerCase());
+    expect(m).toContain(archetypeMethodSelectors(['taxonomist'])[0]!.toLowerCase());
+  });
+
+  it('never carries the any-skill sentinel — every method is named', async () => {
+    for (const x of await methods(['ontologist'])) expect(x).not.toBe('0xffffffff');
+  });
+
+  it('normalizes, de-duplicates and drops malformed slugs rather than minting junk selectors', async () => {
+    const m = await methods(['Ontologist', ' ontologist ', 'Not A Slug', '../evil', '']);
+    expect(m).toHaveLength(2);           // consult + ontologist once
   });
 });

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { issueOrgConsultRoutingDelegation, toWire, type DelegationWire } from '../../../lib/delegation';
+import { DEFAULT_DISPATCH_ARCHETYPES, issueOrgConsultRoutingDelegation, toWire, type DelegationWire } from '../../../lib/delegation';
 import { BusyButton } from '../../shared/BusyButton';
 import { Tabs, type TabItem } from '../../shared/ui';
 import { SectionShell } from '../SectionShell';
@@ -96,7 +96,12 @@ export function OrgAgentSection({ orgSa }: { orgSa: string }) {
         if (!st.sessionKey) throw new Error('routing is unavailable — the interactions-session key is not provisioned on this deployment');
         const via = resolveVia(homeProfile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
-        delegation = toWire(await issueOrgConsultRoutingDelegation(communityId as Address, st.sessionKey as Address, sign));
+        // The wire covers consult AND the archetype methods this org may dispatch to. Minting it
+        // consult-only is what made a perfectly good dispatch grant unusable: the host's gate
+        // verifies the signature against the wire and finds the method absent.
+        delegation = toWire(await issueOrgConsultRoutingDelegation(
+          communityId as Address, st.sessionKey as Address, sign, undefined, DEFAULT_DISPATCH_ARCHETYPES,
+        ));
       }
 
       let carriedWire = false;

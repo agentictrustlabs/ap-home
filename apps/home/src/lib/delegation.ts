@@ -606,6 +606,24 @@ export function archetypeMethodSelectors(slugs: readonly string[]): Hex[] {
 export const ARCHETYPE_GRANT_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
 
 /**
+ * Archetype methods an org's signing wire covers by default — the ontology-engineering roster,
+ * which is the only one deployed.
+ *
+ * A COUPLING WORTH KNOWING: this wire is minted at the routing-enable ceremony, but the GRANTS that
+ * make a method usable can arrive later. A grant for a role outside this list is a credential the
+ * org cannot sign for, and the failure appears at the HOST's gate as an invalid signature rather
+ * than as "re-run your ceremony". Naming the roster up front makes the common case work without a
+ * re-mint; an org dispatching to a role outside it must re-enable routing to widen its wire.
+ *
+ * Listing a method here grants nothing. The wire says what this org CAN SIGN FOR; the host's grant
+ * says what it MAY invoke. Both are required, and neither implies the other.
+ */
+export const DEFAULT_DISPATCH_ARCHETYPES: readonly string[] = [
+  'domain-analyst', 'cluster-architect', 'information-architect', 'ontologist', 'taxonomist',
+  'ontology-reviewer', 'ontology-creation-planner', 'spec-librarian', 'exemplar-curator',
+];
+
+/**
  * The archetype dispatch delegation `host org → calling org`.
  *
  * DIRECTION IS THE THING TO GET RIGHT, and it is the opposite of intuition. The delegator is the org
@@ -827,6 +845,23 @@ export async function issueOrgConsultRoutingDelegation(
   interactionsSessionKey: Address,
   signHash: SignHash,
   validitySeconds = CONSULT_GRANT_VALIDITY_SECONDS,
+  /**
+   * Archetype roles this org may DISPATCH TO on other organizations. Their methods join the consult
+   * selector in the SAME wire.
+   *
+   * TWO CREDENTIALS ARE INVOLVED AND THEY ARE EASY TO CONFLATE — this is the one that was missed.
+   * The archetype dispatch GRANT (host → caller) says the caller MAY invoke a method. This wire says
+   * the org CAN SIGN AS ITSELF for that method. A caller holding a perfect grant still cannot
+   * dispatch if its own wire names only `discussion.consult`, because the host's gate verifies the
+   * session-wrapped signature against the wire and finds the method absent. Grants without this are
+   * a credential that verifies nowhere.
+   *
+   * One wire rather than two, because a second wire for the same delegate would double the ceremony
+   * and the revocation surface for no separation — `allowedMethods` already enumerates, and
+   * `checkSessionWireShape` pins by MEMBERSHIP, so naming more methods narrows nothing about consult.
+   * Still never the any-skill sentinel: every method is named.
+   */
+  dispatchArchetypes: readonly string[] = [],
 ): Promise<Delegation> {
   const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -835,7 +870,11 @@ export async function issueOrgConsultRoutingDelegation(
   const caveats: Caveat[] = [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms([orgSA])),
-    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([consultSkillSelector()])),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([
+      consultSkillSelector(),
+      ...archetypeMethodSelectors([...new Set(dispatchArchetypes.map((a) => a.trim().toLowerCase()).filter(Boolean))]
+        .filter((a) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(a))),
+    ])),
   ];
   const d: Delegation = { delegator: orgSA, delegate: interactionsSessionKey, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
