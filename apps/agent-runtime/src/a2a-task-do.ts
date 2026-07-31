@@ -14,7 +14,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
-import { resolveArchetypeMethod } from './archetype-skill.js';
+import { buildArchetypeCatalog, resolveArchetypeMethod, type LibraryPackageMeta } from './archetype-skill.js';
 import {
   createA2aAgent,
   dispatchA2aRpc,
@@ -717,6 +717,13 @@ export class A2aTaskDO {
       // `internal.deliver` — the serialized single writer; the public route refuses internal.*).
       // spec 329 §3 — the `discussion.consult` skill (person agents; delegation-gated: reachable
       // ONLY under a member-signed consultability grant naming the org + this skill's selector).
+      // ADVERTISE the archetypes this org hosts on its agent card, so a steward can discover the
+      // METHOD to request a grant for. Served from a CACHE because `agentCard()` is synchronous and
+      // the catalog comes from the library — a discovery document tolerates being seconds stale, and
+      // the alternative (an async card) is a breaking change to every caller for no gain here.
+      // Empty until the first refresh lands, which reads as "advertises no archetypes" — true of
+      // most agents, and self-correcting for the ones it is not.
+      dynamicSkills: () => { this.refreshArchetypeCatalog(agentSA); return this.archetypeMethods; },
       // THE ARCHETYPE HARNESS. This agent also serves an A2A endpoint for every archetype its OWN
       // library defines — the METHOD `archetype.<slug>` addresses a role, composed from that role's
       // declared SKILL.md packages. Adding a role is a library write, not a redeploy. Consulted only
@@ -1247,6 +1254,25 @@ export class A2aTaskDO {
     const signRaw = signer.sign;
     if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign');
     return wrapSessionSignature(orgWire, await signRaw({ hash: digest }));
+  }
+
+  /** Methods this agent advertises for the archetypes its library defines. Last good value: a
+   *  failed refresh keeps the previous list rather than un-advertising roles that still exist. */
+  private archetypeMethods: string[] = [];
+  private archetypeCacheAt = 0;
+
+  /** Fire-and-forget catalog refresh, rate-limited. Never awaited by the card — a discovery read
+   *  must not make serving the card depend on the library being reachable. */
+  private refreshArchetypeCatalog(agentSA: string): void {
+    if (Date.now() - this.archetypeCacheAt < 60_000) return;
+    this.archetypeCacheAt = Date.now();
+    void (async () => {
+      try {
+        const r = await this.interactionsInternal(agentSA, 'internal.library.packages', {});
+        const packages = ((r as { packages?: LibraryPackageMeta[] }).packages ?? []);
+        this.archetypeMethods = buildArchetypeCatalog(packages).archetypes.map((a) => a.method);
+      } catch { /* keep the last good list — an unreachable library is not evidence a role is gone */ }
+    })();
   }
 
   /**
