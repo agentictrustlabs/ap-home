@@ -1371,8 +1371,8 @@ export class A2aTaskDO {
     if (!/^0x[0-9a-f]{40}$/.test(host)) return { ok: false, error: 'host (agent address) required' };
     if (!String(o.stepGoal ?? '').trim()) return { ok: false, error: 'stepGoal required' };
 
-    const agentSA = (await this.state.storage.get('agentSA')) as string | undefined;
-    const principal = (agentSA ?? '').toLowerCase();
+    // AGENT_SA_KEY, the key the DO actually rehydrates from for alarm() — not a guessed literal.
+    const principal = ((await this.state.storage.get<string>(AGENT_SA_KEY)) ?? '').toLowerCase();
     if (!principal) return { ok: false, error: 'this agent has no identity' };
 
     // Bound 1: do we hold a grant from that host, for that archetype?
@@ -1416,8 +1416,7 @@ export class A2aTaskDO {
     if (!/^0x[0-9a-f]{40}$/.test(host) || !/^0x[0-9a-f]{64}$/i.test(taskId)) {
       return { ok: false, error: 'host and taskId required' };
     }
-    const agentSA = (await this.state.storage.get('agentSA')) as string | undefined;
-    const principal = (agentSA ?? '').toLowerCase();
+    const principal = ((await this.state.storage.get<string>(AGENT_SA_KEY)) ?? '').toLowerCase();
     const orgWire = await this.interactionsInternal(principal, 'internal.consult.orgWire', {})
       .then((r) => ((r as { wire?: IncomingDelegation | null }).wire ?? null))
       .catch(() => null);
