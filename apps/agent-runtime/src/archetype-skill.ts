@@ -184,14 +184,20 @@ export function parseArchetypeWorkInput(raw: unknown, expectArchetype: string): 
     input: {
       version: 'ap.archetype.work.v1',
       archetype,
-      stepGoal: stepGoal.slice(0, 4_000),
+      stepGoal: stepGoal.slice(0, 16_000),
       ...(str(o.endeavorId, 120) ? { endeavorId: str(o.endeavorId, 120)! } : {}),
       ...(str(o.stepId, 120) ? { stepId: str(o.stepId, 120)! } : {}),
       ...(str(o.capabilityIri, 300) ? { capabilityIri: str(o.capabilityIri, 300)! } : {}),
       ...(str(o.specDigest, EVIDENCE_MAX) ? { specDigest: str(o.specDigest, EVIDENCE_MAX)! } : {}),
       ...(paths?.length ? { specPaths: paths } : {}),
       ...(str(o.currentTurtle, EVIDENCE_MAX) ? { currentTurtle: str(o.currentTurtle, EVIDENCE_MAX)! } : {}),
-      ...(str(o.extra, 4_000) ? { extra: str(o.extra, 4_000)! } : {}),
+      // SAME CEILING AS THE OTHER MATERIAL. `extra` was capped at 4k while specDigest and
+      // currentTurtle got 64k — but it is where the package map, the alignment digest and the
+      // assembled ontology for review all travel. So a reviewer sent a 1300-line ontology read the
+      // first 4k, reported it as "truncated mid-sentence, no SHACL shapes present, 1 of 4 vocabulary
+      // instances", and FAILED work that was complete. A caller cannot see this: the clip happens
+      // after the request is accepted.
+      ...(str(o.extra, EVIDENCE_MAX) ? { extra: str(o.extra, EVIDENCE_MAX)! } : {}),
     },
   };
 }
