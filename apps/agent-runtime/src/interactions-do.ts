@@ -1357,7 +1357,16 @@ export class InteractionsDO {
                     try {
                       evidence = done?.evidenceRefs?.map((r) => decodeInlineRef((r as { iri?: string }).iri)).find((t): t is string => !!t) ?? null;
                     } catch { /* enrichment only */ }
-                    return { stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!done, ...(evidence ? { evidence } : {}) };
+                    // WHAT THE STEP NEEDS, carried through. This projection is a SECOND one — the
+                    // `planProjection` fix did not reach it — and it was the last place the
+                    // capability was dropped: correct from the model, through the command, the
+                    // event and stored state, then flattened away one hop before the reader. Two
+                    // views of the same plan is why fixing one looked like fixing none.
+                    return {
+                      stepId: s.stepId, kind: s.kind, description: s.description, satisfied: !!done,
+                      ...(s.capabilityRequirements?.length ? { capabilityRequirements: s.capabilityRequirements } : {}),
+                      ...(evidence ? { evidence } : {}),
+                    };
                   }),
                 }
               : null,
