@@ -744,8 +744,21 @@ export async function issueServiceAgentWireDelegation(
  *
  *  Only `endeavor.request` is a registered skill today. `adoptPlan` is steward-gated at the reducer
  *  and `state` has no handler yet, so a message naming either is rejected as `unknown skill` — inert,
- *  not dangerous, and the reason the grant is minted with room for them. */
-export const OPERATIONAL_INTENT_SKILLS = ['endeavor.request', 'endeavor.adoptPlan', 'endeavor.state'] as const;
+ *  not dangerous, and the reason the grant is minted with room for them.
+ *
+ *  THE RELAY PAIR lets a holder ask this org to dispatch to a SPECIALIST on another organization,
+ *  and read the result back. It does NOT widen where the org can reach: the relay forwards only to
+ *  hosts and archetypes the org already holds its own grant for, so a holder gains the org's reach
+ *  and never more. Two methods because the holder is not a party to the task the host creates.
+ *
+ *  This list is GLOBAL — every app that mints an operational grant mints these too. Acceptable
+ *  because a selector naming a skill the holder cannot usefully invoke is inert (see above), and
+ *  because per-app selector sets would put the authorization surface in a config file where a typo
+ *  is silent. Revisit if an app ever needs a NARROWER grant than this. */
+export const OPERATIONAL_INTENT_SKILLS = [
+  'endeavor.request', 'endeavor.adoptPlan', 'endeavor.state',
+  'archetype.relay', 'archetype.relayResult',
+] as const;
 
 /** 4-byte A2A offering selectors for those skills — keccak256(utf8(skill))[:4], the same derivation
  *  `consultSkillSelector` uses and the same one `authorizeA2aMessage` decodes against. */
