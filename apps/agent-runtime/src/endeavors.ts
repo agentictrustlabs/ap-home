@@ -384,6 +384,12 @@ const SIG_SCHEMES = new Set(['erc1271', 'erc6492', 'ecdsa', 'webauthn']);
 const ASSERTION_STRENGTHS = new Set(['declared', 'claimed', 'demonstrated']);
 
 export function parsePlanSteps(raw: unknown): PlanStepV1[] | null {
+  // Boundary 2 of 2 — see the propose-side log. In vs out, so a strip here is visible rather than
+  // inferred; this parser has already dropped this field once, silently.
+  if (Array.isArray(raw)) {
+    console.log('[parsePlanSteps] in:',
+      JSON.stringify(raw.map((x) => (x as Record<string, unknown>)?.capabilityRequirements ?? null)));
+  }
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const steps: PlanStepV1[] = [];
   for (const s of raw) {
@@ -413,6 +419,7 @@ export function parsePlanSteps(raw: unknown): PlanStepV1[] | null {
       ...(caps.length ? { capabilityRequirements: caps } : {}),
     });
   }
+  console.log('[parsePlanSteps] out:', JSON.stringify(steps.map((x) => x.capabilityRequirements ?? null)));
   return steps;
 }
 

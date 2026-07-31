@@ -971,9 +971,7 @@ export class A2aTaskDO {
       try {
         const playbook = await this.readOrgPlaybook(principal);
         const draft = await draftEndeavorPlan(this.env, { principal, endeavorId, goal: String(p.goal).trim(), playbook });
-        const out = (await this.interactionsInternal(principal, 'internal.endeavor.proposePlan', {
-          endeavorId,
-          steps: draft.steps.map((s, i) => ({
+        const proposedSteps = draft.steps.map((s, i) => ({
             stepId: `step_${i + 1}_${crypto.randomUUID().slice(0, 8)}`,
             kind: s.kind,
             description: s.description,
@@ -983,7 +981,14 @@ export class A2aTaskDO {
             ...(s.capabilityIri
               ? { capabilityRequirements: [{ capabilityIri: s.capabilityIri, minAssertionStrength: 'declared' as const }] }
               : {}),
-          })),
+          }));
+        // Boundary 1 of 2: what we SEND to proposePlan. Bracketed with the parse-side log so the
+        // side that receives the field and returns it stripped is identifiable in one dispatch.
+        console.log('[plan propose] sending capabilityRequirements:',
+          JSON.stringify(proposedSteps.map((s) => (s as Record<string, unknown>).capabilityRequirements ?? null)));
+        const out = (await this.interactionsInternal(principal, 'internal.endeavor.proposePlan', {
+          endeavorId,
+          steps: proposedSteps,
         })) as { ok?: boolean; error?: string; planId?: string; revision?: number };
         // Auto-work: the SAME turn that drafted the plan now adopts + executes it (the agent does the
         // work). Off ⇒ draft-only, a steward reviews/adopts. Autopilot failures never fail the draft.
