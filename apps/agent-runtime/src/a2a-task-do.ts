@@ -14,6 +14,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
+import { checkSessionWireShape } from './session-wire.js';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
 import {
   createA2aAgent,
@@ -1361,6 +1362,26 @@ export class A2aTaskDO {
       return null;
     }
     const { host, archetype } = decision.route;
+
+    // DOES THE WIRE ACTUALLY COVER THIS METHOD? Presence is not scope. An org whose wire still names
+    // only `discussion.consult` — every org that has not re-run routing-enable since the wire was
+    // widened — would otherwise dispatch and be refused at the HOST's gate, turning a local
+    // ceremony gap into a failed step on someone else's agent. The same membership check the host
+    // will apply, applied here first, so the answer is "run it locally" rather than a rejection.
+    const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+    const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+    const scopeErr = [tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))
+      ? checkSessionWireShape(args.orgWire, { timestamp: tsEnf, allowedMethods: amEnf },
+          Math.floor(Date.now() / 1000), { skill: `archetype.${archetype}` })
+      : 'enforcers not configured — cannot check the wire scope';
+    if (scopeErr) {
+      // Named loudly: the fix is a ceremony (re-enable routing to widen the wire) and nothing else
+      // would surface it — the step would just quietly keep running locally forever.
+      console.log('[archetype route] org wire does not cover this method — running locally:',
+        args.endeavorId, args.step.stepId, `archetype.${archetype}`, scopeErr);
+      return null;
+    }
+
     const key = this.archetypeDispatchKey(args.endeavorId, args.step.stepId);
     const prior = (await this.state.storage.get(key)) as { taskId?: Hex } | undefined;
 
