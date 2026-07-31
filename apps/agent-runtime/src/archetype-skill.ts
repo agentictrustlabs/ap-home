@@ -7,18 +7,21 @@
 // caller put them.
 //
 // Here the specialist is a real recipient. An org that needs T-box work sends `message/send` to the
-// ontology-engineering org with skill `oe.ontologist`; that org's DO verifies the message against a
-// delegation and runs the turn under ITS OWN SKILL.md. The division of ownership is the point:
+// ontology-engineering org addressing the METHOD `archetype.ontologist`; that org's DO verifies the
+// message against a delegation and runs the turn under ITS OWN definition. Ownership is the point:
 //
 //   the TARGET domain org  owns the endeavor, its specs/, and the working ontology;
 //   the ONTOLOGY-ENGINEERING org owns the archetypes' SKILL.md and runs their turns.
 //
-// ONE SKILL ID PER ARCHETYPE, which is a security decision rather than a naming one. A2A authorizes
-// by selector: `allowedMethods` is a list of `bytes4` skill selectors, so one id per archetype lets
-// a grant say "you may ask my Ontologist and my Reviewer" and withhold the rest. A single
-// `oe.archetype` skill taking the archetype as an argument would collapse that to all-or-nothing,
-// and the argument would be caller-supplied — exactly the authority-in-a-message shape ADR-0041
-// forbids.
+// ONE METHOD PER ARCHETYPE, which is a security decision rather than a naming one. A2A authorizes by
+// selector: `allowedMethods` is a list of `bytes4` selectors, so one method per archetype lets a
+// grant say "you may ask my Ontologist and my Reviewer" and withhold the rest. A single
+// `archetype` method taking the role as an argument would collapse that to all-or-nothing, and the
+// argument would be caller-supplied — exactly the authority-in-a-message shape ADR-0041 forbids.
+//
+// VOCABULARY, because two meanings of "skill" meet in this file. The A2A wire field is `skill` and
+// holds a METHOD that addresses a role. A SKILL is a SKILL.md package in the org's library. The
+// method names the role; the skills are what the harness composes behind it.
 //
 // The SKILL.md is a HARNESS READ on the recipient's side, never carried in the request. A caller
 // that could supply the specialist's instructions would be writing its own reviewer.
@@ -27,15 +30,23 @@ import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js
 import { EVIDENCE_MAX } from './endeavors.js';
 
 /**
- * A2A skill id for an archetype slug — `ontologist` → `archetype.ontologist`.
+ * The A2A METHOD that addresses an archetype — `ontologist` → `archetype.ontologist`.
+ *
+ * "Method", not "skill id", and the distinction is load-bearing in THIS repo: a skill here is a
+ * SKILL.md package in a library, and what this returns is not one. It is an addressable role. The
+ * authorization layer agrees — `skillSelector` reduces this string to a `bytes4` checked by the
+ * ALLOWED_METHODS enforcer, the same shape as a Solidity function selector. A2A's wire field is
+ * named `skill`, so quoting the protocol still says skill; our own vocabulary should not.
+ *
+ * The method names the ROLE; the SKILL.mds are what the harness composes behind it.
  *
  * NOT namespaced by context, deliberately. An archetype runs on the demo-a2a of the org that HOLDS
- * its SKILL.md, so the recipient address already says which context you are asking: the
+ * its definition, so the recipient address already says which context you are asking: the
  * ontology-engineering org answers `archetype.cluster-architect`, and a global-mission org answers
- * whatever archetypes ITS library holds, on the same rail. Baking `oe.` into the id would have made
- * the ontology-engineering roster the only one that could ever exist.
+ * whatever archetypes ITS library holds, on the same rail. Baking `oe.` in would have made the
+ * ontology-engineering roster the only one that could ever exist.
  */
-export const archetypeSkillId = (slug: string): string => `archetype.${slug}`;
+export const archetypeMethod = (slug: string): string => `archetype.${slug}`;
 
 /** A capability IRI in a context's namespace — the context is the org's domain, not a constant. */
 export const capabilityIriFor = (context: string, slug: string): string => `urn:skills:cap:${context}:${slug}`;
@@ -110,7 +121,7 @@ export const archetypeForCapability = (capabilityIri: string): ArchetypeDef | un
 export interface ArchetypeWorkInputV1 {
   /** `ap.archetype.work.v1` — pinned so a body of another shape is refused rather than guessed at. */
   version: 'ap.archetype.work.v1';
-  /** The archetype being asked. Redundant with the skill id BY DESIGN — a mismatch means the caller
+  /** The archetype being asked. Redundant with the METHOD by design — a mismatch means the caller
    *  and the rail disagree about who is answering, which is worth failing rather than resolving. */
   archetype: string;
   /** The plan step to carry out, verbatim from the adopted plan. */
@@ -142,7 +153,7 @@ export interface ArchetypeWorkParseError {
 /**
  * Fail-closed body parsing — junk never reaches the turn.
  *
- * `expectArchetype` is the skill the message actually arrived on. Checking the body against it is
+ * `expectArchetype` is the archetype the message's METHOD addressed. Checking the body against it is
  * what stops a caller authorized for one archetype from addressing another through the body, which
  * is the only way the per-selector authorization could otherwise be sidestepped.
  */
@@ -152,7 +163,7 @@ export function parseArchetypeWorkInput(raw: unknown, expectArchetype: string): 
   const archetype = String(o.archetype ?? '').trim();
   if (!archetype) return { ok: false, error: 'archetype is required' };
   if (archetype !== expectArchetype) {
-    return { ok: false, error: `body archetype "${archetype}" does not match the skill it was sent to ("${expectArchetype}")` };
+    return { ok: false, error: `body archetype "${archetype}" does not match the method it was sent to ("${expectArchetype}")` };
   }
   // SHAPE ONLY. Whether this archetype exists is the hosting org's library's answer, not a constant
   // in this worker — an org that adds an archetype to its own library must not need a redeploy here.
@@ -488,7 +499,7 @@ export async function runArchetypeTurn(
 // ── THE HARNESS ────────────────────────────────────────────────────────────────────────────────
 //
 // An agent serves an A2A endpoint for a SET OF ARCHETYPES the way it serves one for itself. The
-// skill id names the role, the org's own library defines what that role is and which skills it
+// method names the role, the org's own library defines what that role is and which skills it
 // composes, and adding a role is a LIBRARY WRITE rather than a redeploy — which is what makes this
 // general purpose. `archetype.cluster-architect` on the ontology-engineering org and
 // `archetype.field-coordinator` on a global-mission org are the same code path.
@@ -498,30 +509,31 @@ export async function runArchetypeTurn(
 
 import type { SkillHandler } from '@agenticprimitives/a2a';
 
-/** `archetype.ontologist` → `ontologist`; anything else → null. */
-export function archetypeSlugFromSkill(skill: string): string | null {
-  const m = /^archetype\.([a-z0-9][a-z0-9-]{1,60})$/.exec(skill ?? '');
+/** `archetype.ontologist` → `ontologist`; any other method → null. */
+export function archetypeSlugFromMethod(method: string): string | null {
+  const m = /^archetype\.([a-z0-9][a-z0-9-]{1,60})$/.exec(method ?? '');
   return m ? m[1]! : null;
 }
 
 export interface ArchetypeHarnessEnv extends PlannerEnv, ArchetypeLibraryEnv {}
 
 /**
- * Resolve an `archetype.<slug>` skill into a handler backed by this agent's own library.
+ * Resolve an `archetype.<slug>` METHOD into a handler backed by this agent's own library.
  *
- * Returns undefined for a skill that is not an archetype id, which leaves the task rejected as
+ * Returns undefined for a method that does not address an archetype, which leaves the task rejected as
  * `unknown skill` exactly as before. Whether the archetype EXISTS is not decided here — the handler
  * discovers that when it reads the library, and a missing definition fails the task with a reason
  * rather than being reported as an unknown skill. Those are different problems: "this agent does not
  * host archetypes" and "this agent does not host THAT archetype" need different fixes.
  */
-export function resolveArchetypeSkill(env: ArchetypeHarnessEnv, agentSA: string): (skill: string) => SkillHandler | undefined {
+export function resolveArchetypeMethod(env: ArchetypeHarnessEnv, agentSA: string): (method: string) => SkillHandler | undefined {
   const read = archetypeSkillReader(env, agentSA);
-  return (skill: string): SkillHandler | undefined => {
-    const slug = archetypeSlugFromSkill(skill);
+  return (method: string): SkillHandler | undefined => {
+    const slug = archetypeSlugFromMethod(method);
     if (!slug) return undefined;
     return {
-      skill,
+      // `skill` is the A2A WIRE FIELD (protocol vocabulary) and carries our method string.
+      skill: method,
       handle: async (ctx) => {
         const parsed = parseArchetypeWorkInput(ctx.input, slug);
         if (!parsed.ok) return { state: 'failed', error: parsed.error };

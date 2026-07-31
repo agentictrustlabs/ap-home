@@ -11,13 +11,13 @@ import {
   archetypeBySlug,
   archetypeForCapability,
   archetypeGoal,
-  archetypeSkillId,
+  archetypeMethod,
   archetypeSkillReader,
   capabilityIriFor,
-  archetypeSlugFromSkill,
+  archetypeSlugFromMethod,
   composeArchetypePrompt,
   loadArchetypeBundle,
-  resolveArchetypeSkill,
+  resolveArchetypeMethod,
   parseArchetypeWorkInput,
   runArchetypeTurn,
 } from '../src/archetype-skill.js';
@@ -27,8 +27,8 @@ const body = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe('roster', () => {
-  it('derives skill id and capability IRIs from one slug', () => {
-    expect(archetypeSkillId('ontologist')).toBe('archetype.ontologist');
+  it('derives the A2A method and capability IRIs from one slug', () => {
+    expect(archetypeMethod('ontologist')).toBe('archetype.ontologist');
     expect(capabilityIriFor('ontology-engineering', 'tbox-modeling')).toBe('urn:skills:cap:ontology-engineering:tbox-modeling');
     // Another domain's context yields its own namespace — the roster is not ontology-only.
     expect(capabilityIriFor('global-mission', 'field-mapping')).toBe('urn:skills:cap:global-mission:field-mapping');
@@ -44,8 +44,8 @@ describe('roster', () => {
     }
   });
 
-  it('gives every archetype a distinct skill id and at least one capability', () => {
-    const ids = OE_ARCHETYPES.map((a) => archetypeSkillId(a.slug));
+  it('gives every archetype a distinct method and at least one capability', () => {
+    const ids = OE_ARCHETYPES.map((a) => archetypeMethod(a.slug));
     expect(new Set(ids).size).toBe(ids.length);
     for (const a of OE_ARCHETYPES) expect(a.capabilities.length, a.slug).toBeGreaterThan(0);
   });
@@ -69,7 +69,7 @@ describe('parseArchetypeWorkInput', () => {
     // A caller granted `oe.ontologist` must not reach the reviewer by relabelling the body.
     const r = parseArchetypeWorkInput(body({ archetype: 'ontology-reviewer' }), 'ontologist');
     expect(r.ok).toBe(false);
-    expect((r as { error: string }).error).toMatch(/does not match the skill it was sent to/);
+    expect((r as { error: string }).error).toMatch(/does not match the method it was sent to/);
   });
 
   it('accepts an archetype OUTSIDE the ontology roster — existence is the library\'s answer', () => {
@@ -293,7 +293,7 @@ describe('loadArchetypeBundle / composeArchetypePrompt', () => {
 });
 
 // THE HARNESS — an agent serving an A2A endpoint for a SET of archetypes rather than for itself.
-describe('resolveArchetypeSkill', () => {
+describe('resolveArchetypeMethod', () => {
   const lib: Record<string, string> = {
     ontologist: '---\nname: ontologist\nskills: ontology-grounding\n---\n# Ontologist\nRole.',
     'ontology-grounding': '---\nname: ontology-grounding\n---\nGround first.',
@@ -317,25 +317,25 @@ describe('resolveArchetypeSkill', () => {
     return { artifacts, ctx: { input, emitArtifact: async (a: Record<string, unknown>) => { artifacts.push(a); return '0x1'; } } as never };
   };
 
-  it('resolves an archetype id and ignores everything else', () => {
-    const r = resolveArchetypeSkill(env(), '0xabc');
+  it('resolves an archetype method and ignores everything else', () => {
+    const r = resolveArchetypeMethod(env(), '0xabc');
     expect(r('archetype.ontologist')?.skill).toBe('archetype.ontologist');
-    // A non-archetype skill must fall through to `unknown skill`, not be swallowed by the harness.
+    // A non-archetype method must fall through to `unknown skill`, not be swallowed by the harness.
     for (const s of ['echo', 'discussion.consult', 'archetype.', 'archetype.Bad Slug', 'notarchetype.x']) {
       expect(r(s), s).toBeUndefined();
     }
   });
 
-  it('parses the slug out of the skill id', () => {
-    expect(archetypeSlugFromSkill('archetype.cluster-architect')).toBe('cluster-architect');
-    expect(archetypeSlugFromSkill('archetype.field-coordinator')).toBe('field-coordinator');
-    expect(archetypeSlugFromSkill('echo')).toBeNull();
+  it('parses the slug out of the method', () => {
+    expect(archetypeSlugFromMethod('archetype.cluster-architect')).toBe('cluster-architect');
+    expect(archetypeSlugFromMethod('archetype.field-coordinator')).toBe('field-coordinator');
+    expect(archetypeSlugFromMethod('echo')).toBeNull();
   });
 
   it('FAILS the task with a reason when this agent does not host that archetype', async () => {
     // Distinct from "unknown skill": "we do not host archetypes" and "we do not host THAT one" need
     // different fixes, so the second must not masquerade as the first.
-    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.missing-role');
+    const h = resolveArchetypeMethod(env(), '0xabc')('archetype.missing-role');
     const { ctx: c } = ctx({ version: 'ap.archetype.work.v1', archetype: 'missing-role', stepGoal: 'do it' });
     const out = await h!.handle(c);
     expect(out.state).toBe('failed');
@@ -343,15 +343,15 @@ describe('resolveArchetypeSkill', () => {
   });
 
   it('REFUSES a body addressed to a different archetype than the skill', async () => {
-    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.ontologist');
+    const h = resolveArchetypeMethod(env(), '0xabc')('archetype.ontologist');
     const { ctx: c } = ctx({ version: 'ap.archetype.work.v1', archetype: 'ontology-reviewer', stepGoal: 'do it' });
     const out = await h!.handle(c);
     expect(out.state).toBe('failed');
-    expect(String(out.error)).toMatch(/does not match the skill it was sent to/);
+    expect(String(out.error)).toMatch(/does not match the method it was sent to/);
   });
 
   it('emits the deliverable as an artifact — a decline is still a result, not a crash', async () => {
-    const h = resolveArchetypeSkill(env(), '0xabc')('archetype.ontologist');
+    const h = resolveArchetypeMethod(env(), '0xabc')('archetype.ontologist');
     const { ctx: c, artifacts } = ctx({ version: 'ap.archetype.work.v1', archetype: 'ontologist', stepGoal: 'Author the T-box' });
     const out = await h!.handle(c);
     expect(out.state).toBe('completed');
