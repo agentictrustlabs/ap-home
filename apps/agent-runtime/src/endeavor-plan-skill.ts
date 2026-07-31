@@ -54,12 +54,18 @@ const DRAFT_TOOLS: ToolSpec[] = [
               capabilityIri: {
                 type: 'string',
                 description:
-                  'OPTIONAL. The capability IRI this step requires, copied EXACTLY from the roster in ' +
-                  'your instructions (e.g. urn:skills:cap:<context>:<slug>). Set it only when the roster ' +
-                  'names a capability that matches the work; omit it otherwise. Never invent an IRI.',
+                  'REQUIRED. The capability IRI this step needs, copied EXACTLY from the roster in your ' +
+                  'instructions (e.g. urn:skills:cap:<context>:<slug>). When no roster entry matches — or ' +
+                  'there is no roster — use the exact string "none". Never invent an IRI, and never omit ' +
+                  'this field: "none" is the answer for a step that needs no specialist.',
               },
             },
-            required: ['kind', 'description'],
+            // capabilityIri is REQUIRED with an explicit "none". As an optional field the model
+            // simply never set it: a roster sat in the playbook, every plan came back with no
+            // capabilities, and nothing downstream could route. An omission is indistinguishable
+            // from a considered "this step needs no specialist" — a sentinel makes the model answer
+            // the question instead of skipping it, and makes the two cases distinguishable to us.
+            required: ['kind', 'description', 'capabilityIri'],
           },
         },
       },
@@ -80,11 +86,14 @@ const PLAN_CONTRACT =
   'Open with a gather step (kind: interaction) ONLY when the goal does not already carry the ' +
   'material needed to start — if it includes source documents, specifications or excerpts, read ' +
   'those and plan the work itself instead of asking someone to restate them. ' +
-  // Capability is what makes a step ROUTABLE to a specialist agent rather than run by the org
-  // itself. Optional by design: a plan that names no capability still executes, so a planner with
-  // no roster degrades to today's behaviour instead of failing or inventing IRIs.
-  'When your instructions include a capability roster, set `capabilityIri` on each step to the ' +
-  'entry that matches the work, copied exactly. Omit it when nothing matches — never invent one. ' +
+  // Capability is what makes a step ROUTABLE to a specialist rather than run by the org itself.
+  // It was optional, and the model simply never set it — a roster sat in the playbook and every
+  // plan came back blank. Required with an explicit "none" so the question gets ANSWERED; a planner
+  // with no roster still degrades cleanly, it just says so instead of staying silent.
+  'EVERY step must carry `capabilityIri`. If your instructions include a capability roster, copy the ' +
+  'entry that matches the work EXACTLY; if nothing matches, or there is no roster, use the exact ' +
+  'string "none". Never invent an IRI and never leave the field out — a step that needs no ' +
+  'specialist says "none", which is an answer, not a blank. ' +
   'Call draft_plan exactly once with the steps. Never answer in prose.';
 
 /** Deterministic fallback (no LLM configured) — a generic gather → do → confirm skeleton so the
@@ -92,9 +101,9 @@ const PLAN_CONTRACT =
 function deterministicSteps(goal: string): DraftStep[] {
   const g = goal.trim().replace(/\.$/, '');
   return [
-    { kind: 'interaction', description: `Gather the details needed to ${g.charAt(0).toLowerCase()}${g.slice(1)}` },
-    { kind: 'contribution', description: `Carry out the work to ${g.charAt(0).toLowerCase()}${g.slice(1)}` },
-    { kind: 'validation', description: 'Confirm the outcome meets the goal and close it out' },
+    { kind: 'interaction', description: `Gather the details needed to ${g.charAt(0).toLowerCase()}${g.slice(1)}`, capabilityIri: 'none' },
+    { kind: 'contribution', description: `Carry out the work to ${g.charAt(0).toLowerCase()}${g.slice(1)}`, capabilityIri: 'none' },
+    { kind: 'validation', description: 'Confirm the outcome meets the goal and close it out', capabilityIri: 'none' },
   ];
 }
 
@@ -109,7 +118,10 @@ function sanitize(raw: unknown): DraftStep[] {
     // trusting the model: anything that is not a `urn:` / URL-shaped IRI is dropped, and the step
     // survives without it. Dropping the step instead would let one hallucinated string cost a plan.
     const cap = String(o.capabilityIri ?? '').trim();
-    const capabilityIri = /^(urn:[a-z0-9][a-z0-9-]*:|https?:\/\/)/i.test(cap) && cap.length <= 300 ? cap : '';
+    // "none" is the model SAYING no specialist is needed — recorded as absent, same as a malformed
+    // value, because a step carrying `urn:…:none` would route nowhere and look like a real need.
+    const capabilityIri = /^none$/i.test(cap) ? ''
+      : /^(urn:[a-z0-9][a-z0-9-]*:|https?:\/\/)/i.test(cap) && cap.length <= 300 ? cap : '';
     if (STEP_KINDS.includes(kind) && description) {
       out.push({ kind, description: description.slice(0, 280), ...(capabilityIri ? { capabilityIri } : {}) });
     }
