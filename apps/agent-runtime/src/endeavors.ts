@@ -206,7 +206,14 @@ export function indexEntryFromState(state: CoordinationStateV1, updatedAt: strin
  *  detail view can render the proposal honestly (its `status` says which it is). */
 function planProjection(state: CoordinationStateV1): {
   planId: string; revision: number; contentHash: string; status: string; proposedBy: string;
-  steps: Array<{ stepId: string; kind: string; description: string; satisfied: boolean; evidence?: string }>;
+  steps: Array<{
+    stepId: string; kind: string; description: string; satisfied: boolean; evidence?: string;
+    /** What the step NEEDS, carried through so a reader can route it to a specialist. Dropped here
+     *  until now, which meant a plan could name the capability and every consumer saw a step that
+     *  declared none — routing would have decided "run it locally" for every step, forever, and
+     *  looked exactly like a plan that never wanted a specialist. */
+    capabilityRequirements?: CapabilityRequirementRef[];
+  }>;
 } | null {
   const adoptedRef = state.endeavor?.adoptedPlanRef;
   const all = Object.values(state.plans);
@@ -227,6 +234,7 @@ function planProjection(state: CoordinationStateV1): {
         kind: s.kind,
         description: s.description,
         satisfied: !!done,
+        ...(s.capabilityRequirements?.length ? { capabilityRequirements: s.capabilityRequirements } : {}),
         ...(done ? { evidence: decodeEvidenceNote(done.evidenceRefs) } : {}),
       };
     }),
