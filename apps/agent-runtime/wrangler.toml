@@ -126,9 +126,13 @@ SKILLS_CORPUS_URL = "https://skills-a2a-production.richardpedersen3.workers.dev"
 # SENT, it is every FOLLOW as well, because reading an endeavor's state is itself a message.
 # So an org that was asked to build one ontology and then watched spent its entire allowance in
 # minutes and could no longer answer even a status read.
+# 5000 was not enough either, and the reason is the same one written above: a poll costs a unit.
+# A panel checking every 2 seconds spends 30 units a minute doing nothing but asking, so a single
+# stalled request burned ~340 units being WATCHED. The clients now back off (3s → 10s → 20s), which
+# is the actual fix; 50000 is the headroom while that lands everywhere.
 # 5000 is sized for that shape of use — a few long-running endeavors and the polling that makes
 # them legible — while still bounding a runaway. MUST match demo-mcp (one shared DO per SA).
-SA_BUDGET_LIMIT_UNITS = "5000"
+SA_BUDGET_LIMIT_UNITS = "50000"
 # spec 288 §6 — edge-mode flag. Production runs EDGE-REQUIRED: both A2A task ingress shapes REQUIRE a valid
 # edge GatewayAssertion — the agent-addressed edge path `POST /api/a2a/<handle>` (the edge conveys the agent
 # in the signed assertion `path`; demo-a2a resolves it via resolveAgentByLabel) works, while the bare

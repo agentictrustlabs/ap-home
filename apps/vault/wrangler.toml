@@ -105,7 +105,7 @@ DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 # spec 287: enable the public native MCP ingress (/mcp/native) with exact-invocation proof.
 DEMO_NATIVE_MCP_ENABLED = "true"
 # spec 290 §8: per-Smart-Agent hard-budget unit cap enforced on the native path (demo value).
-SA_BUDGET_LIMIT_UNITS = "5000"   # must match demo-a2a — one shared budget DO per SA
+SA_BUDGET_LIMIT_UNITS = "50000"   # must match demo-a2a — one shared budget DO per SA
 # spec 288 §6 — edge-mode flag. DEFAULT "false" so an edge-less deploy works (direct /mcp + /mcp/native
 # allowed). `deploy-cloudflare.ts` OVERRIDES this to "true" via --var when EDGE_REQUIRED=true, which makes
 # both MCP ingress surfaces REQUIRE a valid edge GatewayAssertion (direct → 401; the web routes through the
