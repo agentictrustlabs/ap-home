@@ -20,6 +20,7 @@
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
+import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
   appendBoardPost,
@@ -663,6 +664,36 @@ export class InteractionsDO {
    *  caveat separates a steward from a member: without this, a member's own org→member member-access
    *  delegation (same delegator=org, delegate=member, org-signed, unrevoked) passed as a steward
    *  proof → member→steward escalation (kick members, dump the ledger, act as steward). */
+  /**
+   * Liveness + authenticity for an org wire: delegator, delegate, caveats, revocation, signature.
+   *
+   * The four call sites each rebuilt this. They were NOT missing revocation — a correction to the
+   * audit that called them a partial verify — but four copies is four chances to drop one.
+   *
+   * Deliberately says nothing about SHAPE. `hasStewardshipShape` and the record-scope test above are
+   * app authorization policy and stay where they are: no generic "required enforcers" list can say
+   * "allowedMethods must be ABSENT" or "these terms must name the governance registries".
+   */
+  private async verifyWire(wire: IncomingDelegation, expectedDelegator: string, sessionSa: Address): Promise<boolean> {
+    return verifyOrgWire({
+      wire: wire as unknown as IncomingWire,
+      expectedDelegator,
+      expectedDelegate: sessionSa,
+      enforcers: enforcersFromEnv(this.env as unknown as Record<string, string | undefined>),
+      checks: {
+        digest: (d) => hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address),
+        erc1271: (signer, digest, sig) => this.erc1271(signer, digest, sig),
+        isRevoked: async (digest) =>
+          (await this.pub().readContract({
+            address: this.env.DELEGATION_MANAGER as Address,
+            abi: IS_REVOKED_ABI,
+            functionName: 'isRevoked',
+            args: [digest],
+          })) as boolean,
+      },
+    });
+  }
+
   private hasStewardshipShape(wire: IncomingDelegation): boolean {
     // NEW-H2 — FAIL CLOSED on an unconfigured enforcer. If ALLOWED_TARGETS_ENFORCER is unset (wrangler
     // binds "" for a placeholder var), the old `enforcer(c) === ''` matched ANY caveat with a missing/empty
@@ -716,13 +747,8 @@ export class InteractionsDO {
     if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return false;
     const hasRecordScope = (wire.caveats ?? []).some((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
     if (!hasRecordScope) return false; // a stewardship/governance wire is not member-access
-    const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-    const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
-    if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return false;
-    try {
-      const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
-      return !revoked;
-    } catch { return false; }
+    // SHAPE decided above (app policy); LIVENESS decided by the substrate.
+    return this.verifyWire(wire, principal, sessionSa);
   }
 
   /** Steward proof: a presented org→person organizationStewardshipDelegation wire, org-verified + unrevoked on-chain, AND
@@ -732,13 +758,8 @@ export class InteractionsDO {
     if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return false;
     if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return false;
     if (!this.hasStewardshipShape(wire)) return false; // SEC-C1: a member-access grant is NOT stewardship
-    const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-    const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
-    if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return false;
-    try {
-      const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
-      return !revoked;
-    } catch { return false; } // fail-closed on chain-read failure
+    // SHAPE decided above (app policy — a positive identity test); LIVENESS by the substrate.
+    return this.verifyWire(wire, principal, sessionSa);
   }
 
 
