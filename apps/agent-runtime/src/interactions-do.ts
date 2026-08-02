@@ -261,8 +261,32 @@ interface StoredState {
 
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
+/**
+ * Injected external seams (mirrors `packages/fabric`'s `GatewayDeps`).
+ *
+ * The DO reaches four external systems to serve a board read — broker JWKS, GCP KMS, demo-mcp and a
+ * chain RPC — and until now reached all of them through `this.env` and module imports. That made the
+ * board ops untestable except by reconstructing production state through HTTP stubs, which tests the
+ * stubs. These two seams are the ones that matter: everything else the DO does is pure or KV.
+ *
+ * PRODUCTION NEVER PASSES THIS. The Cloudflare binding constructs `new InteractionsDO(state, env)`,
+ * so `deps` is `undefined` and both paths fall through to the real implementations. It is an
+ * injection point, not a bypass — there is no env flag that reaches it, deliberately, because a
+ * runtime switch here would be a way to disable ERC-1271 verification in production.
+ */
+export interface InteractionsDeps {
+  /** ERC-1271 verification. Default: a chain read via `env.RPC_URL`. */
+  erc1271?(account: Address, digest: Hex, signature: Hex): Promise<boolean>;
+  /** One demo-mcp vault tool call. Default: bound-mint transport over `env.MCP_URL`. */
+  vaultTool?(
+    grant: IncomingDelegation,
+    toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
+    toolArgs: Record<string, unknown>,
+  ): Promise<Response>;
+}
+
 export class InteractionsDO {
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor(private state: DurableObjectState, private env: Env, private deps?: InteractionsDeps) {}
 
   /** ARCH-H1 — a per-instance RMW mutex. A Durable Object serves concurrent requests that interleave
    *  across the MCP round-trip, so two appends to the SAME doc both read rev N and one silently
@@ -490,6 +514,7 @@ export class InteractionsDO {
   }
 
   private async erc1271(account: Address, digest: Hex, signature: Hex): Promise<boolean> {
+    if (this.deps?.erc1271) return this.deps.erc1271(account, digest, signature);
     try {
       const magic = (await this.pub().readContract({ address: account, abi: ERC1271_ABI, functionName: 'isValidSignature', args: [digest, signature] })) as Hex;
       return magic.toLowerCase() === ERC1271_MAGIC;
@@ -506,6 +531,7 @@ export class InteractionsDO {
     toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
     toolArgs: Record<string, unknown>,
   ): Promise<Response> {
+    if (this.deps?.vaultTool) return this.deps.vaultTool(grant, toolName, toolArgs);
     const env = this.env;
     if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
