@@ -36,6 +36,7 @@ claiming, and the delegations it signs on the member's behalf.
 | Synthesis inbox + community messaging (spec 312) | `sendFromInbox`/`replyInConversation` (`action:'send'`/`'reply'`, name-resolved) + `?contextKind=` related-messages read + `server/connect/directory.ts` / `src/home/directory.ts` / `DirectoryListingCard` (opt-in self-signed listings, ERC-1271-verified against the SUBJECT SA — ADR-0025) |
 | Workspace switcher (spec 315 / ADR-0046) | `src/lib/workspace.ts` (URL-derived scope: person / `/org/<sa>/…` / `/service/<sa>`) + `src/lib/agent-class.ts` (kind → Person/Org/Service class, service role, authority lineage) + `src/components/portal/AgentSwitcher.tsx` (topbar dropdown grouped by class: you, Organizations you steward, Services you manage — each service shows its custody lineage `you → [org →] role`; connected apps stay in the person nav) + scoped `buildNav` in `nav.ts` + workspace pages `app/(portal)/org/[org]/{overview,data,treasury}` + `app/(portal)/service/[agent]` (role-dispatched panel) |
 | Interactions IA (spec 313 v2) | ONE unified `app/(portal)/messages/page.tsx` (requests pinned + conversation rail + thread/reply + KB-search composer; `/inbox` `/chats` `/find` redirect here) + `src/home/use-inbox.ts` (shared view, 5s polling, names map) + `server/connect/channels.ts` (community boards, membership = current directory listing, audit-before-commit) — nav group in `src/components/portal/nav.ts` |
+| Visibility / invitations (spec 338 §20, W6) | `app/(portal)/visibility/page.tsx` + `src/components/portal/visibility/*` (posture presets, issued-invitations panel, recipient inspector) + **`src/lib/invitation-check.ts`** — the verification logic lives THERE (pure + tested), not in the component. Presets/validation come from `@agenticprimitives/agent-resolution`, so the UI cannot drift from the protocol. Signature + endpoint-control render as `unchecked` (they need an on-chain read), never as a pass; the pane always ends with `AUTHORIZATION_NOT_GRANTED` — finding an agent is not permission to use it. Issuing/revoking is NOT wired (needs the vault + a deployed resolver, W6-b) and the panel says so rather than faking a button. |
 | KB search + naming properties (spec 314) | `src/lib/agent-search.ts` (partial match via discovery MCP → GraphDB, ONE mechanism — no chain fallback) + `src/lib/name-properties.ts` (`readNameRecords`/`writeNameProperties`: encodeRecords pre-sign + on-chain ontology validation, batched userOp, fires reindex) + Properties panel in `app/(portal)/naming/page.tsx` |
 
 ## Hard rules (this app)
@@ -47,4 +48,10 @@ claiming, and the delegations it signs on the member's behalf.
 - White-label / faith vocabulary lives in `src/whitelabel/` + app config — never leaks to packages.
 
 ## Validate
-`pnpm --filter @agenticprimitives-demo/sso-next typecheck` (no `pnpm check:demo-sso-next`).
+```bash
+pnpm --filter @agenticprimitives-demo/sso-next typecheck
+pnpm --filter @agenticprimitives-demo/sso-next test   # added W6 — the app HAD a vitest.config.ts and
+                                                      # test files but no `test` script or vitest dep,
+                                                      # so its suites never ran. They do now.
+```
+(There is still no `pnpm check:demo-sso-next` aggregate.)

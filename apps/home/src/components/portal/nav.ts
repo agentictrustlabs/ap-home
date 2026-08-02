@@ -164,6 +164,9 @@ export function buildNav(
     manage.push({ id: 'metadata', label: 'Metadata', href: '/metadata', Icon: TagIcon, status: 'live' });
     // Records: what's in YOUR vault (the person's own analog of the org Records page).
     manage.push({ id: 'records', label: 'Records', href: '/records', Icon: DatabaseIcon, status: 'live' });
+    // Visibility (spec 338 §20): who can find this agent — naming/listing/resolution/inbound as four
+    // separate choices — plus issued invitations and the recipient-side invitation check.
+    manage.push({ id: 'visibility', label: 'Visibility', href: '/visibility', Icon: GlobeIcon, status: 'live' });
   }
   if (wl.services.devices) {
     manage.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });

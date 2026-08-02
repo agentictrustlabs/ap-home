@@ -1067,6 +1067,11 @@ const DEMO_MCP_CATALOG = defineSurface([
     authorization: { mode: 'agentic-delegation', riskTier: 'high' },
     operations: { rateLimitProfile: 'pii', maxBodyBytes: 262144, timeoutMs: 10000, idempotency: 'safe', cache: 'no-store' },
     mcp: { kind: 'tool', annotations: { title: 'Read PII', readOnlyHint: true } },
+    // W4-b audit (spec 338 §8): PUBLIC is correct and DELIBERATE, not an oversight. An external MCP
+    // client must be able to SEE this tool to call it legitimately; what protects the data is
+    // delegation ∩ entitlement ∩ tool policy ∩ key-release ∩ audit, re-run at the origin — never the
+    // tool's absence from a list. Recorded explicitly so a future reader knows it was reviewed.
+    publication: { exposure: 'public' },
   },
   {
     id: 'get_org_sensitive',
@@ -1077,6 +1082,9 @@ const DEMO_MCP_CATALOG = defineSurface([
     authorization: { mode: 'agentic-delegation', riskTier: 'critical', onchainAcceptanceRequired: true },
     operations: { rateLimitProfile: 'pii', maxBodyBytes: 262144, timeoutMs: 10000, idempotency: 'safe', cache: 'no-store' },
     mcp: { kind: 'tool', annotations: { title: 'Read org-sensitive', readOnlyHint: true } },
+    // W4-b audit: PUBLIC deliberately — see the note on `get_pii`. Discoverability is not access;
+    // this tool additionally requires on-chain acceptance (`onchainAcceptanceRequired`).
+    publication: { exposure: 'public' },
   },
 ] satisfies SurfaceDescriptor[]);
 
