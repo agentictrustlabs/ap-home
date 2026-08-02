@@ -28,6 +28,7 @@ import {
   buildAssistantInboxReply,
   createBoardChannel,
   canSeeChannel,
+  interactionViewOfChannel,
   channelParticipationPolicy,
   canonicalizeMessage,
   createVaultMessageBodyStore,
@@ -1675,7 +1676,16 @@ export class InteractionsDO {
         // mapped to participationPolicy on read (public→open, private→restricted) — lazy, no data migration.
         let wire = index
           .filter((c) => canSeeChannel(c, sessionSa, steward))
-          .map((c) => ({ ...c, participationPolicy: channelParticipationPolicy(c), messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[] }));
+          // spec 340 W12 — a topic IS an Interaction, so it is served as one. The view is a PROJECTION
+          // over what the board already stores (the id derives from `descriptor.id`, the mode from
+          // `participationPolicy`), so this adds a field to the wire and nothing to the vault: no
+          // migration, and no second copy that could disagree with the descriptor it came from.
+          .map((c) => ({
+            ...c,
+            participationPolicy: channelParticipationPolicy(c),
+            interaction: interactionViewOfChannel(c),
+            messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[],
+          }));
         if (op === 'channels.read' && typeof body.channelId === 'string') {
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
           wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
