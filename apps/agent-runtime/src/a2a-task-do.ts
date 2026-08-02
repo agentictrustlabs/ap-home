@@ -569,9 +569,29 @@ function a2aChainReader(env: Env): ReturnType<typeof createChainAuthorityReader>
   return _a2aChainReader;
 }
 
+/**
+ * Injected external seams (the `InteractionsDeps` pattern, applied to the task runtime).
+ *
+ * `build()` derives every on-chain check from two primitives — signature verification and revocation
+ * — and both reach a chain RPC. Injecting exactly those makes the task lifecycle drivable without a
+ * node, while leaving the derived logic (session-wrapped signatures, the skill pinning, the party
+ * checks) entirely real. That derived logic is the part worth testing; the RPC round trip is not.
+ *
+ * PRODUCTION NEVER PASSES THIS. The Cloudflare binding constructs `new A2aTaskDO(state, env)`, so
+ * `deps` is `undefined` and both fall through to the resilient chain reader (or the inline ERC-1271
+ * fallback). No env flag reaches it, deliberately — a runtime switch here would be a way to turn off
+ * signature verification in production.
+ */
+export interface A2aTaskDeps {
+  /** Base signature verification. Default: the resilient chain reader, else inline ERC-1271. */
+  verifySignature?(signer: Address, digest: Hex, signature: Hex): Promise<boolean>;
+  /** Delegation revocation by hash. Default: the chain reader, else a DelegationManager read. */
+  isRevoked?(delegationHash: Hex): Promise<boolean>;
+}
+
 export class A2aTaskDO {
   private agent: A2aAgent | null = null;
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor(private state: DurableObjectState, private env: Env, private deps?: A2aTaskDeps) {}
 
   private build(agentSA: Address): A2aAgent {
     if (this.agent) return this.agent;
@@ -588,13 +608,20 @@ export class A2aTaskDO {
     // the inline path reverts on an undeployed signer (fail-closed) — `valid && deployed` preserves that
     // (an A2A party is always a deployed SA), while the port also handles 6492 robustly. Fall back to inline.
     const reader = a2aChainReader(this.env);
-    const verifySig = reader
+    // The injected seam takes precedence over BOTH the resilient reader and the inline fallback —
+    // there is no chain read left underneath it to disagree with.
+    const verifySig = this.deps?.verifySignature
+      ? this.deps.verifySignature
+      : reader
       ? async (signer: Address, digest: Hex, signature: Hex): Promise<boolean> => {
           const r = await reader.verifySmartAgentSignature({ signer, digest, signature });
           return r.valid && r.deployed;
         }
       : erc1271Inline;
-    const isRevokedFn = reader
+    const injectedRevoked = this.deps?.isRevoked;
+    const isRevokedFn = injectedRevoked
+      ? async (d: Delegation) => injectedRevoked(hashDelegation(d, chainId, dm))
+      : reader
       ? async (d: Delegation) => (await reader.isDelegationRevoked(hashDelegation(d, chainId, dm))).revoked
       : async (d: Delegation) => (await pub.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean;
     const verifyDelegationSigFn = async (d: Delegation) => verifySig(d.delegator, hashDelegation(d, chainId, dm), d.signature as Hex);
