@@ -96,6 +96,12 @@ CHAIN_ID = "84532"
 # secret absent the deterministic rule-based planner runs, a config choice, not a fallback). Committed
 # here (not a --var) so it survives targeted deploys. Key: `wrangler secret put ANTHROPIC_API_KEY
 # --env production`. Optional ORCHESTRATION_MODEL overrides the planner default model.
+# DRIFT HAZARD (observed 2026-08-02). This flag was committed 2026-07-17 as a production flag
+# (spec 327 / ADR-0044) and was still NOT on the live Worker after a 2026-08-01 deploy — it only
+# went live when a subsequent deploy re-sent the full var set. It is NOT in `a2aVars` in
+# scripts/deploy-cloudflare.ts, so its liveness depends on toml inheritance surviving whatever
+# `--var` flags that deploy passes. If the LLM planner is unexpectedly off, CHECK THE LIVE WORKER
+# rather than this file: `wrangler versions view <id> --env production --json`.
 ORCHESTRATION_LLM = "anthropic"
 # spec 334 §6 gather phase — OPTIONAL public reference-graph endpoint. Left UNSET here on purpose:
 # the coordination agent's gather phase is inert until this is configured, so enabling it (and thereby
