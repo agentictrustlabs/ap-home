@@ -12,7 +12,9 @@ import {
   createHmacGatewayAssertionSigner,
   type EdgeIngressRequest,
 } from '@agenticprimitives/edge-runtime';
+import { meetsTransportAssurance, observedTransportAssurance, type TransportAssurance } from '@agenticprimitives/admission';
 import {
+  transportEvidenceFromRequest,
   extractAdmissionRequest,
   createCloudflareRateLimiter,
   dispatchToBinding,
@@ -58,6 +60,18 @@ type BindingName = 'MCP' | 'A2A';
 interface Route {
   binding: BindingName;
   descriptor: SurfaceDescriptor;
+  /**
+   * Minimum transport assurance for this route (spec 339 §10, ADR-0057).
+   *
+   * Omitted on every route TODAY, and that is the accurate configuration rather than a placeholder:
+   * no mTLS hostname exists (`*.workers.dev` cannot do it), so requiring `MTLS` anywhere would refuse
+   * all traffic. The MECHANISM below is live — the moment a zone with a client-certificate rule
+   * exists, a route declares `'MTLS'` here and the refusal is real with no code change.
+   *
+   * mTLS can only ever RAISE this bar. There is deliberately no way to express "skip a check because
+   * the certificate was good" (ADR-0057).
+   */
+  minTransportAssurance?: TransportAssurance;
 }
 
 function descriptor(
@@ -79,6 +93,21 @@ function descriptor(
       cache: 'no-store',
     },
   };
+}
+
+/**
+ * Does this route's transport floor refuse what the handshake actually proved?
+ *
+ * Exported so the WIRING is testable, not just the library primitive underneath it. The bug this
+ * guards against is measuring the request's self-reported label instead of the validated one — which
+ * would let a caller claim its way past a floor by setting a field.
+ */
+export function transportFloorRefuses(
+  route: Pick<Route, 'minTransportAssurance'>,
+  observed: TransportAssurance,
+): boolean {
+  if (!route.minTransportAssurance) return false; // no requirement — the baseline, and the common case
+  return !meetsTransportAssurance(observed, route.minTransportAssurance);
 }
 
 // App-local route catalog (descriptor + which origin). Concrete paths/binding names are app config
@@ -220,6 +249,13 @@ export default {
     // Admission: extract → runAdmission (header hygiene → size/depth/envelope → Stage-1 abuse) →
     // dispatch the exact bytes to the matched origin over its Service Binding.
     const { admission, rawBody } = await extractAdmissionRequest(request);
+
+    // ── Transport evidence (spec 339 §10) ────────────────────────────────
+    // What the TLS handshake actually proved. Absent client certificate ⇒ plain HTTPS, which is a
+    // NORMAL request on the baseline endpoint, never a degraded one. The edge REPORTS; it does not
+    // decide who the caller is (ADR-0043) — the origin still runs the full Web3 pipeline.
+    const transport = transportEvidenceFromRequest(request);
+    const observedAssurance = observedTransportAssurance(transport);
     const route = matchRoute(admission);
 
     const result = await runAdmission(admission, {
@@ -235,6 +271,16 @@ export default {
       });
     }
     if (!route) return json({ error: 'admission denied', correlationId: result.correlationId }, 500, cors);
+
+    // A route may require more than HTTPS. Measured against what was VALIDATED, never the label the
+    // request carried — an unverified or revoked certificate observes as HTTPS and buys nothing.
+    if (transportFloorRefuses(route, observedAssurance)) {
+      // Same generic body as every other admission refusal: the reason stays internal (spec 288 §4).
+      return json({ error: 'admission denied', correlationId: result.correlationId }, 403, {
+        ...cors,
+        'x-correlation-id': result.correlationId,
+      });
+    }
 
     // GatewayAssertion (spec 288 §4): the edge signs that it admitted THESE exact bytes for this route,
     // so the origin can prove the request came through admission (admission only — never authority). The
