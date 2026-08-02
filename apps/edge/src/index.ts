@@ -10,7 +10,7 @@ import {
   runAdmission,
   issueGatewayAssertion,
   createHmacGatewayAssertionSigner,
-  type AdmissionRequest,
+  type EdgeIngressRequest,
 } from '@agenticprimitives/edge-runtime';
 import {
   extractAdmissionRequest,
@@ -112,7 +112,7 @@ const CATALOG: { test: (method: string, path: string) => boolean; route: Route }
   { test: (m, p) => m === 'GET' && p === '/.well-known/agent-card.json', route: { binding: 'A2A', descriptor: descriptor('a2a.card', 'a2a', 'low', 16 * 1024) } },
 ];
 
-function matchRoute(req: AdmissionRequest): Route | undefined {
+function matchRoute(req: EdgeIngressRequest): Route | undefined {
   for (const entry of CATALOG) if (entry.test(req.method, req.path)) return entry.route;
   return undefined;
 }
