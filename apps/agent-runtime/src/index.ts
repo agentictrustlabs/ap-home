@@ -1,3 +1,4 @@
+import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // demo-a2a as a Cloudflare Worker.
 //
 // Local dev:  wrangler dev (port 8787; reads .dev.vars for secrets + contract addrs)
@@ -677,6 +678,16 @@ app.use('*', async (c, next) => {
   if (c.req.path === '/custody/oidc/resolve' || c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/oidc/sign-site-delegation' || c.req.path === '/custody/google/sign-site-delegation') return next();
   if (c.req.path === '/custody/oidc/activate-vault' || c.req.path === '/custody/google/activate-vault') return next();
+  // Peer attestation (spec 338 §6) — deliberately public and CSRF-exempt.
+  //
+  // CSRF defends state-changing actions taken WITH THE USER'S CREDENTIALS. This endpoint takes no
+  // credentials, changes no state, and returns a signature over a nonce the CALLER chose. The worst a
+  // cross-site page achieves is learning this Worker's own public identity — which is exactly what the
+  // endpoint exists to publish. Requiring CSRF here would instead make the attestation unusable by the
+  // parties it is FOR: other agents' clients, cross-origin by definition.
+  //
+  // It is not a signing oracle: one canonical body, never a caller-supplied digest.
+  if (c.req.path === '/peer-attest') return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -1201,6 +1212,85 @@ app.get('/agent/interactions-session-key', async (c) => {
     return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
+
+/**
+ * Peer attestation (spec 338 §6, AR-L7 Residual 1) — "prove you are who I resolved".
+ *
+ * THE GAP THIS CLOSES. `checkResolvedPeer` shipped, `verifyPeerAttestation` shipped, and the live
+ * demo ran the gate and REFUSED — correctly, because nothing anywhere could attest. A verified
+ * publication proves an agent signed "my endpoint is this URI"; between that and who answers there
+ * now sit DNS, BGP, a CDN, a terminating proxy, and anyone holding a certificate for the host.
+ *
+ * WHY THIS HOST CAN DO IT AND THE TREASURY HOST CANNOT. This Worker holds a GCP-KMS key, and the
+ * address that key controls IS the agent it attests as. `demo-treasury-a2a` holds `TREASURY_SA` — an
+ * address — and no key for it: it serves the treasury's surface without being able to prove it IS the
+ * treasury. That is exactly the `host` vs `agent` line in `PeerAuthStrength`, and a host in that
+ * position should be refused rather than believed.
+ *
+ * WHAT IT IS NOT. Not a signing oracle. It signs ONE canonical body — the peer attestation — over a
+ * caller-supplied nonce, and nothing else. It cannot be asked to sign an arbitrary digest, which is
+ * the difference between attesting and handing out the key.
+ *
+ * NOT RELAY-RESISTANT, and the response says so by omission: no `channelBinding` is emitted, because
+ * workerd exposes no TLS exporter (RFC 9266). A party terminating TLS for this host can forward the
+ * challenge here and pass our answer back. The client's gate refuses that only under
+ * `requireChannelBinding: true`, which no baseline deployment can satisfy (ADR-0057).
+ */
+app.post('/peer-attest', async (c) => {
+  const cors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-headers': 'content-type',
+    'cache-control': 'no-store',
+  };
+  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+    return c.json({ ok: false, error: 'attestation_unconfigured' }, 404, cors);
+  }
+
+  let body: { nonce?: string; audience?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'malformed' }, 400, cors);
+  }
+
+  // The nonce is the CALLER's. A server-chosen value would prove nothing about this dial — it is the
+  // only thing making the answer about the request in front of us rather than a captured one.
+  const nonce = (body.nonce ?? '').trim();
+  const audience = (body.audience ?? '').trim();
+  if (nonce.length < 8 || !audience) {
+    return c.json({ ok: false, error: 'nonce and audience required' }, 400, cors);
+  }
+
+  try {
+    const acct = await interactionsSessionAccount(c.env);
+    const chainId = Number(c.env.CHAIN_ID ?? 84532);
+    const now = new Date();
+    const core = {
+      specVersion: 'ap.peer-attestation/1' as const,
+      agentId: `eip155:${chainId}:${acct.address.toLowerCase()}` as never,
+      nonce,
+      audience,
+      issuedAt: now.toISOString(),
+      // Short: an attestation is cheap to re-request, so a long life only widens the replay window.
+      expiresAt: new Date(now.getTime() + 120_000).toISOString(),
+    };
+    const digest = await peerAttestationDigest(core);
+    const signRaw = acct.sign;
+    if (!signRaw) return c.json({ ok: false, error: 'attestation_unconfigured' }, 500, cors);
+    const proof = await signRaw({ hash: digest });
+    return c.json({ ...core, proof }, 200, cors);
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500, cors);
+  }
+});
+
+app.options('/peer-attest', (c) =>
+  c.body(null, 204, {
+    'access-control-allow-origin': '*',
+    'access-control-allow-headers': 'content-type',
+    'access-control-allow-methods': 'POST, OPTIONS',
+  }),
+);
 
 // Audit N3: paymaster monitoring. Returns the current EntryPoint
 // deposit balance for the configured paymaster + alert threshold
