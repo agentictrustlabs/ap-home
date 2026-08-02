@@ -117,7 +117,9 @@ export async function issueDiscoveryGrant(
     },
     statusRef: `home://grant-status/${grantId}`,
     issuedAt: new Date().toISOString(),
-    authorityRef: `home://discovery-authority/${agentId}`,
+    // Self-issuance — the home issues for the agent it custodies using that agent's own key. A
+    // non-empty authorityRef must be `apdel1:<hashDelegation>` (spec 338 W6-c); anything else denies.
+    authorityRef: '',
   };
 
   // The issuer's own key signs. The Home only carries the result.

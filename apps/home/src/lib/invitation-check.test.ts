@@ -69,7 +69,7 @@ async function publication(over: Partial<AgentServicePublicationV1> = {}): Promi
     issuedAt: '2026-07-31T11:00:00.000Z',
     expiresAt: '2026-07-31T18:00:00.000Z',
     publishedBy: TARGET,
-    publicationAuthorityRef: 'vault://acme/pa/1',
+    publicationAuthorityRef: '',
     ...over,
   } as Omit<AgentServicePublicationV1, 'digest' | 'proofs'>;
 
