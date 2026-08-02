@@ -43,7 +43,9 @@ export function resolutionConfig(env: ResolutionEnv): ResolutionConfig | null {
 
 export type ResolutionAction =
   | { action: 'publish'; publication: unknown }
-  | { action: 'issue'; grant: unknown }
+  // `delegation` is present only when the issuer acts under an appointment; the resolver reads the
+  // grant's SIGNED `authorityRef` to decide which case it is, never this field's presence.
+  | { action: 'issue'; grant: unknown; delegation?: unknown }
   | { action: 'revoke'; grantId: string }
   | { action: 'read'; channelId: string };
 
@@ -122,9 +124,13 @@ export async function handleResolution(
       return forward(`${cfg.publicationsUrl}/v1/publications`, json(cfg.publishToken, payload.publication));
 
     case 'issue':
-      // Already signed by the ISSUER over `grantBody()`. The Worker verifies that signature on-chain;
-      // the operator token only gates the write.
-      return forward(`${cfg.resolverUrl}/v1/private/grants`, json(cfg.issueToken, payload.grant));
+      // Already signed by the ISSUER over `grantBody()`. The Worker verifies that signature on-chain,
+      // and — when the grant's signed `authorityRef` commits to one — re-hashes the delegation and
+      // checks its caveats, revocation and signature too. The operator token only gates the write.
+      return forward(
+        `${cfg.resolverUrl}/v1/private/grants`,
+        json(cfg.issueToken, { grant: payload.grant, delegation: payload.delegation }),
+      );
 
     case 'revoke':
       return forward(

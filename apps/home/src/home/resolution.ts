@@ -33,8 +33,23 @@ export const caip10 = (address: string, chainId: number) => `eip155:${chainId}:$
 /** One channel per (agent, audience) — spec 338 §3.1a. */
 export const partnerChannel = (agentId: string, subjectId: string) => `${agentId}:partner:${subjectId}`;
 
+/** The delegation an appointed party presents, plus the ref that commits to it (spec 338 §3.1b). */
+export interface DiscoveryAuthorityPresentation {
+  /** `apdel1:<hashDelegation>` — goes into the SIGNED grant body, pinning WHICH authority was used. */
+  authorityRef: string;
+  /** The agent the grant is FOR. The delegation's delegator; never the issuer. */
+  targetAgent: Address;
+  /** The delegation itself, wire form. The resolver re-hashes it and checks the commitment. */
+  delegation: unknown;
+}
+
 export interface IssueGrantInput {
-  /** The agent being made discoverable. Self-issuance only for now (issuer === target). */
+  /**
+   * The ISSUER — whose key signs the grant.
+   *
+   * Without `authority`, this is also the agent being made discoverable (self-issuance). With it,
+   * this is the appointed party and the target comes from the appointment, so the two differ.
+   */
   agentAddress: Address;
   /** The party allowed to discover it. */
   subjectAddress: Address;
@@ -46,6 +61,13 @@ export interface IssueGrantInput {
   allowedSurfaceIds: string[];
   expiresAt: Date;
   sign: SignHash;
+  /**
+   * Present to issue for an agent you were APPOINTED over rather than one you hold the key of.
+   *
+   * Omit and the grant claims self-issuance, which the resolver only honours when issuer === target.
+   * There is no third option: an `authorityRef` it cannot parse is denied, never treated as self.
+   */
+  authority?: DiscoveryAuthorityPresentation;
 }
 
 export interface ResolutionApiResult {
@@ -90,15 +112,19 @@ export async function issueDiscoveryGrant(
   input: IssueGrantInput,
   token: string,
 ): Promise<ResolutionApiResult> {
-  const agentId = caip10(input.agentAddress, input.chainId);
+  const issuerId = caip10(input.agentAddress, input.chainId);
+  // The agent being made discoverable. Under an appointment that is the APPOINTMENT'S target, never
+  // the issuer — taking it from the issuer would let a holder retarget the authority at itself.
+  const agentId = input.authority
+    ? caip10(input.authority.targetAgent, input.chainId)
+    : issuerId;
   const subjectId = caip10(input.subjectAddress, input.chainId);
   const grantId = newGrantId();
 
   const core = {
     specVersion: 'ap.private-resolution-grant/1' as const,
     grantId,
-    issuer: agentId,
-    // Self-issuance: the resolver refuses a delegated issuer until a vault authority record exists.
+    issuer: issuerId,
     targetAgent: agentId,
     subject: subjectId,
     mode: 'subject-bound' as const,
@@ -117,15 +143,19 @@ export async function issueDiscoveryGrant(
     },
     statusRef: `home://grant-status/${grantId}`,
     issuedAt: new Date().toISOString(),
-    // Self-issuance — the home issues for the agent it custodies using that agent's own key. A
-    // non-empty authorityRef must be `apdel1:<hashDelegation>` (spec 338 W6-c); anything else denies.
-    authorityRef: '',
+    // '' claims self-issuance; `apdel1:<hashDelegation>` commits to the appointment used. Because the
+    // ref is INSIDE the body being signed below, the issuer commits to which authority it acted
+    // under — presenting a different delegation later, even a valid one, fails at the resolver.
+    authorityRef: input.authority?.authorityRef ?? '',
   };
 
   // The issuer's own key signs. The Home only carries the result.
   const proof = await input.sign(signingDigest(await digestOf(core)));
 
-  const result = await post({ action: 'issue', grant: { ...core, proof } }, token);
+  const result = await post(
+    { action: 'issue', grant: { ...core, proof }, delegation: input.authority?.delegation },
+    token,
+  );
   return result.ok ? { ...result, grantId } : result;
 }
 

@@ -13,6 +13,7 @@ import type { AgentDiscoveryPreset } from '@agenticprimitives/agent-resolution';
 import { Stack } from '../../shared/ui';
 import { VisibilityPolicyCard } from './VisibilityPolicyCard';
 import { InvitationsPanel } from './InvitationsPanel';
+import { DiscoveryAuthorityPanel } from './DiscoveryAuthorityPanel';
 import { InvitationInspector } from './InvitationInspector';
 
 type Pane = 'agent' | 'inspect';
@@ -56,6 +57,7 @@ export function VisibilityTab() {
         <Stack gap={1}>
           <VisibilityPolicyCard value={preset} onChange={setPreset} />
           <InvitationsPanel />
+          <DiscoveryAuthorityPanel />
         </Stack>
       ) : (
         <InvitationInspector />

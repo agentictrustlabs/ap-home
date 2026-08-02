@@ -8,11 +8,12 @@
 // THE GRANT ID IS SHOWN EXACTLY ONCE. It is a bearer-shaped capability until presented, so it is never
 // stored anywhere it could be read back. Losing it means reissuing, which is the correct trade.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { signHashFor, type Via } from '../../../home/onboarding';
 import { issueDiscoveryGrant, revokeDiscoveryGrant } from '../../../home/resolution';
+import { parseDiscoveryAuthorityBundle } from '../../../home/discovery-authority';
 import { Card, Row, Stack } from '../../shared/ui';
 import { BusyButton } from '../../shared/BusyButton';
 
@@ -26,6 +27,8 @@ interface Issued {
   purpose: string;
   expiresAt: string;
   revoked?: boolean;
+  /** The agent it makes discoverable, when that is not the signed-in agent. */
+  onBehalfOf?: string;
 }
 
 export function InvitationsPanel() {
@@ -37,8 +40,27 @@ export function InvitationsPanel() {
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   // Session-local only — the grant id is deliberately not persisted anywhere readable.
   const [issued, setIssued] = useState<Issued[]>([]);
+  // An appointment pasted in to issue for an agent whose key you do NOT hold (spec 338 W6-c).
+  const [bundleText, setBundleText] = useState('');
 
-  const canIssue = !!session && !!agentAddress && /^0x[0-9a-fA-F]{40}$/.test(subject.trim());
+  // Parsed on every keystroke so a mistyped bundle explains itself here, rather than coming back as
+  // an `authority_invalid` from the resolver that the operator has to decode.
+  const parsed = useMemo(
+    () => (bundleText.trim() ? parseDiscoveryAuthorityBundle(bundleText) : null),
+    [bundleText],
+  );
+  const authority = parsed?.ok ? parsed.bundle : null;
+
+  // The appointment names WHO may use it. Signing in as anyone else produces a grant the resolver
+  // refuses, so say it here instead of letting them spend a signature to find out.
+  const wrongAppointee =
+    !!authority && !!agentAddress &&
+    authority.steward.toLowerCase() !== agentAddress.toLowerCase();
+
+  const canIssue =
+    !!session && !!agentAddress &&
+    /^0x[0-9a-fA-F]{40}$/.test(subject.trim()) &&
+    (!bundleText.trim() || (!!authority && !wrongAppointee));
 
   const issue = useCallback(async () => {
     if (!session || !agentAddress) return;
@@ -60,6 +82,15 @@ export function InvitationsPanel() {
           allowedSurfaceIds: surfaces.split(',').map((s) => s.trim()).filter(Boolean),
           expiresAt,
           sign,
+          // Present ⇒ the grant is FOR the appointment's target and commits to its delegation.
+          // Absent ⇒ it claims self-issuance, which only holds when issuer === target.
+          authority: authority
+            ? {
+                authorityRef: authority.authorityRef,
+                targetAgent: authority.targetAgent,
+                delegation: authority.delegation,
+              }
+            : undefined,
         },
         session.token,
       );
@@ -68,7 +99,13 @@ export function InvitationsPanel() {
         throw new Error(result.detail ?? result.error ?? 'the resolver refused the grant');
       }
       setIssued((prev) => [
-        { grantId: result.grantId!, subject: subject.trim(), purpose, expiresAt: expiresAt.toISOString() },
+        {
+          grantId: result.grantId!,
+          subject: subject.trim(),
+          purpose,
+          expiresAt: expiresAt.toISOString(),
+          onBehalfOf: authority?.targetAgent,
+        },
         ...prev,
       ]);
       setMsg({ kind: 'ok', text: 'Grant issued. Copy the id now — it is not shown again.' });
@@ -78,7 +115,7 @@ export function InvitationsPanel() {
     } finally {
       setBusy(false);
     }
-  }, [session, agentAddress, subject, purpose, surfaces]);
+  }, [session, agentAddress, subject, purpose, surfaces, authority]);
 
   const revoke = useCallback(
     async (grantId: string) => {
@@ -138,9 +175,48 @@ export function InvitationsPanel() {
           </Row>
         </Stack>
 
+        <details style={{ fontSize: '0.8rem' }}>
+          <summary style={{ cursor: 'pointer', opacity: 0.8 }}>
+            Issuing for an agent you don’t hold the key of?
+          </summary>
+          <Stack gap={0.35} style={{ marginTop: '0.5rem' }}>
+            <p style={{ margin: 0, fontSize: '0.78rem', opacity: 0.72 }}>
+              Paste the appointment its keyholder gave you. Your key still signs the grant; the
+              appointment is what proves you were allowed to.
+            </p>
+            <textarea value={bundleText} onChange={(e) => setBundleText(e.target.value)} rows={5}
+              placeholder="{ &quot;bundleVersion&quot;: &quot;ap.discovery-authority-bundle/1&quot;, … }"
+              spellCheck={false}
+              style={{ width: '100%', padding: '0.4rem', borderRadius: 6, border: '1px solid var(--border,#e4e0d8)', fontFamily: 'ui-monospace, monospace', fontSize: '0.7rem', resize: 'vertical' }} />
+
+            {parsed && !parsed.ok && (
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.78rem', color: 'var(--danger,#b3261e)' }}>
+                {parsed.problems.map((p) => (
+                  <li key={`${p.field}:${p.message}`}><code>{p.field}</code> — {p.message}</li>
+                ))}
+              </ul>
+            )}
+
+            {authority && wrongAppointee && (
+              <div role="alert" style={{ fontSize: '0.78rem', color: 'var(--danger,#b3261e)' }}>
+                This appointment names {authority.steward.slice(0, 10)}…, but you are signed in as{' '}
+                {agentAddress?.slice(0, 10)}…. Only the named party can use it.
+              </div>
+            )}
+
+            {authority && !wrongAppointee && (
+              <div style={{ fontSize: '0.78rem', opacity: 0.8 }}>
+                Issuing for <code style={{ fontSize: '0.72rem' }}>{authority.targetAgent.slice(0, 12)}…</code>{' '}
+                — appointment valid until {new Date(authority.expiresAt).toLocaleDateString()}. The
+                resolver re-checks it on-chain; this preview is only a courtesy.
+              </div>
+            )}
+          </Stack>
+        </details>
+
         <Row gap={0.5}>
           <BusyButton busy={busy} busyLabel="Signing…" onClick={issue} disabled={!canIssue}>
-            Issue discovery grant
+            {authority ? 'Issue on their behalf' : 'Issue discovery grant'}
           </BusyButton>
           {!session && <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>Sign in to issue.</span>}
         </Row>
@@ -170,6 +246,7 @@ export function InvitationsPanel() {
                 </Row>
                 <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.2rem' }}>
                   {i.purpose} · to {i.subject.slice(0, 10)}… · until {new Date(i.expiresAt).toLocaleDateString()}
+                  {i.onBehalfOf && <> · for {i.onBehalfOf.slice(0, 10)}…</>}
                 </div>
               </div>
             ))}
@@ -181,9 +258,9 @@ export function InvitationsPanel() {
         )}
 
         <p style={{ margin: 0, fontSize: '0.78rem', opacity: 0.7 }}>
-          Self-issuance only: you can make <em>your own</em> agent discoverable. Issuing on behalf of an
-          agent you custody needs a vault authority record, which is not wired yet — the resolver
-          refuses it rather than trusting an unchecked claim.
+          Two ways to issue, and the resolver decides which from the grant’s <em>signed</em> body: for
+          your own agent, or for one that appointed you. There is no third — an authority reference it
+          cannot read is refused, never treated as self-issuance.
         </p>
       </Stack>
     </Card>
