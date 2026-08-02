@@ -8,8 +8,8 @@
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
-const ERC1271_MAGIC = '0x1626ba7e';
 const ERC1271_ABI = [
   { type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'bytes' }], outputs: [{ type: 'bytes4' }] },
 ] as const;

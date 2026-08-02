@@ -22,10 +22,10 @@ function unverifiedAud(token: string): string | null {
   }
 }
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 // (importJwks / verifyAgentSession / getServer / resolveOrigin are also used by the
 //  spec-275 session-authorized POST branch below — same verifier as the GET.)
 
-const ERC1271_MAGIC = '0x1626ba7e';
 const ERC1271_ABI = [
   { type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'bytes' }], outputs: [{ type: 'bytes4' }] },
 ] as const;

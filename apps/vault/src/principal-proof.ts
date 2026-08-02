@@ -12,21 +12,11 @@
 // validator, no proof, a stale timestamp, or an invalid signature all reject — no mint.
 
 import { createPublicClient, http, keccak256, toBytes, type Address } from 'viem';
+// The UniversalSignatureValidator ABI lives in `chain-state-viem` — ONE declaration, so a
+// signature check here cannot drift from the one the authority reader makes.
+import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticprimitives/chain-state-viem';
 
 /** UniversalSignatureValidator `isValidSig` — same ABI as the vault-key + credential verifiers. */
-const USV_ISVALIDSIG_ABI = [
-  {
-    type: 'function',
-    name: 'isValidSig',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'signer', type: 'address' },
-      { name: 'hash', type: 'bytes32' },
-      { name: 'sig', type: 'bytes' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
 
 export interface PrincipalProofEnv {
   RPC_URL: string;

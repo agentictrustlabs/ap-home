@@ -33,6 +33,9 @@ import { cachingDekWrapper } from './dek-cache';
 import { canonicalize, sha256Hex, type Sha256 } from '@agenticprimitives/key-authorization';
 import { createDemoVault } from './vault.js';
 import { getVaultKeyBindingRow, putVaultKeyBindingRow, type VaultKeyBindingRow } from './db.js';
+// The UniversalSignatureValidator ABI lives in `chain-state-viem` — ONE declaration, so a
+// signature check here cannot drift from the one the authority reader makes.
+import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticprimitives/chain-state-viem';
 
 /** The host id a person SA authorizes in its VaultKeyBinding. */
 export const VAULT_SERVER_ID = 'demo-mcp';
@@ -48,19 +51,6 @@ export interface VaultKeyEnv {
 
 // UniversalSignatureValidator.isValidSig(signer, hash, sig) — ERC-1271/6492/ECDSA
 // across any connection strategy (same surface DEL-001 uses).
-const USV_ISVALIDSIG_ABI = [
-  {
-    type: 'function',
-    name: 'isValidSig',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'signer', type: 'address' },
-      { name: 'hash', type: 'bytes32' },
-      { name: 'sig', type: 'bytes' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
 
 function bindingFromRow(row: VaultKeyBindingRow): VaultKeyBindingV1 {
   return {

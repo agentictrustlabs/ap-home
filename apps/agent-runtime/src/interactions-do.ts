@@ -67,9 +67,9 @@ import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env,
 import { checkSessionWireShape } from './session-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
+import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
-const ERC1271_MAGIC = '0x1626ba7e';
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
 // spec 324 §10 conversation/topic split (renamed from board.* in the W6 key migration): descriptors in

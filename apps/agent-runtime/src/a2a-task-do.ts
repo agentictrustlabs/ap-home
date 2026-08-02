@@ -84,9 +84,9 @@ import {
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
 import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
+import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
-const ERC1271_MAGIC = '0x1626ba7e';
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
 /** Stable JSON keccak — the body integrity hash. The sender computes `bodyHash` the same way. */

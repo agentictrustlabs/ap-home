@@ -17,22 +17,12 @@ import {
   type VerifiableCredential,
 } from '@agenticprimitives/verifiable-credentials';
 import type { AgenticEntitlementCredentialV1, CredentialVerifier } from '@agenticprimitives/entitlements';
+// The UniversalSignatureValidator ABI lives in `chain-state-viem` — ONE declaration, so a
+// signature check here cannot drift from the one the authority reader makes.
+import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticprimitives/chain-state-viem';
 
 /** UniversalSignatureValidator `isValidSig` — ERC-1271/6492/ECDSA/WebAuthn over a digest (same ABI as
  *  the vault-key + delegation verifiers; the deployed USV is the one authority for signature validity). */
-const USV_ISVALIDSIG_ABI = [
-  {
-    type: 'function',
-    name: 'isValidSig',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'signer', type: 'address' },
-      { name: 'hash', type: 'bytes32' },
-      { name: 'sig', type: 'bytes' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
 
 /** The subset of demo-mcp's Env this verifier needs. */
 export interface CredentialVerifierEnv {
