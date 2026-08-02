@@ -601,6 +601,14 @@ function buildAllowedOriginMatcher(env: Env): (origin: string | undefined | null
 }
 
 app.use('*', async (c, next) => {
+  // Peer attestation is PUBLIC and cross-origin BY DEFINITION — it exists so any agent's client can
+  // ask "prove which agent you are". Gating it by this Worker's browser-origin allowlist would make it
+  // unusable by exactly the callers it is for, and the allowlist buys nothing here: the endpoint takes
+  // no credentials and returns only this Worker's own public identity. So: open CORS, and
+  // `credentials: false` — nothing about this request should ever carry a cookie.
+  if (c.req.path === '/peer-attest') {
+    return cors({ origin: '*', allowMethods: ['POST', 'OPTIONS'], allowHeaders: ['content-type'] })(c, next);
+  }
   const match = buildAllowedOriginMatcher(c.env);
   return cors({
     origin: (origin) => match(origin),
