@@ -70,3 +70,7 @@ service = "demo-mcp-production"
 [[env.production.services]]
 binding = "A2A"
 service = "demo-a2a-production"
+
+# DEPLOY WITH `--env production`. The real Worker is `demo-edge-production`; the service bindings to
+# demo-mcp/demo-a2a live under [env.production] ONLY. A bare `wrangler deploy` publishes a SEPARATE,
+# binding-less Worker named `demo-edge` whose dispatch then loops and returns Cloudflare error 1042.
