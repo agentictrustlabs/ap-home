@@ -22,7 +22,7 @@ import { join } from 'node:path';
 
 const REPO_ROOT = join(import.meta.dirname ?? __dirname, '..');
 const NETWORK = process.env.DEPLOY_NETWORK ?? 'anvil';
-const DEPLOYMENTS_PATH = join(REPO_ROOT, 'apps', 'contracts', `deployments-${NETWORK}.json`);
+const DEPLOYMENTS_PATH = join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`);
 
 if (!existsSync(DEPLOYMENTS_PATH)) {
   console.error(`gen-dev-vars: ${DEPLOYMENTS_PATH} not found.`);
