@@ -60,6 +60,8 @@ import {
   type PersonAssistantV1,
   type TopicAssistantV1,
 } from '@agenticprimitives/fabric/messaging';
+// spec 341 Wave 2a — the inbox read cursor (Ring-0, pure; survives the Wave 5 transport change).
+import { inboxRevision, type InboxDataV1 } from '@agenticprimitives/fabric';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
 
@@ -937,7 +939,17 @@ export class InteractionsDO {
       try {
         if (op === 'inbox.get') {
           const doc = await this.readDoc<unknown>(g, INBOX_RESOURCE, null);
-          return json({ ok: true, doc });
+          // spec 341 Wave 2a — the read cursor. A caller that presents the revision it already holds
+          // gets `unchanged` instead of the document. The vault read above is unavoidable (we must
+          // read to digest), so this does not save the round trip; it saves the TRANSFER and, on the
+          // caller's side, `hydrateInboxStores` — an O(events) replay it otherwise performs on every
+          // single poll. Absent cursor ⇒ always the document (a first-time caller has seen nothing).
+          const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
+          const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
+          if (revision !== null && since && since === revision) {
+            return json({ ok: true, unchanged: true, revision });
+          }
+          return json({ ok: true, doc, ...(revision ? { revision } : {}) });
         }
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
