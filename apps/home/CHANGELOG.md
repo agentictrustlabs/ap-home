@@ -1,5 +1,14 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.22
+
+### Patch Changes
+
+- Updated dependencies [61fffa3]
+- Updated dependencies [fe7db21]
+  - @agenticprimitives/fabric@0.0.0-alpha.8
+  - @agenticprimitives/home@0.0.0-alpha.8
+
 ## 0.0.2-alpha.21
 
 ### Patch Changes
