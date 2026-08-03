@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  buildA2aAgentCard,
   parseAgentSubdomain,
   agentNameForLabel,
   withConsultSkill,
@@ -125,5 +126,43 @@ describe('skill cards', () => {
     const withConsult = withConsultSkill(skills, true);
     expect(withConsult).toHaveLength(2);
     expect(withConsult[0]?.id).toBe('grant-writing');
+  });
+});
+
+
+// ADR-0059 / spec 341 §2.1 — asserted on the card demo-a2a ACTUALLY SERVES, not on the package
+// builder. The recurring failure in this repo is a correct implementation reachable only from a path
+// no deployment runs (spec 340 W11 → W12), so the test targets the deployed shape.
+describe('the served Agent Card declares how to authenticate', () => {
+  const ctx = {
+    publicOrigin: 'https://alice.example.io',
+    label: 'alice',
+    name: 'alice.impact',
+    agent: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  } as unknown as Parameters<typeof buildA2aAgentCard>[0];
+
+  const card = (): Record<string, unknown> => buildA2aAgentCard(ctx, 84532);
+  const caps = (): { extensions?: { uri: string }[] } =>
+    card().capabilities as { extensions?: { uri: string }[] };
+
+  it('carries the AP authority extension on the public card', () => {
+    const uris = (caps().extensions ?? []).map((e) => e.uri);
+    expect(uris.some((u) => u.includes('/a2a/authority/'))).toBe(true);
+  });
+
+  it('states that a bearer is an envelope and authority is re-checked per call', () => {
+    const ext = (caps().extensions ?? []).find((e) => e.uri.includes('/a2a/authority/')) as
+      | { params?: { bearerIsEnvelopeOnly?: boolean; reEvaluatedPerCall?: boolean; chain?: string } }
+      | undefined;
+    expect(ext?.params?.bearerIsEnvelopeOnly).toBe(true);
+    expect(ext?.params?.reEvaluatedPerCall).toBe(true);
+    // Chain-scoped, so a peer resolves the delegation against the right chain rather than guessing.
+    expect(ext?.params?.chain).toBe('eip155:84532');
+  });
+
+  it('does not claim streaming or push it has not mounted', () => {
+    const c = card().capabilities as { streaming: boolean; pushNotifications: boolean };
+    expect(c.streaming).toBe(false);
+    expect(c.pushNotifications).toBe(false);
   });
 });

@@ -10,6 +10,7 @@
 // public `https://<handle>.impact-agent.io`). For direct workers.dev / local
 // access we parse the Host header ourselves.
 
+import { apAuthorityExtension } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
@@ -171,20 +172,32 @@ export function buildA2aAgentCard(
     supportedInterfaces: [{ url: messageEndpoint, protocolBinding: 'JSONRPC' }],
     provider: { organization: 'Agentic Connect', url: origin },
     capabilities: {
+      // Honest flags (ADR-0059): this host mounts no SSE transport and wires no push sender, so it
+      // says so. Spec 341 §3 makes one of these true BEFORE the Home's read cutover, because a Card
+      // declaring neither leaves polling as the only mechanism.
       streaming: false,
       pushNotifications: false,
       stateTransitionHistory: false,
-      ...(provenanceEnabled
-        ? {
-            extensions: [
+      extensions: [
+        // ADR-0059 / spec 341 §2.1 — how to authenticate, on the PUBLIC card, unconditionally. Without
+        // this a peer learns which skills exist and nothing about becoming allowed to call them, which
+        // is what made spec 341's success test ("an external agent uses the same skills the Home
+        // uses") unreachable. Unlike the provenance and x402 extensions this is NOT conditional: it
+        // leaks nothing, and hiding it would defeat its only purpose.
+        apAuthorityExtension({
+          methods: ['delegation', 'session-wire', 'mandate'],
+          chain: `eip155:${chainId}`,
+        }),
+        ...(provenanceEnabled
+          ? [
               {
                 uri: 'https://agentictrust.io/a2a/extensions/skill-provenance/v1',
                 required: false,
                 description: 'artifacts may carry a verifiable skill-provenance manifest (who-did-what-when)',
               },
-            ],
-          }
-        : {}),
+            ]
+          : []),
+      ],
     },
     defaultInputModes: ['text/plain', 'application/json'],
     defaultOutputModes: ['text/plain', 'application/json'],
