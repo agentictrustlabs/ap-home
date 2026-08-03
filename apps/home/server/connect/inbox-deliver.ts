@@ -1,7 +1,18 @@
-// POST /connect/inbox/deliver — inbound signed-envelope delivery (spec 309 §7
-// "direct app↔inbox" profile; spec 310 W3). The transport half: any agent (an
-// A2A worker, a relying app's service agent, another Home) POSTs a
-// MessageEnvelopeV1 + body for a recipient this Home hosts.
+// POST /connect/inbox/deliver — inbound delivery for a recipient this Home hosts
+// (spec 309 §7 "direct app↔inbox" profile; spec 310 W3).
+//
+// AUTHENTICATED SINCE spec 341 §5.2. It was not, and the header here used to
+// claim "signed-envelope delivery" while nothing verified a signature: no bearer,
+// no session, `access-control-allow-origin: *`, and the only check was that the
+// recipient's label resolved to `envelope.to[0]` — i.e. that the message was
+// correctly ADDRESSED. `envelope.from` was taken on trust, so anyone who knew a
+// person's label could inject a message into their inbox as any sender.
+//
+// The caller now presents an id_token THIS Home minted, and `envelope.from` MUST
+// equal the verified subject. A sender claim is no longer a claim.
+//
+// This is authentication, not authority: holding a token permits nothing, and a
+// message is never authority (spec 309 §4.2, ADR-0041).
 //
 // Admission is the packages' audited fail-closed pipeline (validate → body-hash
 // → audit-accept → commit; case submit/admit transitions audited the same way).
@@ -16,8 +27,17 @@ import { nameLabel } from '../../src/lib/domain';
 import { deliverToInbox } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
 import { makeInboxKv } from '../lib/inbox-store';
+import { importJwks } from '@agenticprimitives/connect';
+import { getServer, ownIssuer } from '../_lib/server-broker';
+import { bearerFrom, verifyRelyingClientIdToken } from '../_lib/relying-token';
 
-const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
+// `authorization` must be allowed through, or a browser client cannot present the token this endpoint
+// now requires. The origin stays `*`: the token is the gate, not the origin — an origin check would be
+// a second, weaker mechanism (ADR-0013).
+const cors = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'content-type, authorization',
+};
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...cors } });
 
@@ -38,6 +58,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const label = (body?.label ?? '').trim().toLowerCase();
   if (!/^[a-z0-9-]{1,63}$/.test(label) || !body?.envelope || typeof body.bodyText !== 'string') {
     return json({ error: 'label + envelope + bodyText required' }, 400);
+  }
+
+  // ── spec 341 §5.2 — authenticate the SENDER, before anything is admitted ──────────────────────
+  // Ordering matters: this runs before the on-chain name read, so an unauthenticated caller cannot
+  // use this endpoint as a free naming-resolution oracle, and cannot make us spend an RPC call.
+  const token = bearerFrom(request);
+  if (!token) return json({ error: 'authorization required' }, 401);
+  const { jwks } = await getServer(env);
+  const subject = await verifyRelyingClientIdToken(token, await importJwks(jwks), ownIssuer(request, env));
+  if (!subject) return json({ error: 'invalid or unrecognised token' }, 401);
+
+  const claimedFrom = body.envelope.from?.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
+  if (!claimedFrom) return json({ error: 'envelope.from must carry the sending agent' }, 400);
+  if (claimedFrom !== subject) {
+    // The whole point. A caller may deliver AS ITSELF and as nothing else; `from` is now bound to a
+    // signature this Home verified rather than to whatever the body asserted.
+    return json({ error: 'envelope.from does not match the authenticated sender' }, 403);
   }
 
   // Label → recipient SA, one on-chain mechanism (reverse-confirmed forward
