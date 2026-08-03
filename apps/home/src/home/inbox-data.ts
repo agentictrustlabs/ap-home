@@ -39,7 +39,15 @@ import {
 import { projectHomeInboxSummary, type HomeInboxSummaryV1 } from '@agenticprimitives/home';
 // spec 322 W1 — the inbox DOC shape + pure operations are substrate (fabric); this module keeps only
 // the app's storage adapter (KV/vault routing, audit sink) and the Home-specific compositions.
-import { emptyInboxData, parseInboxData, hydrateInboxStores, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
+import {
+  emptyInboxData,
+  parseInboxData,
+  hydrateInboxStores,
+  upsertConversation,
+  type InboxDataV1,
+  type CommitmentRecordV1,
+  type DecisionRecordV1,
+} from '@agenticprimitives/fabric';
 import type { AuditEvent, AuditSink } from '@agenticprimitives/audit';
 import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
 import { homeCaip10 } from './manifest';
@@ -92,6 +100,19 @@ export interface InboxView {
   folders: FolderSummaryV1[];
   summary: HomeInboxSummaryV1;
   cases: InteractionCaseV1[];
+  /**
+   * spec 340 W10b-2 — the determination and the obligation, keyed by interaction id.
+   *
+   * These are NOT derived from `case.state` and must not be re-derived from it. A determination has
+   * its own lifecycle and its own signer: a case can be `revoked` while its grant remains a recorded
+   * fact, and an obligation can be outstanding after execution finished. `case.state` answers "how far
+   * did the work get"; these answer "what was decided" and "what is owed".
+   *
+   * Empty for any case whose history never produced one — absence is an answer, not a reason to fall
+   * back to reading the case state (ADR-0013).
+   */
+  decisions: Record<string, DecisionRecordV1>;
+  commitments: Record<string, CommitmentRecordV1>;
   cards: Record<string, ActionCardV1>;
   bodies: Record<string, string>;
   mandates: Record<string, InteractionMandateV1>;
@@ -178,11 +199,23 @@ export async function readInboxView(kv: KV, person: string, bodyStore?: MessageB
   }
   const descriptors: InboxView['descriptors'] = {};
   for (const d of doc.conversations ?? []) descriptors[d.id] = d;
+  // spec 340 W10b-2. Read off the machines that own them — the replay that rebuilt `interactions`
+  // populated these from the SAME stored event log, so they cost no extra storage and no migration.
+  const decisions: InboxView['decisions'] = {};
+  const commitments: InboxView['commitments'] = {};
+  for (const c of cases) {
+    const d = interactions.getDecision(c.id);
+    if (d) decisions[c.id] = d;
+    const m = interactions.getCommitment(c.id);
+    if (m) commitments[c.id] = m;
+  }
   return {
     items,
     folders: summarizeFolders(items),
     summary: projectHomeInboxSummary({ items, cases }),
     cases,
+    decisions,
+    commitments,
     cards: doc.cards,
     bodies: await resolveBodies(doc, bodyStore, conversationId),
     mandates: doc.mandates ?? {},
@@ -482,6 +515,27 @@ export async function applyCaseTransition(
   doc.caseEvents.push(event);
   await saveInboxData(kv, person, doc);
   return result.case;
+}
+
+/**
+ * spec 340 W10b-2 — what a case transition DETERMINED, read back off the owning machines.
+ *
+ * Separate from `applyCaseTransition`'s return on purpose. That returns the case, which answers how
+ * far the work got; this answers what was decided and what is owed. Callers that need both ask for
+ * both, rather than one being inferred from the other.
+ *
+ * Nothing extra is stored: the emission rode the same `caseEvents` append the transition already
+ * wrote, so this is a replay of bytes that are on disk either way.
+ */
+export async function readCaseDetermination(
+  kv: KV,
+  person: Address,
+  interactionId: string,
+): Promise<{ decision: DecisionRecordV1 | null; commitment: CommitmentRecordV1 | null }> {
+  const doc = await loadInboxData(kv, person);
+  const { interactions } = hydrate(person, doc);
+  const id = interactionId as InteractionCaseV1['id'];
+  return { decision: interactions.getDecision(id), commitment: interactions.getCommitment(id) };
 }
 
 /**

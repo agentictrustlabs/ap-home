@@ -20,7 +20,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
+import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, readCaseDetermination, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
 import { makeInboxKv, type InboxKV } from '../lib/inbox-store';
 import { mandateDigest } from '../../src/home/mandate';
@@ -357,7 +357,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (transition === 'approve' || transition === 'deny' || transition === 'ask-info' || transition === 'revoke') {
         await appendControlEvent(env, owner as Address, 'inbox-decision', updated.authorityRefs.slice(-1));
       }
-      return jsonCors({ ok: true, case: updated }, request);
+      // spec 340 W10b-2: return what was DETERMINED alongside how far the work got. The client no
+      // longer has to read a determination out of `case.state` — which is the reading that made one
+      // field answer three questions with three different signers (spec 340 §R.2).
+      const determination = await readCaseDetermination(inboxKv, owner as Address, body.interactionId);
+      return jsonCors({ ok: true, case: updated, ...determination }, request);
     }
     return jsonCors({ error: 'unknown action' }, request, 400);
   } catch (e) {
