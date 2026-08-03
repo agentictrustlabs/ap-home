@@ -1,5 +1,16 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.23
+
+### Patch Changes
+
+- Updated dependencies [94b3dfd]
+- Updated dependencies [867bf2a]
+- Updated dependencies [8cb5bb0]
+- Updated dependencies [974a165]
+  - @agenticprimitives/a2a@0.0.0-alpha.18
+  - @agenticprimitives/fabric@0.0.0-alpha.9
+
 ## 0.0.2-alpha.22
 
 ### Patch Changes
