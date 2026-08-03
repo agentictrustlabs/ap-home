@@ -1,5 +1,37 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.19
+
+### Patch Changes
+
+- Updated dependencies [986a02f]
+- Updated dependencies [986a02f]
+- Updated dependencies [986a02f]
+- Updated dependencies [986a02f]
+- Updated dependencies [986a02f]
+- Updated dependencies [986a02f]
+  - @agenticprimitives/a2a@0.0.0-alpha.17
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.3
+  - @agenticprimitives/types@1.0.0-alpha.21
+  - @agenticprimitives/audit@1.0.0-alpha.21
+  - @agenticprimitives/situations@0.0.0-alpha.5
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.2
+  - @agenticprimitives/agent-account@1.0.0-alpha.21
+  - @agenticprimitives/chain-state-viem@0.0.0-alpha.3
+  - @agenticprimitives/connect-auth@1.0.0-alpha.21
+  - @agenticprimitives/orchestration-anthropic@0.0.0-alpha.2
+  - @agenticprimitives/agent-resolution@0.0.0-alpha.2
+  - @agenticprimitives/delegation@1.0.0-alpha.21
+  - @agenticprimitives/fabric@0.0.0-alpha.5
+  - @agenticprimitives/agent-naming@1.0.0-alpha.21
+  - @agenticprimitives/connect@1.0.0-alpha.21
+  - @agenticprimitives/content-storage@0.1.1-alpha.0
+  - @agenticprimitives/coordination@0.0.0-alpha.4
+  - @agenticprimitives/key-custody@1.0.0-alpha.21
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.21
+  - @agenticprimitives/related-agents@0.0.0-alpha.17
+  - @agenticprimitives/rate-control-cloudflare@0.0.0-alpha.2
+
 ## 0.0.2-alpha.18
 
 ### Patch Changes
