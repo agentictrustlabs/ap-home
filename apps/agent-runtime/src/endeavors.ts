@@ -52,7 +52,7 @@ import {
   type ChannelMessageEntryV1,
   type ChannelV1,
   type ConversationDescriptorV1,
-  type MessageEnvelopeV1,
+  type AnyMessageEnvelope,
 } from '@agenticprimitives/fabric/messaging';
 
 // ── Vault record keys ──
@@ -119,7 +119,7 @@ export interface EndeavorOpDeps {
   /** Audit row (actor = session SA) — callers invoke it BEFORE the commit writes. */
   writeAudit(action: string, subject: { type: string; id: string }, timestamp?: string): Promise<void>;
   /** Persist a fabric message body at the envelope's own resource (hash-bound). */
-  putTopicBody(envelope: MessageEnvelopeV1, bodyText: string): Promise<void>;
+  putTopicBody(envelope: AnyMessageEnvelope, bodyText: string): Promise<void>;
   /** OPTIONAL — fire-and-forget hand-off to the org's own agent to DRAFT a multi-step plan from the
    *  adopted goal (spec 327 planner reused; the org is the actor via internal.endeavor.proposePlan).
    *  Absent (internal doors, unconfigured LLM) ⇒ no auto-draft, the steward authors the plan by hand. */
@@ -1121,7 +1121,7 @@ export async function handleEndeavorOp(
       const composed: ChannelV1[] = [channel];
       const r = await appendBoardPost(composed, {
         channelId: topicId,
-        from: deps.sessionCaip as MessageEnvelopeV1['from'],
+        from: deps.sessionCaip as AnyMessageEnvelope['from'],
         authorName: name ?? (steward ? 'Steward' : viewer),
         bodyText,
       });

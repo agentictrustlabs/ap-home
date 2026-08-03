@@ -55,6 +55,7 @@ import {
   type DirectoryListingV1,
   type FixedWindowState,
   type MessageEnvelopeV1,
+  type AnyMessageEnvelope,
   type MessageEventV1,
   type PersonAssistantV1,
   type TopicAssistantV1,
@@ -635,7 +636,7 @@ export class InteractionsDO {
    *  board surfaced a raw "auth failed"). Requires demo-mcp ≥ VL-W2 (`get_vault_records`, deployed
    *  2026-07-13) — the deployed fleet has it; there is deliberately NO per-record fallback path
    *  (ADR-0013 one-mechanism). Fail-closed PER RECORD: unverifiable bodies are omitted. */
-  private async readTopicBodies(grant: IncomingDelegation, envelopes: MessageEnvelopeV1[]): Promise<Record<string, string>> {
+  private async readTopicBodies(grant: IncomingDelegation, envelopes: AnyMessageEnvelope[]): Promise<Record<string, string>> {
     if (envelopes.length === 0) return {};
     const recordTypes = [...new Set(envelopes.map((e) => e.body.resource))];
     let records: Record<string, unknown> = {};
@@ -1036,7 +1037,7 @@ export class InteractionsDO {
             if (!entry) return json({ error: 'unknown channel' }, 404);
             const assistant = entry.assistant;
             if (!assistant) return json({ error: 'assistant is not enabled on this topic' }, 409);
-            const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as MessageEnvelopeV1['from'];
+            const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
             const messages = await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []);
             const composed: ChannelV1[] = [{ ...entry, messages }];
             const r = await appendBoardPost(composed, { channelId, from: orgCaip, authorName: assistant.displayName, bodyText, actor: orgCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
@@ -1089,8 +1090,17 @@ export class InteractionsDO {
             const dg = st0.deliveryGrant;
             if (!dg) return json({ error: 'no delivery grant — enable inbox delivery for this agent first' }, 409);
             const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
-            const personCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as MessageEnvelopeV1['from'];
-            const built = await buildAssistantInboxReply(doc.conversations as ConversationDescriptorV1[] | undefined, { principal: personCaip, conversationId, bodyText });
+            const personCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
+            // spec 340 — a V2 reply MUST name what it answers (§R.4); `INFORM` alone cannot say
+            // "this is a response". The antecedent is the newest message in this conversation that
+            // did NOT come from the principal — which is precisely what the assistant is replying to.
+            // Fail-closed: nothing inbound to answer ⇒ no reply, rather than an envelope that claims
+            // to be an original.
+            const convEnvelopes = ((doc.envelopes ?? []) as AnyMessageEnvelope[])
+              .filter((e) => e.conversationId === conversationId && e.from !== personCaip);
+            const antecedent = convEnvelopes[convEnvelopes.length - 1]?.id;
+            if (!antecedent) return json({ error: 'no inbound message in this conversation to reply to' }, 409);
+            const built = await buildAssistantInboxReply(doc.conversations as ConversationDescriptorV1[] | undefined, { principal: personCaip, conversationId, bodyText, inReplyTo: antecedent });
             if (!built.ok) return json({ error: built.error }, 409);
             const { envelope, counterpartyAddr, bodyBytes } = built;
             // Counterparty copy FIRST, fail-closed (the sendFromInbox "recipient side first" rule):
@@ -1775,7 +1785,7 @@ export class InteractionsDO {
           if (!canSeeChannel(entry, sessionSa, posterSteward)) return json({ error: 'not a participant of this restricted topic — ask a facilitator for an invitation' }, 403);
           const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
-          const r = await appendBoardPost(composed, { channelId, from: sessionCaip as MessageEnvelopeV1['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
+          const r = await appendBoardPost(composed, { channelId, from: sessionCaip as AnyMessageEnvelope['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
           if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
           await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
@@ -1784,7 +1794,7 @@ export class InteractionsDO {
           await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
           // spec 327 §3 — post-commit assistant trigger: fire-and-forget AFTER the member's post is
           // durable; a failed/limited dispatch is audited + dropped, never affecting this response.
-          if (assistantTrigger(entry, { from: sessionCaip as MessageEnvelopeV1['from'], bodyText: String(body.bodyText ?? '') })) {
+          if (assistantTrigger(entry, { from: sessionCaip as AnyMessageEnvelope['from'], bodyText: String(body.bodyText ?? '') })) {
             this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerBody: String(body.bodyText ?? '').trim() });
           }
           return json({ ok: true, messageId: r.envelope.id });

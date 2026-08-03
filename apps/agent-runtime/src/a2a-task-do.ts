@@ -79,6 +79,8 @@ import {
   type EligibleConsultMemberV1,
   type FixedWindowState,
   type MessageEnvelopeV1,
+  type AnyMessageEnvelope,
+  type MessageEnvelopeV2,
 } from '@agenticprimitives/fabric/messaging';
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
@@ -1317,18 +1319,18 @@ export class A2aTaskDO {
    *  a recipient without inbox delivery enabled simply can't receive (the caller drops the error). */
   private async deliverEndeavorOutcomeNotice(fromSa: string, recipient: string, goal: string, outcome: string): Promise<void> {
     const chainId = Number(this.env.CHAIN_ID ?? 84532);
-    const fromCaip = caip10(chainId, fromSa.toLowerCase() as Address) as MessageEnvelopeV1['from'];
-    const toCaip = caip10(chainId, recipient.toLowerCase() as Address) as MessageEnvelopeV1['from'];
+    const fromCaip = caip10(chainId, fromSa.toLowerCase() as Address) as AnyMessageEnvelope['from'];
+    const toCaip = caip10(chainId, recipient.toLowerCase() as Address) as AnyMessageEnvelope['from'];
     const now = new Date().toISOString();
     const messageId = generateMessageId();
     const subject = `Your request is complete: ${goal}`.slice(0, 120);
     const bodyText = `Your request has been completed.\n\nRequest: ${goal}\n\nOutcome:\n${outcome}`;
     const bodyBytes = new TextEncoder().encode(bodyText);
-    const envelope: MessageEnvelopeV1 = {
-      version: 'ap.message.v1',
+    const envelope: MessageEnvelopeV2 = {
+      version: 'ap.message.v2',
       id: messageId,
       conversationId: generateConversationId(),
-      kind: 'plain',
+      performative: 'INFORM',
       from: fromCaip,
       to: [toCaip],
       subject,

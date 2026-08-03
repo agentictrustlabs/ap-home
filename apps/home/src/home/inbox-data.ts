@@ -20,6 +20,7 @@ import {
   type InboxItemV1,
   type InboxProjector,
   type MessageEnvelopeV1,
+  type MessageEnvelopeV2,
   type MessageEventV1,
   type MessageBodyStore,
   messageBodyResource,
@@ -178,7 +179,7 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore, con
 
 /** Persist a body — to the owner's vault, the ONLY residency (spec 317 cutover). A write without a
  *  store fails LOUDLY: the owner must provision their standing delivery grant first (no KV fallback). */
-async function persistBody(_doc: InboxDataV1, envelope: MessageEnvelopeV1, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
+async function persistBody(_doc: InboxDataV1, envelope: AnyMessageEnvelope, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
   if (!bodyStore) {
     throw new Error('vault delivery grant required — enable vault storage for this agent before sending or receiving messages');
   }
@@ -251,7 +252,7 @@ export async function readMessagesByContext(
 }
 
 export interface DeliverPayload {
-  envelope: MessageEnvelopeV1;
+  envelope: AnyMessageEnvelope;
   /** Plaintext body; its UTF-8 bytes must match envelope.bodyHash (enforced). */
   bodyText: string;
   /** Draft case for `request` messages — requester=from, responder=recipient. */
@@ -293,7 +294,10 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
   // Typed request → register the case and drive submit/admit, audited.
   if (payload.interactionCase) {
     const c = payload.interactionCase;
-    if (envelope.kind !== 'request') throw new Error('interaction case requires a request message');
+    // spec 340 — this one IS safely translatable, unlike the `plain` gate. `performativeForKind` maps
+    // ONLY `request` to REQUEST, so the test is exactly equivalent for V1 and correct for V2. (The
+    // `plain` gate was not, because `plain` and `response` both map to INFORM — see use-inbox.)
+    if (performativeOf(envelope) !== 'REQUEST') throw new Error('interaction case requires a request message');
     if (envelope.interactionId !== c.id) throw new Error('envelope/case interaction id mismatch');
     if (c.state !== 'draft') throw new Error('case must arrive in draft state');
     if (c.requester.toLowerCase() !== envelope.from.toLowerCase()) throw new Error('case requester must be the sender');
@@ -388,11 +392,11 @@ export async function sendFromInbox(
   // The body ref IS the vault resource `message.body:<id>` (resolved in each owner's own vault) — the
   // only residency (spec 317 cutover).
   const bodyResource = messageBodyResource(messageId);
-  const envelope: MessageEnvelopeV1 = {
-    version: 'ap.message.v1',
+  const envelope: MessageEnvelopeV2 = {
+    version: 'ap.message.v2',
     id: messageId,
     conversationId,
-    kind: 'plain',
+    performative: 'INFORM',
     from: me,
     to: [them],
     subject: opts.subject,
