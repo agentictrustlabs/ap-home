@@ -1,5 +1,13 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.20
+
+### Patch Changes
+
+- Updated dependencies [da1ff0b]
+- Updated dependencies [8a017ae]
+  - @agenticprimitives/fabric@0.0.0-alpha.6
+
 ## 0.0.2-alpha.19
 
 ### Patch Changes
