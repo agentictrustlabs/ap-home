@@ -45,6 +45,9 @@ import {
   hydrateInboxStores,
   upsertConversation,
   type InboxDataV1,
+  isEnvelopeV2,
+  performativeOf,
+  type AnyMessageEnvelope,
   type CommitmentRecordV1,
   type DecisionRecordV1,
 } from '@agenticprimitives/fabric';
@@ -126,7 +129,15 @@ export interface InboxView {
     {
       from: string;
       subject?: string;
-      kind: string;
+      /**
+       * V1 ONLY — `undefined` on an `ap.message.v2` envelope, which dropped the taxonomy.
+       * Readers MUST NOT infer "not plain" from its absence; branch on presence (see `use-inbox`).
+       */
+      kind?: string;
+      /** Both versions, via the dual-read seam. What the message DOES, which is what `kind` stood in for. */
+      performative: string;
+      /** The causal edge. Under V2 this — not a taxonomy — is what distinguishes a reply (spec 340 §R.4). */
+      inReplyTo?: string;
       interactionId?: string;
       contextRefs?: ContextRefV1[];
       signatureSigner?: string;
@@ -159,7 +170,7 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore, con
   await Promise.all(envelopes.map(async (e) => {
     // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
     // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
-    const normalized: MessageEnvelopeV1 = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
+    const normalized: AnyMessageEnvelope = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
     try { out[e.id] = new TextDecoder().decode(await bodyStore.loadBody(normalized)); } catch { /* omitted */ }
   }));
   return out;
@@ -189,7 +200,9 @@ export async function readInboxView(kv: KV, person: string, bodyStore?: MessageB
     envelopeMeta[e.id] = {
       from: e.from,
       subject: e.subject,
-      kind: e.kind,
+      ...(isEnvelopeV2(e) ? {} : { kind: e.kind }),
+      performative: performativeOf(e),
+      inReplyTo: e.inReplyTo,
       interactionId: e.interactionId,
       contextRefs: e.contextRefs,
       signatureSigner: e.signature?.signer,

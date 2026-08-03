@@ -17,7 +17,12 @@ import type { HomeInboxSummaryV1 } from '@agenticprimitives/home';
 export interface EnvelopeMeta {
   from: string;
   subject?: string;
-  kind: string;
+  /** V1 ONLY — absent on `ap.message.v2`. Branch on PRESENCE; absence is not "not plain". */
+  kind?: string;
+  /** Both versions. What the message does, which is what `kind` was standing in for. */
+  performative: string;
+  /** The causal edge — under V2 this is what makes something a reply (spec 340 §R.4). */
+  inReplyTo?: string;
   interactionId?: string;
   contextRefs?: ContextRefV1[];
   signatureSigner?: string;
@@ -128,7 +133,16 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       if (items.length === 0) return false;
       return items.every((i) => {
         const meta = view.envelopeMeta[i.messageId];
-        return !i.interactionId && (meta ? meta.kind === 'plain' : true);
+        // spec 340 §R.4 — the rule is PER VERSION, not translated. `kind === 'plain'` was enforcing
+        // two things at once: "INFORM-shaped" and "an original, not a reply". The second vanishes
+        // under V2, where a reply is an INFORM too, so mapping it forward to `performative ===
+        // 'INFORM'` would silently widen this filter. V1 keeps the exact comparison it had; V2 uses
+        // the causal edge, which is what the taxonomy had been standing in for.
+        if (i.interactionId) return false;
+        if (!meta) return true;
+        return meta.kind !== undefined
+          ? meta.kind === 'plain'
+          : meta.performative === 'INFORM' && !meta.inReplyTo;
       });
     },
     [view],
