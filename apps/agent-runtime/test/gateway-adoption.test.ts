@@ -112,3 +112,75 @@ describe('the evidence buffer', () => {
     expect(buf.at(-1)!.at).toBe(`t${DIVERGENCE_BUFFER * 3 - 1}`); // keeps the NEWEST, not the first ones seen
   });
 });
+
+// ── Against the REAL document, not a toy one ──────────────────────────────────────────────────────────
+//
+// The comparison above runs on `{a:1,b:2}`. What the two planes actually exchange is an `InboxDataV1`:
+// nested, optional-heavy, with several dictionaries and four parallel arrays. Every interesting way this
+// harness can be wrong — a `Record` whose key order differs, an optional field present-but-undefined on
+// one side, an array whose order carries meaning — only shows up in a document with those features.
+describe('comparison against a real InboxDataV1', () => {
+  const AT = '2026-08-04T00:00:00.000Z';
+  const doc = (over: Record<string, unknown> = {}) => ({
+    version: 1,
+    envelopes: [
+      { id: 'msg_a', from: '0xaaa', to: '0xbbb', kind: 'dm', at: '2026-08-01T00:00:00.000Z', bodyHash: '0x11' },
+      { id: 'msg_b', from: '0xccc', to: '0xbbb', kind: 'dm', at: '2026-08-02T00:00:00.000Z', bodyHash: '0x22' },
+    ],
+    events: [{ messageId: 'msg_a', eventType: 'delivered', at: '2026-08-01T00:00:01.000Z' }],
+    draftCases: [],
+    caseEvents: [],
+    cards: { ixn_1: { title: 'Approve', actions: ['approve', 'deny'] } },
+    ...over,
+  });
+
+  it('calls two reads of the same document equal', () => {
+    expect(compareServed('inbox.get', doc(), doc(), AT).kind).toBe('equal');
+  });
+
+  it('is unmoved by key order inside the cards dictionary', () => {
+    // `cards` is a Record. Two JSON serialisations of the same map can order keys differently, and
+    // flagging that would mark a healthy shadow as diverging on its first run with more than one card.
+    const a = doc({ cards: { ixn_1: { title: 'A', actions: ['approve'] }, ixn_2: { title: 'B', actions: ['deny'] } } });
+    const b = doc({ cards: { ixn_2: { title: 'B', actions: ['deny'] }, ixn_1: { title: 'A', actions: ['approve'] } } });
+    expect(compareServed('inbox.get', a, b, AT).kind).toBe('equal');
+  });
+
+  it('catches a DROPPED envelope', () => {
+    // The failure that matters most and shows least: the caller renders a shorter list and nothing errors.
+    const short = doc({ envelopes: [doc().envelopes[0]] });
+    expect(compareServed('inbox.get', doc(), short, AT).kind).toBe('value');
+  });
+
+  it('catches REORDERED envelopes', () => {
+    // Array order is not sorted away, deliberately: `envelopes` is a sequence, and a plane that returned
+    // the same messages in a different order has changed what the person sees. Both planes read the same
+    // stored bytes, so a reorder here is a real defect and not an artefact of serialisation.
+    const flipped = doc({ envelopes: [doc().envelopes[1], doc().envelopes[0]] });
+    expect(compareServed('inbox.get', doc(), flipped, AT).kind).toBe('value');
+  });
+
+  it('catches an optional section that turned into an empty one', () => {
+    // `mandates`/`conversations` are optional. Absent and `{}` are different documents, and a plane that
+    // helpfully filled in a default would be changing the record on the way out.
+    expect(compareServed('inbox.get', doc(), doc({ mandates: {} }), AT).kind).toBe('value');
+  });
+
+  it('catches a changed bodyHash while everything else matches', () => {
+    // The single-field change with the largest consequence: bodies are hash-verified against the envelope
+    // (spec 309 §8.4), so a plane serving a different `bodyHash` makes the body unverifiable — and every
+    // count, id and timestamp around it still lines up.
+    const tampered = doc();
+    tampered.envelopes[1].bodyHash = '0x99';
+    const d = compareServed('inbox.get', doc(), tampered, AT);
+    expect(d.kind).toBe('value');
+    expect(d.detail).toContain('@'); // and it points at where, not just that
+  });
+
+  it('keeps the excerpt small even for a full inbox', () => {
+    const big = (h: string) => doc({
+      envelopes: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, from: '0xaaa', to: '0xbbb', kind: 'dm', at: AT, bodyHash: h })),
+    });
+    expect(compareServed('inbox.get', big('0x11'), big('0x22'), AT).detail!.length).toBeLessThan(200);
+  });
+});
