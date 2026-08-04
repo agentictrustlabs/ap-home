@@ -26,6 +26,7 @@ import {
   appendBoardPost,
   assistantTrigger,
   buildAssistantInboxReply,
+  buildOutboundMessage,
   createBoardChannel,
   canSeeChannel,
   interactionViewOfChannel,
@@ -61,7 +62,10 @@ import {
   type TopicAssistantV1,
 } from '@agenticprimitives/fabric/messaging';
 // spec 341 Wave 2a — the inbox read cursor (Ring-0, pure; survives the Wave 5 transport change).
-import { inboxRevision, type InboxDataV1 } from '@agenticprimitives/fabric';
+import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
+// spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
+import { deliverOutbound } from './outbound-delivery.js';
+import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
 
@@ -175,6 +179,22 @@ const INBOX_ASSISTANT_READ_LIMIT = 8;
 // kill switch (the on-chain revocation is the authority kill at every member's gate).
 const ROUTING_ORG_WIRE_KEY = 'routing.orgWire';
 interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; sessionKey: string; enabledBy: string; enabledAt: string }
+
+// spec 341 §5.1b — the DO-custodied PERSON MESSAGING wire. Same shape and same reason as the org
+// consult wire above, for the other direction of the same problem: the Home is this person's control
+// plane but holds no key, so it cannot sign a message as them. The wire (delegator = this person,
+// delegate = the interactions-session KMS key, allowedMethods = the messaging.deliver selector,
+// allowedTargets = the counterparties it covers) lets THIS runtime sign outbound delivery as them.
+//
+// IT IS CUSTODIED HERE, NOT AT THE HOME, for the reason a wire always lives with the runtime that
+// spends it: an artifact stored where it cannot be used is a copy, and a second copy is a second
+// thing to revoke. Clearing this key is the person-side send kill switch; the on-chain revocation is
+// the authority kill at every recipient's gate.
+const MESSAGING_WIRE_KEY = 'messaging.wire';
+interface MessagingWireRecord { wire: IncomingDelegation; hash: string; sessionKey: string; enabledAt: string }
+/** The one skill an outbound 1:1 message uses. The wire must name its selector, and the shape check
+ *  pins it — a wire minted for this rail must not authorize another. */
+const MESSAGING_DELIVER_SKILL = 'messaging.deliver';
 
 /** The scope set the CURRENT wave requires — a stored grant missing any of these is STALE and the
  *  steward re-signs via the Enable ceremony (grant re-signs are ceremonies, not migration). */
@@ -827,6 +847,31 @@ export class InteractionsDO {
       return { ok: true };
     }
     return this.bridgeGate(request, rawBody, op);
+  }
+
+  /**
+   * The A2A transport for outbound sends.
+   *
+   * It dials the recipient's own `A2aTaskDO` — the SAME dispatch `/api/a2a` performs after Host
+   * resolution, which is what makes this a real A2A send and not a shortcut: the recipient's gate
+   * runs `authorizeA2aMessage` in full (allowedTargets, allowedMethods, timestamp window, ERC-1271
+   * on the wire, on-chain `isRevoked`, single-use message id) exactly as it would for a stranger.
+   *
+   * It is a DO stub rather than an HTTPS fetch because a Worker cannot reliably call a hostname on
+   * its own Cloudflare account (CF-1042) — the loopback is the deployment's constraint, not a
+   * weakening of the check. Nothing here carries a shared secret; the wire is the authority.
+   */
+  private a2aTransport(): A2aTransport {
+    return {
+      rpc: async (target, req) => {
+        const t = String(target).toLowerCase();
+        const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(t));
+        const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${t}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req),
+        }));
+        return (await resp.json()) as never;
+      },
+    };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -2062,6 +2107,151 @@ export class InteractionsDO {
           await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, index);
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
           return json({ ok: true, routing: r.channel.routing });
+        });
+      }
+
+      // ── spec 341 §5.1b — the person's OUTBOUND MESSAGING rail: custody their messaging wire, and
+      //    send under it. This is the half of `sendFromInbox` the Home cannot do: it can compose and
+      //    it can write the sender's own copy, but the recipient's copy has to be an authorized,
+      //    signed A2A delivery, and the key that signs it is here. Self-access only — a session
+      //    proving some OTHER person is not authority over this person's mail. ──
+      if (op === 'messaging.wireStatus' || op === 'messaging.wireEnable' || op === 'messaging.wireDisable' || op === 'messaging.send') {
+        if (sessionSa.toLowerCase() !== principal) {
+          return json({ error: 'this is the principal’s own outbound rail — self access only' }, 403);
+        }
+        // The delegate every wire must name. Unprovisioned ⇒ 503 rather than a wire we cannot spend.
+        let sessionKey: string;
+        try { sessionKey = (await interactionsSessionAccount(this.env)).address.toLowerCase(); } catch {
+          return json({ error: 'interactions-session KMS key unprovisioned — messaging needs GCP_KMS_INTERACTIONS_KEY_NAME' }, 503);
+        }
+        const rec = (await this.state.storage.get(MESSAGING_WIRE_KEY)) as MessagingWireRecord | undefined;
+
+        if (op === 'messaging.wireStatus') {
+          // `recipients` is DECODED FROM THE WIRE, never stored alongside it. A stored list could
+          // disagree with the caveat, and the caveat is what the recipient's gate enforces — so the
+          // UI would then promise sends that fail.
+          let recipients: string[] = [];
+          if (rec) {
+            try {
+              const at = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
+              if (at?.terms) recipients = decodeAllowedTargetsTerms(at.terms as Hex).map((a) => a.toLowerCase());
+            } catch { /* an undecodable caveat is reported as no recipients, not as a crash */ }
+          }
+          return json({ ok: true, sessionKey, wirePresent: !!rec, enabledAt: rec?.enabledAt ?? null, recipients });
+        }
+
+        if (op === 'messaging.wireDisable') {
+          // LOCAL removal. Real revocation is on-chain and kills the wire at every recipient's gate;
+          // this only stops us spending it. The distinction is stated because a caller who deletes
+          // here has not revoked anything.
+          await this.state.storage.delete(MESSAGING_WIRE_KEY);
+          return json({ ok: true, note: 'local copy dropped — on-chain revocation is separate' });
+        }
+
+        if (op === 'messaging.wireEnable') {
+          const incoming = body.delegation as IncomingDelegation | undefined;
+          if (!incoming) return json({ error: 'a person-signed messaging wire is required' }, 400);
+          // The three checks that make custodying this safe, in the order that fails cheapest first.
+          if (incoming.delegator.toLowerCase() !== principal) {
+            return json({ error: 'messaging wire delegator must be this person' }, 400);
+          }
+          // Without this, a caller could install a wire delegating to a key THEY control. It would be
+          // a perfectly valid delegation — just not to us — and every downstream gate would agree.
+          if (incoming.delegate.toLowerCase() !== sessionKey) {
+            return json({ error: 'messaging wire delegate must be the interactions-session key' }, 400);
+          }
+          const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+          const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+          if (![tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
+            return json({ error: 'messaging enforcers not configured — cannot verify the wire shape' }, 503);
+          }
+          const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: MESSAGING_DELIVER_SKILL });
+          if (shapeErr) return json({ error: shapeErr }, 400);
+          const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
+            return json({ error: 'messaging wire signature failed verification against this person' }, 403);
+          }
+          try {
+            const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+            if (revoked) return json({ error: 'messaging wire is already revoked on-chain' }, 403);
+          } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
+          const stored: MessagingWireRecord = { wire: incoming, hash: digest, sessionKey, enabledAt: new Date().toISOString() };
+          await this.state.storage.put(MESSAGING_WIRE_KEY, stored);
+          await audit.write({ id: crypto.randomUUID(), timestamp: stored.enabledAt, action: 'interactions.messaging.wireEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: digest } });
+          return json({ ok: true, hash: digest });
+        }
+
+        // ── messaging.send ──────────────────────────────────────────────────────────────────────
+        if (!rec) return json({ error: 'no messaging wire — sign one before sending (the ceremony is one prompt)' }, 409);
+        const recipient = String(body.recipient ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(recipient)) return json({ error: 'recipient (address) required' }, 400);
+        const chainId = Number(this.env.CHAIN_ID ?? 84532);
+        const built = await buildOutboundMessage({
+          from: caip10(chainId, principal as Address) as never,
+          to: caip10(chainId, recipient as Address) as never,
+          bodyText: String(body.bodyText ?? ''),
+          ...(body.subject ? { subject: String(body.subject) } : {}),
+          ...(body.conversationId ? { conversationId: String(body.conversationId) } : {}),
+          ...(body.title ? { title: String(body.title) } : {}),
+          ...(Array.isArray(body.contextRefs) ? { contextRefs: body.contextRefs as ContextRefV1[] } : {}),
+        });
+        if (!built.ok) return json({ error: built.error }, 400);
+        const { envelope, descriptor, bodyBytes } = built;
+
+        // RECIPIENT SIDE FIRST, fail-closed — `sendFromInbox`'s rule, kept: a send that the recipient
+        // rejects leaves nothing in the sender's own record claiming it went out. The A2A gate at the
+        // far end re-verifies EVERYTHING (targets, skill, window, ERC-1271, on-chain revocation), so
+        // a stale or revoked wire stops the send rather than degrading it.
+        let taskId: string;
+        try {
+          const out = await deliverOutbound({
+            personSA: principal as Address,
+            recipientSA: recipient as Address,
+            wire: rec.wire,
+            sessionKey: sessionKey as Address,
+            signWithSessionKey: async (h) => {
+              const acct = await interactionsSessionAccount(this.env);
+              if (!acct.sign) throw new Error('interactions-session KMS account lacks raw-digest sign');
+              return acct.sign({ hash: h });
+            },
+            payload: { envelope: envelope as never, bodyText: new TextDecoder().decode(bodyBytes), conversation: descriptor },
+            skill: MESSAGING_DELIVER_SKILL,
+            transport: this.a2aTransport(),
+          });
+          taskId = out.taskId;
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : String(e);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.messaging.send', outcome: 'denied', actor: { type: 'user', id: sessionSa }, subject: { type: 'message', id: envelope.id }, reason }).catch(() => undefined);
+          // NOT caught into a weaker path. The in-Worker `internal.deliver` marker would land this
+          // message without any of the above being true, which is the authority this replaces.
+          return json({ error: `delivery rejected by the recipient: ${reason}` }, 409);
+        }
+
+        // Self-send: the delivered copy IS the record. Writing a second one would double the thread.
+        if (recipient === principal) {
+          await audit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.messaging.send', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'message', id: envelope.id } });
+          return json({ ok: true, messageId: envelope.id, conversationId: envelope.conversationId, taskId });
+        }
+
+        // The sender's OWN copy — body under this person's delivery wire, envelope + `sent` event +
+        // their own view of the thread under the interactions grant. Same pair of writes the
+        // assistant reply path performs, serialized behind the same single-writer mutex.
+        const dgSend = st.deliveryGrant;
+        if (!dgSend) return json({ error: 'delivered, but no delivery grant to record your own copy — enable inbox delivery' }, 409);
+        return this.serialize(async () => {
+          const doc = (await this.readDoc<InboxDataV1>(grant, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} } as unknown as InboxDataV1;
+          let bin = '';
+          for (const b of bodyBytes) bin += String.fromCharCode(b);
+          await this.vaultFor(dgSend).write({ owner: '', resource: envelope.body.resource, data: { b64: btoa(bin), contentType: 'text/plain', bodyHash: envelope.bodyHash }, classification: 'internal' } as never);
+          doc.envelopes = [...((doc.envelopes as MessageEnvelopeV1[] | undefined) ?? []), envelope as never];
+          const sent: MessageEventV1 = { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'sent', at: envelope.createdAt };
+          doc.events = [...((doc.events as MessageEventV1[] | undefined) ?? []), sent];
+          // The sender's own view of the thread — same descriptor, owned by them.
+          upsertConversation(doc, { ...descriptor, owner: envelope.from });
+          await this.writeDoc(grant, INBOX_RESOURCE, doc);
+          await audit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.messaging.send', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'message', id: envelope.id } });
+          return json({ ok: true, messageId: envelope.id, conversationId: envelope.conversationId, taskId });
         });
       }
 
