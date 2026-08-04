@@ -2183,7 +2183,11 @@ export class InteractionsDO {
         }
 
         // ── messaging.send ──────────────────────────────────────────────────────────────────────
-        if (!rec) return json({ error: 'no messaging wire — sign one before sending (the ceremony is one prompt)', code: 'wire_absent', sessionKey }, 409);
+        // RESOLVE THE RECIPIENT BEFORE CHECKING FOR THE WIRE, even though the wire check is cheaper.
+        // The refusal has to NAME who to approve, and for a name-addressed send this is the only party
+        // that can resolve it. Answering "no wire" without the recipient made the client mint one
+        // covering whatever it could guess — which was the sender themselves (caught by the e2e, and a
+        // silent fallback of exactly the kind ADR-0013 forbids).
         const chainId = Number(this.env.CHAIN_ID ?? 84532);
 
         // WHO IS THIS FOR. Three CALLER-SELECTED ways to name the recipient, not a fallback chain
@@ -2211,7 +2215,9 @@ export class InteractionsDO {
             return json({ error: `name resolution failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
           }
         }
-        if (!recipient && convId) {
+        if (!recipient && convId && rec) {
+          // Only reachable with a wire present: resolving a reply's counterparty costs a vault read,
+          // and a caller with no wire cannot send to them either way.
           const doc = await this.readDoc<InboxDataV1>(grant, INBOX_RESOURCE, null as never);
           const descriptor = ((doc?.conversations ?? []) as ConversationDescriptorV1[]).find((d) => d.id === convId);
           if (!descriptor) return json({ error: 'unknown conversation' }, 404);
@@ -2222,6 +2228,10 @@ export class InteractionsDO {
         }
         if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
           return json({ error: 'recipient (address), recipientName, or conversationId required' }, 400);
+        }
+        // Now the refusal can name who to approve.
+        if (!rec) {
+          return json({ error: 'no messaging wire — sign one before sending (the ceremony is one prompt)', code: 'wire_absent', recipient, sessionKey }, 409);
         }
 
         // IS THIS RECIPIENT INSIDE THE WIRE. The far gate would answer this too, but only as an opaque

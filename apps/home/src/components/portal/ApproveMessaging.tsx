@@ -36,6 +36,19 @@ export function ApproveMessaging({
 }) {
   const [busy, setBusy] = useState(false);
   if (!need || !person || !session) return null;
+  // NO DEFAULT RECIPIENT. An earlier version fell back to the person themselves when the agent did not
+  // name one, and minted a wire authorizing the sender to message HERSELF — the ceremony completed, the
+  // signature was spent, and the next send failed with `recipient_not_in_wire` naming a party nobody
+  // had asked about. Refusing is the only honest option: a wire for the wrong counterparty is worse
+  // than no wire, because it looks like success.
+  if (!need.recipient) {
+    return (
+      <div className="chat-attention" style={{ fontSize: '0.85rem' }}>
+        Your agent can’t send yet, and it didn’t say who to approve — reopen the message and try again.
+      </div>
+    );
+  }
+  const recipient = need.recipient;
   return (
     <div className="chat-attention" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
       <span style={{ fontSize: '0.85rem' }}>
@@ -51,9 +64,7 @@ export function ApproveMessaging({
           try {
             await approveMessagingContact({
               person,
-              // No recipient means there is no wire at all. The agent reports the counterparty that
-              // was blocked whenever it knows one, so the union starts from the right place.
-              recipient: (need.recipient ?? person) as Address,
+              recipient,
               via: resolveVia(credential, session.via),
               token: session.token,
             });
