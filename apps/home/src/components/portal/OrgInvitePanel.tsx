@@ -7,7 +7,8 @@
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { sendMessage } from '../../lib/messaging-send';
+import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
+import { ApproveMessaging } from './ApproveMessaging';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { Avatar } from './chat/Avatar';
 import { BusyButton } from '../shared/BusyButton';
@@ -17,6 +18,8 @@ import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 
 export function OrgInvitePanel({ org }: { org: string }) {
   const { session, profile, agentAddress } = useSession();
+  // spec 341 §5.1b — an invite blocked only for want of the person's approval.
+  const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const communityId = org.toLowerCase();
   const authed = { 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` };
 
@@ -63,7 +66,10 @@ export function OrgInvitePanel({ org }: { org: string }) {
       });
       setNote(`Invitation sent to ${hit.displayName ?? hit.name}.` + grantNote);
       setQuery(''); setHits(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); setBusyFor(null); }
+    } catch (e) {
+      if (e instanceof MessagingWireRequiredError) setWireNeeded(e);
+      else setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); setBusyFor(null); }
   }, [authed, communityId, profile?.credential, session]);
 
   const inviteEmail = useCallback(async () => {
@@ -101,6 +107,14 @@ export function OrgInvitePanel({ org }: { org: string }) {
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <h3 className="subhead" style={{ marginBottom: '.6rem' }}>Invite people</h3>
+      <ApproveMessaging
+        need={wireNeeded}
+        person={agentAddress ?? null}
+        session={session}
+        credential={profile?.credential}
+        onApproved={() => setWireNeeded(null)}
+        onError={setErr}
+      />
       {err && <p style={{ color: 'var(--color-danger)', fontSize: '.82rem' }}>{err}</p>}
       {note && <p style={{ color: 'var(--color-sage-700, #047857)', fontSize: '.82rem' }}>{note}</p>}
 

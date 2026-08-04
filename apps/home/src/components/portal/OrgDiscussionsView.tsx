@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
-import { sendMessage } from '../../lib/messaging-send';
+import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
+import { ApproveMessaging } from './ApproveMessaging';
 import { agentNameForLabel } from '../../lib/domain';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
@@ -62,6 +63,7 @@ function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
 
 export function OrgDiscussionsView({ org }: { org: Address }) {
   const { session, profile: homeProfile, agentAddress, agentName } = useSession();
+  const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const communityId = org.toLowerCase();
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
@@ -287,7 +289,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             // id carries org + topic (`<orgSA>/<topicId>`) — ContextRefV1 has no extra fields; the
             // Messages chip splits it to acceptInvite + deep-link.
             contextRefs: [{ kind: 'discussion-topic', id: `${communityId}/${active}`, label: b.topicTitle ?? 'Join discussion' }],
-          }).catch(() => null);
+          }).catch((e: unknown) => {
+            // Best-effort as before — the participant record already stands. But an approval-shaped
+            // failure is offered rather than swallowed: the steward can fix it and re-invite.
+            if (e instanceof MessagingWireRequiredError) setWireNeeded(e);
+          });
         }
       }
       await loadParticipants();
@@ -497,7 +503,15 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               </button>
             </>
           )}
-          {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+          <ApproveMessaging
+        need={wireNeeded}
+        person={agentAddress ?? null}
+        session={session}
+        credential={homeProfile?.credential}
+        onApproved={() => setWireNeeded(null)}
+        onError={setError}
+      />
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
         </div>
 
         {/* After a steward approves, the applicant completes membership here — publishing the listing they sign

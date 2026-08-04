@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from '@agenticprimitives/types';
-import { deliverOutbound, hashDeliveryBody } from '../src/outbound-delivery.js';
+import { deliverOutbound, hashDeliveryBody, wireTargets } from '../src/outbound-delivery.js';
+import { encodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
 
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
@@ -161,5 +162,42 @@ describe('fail-closed', () => {
     // A caller that caught this and wrote over the in-Worker marker instead would restore exactly the
     // authority this replaces.
     await expect(run({ transport }).go()).rejects.toThrow(/unauthorized/);
+  });
+});
+
+describe('reading what a wire authorizes', () => {
+  const ENF = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  const withTargets = (targets: Address[]) => ({
+    caveats: [{ enforcer: ENF, terms: encodeAllowedTargetsTerms(targets) }],
+  });
+
+  it('decodes the caveat, which is what the recipient’s gate enforces', () => {
+    const r = wireTargets(withTargets([BOB, SESSION_KEY]), ENF);
+    expect(r).toEqual({ ok: true, targets: [BOB.toLowerCase(), SESSION_KEY.toLowerCase()] });
+  });
+
+  it('matches the enforcer case-insensitively', () => {
+    expect(wireTargets(withTargets([BOB]), ENF.toUpperCase().replace('0X', '0x')).ok).toBe(true);
+  });
+
+  it('reports an ABSENT targets caveat, not an empty contact list', () => {
+    // An unbounded wire and a wire covering nobody are different facts with different remedies. The
+    // gate refuses the first outright; reporting it as "you have not approved anyone" would send the
+    // person into a ceremony that cannot help.
+    expect(wireTargets({ caveats: [{ enforcer: '0x1', terms: '0x2' }] }, ENF)).toEqual({ ok: false, reason: 'absent' });
+    expect(wireTargets({ caveats: [] }, ENF)).toEqual({ ok: false, reason: 'absent' });
+    expect(wireTargets(undefined, ENF)).toEqual({ ok: false, reason: 'absent' });
+  });
+
+  it('reports UNDECODABLE terms rather than throwing into the request path', () => {
+    expect(wireTargets({ caveats: [{ enforcer: ENF, terms: '0xdeadbeef' }] }, ENF)).toEqual({ ok: false, reason: 'undecodable' });
+  });
+
+  it('refuses to answer when the enforcer address is unconfigured', () => {
+    // Empty config used to mean "find no caveat" ⇒ empty targets ⇒ every send looks unapproved. Worse,
+    // the mirror-image bug in a membership check fails OPEN (audit NEW-H2). Say "undecodable".
+    for (const bad of [undefined, '', '0x', 'not-an-address']) {
+      expect(wireTargets(withTargets([BOB]), bad), String(bad)).toEqual({ ok: false, reason: 'undecodable' });
+    }
   });
 });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInboxView, agentLabel } from '../../../home/use-inbox';
 import { useSession } from '../../../context/session';
+import { ApproveMessaging } from '../ApproveMessaging';
 import { searchAgentsKb } from '../../../lib/agent-search';
 import { AvatarUpload } from './AvatarUpload';
 import { MessageBubble } from './MessageBubble';
@@ -29,8 +30,9 @@ export function DmSlideOver({
   channelContext?: { channelTitle: string };
   onClose: () => void;
 }) {
-  const { agentAddress } = useSession();
-  const { view, refresh, loadThread, send: sendMessageViaAgent, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
+  const { agentAddress, profile } = useSession();
+  const { view, refresh, loadThread, send: sendMessageViaAgent, wireRequired, setWireRequired, error, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
+  const [dmError, setDmError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>('resolving');
@@ -189,6 +191,19 @@ export function DmSlideOver({
           <div className="chat-dm-resolution-banner chat-dm-resolution-banner--pending" role="status">
             Finding {recipientName}…
           </div>
+        )}
+
+        {/* spec 341 §5.1b — the send needs the person's approval before their agent can carry it. */}
+        <ApproveMessaging
+          need={wireRequired}
+          person={agentAddress ?? null}
+          session={session}
+          credential={profile?.credential}
+          onApproved={() => { setWireRequired(null); setDmError(null); }}
+          onError={setDmError}
+        />
+        {(dmError ?? error) && (
+          <div className="chat-dm-resolution-banner" role="status" style={{ color: 'var(--color-danger)' }}>{dmError ?? error}</div>
         )}
 
         <div className="chat-thread-body">

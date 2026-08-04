@@ -8,7 +8,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
-import { sendMessage } from '../../../src/lib/messaging-send';
+import { sendMessage, MessagingWireRequiredError } from '../../../src/lib/messaging-send';
+import { ApproveMessaging } from '../../../src/components/portal/ApproveMessaging';
 import { agentNameForLabel } from '../../../src/lib/domain';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
@@ -20,7 +21,9 @@ const NETWORKS_INDEX = 'networks';
 interface Listing { label: string; listing: { displayName: string; roles?: string[]; subject: string } }
 
 export default function NetworksPage() {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, profile } = useSession();
+  // spec 341 §5.1b — a send the person can unblock with one signature, kept apart from real errors.
+  const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const { agents } = useManagedAgents(session?.token ?? null);
   const orgs = agents.filter((a) => a.kind === 'org' && a.name);
 
@@ -103,11 +106,13 @@ export default function NetworksPage() {
       setContactOrg(null);
       setDraft('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // The one failure a signature fixes, kept separate so it renders as an action.
+      if (e instanceof MessagingWireRequiredError) setWireNeeded(e);
+      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [session, contactOrg, draft]);
+  }, [session, contactOrg, draft, agentAddress]);
 
   if (!session) {
     return (
@@ -121,6 +126,14 @@ export default function NetworksPage() {
 
   return (
     <SectionShell title="Networks" description="Your named organizations, published for discovery — other orgs can find them and reach their inbox.">
+      <ApproveMessaging
+        need={wireNeeded}
+        person={agentAddress ?? null}
+        session={session}
+        credential={profile?.credential}
+        onApproved={() => setWireNeeded(null)}
+        onError={setError}
+      />
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '.85rem' }}>{error}</p>}
       {note && <p style={{ color: 'var(--color-sage-700)', fontSize: '.85rem' }}>{note}</p>}
 

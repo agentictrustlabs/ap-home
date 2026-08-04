@@ -64,7 +64,7 @@ import {
 // spec 341 Wave 2a — the inbox read cursor (Ring-0, pure; survives the Wave 5 transport change).
 import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
-import { deliverOutbound } from './outbound-delivery.js';
+import { deliverOutbound, wireTargets } from './outbound-delivery.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
@@ -2127,17 +2127,17 @@ export class InteractionsDO {
         const rec = (await this.state.storage.get(MESSAGING_WIRE_KEY)) as MessagingWireRecord | undefined;
 
         if (op === 'messaging.wireStatus') {
-          // `recipients` is DECODED FROM THE WIRE, never stored alongside it. A stored list could
-          // disagree with the caveat, and the caveat is what the recipient's gate enforces — so the
-          // UI would then promise sends that fail.
-          let recipients: string[] = [];
-          if (rec) {
-            try {
-              const at = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
-              if (at?.terms) recipients = decodeAllowedTargetsTerms(at.terms as Hex).map((a) => a.toLowerCase());
-            } catch { /* an undecodable caveat is reported as no recipients, not as a crash */ }
-          }
-          return json({ ok: true, sessionKey, wirePresent: !!rec, enabledAt: rec?.enabledAt ?? null, recipients });
+          // Decoded from the wire, never stored beside it — see `wireTargets` for why the three
+          // outcomes are distinguished rather than flattened to an empty list.
+          const t = rec ? wireTargets(rec.wire, this.env.ALLOWED_TARGETS_ENFORCER) : null;
+          return json({
+            ok: true,
+            sessionKey,
+            wirePresent: !!rec,
+            enabledAt: rec?.enabledAt ?? null,
+            recipients: t?.ok ? t.targets : [],
+            ...(t && !t.ok ? { wireDamaged: t.reason } : {}),
+          });
         }
 
         if (op === 'messaging.wireDisable') {
@@ -2228,14 +2228,14 @@ export class InteractionsDO {
         // authorization failure. Answering here lets the UI do the right thing — run the one-prompt
         // ceremony that adds this counterparty — instead of showing "delivery rejected" for what is
         // simply a contact the person has not approved yet (§5.1: one prompt per NEW counterparty).
-        try {
-          const at = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
-          const targets = at?.terms ? decodeAllowedTargetsTerms(at.terms as Hex).map((a) => a.toLowerCase()) : [];
-          if (!targets.includes(recipient)) {
-            return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: targets, sessionKey }, 409);
-          }
-        } catch {
-          return json({ error: 'messaging wire targets are undecodable — re-sign the wire' }, 409);
+        const cover = wireTargets(rec.wire, this.env.ALLOWED_TARGETS_ENFORCER);
+        if (!cover.ok) {
+          // A damaged or unbounded wire is NOT "no contacts approved" — offering the approve-a-contact
+          // ceremony for it would loop, because the ceremony cannot fix either.
+          return json({ error: `messaging wire targets are ${cover.reason} — re-sign the wire` }, 409);
+        }
+        if (!cover.targets.includes(recipient as Address)) {
+          return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: cover.targets, sessionKey }, 409);
         }
         const built = await buildOutboundMessage({
           from: caip10(chainId, principal as Address) as never,

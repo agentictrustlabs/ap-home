@@ -7,7 +7,7 @@ import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
 import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
-import { resolveVia, signHashFor, type Via } from '../../home/onboarding';
+import { signHashFor, type Via } from '../../home/onboarding';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
@@ -17,8 +17,7 @@ import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
-import { BusyButton } from '../shared/BusyButton';
-import { approveMessagingContact } from '../../lib/messaging-ceremony';
+import { ApproveMessaging } from './ApproveMessaging';
 
 
 const PENDING_STATES = ['submitted', 'triaged'];
@@ -125,7 +124,6 @@ function ConvAvatar({ conversationId, title, view }: { conversationId: string; t
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { session, agentAddress, profile } = useSession();
   const { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, agentAddress ?? undefined);
-  const [approving, setApproving] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
@@ -369,44 +367,14 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         </span>
       ) : undefined}
     >
-      {/* spec 341 §5.1b — the ONE failure a person can resolve: their agent has no authority to
-          message this contact yet. Rendered as an action rather than an error, because "delivery
-          rejected" is true but useless when the fix is a single signature. */}
-      {wireRequired ? (
-        <div className="chat-attention" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem' }}>
-            {wireRequired.reason === 'wire_absent'
-              ? 'Approve your agent to send messages for you — one signature, valid for this session, revocable anytime.'
-              : 'You haven’t approved messaging this contact yet — one signature adds them.'}
-          </span>
-          <BusyButton
-            busy={approving}
-            busyLabel="Approving…"
-            onClick={async () => {
-              if (!agentAddress || !session) return;
-              setApproving(true);
-              setError(null);
-              try {
-                await approveMessagingContact({
-                  person: agentAddress,
-                  // No recipient means there is no wire at all; approving then covers whoever the
-                  // blocked send named, which the agent reported back with the refusal.
-                  recipient: (wireRequired.recipient ?? agentAddress) as Address,
-                  via: resolveVia(profile?.credential, session.via),
-                  token: session.token,
-                });
-                setWireRequired(null);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setApproving(false);
-              }
-            }}
-          >
-            Approve
-          </BusyButton>
-        </div>
-      ) : null}
+      <ApproveMessaging
+        need={wireRequired}
+        person={agentAddress ?? null}
+        session={session}
+        credential={profile?.credential}
+        onApproved={() => setWireRequired(null)}
+        onError={setError}
+      />
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
       {pendingCases.length > 0 && (

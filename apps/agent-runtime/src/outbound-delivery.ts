@@ -23,8 +23,42 @@
 // revocable on-chain at any moment.
 
 import { hashA2aMessage, type A2aMessage, type A2aTransport, A2aWireAdapter } from '@agenticprimitives/a2a';
+import { decodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { keccak256, toBytes } from 'viem';
+
+/** What a wire's `allowedTargets` caveat says, or why it says nothing. */
+export type WireTargets =
+  | { ok: true; targets: Address[] }
+  | { ok: false; reason: 'absent' | 'undecodable' };
+
+/**
+ * Read the counterparties a wire authorizes.
+ *
+ * THE THREE OUTCOMES ARE NOT THE SAME and collapsing them is the bug this shape prevents. "No caveat"
+ * means the wire is unbounded — which the gate refuses anyway, so treating it as an empty target list
+ * would report "you have not approved anyone" for a wire that is actually malformed. "Undecodable"
+ * means the wire is damaged and must be re-signed. Only `ok` with a list is an answer about contacts,
+ * and it is the one the UI turns into "approve this person".
+ *
+ * The DECODE is the source of truth, never a list stored beside the wire: a stored list can disagree
+ * with the caveat, and the caveat is what the recipient's gate enforces — so the UI would promise
+ * sends that fail.
+ */
+export function wireTargets(
+  wire: { caveats?: readonly { enforcer?: string; terms?: string }[] } | undefined,
+  allowedTargetsEnforcer: string | undefined,
+): WireTargets {
+  const enf = (allowedTargetsEnforcer ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(enf)) return { ok: false, reason: 'undecodable' };
+  const cav = (wire?.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === enf);
+  if (!cav?.terms) return { ok: false, reason: 'absent' };
+  try {
+    return { ok: true, targets: decodeAllowedTargetsTerms(cav.terms as Hex).map((a) => a.toLowerCase() as Address) };
+  } catch {
+    return { ok: false, reason: 'undecodable' };
+  }
+}
 
 /**
  * The `messaging.*` skill payload, verbatim as `makeDeliverHandler` parses it.
