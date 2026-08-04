@@ -93,7 +93,9 @@ export function MessageComposer({
           <button type="button" className="ghost" style={{ minHeight: 0, padding: '0.2rem 0.5rem' }} onClick={() => setPendingImage(null)}>Remove</button>
         </div>
       )}
-      <button type="button" className="chat-send-btn" disabled={!canSend} onClick={send} title="Send">
+      {/* The label is a glyph, so the accessible name has to be stated — a screen reader (and any
+          test) otherwise sees a button called "➤". */}
+      <button type="button" className="chat-send-btn" aria-label="Send message" disabled={!canSend} onClick={send} title="Send">
         {busy ? '…' : '➤'}
       </button>
     </div>
