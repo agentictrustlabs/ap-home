@@ -6,7 +6,6 @@
 import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import type { FnContext } from '../_lib/server-broker';
 import { getServer, ownIssuer } from '../_lib/server-broker';
-import { bridgeInteractions } from '../lib/interactions-bridge';
 import { getClient } from '../../src/lib/oidc-clients';
 import { verifyStewardship } from '../_lib/verify-stewardship';
 import type { IncomingDelegation } from '../_lib/verify-delegation';
@@ -93,12 +92,6 @@ async function controlsOrgForPerson(env: FnContext['env'], person: string, org: 
  * Authorized by the alliance's stewardship delegation, not a shared secret: the secret proved the
  * caller was our Home and nothing about whether this person may act for this alliance.
  */
-async function readRowsViaBridge(env: FnContext['env'], alliance: string): Promise<{ apps: unknown[]; rows: UupgMembershipRequest[] }> {
-  const r = await bridgeInteractions<{ doc?: { applications?: unknown[] } }>(env, alliance, 'applications.get', {});
-  if (!r.ok) throw new Error(r.body.error ?? `read failed (${r.status})`);
-  const apps = Array.isArray(r.body.doc?.applications) ? r.body.doc!.applications : [];
-  return { apps, rows: apps.filter(isUupgRequest) };
-}
 
 async function readRows(env: FnContext['env'], alliance: string, session: string, stewardship?: unknown): Promise<{ apps: unknown[]; rows: UupgMembershipRequest[] }> {
   const r = await allianceOp<{ doc?: { applications?: unknown[] } }>(env, alliance, 'applications.get', { session, ...(stewardship ? { stewardship } : {}) });
@@ -179,17 +172,18 @@ export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
     if (!(await controlsOrgForPerson(ctx.env, actor, org))) return json({ error: 'you must steward the requesting organization' }, 403);
     const all: UupgMembershipRequest[] = [];
     for (const alliance of alliances) {
-      // ⚠ KNOWN AUTHORITY GAP (spec 341 §5.5a). This reads the ALLIANCE's whole request list as the
-      // requesting ORG's steward — who has no authority over that alliance — and filters to their own
-      // rows afterwards. So the decision about what they may see happens HERE, after an unauthorized
-      // read, and a filter bug is a disclosure rather than a denial. Same shape as the library shared
-      // lens (§5.4).
-      //
-      // Left on the bridge DELIBERATELY rather than converted: a session would fail closed and silently
-      // break the feature for every uupg org, and the real fix is an op that returns only the caller's
-      // own rows — the alliance deciding what to show, not the Home filtering after the fact.
-      const { rows } = await readRowsViaBridge(ctx.env, alliance).catch(() => ({ rows: [] as UupgMembershipRequest[] }));
-      all.push(...rows.filter((r) => r.subject === org));
+      // spec 341 §5.6 — the ALLIANCE decides what to show. This used to read the alliance's WHOLE
+      // pending list as the requesting org's steward — who has no authority over that alliance — and
+      // filter afterwards, so the decision happened here, after an unauthorized read, and a filter bug
+      // was a disclosure rather than a denial. Now the alliance's own agent returns only rows belonging
+      // to orgs this caller can PROVE they steward; the rest never leaves it.
+      const mine = await allianceOp<{ applications?: unknown[] }>(ctx.env, alliance, 'applications.mine', {
+        session: sessionOf(ctx),
+        subjects: [org],
+        stewardship: await stewardshipFor(ctx.env, actor, org),
+      }).catch(() => null);
+      const rows = (mine?.ok ? (mine.body.applications ?? []) : []).filter(isUupgRequest);
+      all.push(...rows);
     }
     return json({ ok: true, requests: all.sort((a, b) => b.id - a.id).slice(0, 200) });
   }

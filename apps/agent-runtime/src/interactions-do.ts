@@ -2376,6 +2376,74 @@ export class InteractionsDO {
         });
       }
 
+      // ── spec 341 §5.6 — `content.shared`. The OWNER releases one artifact, or nothing. ──
+      //
+      // Same inversion as `applications.mine`, applied to the library's cross-vault read. The caller
+      // used to pull the owner's ENTIRE catalog and then evaluate the sharing grants at the Home — so
+      // every artifact the owner had crossed the wire to answer a question about one, and the check
+      // that mattered ran after the disclosure it was meant to prevent.
+      //
+      // Now the owner's own agent evaluates its own grants and returns the ONE artifact, or nothing.
+      // The catalog never leaves. The reader learns of no artifact it was not granted — not even that
+      // one exists.
+      if (op === 'content.shared') {
+        const artifactId = String(body.artifactId ?? '');
+        if (!artifactId) return json({ error: 'artifactId required' }, 400);
+        const list = ((await this.vaultFor(grant).read<unknown>({ owner: '', resource: 'content.catalog' }))?.data ?? []) as Array<Record<string, unknown>>;
+        const art = Array.isArray(list) ? list.find((x) => String(x?.id ?? '') === artifactId) : undefined;
+        const reader = sessionSa.toLowerCase();
+        // ABSENT and NOT-SHARED answer identically. Distinguishing them would let a reader enumerate
+        // what an owner holds by asking for ids and reading the difference in the refusal.
+        if (!art) return json({ ok: true, artifact: null });
+        const grantsOf = (a: Record<string, unknown>): Array<{ grantee?: { address?: string }; revoked?: boolean }> =>
+          (Array.isArray(a.grants) ? a.grants : []) as Array<{ grantee?: { address?: string }; revoked?: boolean }>;
+        // Own grants plus those inherited from any ancestor folder — the containment cascade, evaluated
+        // HERE against the authoritative list rather than against a copy the caller was handed.
+        const chain: Array<Record<string, unknown>> = [art];
+        let cursor = art;
+        for (let i = 0; i < 16 && cursor?.folder; i++) {
+          const parent = list.find((x) => String(x?.id ?? '') === String(cursor.folder));
+          if (!parent) break;
+          chain.push(parent);
+          cursor = parent;
+        }
+        const shared = chain.some((a) => grantsOf(a).some((gr) => !gr.revoked && String(gr.grantee?.address ?? '').toLowerCase() === reader));
+        if (!shared) return json({ ok: true, artifact: null });
+        return json({ ok: true, artifact: art });
+      }
+
+      // ── spec 341 §5.6 — `applications.mine`. THE HOLDER DECIDES WHAT TO SHOW. ──
+      //
+      // The shape this replaces appeared twice: a caller with no authority over a collection read the
+      // WHOLE collection and filtered afterwards. An org's steward pulled an alliance's entire pending
+      // list to find their own row; the library pulled another org's full catalog to find what was
+      // shared. In both, the decision about what the caller may see happened at the HOME, after an
+      // unauthorized read — so a filter bug is a DISCLOSURE, not a denial.
+      //
+      // Inverting it costs nothing and fixes the class: this agent holds the collection, so this agent
+      // filters, and the rest never leaves. The caller is told what is theirs, and cannot be told
+      // anything else by getting the filter wrong.
+      if (op === 'applications.mine') {
+        // Rows belonging to the CALLER — either they applied, or they applied FOR an org they steward.
+        // Stewardship is proven, not asserted: an unproven org claim is simply dropped from the set
+        // rather than refused, because a caller may legitimately hold rows for some orgs and not others.
+        const subjects = new Set<string>([sessionSa.toLowerCase()]);
+        const claimed = Array.isArray(body.subjects) ? (body.subjects as unknown[]).map((x) => String(x).toLowerCase()) : [];
+        for (const sub of claimed.slice(0, 32)) {
+          if (!/^0x[0-9a-f]{40}$/.test(sub)) continue;
+          if (await this.isSteward(sub, sessionSa, body.stewardship as IncomingDelegation | undefined)) subjects.add(sub);
+        }
+        const doc = await this.readDoc<{ applications?: unknown[] }>(grant, APPLICATIONS_RESOURCE, { applications: [] });
+        const rows = Array.isArray(doc?.applications) ? doc.applications : [];
+        const mine = rows.filter((r) => {
+          const row = r as { applicant?: string; subject?: string };
+          const applicant = String(row.applicant ?? '').toLowerCase();
+          const subject = String(row.subject ?? '').toLowerCase();
+          return subjects.has(applicant) || (subject !== '' && subjects.has(subject));
+        });
+        return json({ ok: true, applications: mine });
+      }
+
       // ── spec 341 §5.5b — INVITE CLAIM. Not admission: the org ALREADY acted, and the record it
       //    minted is addressed to this caller. They are collecting, not requesting. ──
       if (op === 'invite.claim') {

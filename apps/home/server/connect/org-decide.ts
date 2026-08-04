@@ -12,7 +12,6 @@ import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
 import { buildEnrollmentDecision } from '@agenticprimitives/organization';
 import { controlsOrg } from './org-invite';
 import { orgVault } from '../lib/org-vault';
-import { bridgeInteractions } from '../lib/interactions-bridge';
 import type { OrgApplication } from '../lib/org-applications';
 import { CHAIN_ID } from '../../src/lib/chain';
 

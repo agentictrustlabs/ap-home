@@ -126,6 +126,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   await env.AUTH_CODES.put(KEY(label), JSON.stringify(manifest));
   // Manifest (re)publication is a Home lifecycle fact on the control-plane
   // timeline (spec 310 W4).
-  await appendControlEvent(env, person as Address, 'home-rotated', []);
+  await appendControlEvent(env, person as Address, 'home-rotated', [], bearer);
   return jsonCors({ ok: true }, request);
 };

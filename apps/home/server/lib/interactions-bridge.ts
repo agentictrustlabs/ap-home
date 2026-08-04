@@ -1,41 +1,21 @@
-// Home-server → InteractionsDO bridge (spec 322 W3f — the 1-1 inbox residency channel).
+// Home-server → InteractionsDO reachability (spec 341 §1 — what is LEFT of the bridge).
 //
-// The Home reaches an owner's `inbox.data` and dm bodies ONLY through the owner's per-principal
-// InteractionsDO on demo-a2a — the serialized single writer/reader over the owner's interactions
-// grant. This is the SAME SEC-010 HMAC envelope as the custody bridge (timestamp + nonce + raw-body
-// hash + audience `interactions.<op>`); the standing delivery grant is write-only and can no longer
-// read mail. Fail-closed (ADR-0013): no configured bridge ⇒ no mail I/O — never a weaker path.
-import { signBridgeCall } from '../_lib/bridge-hmac';
-
+// THE BRIDGE IS GONE. `bridgeInteractions` and its SEC-010 HMAC envelope are deleted: every Home path
+// to an owner's `InteractionsDO` now authorizes with the PERSON'S OWN SESSION, or an org's stewardship
+// delegation, or a capability the org itself minted. What the secret used to prove — *the caller is our
+// Home* — was never the fact any of those operations turned on.
+//
+// What survives is a reachability check, and it deliberately no longer asks about the secret. Requiring
+// a credential these paths do not use would fail closed for a reason that stopped being true, and would
+// keep a dead value load-bearing in config long after the code stopped reading it.
+//
+// `A2A_CUSTODY_BRIDGE_SECRET` still exists in this app for CUSTODY and OIDC (`server/fedcm.ts`,
+// `server/_lib/kms-resolve.ts`) — a different channel, out of this migration's scope (§7.1).
 export interface InteractionsBridgeEnv {
   A2A_CUSTODY_URL?: string;
-  A2A_CUSTODY_BRIDGE_SECRET?: string;
 }
 
+/** Is the owner's DO reachable at all? The URL, and nothing else — see above. */
 export function interactionsBridgeConfigured(env: InteractionsBridgeEnv): boolean {
-  return !!(env.A2A_CUSTODY_URL?.trim() && env.A2A_CUSTODY_BRIDGE_SECRET?.trim());
-}
-
-/** One bridge-signed DO op. Returns the parsed body; `ok:false` carries the DO's error + status. */
-export async function bridgeInteractions<T = Record<string, unknown>>(
-  env: InteractionsBridgeEnv,
-  owner: string,
-  op: 'inbox.get' | 'inbox.put' | 'inbox.body.get' | 'controlevents.append' | 'dm.body.put' | 'invite.get' | 'invite.put' | 'applications.get' | 'applications.put' | 'content.get' | 'content.put',
-  payload: unknown,
-): Promise<{ ok: boolean; status: number; body: T & { error?: string } }> {
-  if (!interactionsBridgeConfigured(env)) {
-    return { ok: false, status: 503, body: { error: 'interactions bridge not configured' } as T & { error?: string } };
-  }
-  const envelope = await signBridgeCall({
-    secret: env.A2A_CUSTODY_BRIDGE_SECRET!,
-    audience: `interactions.${op}`,
-    payload,
-  });
-  const resp = await fetch(`${env.A2A_CUSTODY_URL!.replace(/\/$/, '')}/interactions/${owner.toLowerCase()}/${op}`, {
-    method: 'POST',
-    headers: envelope.headers,
-    body: envelope.body, // EXACT signed bytes — the receiver hashes the raw body
-  });
-  const body = (await resp.json().catch(() => ({}))) as T & { error?: string };
-  return { ok: resp.ok, status: resp.status, body };
+  return !!env.A2A_CUSTODY_URL?.trim();
 }

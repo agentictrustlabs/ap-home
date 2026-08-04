@@ -58,10 +58,9 @@ export async function appendControlEvent(
   person: Address,
   eventType: HomeControlEventV1['eventType'],
   refs: HomeControlEventV1['refs'] = [],
-  /** spec 341 §1 — the person's OWN broker session, when the caller has one. Converts this append
-   *  from a shared secret to the owner's credential. Absent ⇒ the bridge, unchanged: several callers
-   *  are genuinely server-side flows with no person bearer, which is why the parameter is optional
-   *  rather than the signature being changed under them. */
+  /** The person's OWN broker session. Optional only because the parameter was added under existing
+   *  callers; every one of them turned out to have the token in scope, which is why the bridge branch
+   *  could go. Absent ⇒ no vault append (best-effort, as before), never a fall back to a secret. */
   session?: string,
 ): Promise<void> {
   const auditId = globalThis.crypto.randomUUID();
@@ -87,12 +86,14 @@ export async function appendControlEvent(
   // (audience interactions.controlevents.append), same rationale as the W3f inbox ops. The KV copy
   // is a rebuildable cache. Best-effort: a person whose interactions plane isn't enabled keeps the
   // KV copy until their ceremony re-syncs.
+  // spec 341 §1 — the person's own session, and ONLY that. The bridge branch is gone: every caller
+  // turned out to hold the caller's token already (`home-manifest`, `library`, `directory`), so the
+  // secret path was unreachable — and an unreachable fallback is a second mechanism waiting to be
+  // routed to (ADR-0013). No session ⇒ the vault append is skipped and the KV copy stands, which is
+  // the same best-effort outcome this always had.
   if (session) {
     const { callInteractions } = await import('./channels');
     await callInteractions(env, person, 'controlevents.append', { event: row, session }).catch(() => null);
-  } else {
-    const { bridgeInteractions } = await import('../lib/interactions-bridge');
-    await bridgeInteractions(env, person, 'controlevents.append', { event: row }).catch(() => null);
   }
   const raw = await env.AUTH_CODES.get(KEY(person));
   const rows = raw ? (JSON.parse(raw) as HomeControlEventV1[]) : [];

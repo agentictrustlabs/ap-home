@@ -419,7 +419,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const before = reqs.length;
       const kept = reqs.map((r) => (r.requester === granteeAddr && r.artifactId === art.id && r.status === 'pending' ? { ...r, status: 'granted' as const } : r));
       if (kept.some((r, i) => r.status !== reqs[i]?.status) || kept.length !== before) await writeRequests(env, scope.owner, kept).catch(() => undefined);
-      await appendControlEvent(env, person as Address, 'grant-issued').catch(() => undefined);
+      await appendControlEvent(env, person as Address, 'grant-issued', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
       return jsonCors({ ok: true, artifact: art, entitlementId, signed, credential, delegation }, request);
     }
     case 'revoke': {
@@ -431,7 +431,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       await scope.write(list);
       // Withdraw the federated inbound pointer for the grantee.
       if (addr) await revokeInbound(env, addr, scope.owner, resource).catch(() => undefined);
-      await appendControlEvent(env, person as Address, 'grant-revoked').catch(() => undefined);
+      await appendControlEvent(env, person as Address, 'grant-revoked', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
       return jsonCors({ ok: true, artifact: art }, request);
     }
     case 'open': {
@@ -439,11 +439,34 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // the grant against its authoritative list (fail-closed) and releases an audience-bound copy.
       const ownerScope = typeof body.ownerScope === 'string' ? body.ownerScope : person;
       const ownerKind: AgentKind = body.ownerKind === 'org' ? 'org' : 'person';
-      const ownerList = await readOwnerList(env, ownerScope, ownerKind);
-      const art = ownerList.find((x) => x.id === body.id);
-      if (!art) return jsonCors({ error: 'unknown artifact' }, request, 404);
-      const holds = ownerScope === person || activeEffectiveGrants(ownerList, art).some((g) => g.grantee.address.toLowerCase() === person.toLowerCase());
-      if (!holds) return jsonCors({ error: 'access to this artifact was revoked or never granted' }, request, 403);
+      // spec 341 §5.6 — AN ORG OWNER RELEASES ONE ARTIFACT, OR NOTHING. This used to pull the org's
+      // ENTIRE catalog over the shared secret and evaluate the sharing grants here: every artifact the
+      // org held crossed the wire to answer a question about one, and the check that mattered ran after
+      // the disclosure it was meant to prevent. Now the org's own agent evaluates its own grants and
+      // the catalog never leaves.
+      //
+      // The PERSON branch is genuinely different, not an exemption: their catalog IS this Home's KV, so
+      // there is no other holder to ask.
+      let art: LibraryArtifact | undefined;
+      if (ownerKind !== 'org') {
+        // A PERSON owner's catalog is this Home's own KV — there is no separate holder to ask, and
+        // nothing crosses a trust boundary that the shared-worker demo topology does not already
+        // collapse. The grant check below is the owner's own, over the owner's own list.
+        const ownerList = await readOwnerList(env, ownerScope, ownerKind);
+        art = ownerList.find((x) => x.id === body.id);
+        const holds = ownerScope === person || (art && activeEffectiveGrants(ownerList, art).some((g) => g.grantee.address.toLowerCase() === person.toLowerCase()));
+        if (!holds) art = undefined;
+      } else {
+        const { callInteractions } = await import('./channels');
+        const r = await callInteractions(env, ownerScope, 'content.shared', {
+          session: (request.headers.get('authorization') ?? '').slice(7),
+          artifactId: body.id,
+        }).catch(() => null);
+        art = (r && r.status < 400 ? (r.body.artifact as LibraryArtifact | null) : null) ?? undefined;
+      }
+      // Unknown and not-shared are ONE answer, deliberately. Separating them would let a reader
+      // enumerate what an owner holds by asking for ids and reading the difference in the refusal.
+      if (!art) return jsonCors({ error: 'access to this artifact was revoked or never granted' }, request, 403);
       // Read receipt = the READER's own use-receipt (evidence *I* accessed this), written to the READER's
       // OWN vault (`content.receipt.<id>`, tamper-evident) — vault-first (a principal writes only its own
       // vault; no cross-principal write), closing the "receipts belong in a vault" finding (ADR-0055).
@@ -473,7 +496,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const release = await mintRelease(env, person, art, list);
       art.releases = [...(art.releases ?? []), release];
       await scope.write(list);
-      await appendControlEvent(env, person as Address, 'credential-issued').catch(() => undefined);
+      await appendControlEvent(env, person as Address, 'credential-issued', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
       return jsonCors({ ok: true, artifact: art, release }, request);
     }
     case 'discuss': {
@@ -579,15 +602,12 @@ async function revokeInbound(env: FnContext['env'], grantee: string, ownerScope:
  * That is a sharing-grant → delegation change, not a transport swap, which is why it is left standing
  * and counted rather than quietly worked around.
  */
-async function readOwnerList(env: FnContext['env'], ownerScope: string, ownerKind: AgentKind): Promise<LibraryArtifact[]> {
-  if (ownerKind === 'org') {
-    const org = ownerScope.toLowerCase();
-    const { orgVault } = await import('../lib/org-vault');
-    if (!(await orgVault(env, org))) return [];
-    const { bridgeInteractions } = await import('../lib/interactions-bridge');
-    const r = await bridgeInteractions<{ record?: unknown }>(env, org, 'content.get', { resource: 'content.catalog' });
-    return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? [];
-  }
+async function readOwnerList(env: FnContext['env'], ownerScope: string, _ownerKind: AgentKind): Promise<LibraryArtifact[]> {
+  // OWN list only. The org branch is gone with the shared lens (spec 341 §5.6): reading another
+  // owner's catalog to answer a question about one artifact was the disclosure this repo kept
+  // rediscovering, and `content.shared` replaced it — the owner's agent evaluates its own grants and
+  // releases one artifact or nothing. The only caller left asks for its OWN list, where the KV index is
+  // the authoritative copy.
   return JSON.parse((await env.AUTH_CODES.get(`library:${ownerScope}`)) ?? '[]') as LibraryArtifact[];
 }
 

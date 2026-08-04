@@ -79,7 +79,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (r.status === 200) {
       // Leaving revokes the AUTHORITY-ONLY member link too (never a steward link — spec 318).
       await removeOrgMemberLink(env, who.person, communityId);
-      await appendControlEvent(env, who.person as Address, 'grant-revoked').catch(() => undefined); // listing = the membership consent (closed event union)
+      await appendControlEvent(env, who.person as Address, 'grant-revoked', [], who.token).catch(() => undefined); // listing = the membership consent (closed event union)
     }
     return jsonCors(r.body, request, r.status);
   }
@@ -113,7 +113,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ...(selfStewardship ? { stewardship: selfStewardship } : {}),
     });
     if (r.status === 200) {
-      await appendControlEvent(env, who.person as Address, 'grant-issued').catch(() => undefined); // listing = the membership consent (closed event union)
+      await appendControlEvent(env, who.person as Address, 'grant-issued', [], who.token).catch(() => undefined); // listing = the membership consent (closed event union)
     }
     return jsonCors(r.body, request, r.status);
   }

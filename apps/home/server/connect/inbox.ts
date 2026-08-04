@@ -325,7 +325,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         // The mandate (scoped delegation + signed intent) is the issued artifact.
         await appendControlEvent(env, owner as Address, 'credential-issued', [
           { kind: 'delegation', hash: body.mandate.delegationHash },
-        ]);
+        ], bearerP);
         return jsonCors({ ok: true, case: updated }, request);
       }
 
@@ -333,7 +333,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // Decisions land on the control-plane timeline (spec 310 W4); view/triage
       // are navigation, not decisions.
       if (transition === 'approve' || transition === 'deny' || transition === 'ask-info' || transition === 'revoke') {
-        await appendControlEvent(env, owner as Address, 'inbox-decision', updated.authorityRefs.slice(-1));
+        await appendControlEvent(env, owner as Address, 'inbox-decision', updated.authorityRefs.slice(-1), bearerP);
       }
       // spec 340 W10b-2: return what was DETERMINED alongside how far the work got. The client no
       // longer has to read a determination out of `case.state` — which is the reading that made one
