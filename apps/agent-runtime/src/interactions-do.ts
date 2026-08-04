@@ -204,6 +204,22 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 //
 // The delegate stays the interactions service SA — the same party that performs the vault call either
 // way. What differs per app is WHICH delegation authorizes it, and therefore what a revocation kills.
+/**
+ * The vault resource each owner-facing op touches.
+ *
+ * Kept as data rather than inlined per op so adding an op to the per-app rail is one row, and so the
+ * set an app must be granted is READABLE — a person approving an app should be able to see what it can
+ * reach without tracing call sites. An op absent from this map is not scope-checked here; demo-mcp
+ * still enforces, so the failure is a worse error message, never a wider grant.
+ */
+const OP_RESOURCE: Record<string, string | undefined> = {
+  'inbox.get': 'vault:inbox.data',
+  'inbox.put': 'vault:inbox.data',
+  'inbox.body.get': 'vault:message.body:dm:',
+  'dm.body.put': 'vault:message.body:dm:',
+  'controlevents.append': 'vault:control-events.data',
+};
+
 const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
 interface ReadGrantRecord { wire: IncomingDelegation; hash: string; clientId: string; storedAt: string }
 
@@ -1105,6 +1121,22 @@ export class InteractionsDO {
           if (revoked) return json({ error: 'this app’s read grant was revoked', code: 'read_grant_revoked', clientId: callerClientId }, 403);
         } catch {
           return json({ error: 'revocation check unavailable — read refused (fail-closed)' }, 503);
+        }
+        // DOES THIS APP'S GRANT COVER THIS OP? A courtesy check, not the enforcement point: demo-mcp
+        // re-enforces server + resource + `ops` per record and is the authority. Doing it here turns a
+        // scope mismatch into a refusal that NAMES the missing resource, instead of an opaque
+        // `record_scope_denied` from one hop away.
+        const need = OP_RESOURCE[op];
+        if (need) {
+          let covered = false;
+          try {
+            const scopeCav = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+            const granted = scopeCav?.terms ? decodeVaultRecordScopeTerms(scopeCav.terms as Hex).flatMap((gr) => gr.resources) : [];
+            covered = granted.some((r) => (r.endsWith('*') ? need.startsWith(r.slice(0, -1)) : r === need));
+          } catch { covered = false; }
+          if (!covered) {
+            return json({ error: `this app's read grant does not cover ${need}`, code: 'read_grant_scope', clientId: callerClientId, need }, 403);
+          }
         }
         g = rec.wire;
       }
@@ -2294,9 +2326,13 @@ export class InteractionsDO {
         try {
           resources = decodeVaultRecordScopeTerms(scopeCav.terms as Hex).flatMap((gr) => gr.resources);
         } catch { return json({ error: 'the read grant’s scope terms are undecodable' }, 400); }
-        if (!resources.includes('vault:inbox.data')) {
-          return json({ error: 'the read grant must include vault:inbox.data to be usable for inbox reads' }, 400);
-        }
+        if (resources.length === 0) return json({ error: 'the read grant must name at least one resource' }, 400);
+        // DECLARATIVE, not inbox-specific. The first version of this required `vault:inbox.data`, which
+        // made the machinery inbox-only while wearing a general name — a grant covering only
+        // `vault:skills.data` (the capability record behind /skills) could not be issued at all. What
+        // the grant carries is what it authorizes; what an OP needs is checked when the op runs.
+        const tooBroad = resources.filter((r) => r === 'vault:*' || r === 'vault:');
+        if (tooBroad.length > 0) return json({ error: 'a read grant must scope to record families, never the whole vault' }, 400);
         const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
         const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {

@@ -43,6 +43,20 @@ import type { SignHash } from '../home/resolution';
  */
 export const INBOX_READ_RESOURCES = ['vault:inbox.data', 'vault:message.body:dm:*'] as const;
 
+/**
+ * The person's PRIVATE capability record — what the Home's `/skills` page holds (spec 341 §4.3a).
+ *
+ * A separate set, not an addition to the inbox one, because they are separate decisions: an app that
+ * renders your mail has no business reading what you can do, and an app matching you to work has no
+ * business reading your mail. Bundling them would make "authorize this app" a single coarse yes, which
+ * is the property per-app grants exist to end.
+ *
+ * NOT the same thing as the PUBLISHED subset: `atl:skills` is an owner-signed profile property the
+ * discovery matcher ranks, public by construction and needing no grant to read. This covers the private
+ * record the published subset is chosen FROM.
+ */
+export const CAPABILITY_READ_RESOURCES = ['vault:skills.data'] as const;
+
 /** Default lifetime. Long enough not to be a nuisance, short enough that expiry is a real bound and not
  *  a formality — the same reasoning as the messaging wire. */
 export const READ_GRANT_VALIDITY_SECONDS = 30 * 24 * 60 * 60;
@@ -68,7 +82,14 @@ export interface ReadGrantInput {
   personSA: Address;
   /** The interactions service SA — the delegate the agent pins. */
   serviceSA: Address;
-  /** Resources this app may read. Defaults to the inbox set; NEVER `vault:*` (the builder refuses it). */
+  /**
+   * Resources this app may read — `INBOX_READ_RESOURCES`, `CAPABILITY_READ_RESOURCES`, or any other
+   * record family. Defaults to the inbox set; NEVER `vault:*` (the builder refuses it).
+   *
+   * The grant is DECLARATIVE: it says what it covers, and each op checks what it needs. An earlier
+   * version required `vault:inbox.data` in every grant, which made this inbox-only while wearing a
+   * general name — a capability-record grant could not be issued at all.
+   */
   resources?: readonly string[];
   /** The MCP server the scope binds to. */
   server: string;
@@ -88,9 +109,6 @@ export interface ReadGrantInput {
 export async function issueReadGrant(input: ReadGrantInput): Promise<Delegation> {
   const resources = [...new Set(input.resources ?? INBOX_READ_RESOURCES)];
   if (resources.length === 0) throw new Error('a read grant must name at least one resource');
-  if (!resources.includes('vault:inbox.data')) {
-    throw new Error('a read grant for inbox access must include vault:inbox.data');
-  }
   const nowSec = Math.floor((input.now?.() ?? Date.now()) / 1000);
   const caveats: Caveat[] = [
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, nowSec + (input.validitySeconds ?? READ_GRANT_VALIDITY_SECONDS))),

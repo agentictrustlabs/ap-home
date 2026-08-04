@@ -13,7 +13,7 @@ vi.mock('../csrf', () => ({ ensureCsrfToken: async () => undefined, csrfHeaders:
 vi.mock('./sso-cookie', () => ({ readSsoCookie: () => ({ token: 'tok' }) }));
 vi.mock('../context/session', () => ({ SESSION_KEY: 'agenticprimitives:home:session' }));
 
-const { issueReadGrant, INBOX_READ_RESOURCES, READ_GRANT_VALIDITY_SECONDS } = await import('./read-grants');
+const { issueReadGrant, INBOX_READ_RESOURCES, CAPABILITY_READ_RESOURCES, READ_GRANT_VALIDITY_SECONDS } = await import('./read-grants');
 
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const SERVICE = '0xdddddddddddddddddddddddddddddddddddddddd' as Address;
@@ -92,9 +92,35 @@ describe('unusable shapes are refused at the mint', () => {
     await expect(mint({ resources: [] })).rejects.toThrow(/at least one resource/);
   });
 
-  it('refuses one missing vault:inbox.data', async () => {
-    // It would store, look authorized in a list, and fail at every read — the worst of the three
-    // outcomes, because nothing surfaces until a person wonders why their mail is empty.
-    await expect(mint({ resources: ['vault:message.body:dm:*'] })).rejects.toThrow(/vault:inbox.data/);
+  it('ALLOWS a partial family — the op decides, not the mint', async () => {
+    // This used to throw, because the mint required `vault:inbox.data` in every grant. That check was
+    // in the wrong place: what a grant COVERS and what an OP NEEDS are different questions, and
+    // conflating them made the machinery inbox-only. A bodies-only grant is a legal grant; an inbox
+    // read under it is refused at the agent with `read_grant_scope`, naming the missing resource.
+    const g = await scopeOf({ resources: ['vault:message.body:dm:*'] });
+    expect(g.flatMap((x) => x.resources)).toEqual(['vault:message.body:dm:*']);
+  });
+});
+
+describe('the grant is not inbox-only (spec 341 §4.3a)', () => {
+  it('can be scoped to the CAPABILITY record alone', async () => {
+    // The gap `/skills` exposed: the first version required `vault:inbox.data` in every grant, so an
+    // app that only needed the capability record could not be authorized at all.
+    const g = await scopeOf({ resources: CAPABILITY_READ_RESOURCES });
+    expect(g.flatMap((x) => x.resources)).toEqual(['vault:skills.data']);
+    for (const x of g) expect(x.ops).toEqual(['read']);
+  });
+
+  it('keeps mail and capabilities SEPARATE decisions', async () => {
+    // Bundling them would make "authorize this app" one coarse yes — the property per-app grants exist
+    // to end. An app matching you to work has no business reading your mail.
+    const caps = (await scopeOf({ resources: CAPABILITY_READ_RESOURCES })).flatMap((x) => x.resources);
+    const mail = (await scopeOf()).flatMap((x) => x.resources);
+    expect(caps).not.toContain('vault:inbox.data');
+    expect(mail).not.toContain('vault:skills.data');
+  });
+
+  it('still refuses whole-vault for any family', async () => {
+    await expect(mint({ resources: ['vault:*'] })).rejects.toThrow();
   });
 });
