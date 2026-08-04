@@ -11,7 +11,10 @@ import { encodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
 const SESSION_KEY = '0xdddddddddddddddddddddddddddddddddddddddd' as Address;
-const WIRE = { delegator: ALICE, delegate: SESSION_KEY, caveats: [{ enforcer: '0x1', terms: '0x2' }], signature: '0xsig', salt: '12345' };
+// The TRANSPORT grant: person → person, carrying the caveats. See `outbound-delivery.ts` for why the
+// sender cannot be the key.
+const GRANT = { delegator: ALICE, delegate: ALICE, caveats: [{ enforcer: '0x1', terms: '0x2' }], signature: '0xsig', salt: '12345' };
+const wrapped = (d: Hex): Hex => `0x51${d.slice(2, 10)}${'00'.repeat(60)}` as Hex;
 
 const caip = (a: Address): string => `eip155:84532:${a}`;
 const payload = () => ({
@@ -48,9 +51,8 @@ const run = (over: Record<string, unknown> = {}) => {
       deliverOutbound({
         personSA: ALICE,
         recipientSA: BOB,
-        wire: WIRE,
-        sessionKey: SESSION_KEY,
-        signWithSessionKey: async (d: Hex) => `${d.slice(0, 10)}${'00'.repeat(60)}` as Hex,
+        transportGrant: GRANT,
+        signAsPerson: async (d: Hex) => wrapped(d),
         payload: payload(),
         transport: rec.transport,
         nowMs: 1_780_000_000_000,
@@ -62,13 +64,24 @@ const run = (over: Record<string, unknown> = {}) => {
 const paramsOf = (rec: ReturnType<typeof recording>) => rec.calls[0]!.request.params as Record<string, never>;
 
 describe('two identities, never collapsed', () => {
-  it('signs as the SESSION KEY on the A2A layer', async () => {
+  it('sends as the PERSON\u2019s agent, never as the key', async () => {
     const { rec, go } = run();
     await go();
-    const p = paramsOf(rec) as unknown as { requester: Address; message: { sender: Address } };
-    // The gate requires delegate === requester === message.sender, and the wire's delegate is the key.
-    expect(p.requester).toBe(SESSION_KEY);
-    expect(p.message.sender).toBe(SESSION_KEY);
+    const p = paramsOf(rec) as unknown as { requester: Address; message: { sender: Address; signature: Hex } };
+    // The gate requires delegate === requester === message.sender (hence the self-delegated transport
+    // grant) and verifies that sender with a check demanding DEPLOYED code. A key has none, so a key
+    // can never be a sender \u2014 the failure that shipped once and was found only by the live e2e.
+    expect(p.requester).toBe(ALICE);
+    expect(p.message.sender).toBe(ALICE);
+    // The key\u2019s participation is inside the signature, with the wire that authorizes it.
+    expect(p.message.signature.startsWith('0x51')).toBe(true);
+  });
+
+  it('refuses to send a PLAIN signature', async () => {
+    // Produced by the right key over the right digest, and refused at every recipient, because nothing
+    // in it says which identity that key may speak for.
+    await expect(run({ signAsPerson: async (d: Hex) => `${d.slice(0, 10)}${'00'.repeat(60)}` as Hex }).go())
+      .rejects.toThrow(/session-wrapped/);
   });
 
   it('carries the PERSON as the author of the envelope', async () => {
@@ -122,16 +135,16 @@ describe('the signed bodyHash binds the payload', () => {
 });
 
 describe('the wire is spent, never minted', () => {
-  it('passes the wire through untouched', async () => {
+  it('passes the transport grant through untouched', async () => {
     const { rec, go } = run();
     await go();
     // Minting needs the person's custody credential, which this worker does not have and must not.
-    expect((paramsOf(rec) as unknown as { delegation: unknown }).delegation).toEqual(WIRE);
+    expect((paramsOf(rec) as unknown as { delegation: unknown }).delegation).toEqual(GRANT);
   });
 
   it('signs exactly once — the message', async () => {
     let n = 0;
-    const { go } = run({ signWithSessionKey: async (d: Hex) => { n++; return `${d.slice(0, 10)}${'00'.repeat(60)}` as Hex; } });
+    const { go } = run({ signAsPerson: async (d: Hex) => { n++; return wrapped(d); } });
     await go();
     // A second signature would mean a delegation was minted here, with the session key, producing
     // authority the person never granted — and it would verify perfectly at the gate.
@@ -149,7 +162,7 @@ describe('the wire is spent, never minted', () => {
 
 describe('fail-closed', () => {
   it('refuses to send an unsigned message', async () => {
-    const { go } = run({ signWithSessionKey: async () => '0x' as Hex });
+    const { go } = run({ signAsPerson: async () => '0x' as Hex });
     await expect(go()).rejects.toThrow(/was not signed/);
   });
 

@@ -11,23 +11,37 @@
 // The Home is the person's control plane asking their agent to act; the agent does the acting, because
 // it is the only party that can sign.
 //
-// TWO IDENTITIES, NEVER COLLAPSED. On the A2A layer the sender is the SESSION KEY — `authorizeA2aMessage`
-// requires `delegate === requester === message.sender`, and the wire's delegate is that key. Inside the
-// payload, `envelope.from` is the PERSON, and the receiving skill enforces that too: NEW-H1 checks
-// `envelope.from === ctx.principal`, which is the wire's DELEGATOR. So the two identities are pinned at
-// both ends by different checks — the transport proves who signed, the envelope proves who sent.
+// THE SENDER IS AN AGENT, NEVER A KEY. An earlier version made `message.sender` the KMS session key and
+// signed plainly. It failed at every recipient, because the gate verifies the sender's signature with
+// `r.valid && r.deployed` and a bare key has no contract (`eth_getCode` returns `0x`). That check is the
+// design, not an obstacle: under ADR-0010 an agent IS its Smart Agent address, so a message authored by
+// a key would be authored by nobody. The e2e found this; no unit test could, because both sides of the
+// seam agreed with each other.
 //
-// THE WIRE IS USED, NEVER MINTED HERE. Minting would need the person's custody credential, which this
-// worker does not have and must not have. A wire arrives already signed by the person; this module can
-// only spend it, and only within the caveats it carries — named skills, pinned targets, a live window,
-// revocable on-chain at any moment.
+// So the sender is the PERSON's SA, and the signature is SESSION-WRAPPED (`0x51`) — the shipped
+// mechanism for "how an agent signs as an identity whose key it does not hold" (`session-wire.ts`). The
+// recipient unwraps it and checks, per message: the wire's delegator IS the claimed sender, the raw
+// ECDSA recovers to the wire's delegate, the wire ERC-1271-verifies against the sender, and the wire is
+// unrevoked on-chain.
+//
+// TWO DELEGATIONS, ANSWERING TWO QUESTIONS.
+//   · the TRANSPORT grant (person → person, self)  — may this agent invoke this skill on that recipient?
+//     It is what `authorizeA2aMessage` reads, and its delegator is what the receiving skill checks
+//     `envelope.from` against (NEW-H1). Self-delegation confers nothing new; it CARRIES THE CAVEATS.
+//   · the SIGNING wire (person → session key)      — may this key produce signatures that count as the
+//     person's? It never travels as `delegation`; it travels INSIDE the signature.
+//
+// NEITHER IS MINTED HERE. Minting needs the person's custody credential, which this worker does not have
+// and must not have. Both arrive already signed; this module can only spend them, inside the caveats
+// they carry — named skills, pinned targets, a live window, revocable on-chain at any moment.
 
 import { hashA2aMessage, type A2aMessage, type A2aTransport, A2aWireAdapter } from '@agenticprimitives/a2a';
 import { decodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
+import { SESSION_WRAPPED_SIG_TYPE } from './session-wire.js';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { keccak256, toBytes } from 'viem';
 
-/** What a wire's `allowedTargets` caveat says, or why it says nothing. */
+/** What a delegation's `allowedTargets` caveat says, or why it says nothing. */
 export type WireTargets =
   | { ok: true; targets: Address[] }
   | { ok: false; reason: 'absent' | 'undecodable' };
@@ -80,16 +94,18 @@ export interface MessagingDeliverPayload {
 export const hashDeliveryBody = (data: unknown): Hex => keccak256(toBytes(JSON.stringify(data ?? null)));
 
 export interface OutboundDeliveryInput {
-  /** The PERSON the message is from — the wire's delegator, and `envelope.from`. */
+  /** The PERSON. The A2A sender, the transport grant's delegator+delegate, and `envelope.from`. */
   personSA: Address;
-  /** The recipient AGENT being called. Must be inside the wire's `allowedTargets`. */
+  /** The recipient AGENT being called. Must be inside the transport grant's `allowedTargets`. */
   recipientSA: Address;
-  /** The person's messaging wire, already signed by their custody credential. Spent, never minted. */
-  wire: unknown;
-  /** The wire's delegate — this worker's interactions session key. Signs the message. */
-  sessionKey: Address;
-  /** Signs a digest with the session key (the KMS-backed viem account). */
-  signWithSessionKey: (digest: Hex) => Promise<Hex>;
+  /** The TRANSPORT grant (person → person), already signed. Travels as `delegation`; spent, never minted. */
+  transportGrant: unknown;
+  /**
+   * Produces the SESSION-WRAPPED signature over a digest: the session key signs, and the signing wire
+   * that authorizes it is wrapped in alongside. Injected rather than assembled here so this module
+   * never touches a key or a wire it does not need to see.
+   */
+  signAsPerson: (digest: Hex) => Promise<Hex>;
   /** The skill payload. `envelope.from` must be the person; the receiving skill re-checks it. */
   payload: MessagingDeliverPayload;
   /** Which messaging skill. Must be named in the wire's `allowedMethods`. */
@@ -133,17 +149,23 @@ export async function deliverOutbound(input: OutboundDeliveryInput): Promise<Out
 
   const unsigned = {
     messageId,
-    // The SESSION KEY, not the person: the gate requires delegate === requester === message.sender, and
-    // the wire's delegate is this key. The person is named on the envelope inside, which is where
-    // "who sent this" belongs.
-    sender: input.sessionKey,
+    // THE PERSON'S AGENT. The gate requires delegate === requester === message.sender, which is why the
+    // transport grant is a self-delegation, and why a key cannot appear here: the recipient verifies
+    // this address with a check that demands deployed code.
+    sender: input.personSA,
     skill,
     bodyHash: hashDeliveryBody(input.payload),
     createdAt: Math.floor(nowMs / 1000),
   };
-  const signature = await input.signWithSessionKey(hashA2aMessage(unsigned));
+  const signature = await input.signAsPerson(hashA2aMessage(unsigned));
   if (!signature || signature === '0x') {
-    throw new Error('outbound delivery message was not signed by the session key');
+    throw new Error('outbound delivery message was not signed');
+  }
+  if (!signature.startsWith(SESSION_WRAPPED_SIG_TYPE)) {
+    // A PLAIN signature here is the failure that already happened once. It would be produced by the
+    // right key over the right digest and still be refused at every recipient, because nothing in it
+    // says which identity the key is allowed to speak for.
+    throw new Error('outbound delivery must be session-wrapped — a plain signature cannot speak for an agent');
   }
 
   const message: A2aMessage = {
@@ -157,11 +179,11 @@ export async function deliverOutbound(input: OutboundDeliveryInput): Promise<Out
 
   const client = new A2aWireAdapter(input.transport);
   const { taskId, state } = await client.submitTask(input.recipientSA, {
-    // Spent as-is, and NOT re-serialized into a `Delegation`: the wire's `salt` is a decimal STRING on
+    // Spent as-is, and NOT re-serialized into a `Delegation`: the grant's `salt` is a decimal STRING on
     // the wire and a bigint in the type, and `JSON.stringify` throws on bigint. Every other sender here
     // passes the received shape straight through for the same reason.
-    delegation: input.wire as never,
-    requester: input.sessionKey,
+    delegation: input.transportGrant as never,
+    requester: input.personSA,
     message,
     input: input.payload,
   });

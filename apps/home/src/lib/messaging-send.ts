@@ -170,26 +170,28 @@ export async function approveMessagingRecipient(args: {
   newRecipient: Address;
   /** Mints + signs the delegation. Injected so this module stays free of the credential-routing
    *  machinery (`signHashFor`), and so the ceremony is testable without a signer. */
-  mintWire: (input: { person: Address; sessionKey: Address; recipients: Address[] }) => Promise<unknown>;
+  mintWire: (input: { person: Address; sessionKey: Address; recipients: Address[] }) => Promise<{ wire: unknown; transport: unknown }>;
 }): Promise<void> {
   const current = await readMessagingWire(args.person);
   if (!current.sessionKey) {
     throw new Error('this deployment has no interactions session key — messaging cannot be enabled');
   }
   const recipients = [...new Set([...current.recipients.map((r) => r.toLowerCase() as Address), args.newRecipient.toLowerCase() as Address])];
-  const wire = await args.mintWire({ person: args.person, sessionKey: current.sessionKey, recipients });
-  await putMessagingWire(args.person, wire);
+  const minted = await args.mintWire({ person: args.person, sessionKey: current.sessionKey, recipients });
+  await putMessagingWire(args.person, minted.wire, minted.transport);
 }
 
 /** Install a wire the PERSON signed. The agent re-checks delegator, delegate, shape, signature and
  *  on-chain revocation before custodying it — this call cannot install authority by asserting it. */
-export async function putMessagingWire(person: Address, wire: unknown): Promise<void> {
+export async function putMessagingWire(person: Address, wire: unknown, transport: unknown): Promise<void> {
   // A freshly minted `Delegation` carries a bigint salt, and `JSON.stringify` throws on one. Left
   // unchecked it surfaces as "Do not know how to serialize a BigInt" from inside the POST below —
   // nowhere near the mint that produced it, and indistinguishable from a network failure to whoever
   // is reading the screen. Named here instead.
-  if (typeof (wire as { salt?: unknown } | null)?.salt === 'bigint') {
-    throw new Error('the messaging wire must be in its transport form — pass it through toWire() first');
+  for (const d of [wire, transport]) {
+    if (typeof (d as { salt?: unknown } | null)?.salt === 'bigint') {
+      throw new Error('the messaging wire must be in its transport form — pass it through toWire() first');
+    }
   }
   await ensureCsrfToken();
   const session = homeBearer();
@@ -198,7 +200,7 @@ export async function putMessagingWire(person: Address, wire: unknown): Promise<
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session, delegation: wire }),
+    body: JSON.stringify({ session, delegation: wire, transport }),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok || body.ok === false) throw new Error(String(body.error ?? `wire enable failed (${res.status})`));

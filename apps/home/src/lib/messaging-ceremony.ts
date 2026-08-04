@@ -19,7 +19,7 @@
 import type { Address } from '@agenticprimitives/types';
 import { signHashFor, type Via } from '../home/onboarding';
 import { toWire } from './delegation';
-import { issueMessagingWire } from './messaging-wire';
+import { issueMessagingTransportGrant, issueMessagingWire } from './messaging-wire';
 import { approveMessagingRecipient } from './messaging-send';
 
 export interface MessagingCeremonyInput {
@@ -48,11 +48,17 @@ export async function approveMessagingContact(input: MessagingCeremonyInput): Pr
       // prompt, a wallet popup, or a server-side KMS signature — routing by the person's credential
       // and never by a raw session field, which is what stops a KMS home from popping MetaMask.
       const signHash = await signHashFor(input.via, person, input.token ? { token: input.token } : undefined);
+      // TWO delegations, ONE consent. They answer different questions — may this key sign as me, and
+      // may I invoke this skill on these agents — and the gate needs both. It is one approval because
+      // it is one decision; a person who wanted the first without the second could do nothing with it.
+      // A wallet home sees two prompts here; passkey and KMS homes see none extra.
+      //
       // `toWire` is NOT cosmetic: a `Delegation`'s salt is a bigint, `JSON.stringify` throws on one,
       // and the throw surfaces as "Do not know how to serialize a BigInt" from inside the POST —
-      // nowhere near the mint that produced it. Every other client that ships a delegation does this;
-      // this one did not, and only a live run found it. The wire form is also what the agent expects.
-      return toWire(await issueMessagingWire({ personSA: person, sessionKey, recipients, signHash }));
+      // nowhere near the mint that produced it. Only a live run found that.
+      const wire = toWire(await issueMessagingWire({ personSA: person, sessionKey, recipients, signHash }));
+      const transport = toWire(await issueMessagingTransportGrant({ personSA: person, recipients, signHash }));
+      return { wire, transport };
     },
   });
 }

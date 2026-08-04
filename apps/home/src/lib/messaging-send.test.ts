@@ -100,7 +100,7 @@ describe('the ceremony carries existing counterparties forward', () => {
     await approveMessagingRecipient({
       person: ALICE,
       newRecipient: CAROL,
-      mintWire: async (i) => { minted = i; return { wire: true }; },
+      mintWire: async (i) => { minted = i; return { wire: { salt: '1' }, transport: { salt: '2' } }; },
     });
     // A wire naming only Carol would replace the one naming Bob, and messages to Bob would start
     // bouncing at his gate with nothing here having failed.
@@ -114,7 +114,7 @@ describe('the ceremony carries existing counterparties forward', () => {
         : { body: { ok: true } },
     );
     let minted: { recipients: Address[] } | null = null;
-    await approveMessagingRecipient({ person: ALICE, newRecipient: BOB, mintWire: async (i) => { minted = i; return {}; } });
+    await approveMessagingRecipient({ person: ALICE, newRecipient: BOB, mintWire: async (i) => { minted = i; return { wire: {}, transport: {} }; } });
     expect(minted!.recipients).toEqual([BOB]);
   });
 
@@ -124,7 +124,7 @@ describe('the ceremony carries existing counterparties forward', () => {
     // The delegate is the whole point of the wire. Minting without one would produce a delegation to
     // nobody, signed by the person, which is worse than refusing.
     await expect(
-      approveMessagingRecipient({ person: ALICE, newRecipient: BOB, mintWire: async () => { called = true; return {}; } }),
+      approveMessagingRecipient({ person: ALICE, newRecipient: BOB, mintWire: async () => { called = true; return { wire: {}, transport: {} }; } }),
     ).rejects.toThrow(/no interactions session key/);
     expect(called).toBe(false);
   });
@@ -133,7 +133,7 @@ describe('the ceremony carries existing counterparties forward', () => {
     stubFetch(() => ({ status: 503, body: { error: 'unavailable' } }));
     let called = false;
     await expect(
-      approveMessagingRecipient({ person: ALICE, newRecipient: CAROL, mintWire: async () => { called = true; return {}; } }),
+      approveMessagingRecipient({ person: ALICE, newRecipient: CAROL, mintWire: async () => { called = true; return { wire: {}, transport: {} }; } }),
     ).rejects.toThrow();
     expect(called).toBe(false);
   });
@@ -153,13 +153,15 @@ describe('a minted wire is not a transportable wire', () => {
   // Approve button — a message about JSON where the reader needed a message about signing.
   it('refuses a bigint salt with a message that names the fix', async () => {
     stubFetch(() => ({ body: { ok: true } }));
-    await expect(putMessagingWire(ALICE, { delegator: ALICE, salt: 1n })).rejects.toThrow(/toWire/);
+    await expect(putMessagingWire(ALICE, { delegator: ALICE, salt: 1n }, { salt: '2' })).rejects.toThrow(/toWire/);
+    // The transport grant is checked too — either one throws from inside the POST.
+    await expect(putMessagingWire(ALICE, { salt: '1' }, { salt: 2n })).rejects.toThrow(/toWire/);
     expect(calls).toHaveLength(0);
   });
 
   it('accepts the transport form', async () => {
     stubFetch(() => ({ body: { ok: true } }));
-    await putMessagingWire(ALICE, { delegator: ALICE, salt: '1' });
+    await putMessagingWire(ALICE, { delegator: ALICE, salt: '1' }, { delegator: ALICE, salt: '2' });
     expect(calls[0]!.url).toBe(`/a2a/interactions/${ALICE}/messaging.wireEnable`);
   });
 });

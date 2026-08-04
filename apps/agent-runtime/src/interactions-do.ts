@@ -65,6 +65,7 @@ import {
 import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
+import { wrapSessionSignature } from './session-wire.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
@@ -191,7 +192,18 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 // thing to revoke. Clearing this key is the person-side send kill switch; the on-chain revocation is
 // the authority kill at every recipient's gate.
 const MESSAGING_WIRE_KEY = 'messaging.wire';
-interface MessagingWireRecord { wire: IncomingDelegation; hash: string; sessionKey: string; enabledAt: string }
+/** TWO artifacts, because the gate asks two questions. `wire` (person → session key) authorizes the key
+ *  to produce signatures that count as the person's, and travels INSIDE each signature. `transport`
+ *  (person → person) authorizes the skill against the named recipients, and is what
+ *  `authorizeA2aMessage` reads. See `outbound-delivery.ts` for why one cannot serve both. */
+interface MessagingWireRecord {
+  wire: IncomingDelegation;
+  transport: IncomingDelegation;
+  hash: string;
+  transportHash: string;
+  sessionKey: string;
+  enabledAt: string;
+}
 /** The one skill an outbound 1:1 message uses. The wire must name its selector, and the shape check
  *  pins it — a wire minted for this rail must not authorize another. */
 const MESSAGING_DELIVER_SKILL = 'messaging.deliver';
@@ -2129,7 +2141,8 @@ export class InteractionsDO {
         if (op === 'messaging.wireStatus') {
           // Decoded from the wire, never stored beside it — see `wireTargets` for why the three
           // outcomes are distinguished rather than flattened to an empty list.
-          const t = rec ? wireTargets(rec.wire, this.env.ALLOWED_TARGETS_ENFORCER) : null;
+          // The TRANSPORT grant's targets, because that is the delegation the recipient's gate reads.
+          const t = rec ? wireTargets(rec.transport, this.env.ALLOWED_TARGETS_ENFORCER) : null;
           return json({
             ok: true,
             sessionKey,
@@ -2150,8 +2163,37 @@ export class InteractionsDO {
 
         if (op === 'messaging.wireEnable') {
           const incoming = body.delegation as IncomingDelegation | undefined;
-          if (!incoming) return json({ error: 'a person-signed messaging wire is required' }, 400);
-          // The three checks that make custodying this safe, in the order that fails cheapest first.
+          const incomingTransport = body.transport as IncomingDelegation | undefined;
+          if (!incoming || !incomingTransport) {
+            return json({ error: 'both the signing wire and the transport grant are required' }, 400);
+          }
+          const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
+          const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
+          const atEnf = (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase();
+          if (![tsEnf, amEnf, atEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
+            return json({ error: 'messaging enforcers not configured — cannot verify the shapes' }, 503);
+          }
+          const chainIdForWire = Number(this.env.CHAIN_ID ?? 84532);
+          const dm = this.env.DELEGATION_MANAGER as Address;
+          const toD = (w: IncomingDelegation): Delegation =>
+            ({ ...w, salt: BigInt(w.salt), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) }) as Delegation;
+          /** Signed by this person, and not already revoked. Fail-closed on a chain-read failure —
+           *  storing an unverifiable delegation is how a junk-overwrite DoS starts. */
+          const provenByPerson = async (w: IncomingDelegation): Promise<{ ok: true; digest: string } | { ok: false; res: Response }> => {
+            const digest = hashDelegation(toD(w), chainIdForWire, dm);
+            if (!(await this.erc1271(w.delegator as Address, digest, w.signature as Hex))) {
+              return { ok: false, res: json({ error: 'signature failed verification against this person' }, 403) };
+            }
+            try {
+              const revoked = (await this.pub().readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+              if (revoked) return { ok: false, res: json({ error: 'this delegation is already revoked on-chain' }, 403) };
+            } catch {
+              return { ok: false, res: json({ error: 'revocation check unavailable — nothing stored (fail-closed)' }, 503) };
+            }
+            return { ok: true, digest };
+          };
+
+          // ── 1. The SIGNING wire (person → session key) ──────────────────────────────────────────
           if (incoming.delegator.toLowerCase() !== principal) {
             return json({ error: 'messaging wire delegator must be this person' }, 400);
           }
@@ -2160,26 +2202,40 @@ export class InteractionsDO {
           if (incoming.delegate.toLowerCase() !== sessionKey) {
             return json({ error: 'messaging wire delegate must be the interactions-session key' }, 400);
           }
-          const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
-          const amEnf = (this.env.ALLOWED_METHODS_ENFORCER ?? '').toLowerCase();
-          if (![tsEnf, amEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
-            return json({ error: 'messaging enforcers not configured — cannot verify the wire shape' }, 503);
-          }
           const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: MESSAGING_DELIVER_SKILL });
           if (shapeErr) return json({ error: shapeErr }, 400);
-          const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
-          if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
-            return json({ error: 'messaging wire signature failed verification against this person' }, 403);
+          const wireProof = await provenByPerson(incoming);
+          if (!wireProof.ok) return wireProof.res;
+
+          // ── 2. The TRANSPORT grant (person → person) ────────────────────────────────────────────
+          // Self-delegated by construction: it confers nothing new, it carries the caveats the
+          // recipient's gate enforces. A grant whose delegate is anyone else would let some OTHER
+          // party send as this person — the single most valuable thing to get wrong here.
+          if (incomingTransport.delegator.toLowerCase() !== principal || incomingTransport.delegate.toLowerCase() !== principal) {
+            return json({ error: 'the transport grant must be this person delegating to themselves' }, 400);
           }
-          try {
-            const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
-            if (revoked) return json({ error: 'messaging wire is already revoked on-chain' }, 403);
-          } catch { return json({ error: 'revocation check unavailable — wire not stored (fail-closed)' }, 503); }
-          const stored: MessagingWireRecord = { wire: incoming, hash: digest, sessionKey, enabledAt: new Date().toISOString() };
+          const tShape = checkSessionWireShape(incomingTransport, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: MESSAGING_DELIVER_SKILL });
+          if (tShape) return json({ error: `transport grant: ${tShape}` }, 400);
+          // It must NAME its recipients. Without this caveat the grant is unbounded, and "approve this
+          // contact" would be a client-side preference rather than an on-chain-revocable bound.
+          const tTargets = wireTargets(incomingTransport, atEnf);
+          if (!tTargets.ok || tTargets.targets.length === 0) {
+            return json({ error: 'the transport grant must name its recipients (allowedTargets)' }, 400);
+          }
+          const transportProof = await provenByPerson(incomingTransport);
+          if (!transportProof.ok) return transportProof.res;
+
+          const stored: MessagingWireRecord = {
+            wire: incoming,
+            transport: incomingTransport,
+            hash: wireProof.digest,
+            transportHash: transportProof.digest,
+            sessionKey,
+            enabledAt: new Date().toISOString(),
+          };
           await this.state.storage.put(MESSAGING_WIRE_KEY, stored);
-          await audit.write({ id: crypto.randomUUID(), timestamp: stored.enabledAt, action: 'interactions.messaging.wireEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: digest } });
-          return json({ ok: true, hash: digest });
+          await audit.write({ id: crypto.randomUUID(), timestamp: stored.enabledAt, action: 'interactions.messaging.wireEnable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: transportProof.digest } });
+          return json({ ok: true, hash: wireProof.digest, transportHash: transportProof.digest, recipients: tTargets.targets });
         }
 
         // ── messaging.send ──────────────────────────────────────────────────────────────────────
@@ -2238,7 +2294,7 @@ export class InteractionsDO {
         // authorization failure. Answering here lets the UI do the right thing — run the one-prompt
         // ceremony that adds this counterparty — instead of showing "delivery rejected" for what is
         // simply a contact the person has not approved yet (§5.1: one prompt per NEW counterparty).
-        const cover = wireTargets(rec.wire, this.env.ALLOWED_TARGETS_ENFORCER);
+        const cover = wireTargets(rec.transport, this.env.ALLOWED_TARGETS_ENFORCER);
         if (!cover.ok) {
           // A damaged or unbounded wire is NOT "no contacts approved" — offering the approve-a-contact
           // ceremony for it would loop, because the ceremony cannot fix either.
@@ -2268,12 +2324,15 @@ export class InteractionsDO {
           const out = await deliverOutbound({
             personSA: principal as Address,
             recipientSA: recipient as Address,
-            wire: rec.wire,
-            sessionKey: sessionKey as Address,
-            signWithSessionKey: async (h) => {
+            transportGrant: rec.transport,
+            // Sign as the PERSON: the KMS key produces the raw ECDSA, and the signing wire that
+            // authorizes it is wrapped in alongside (`0x51`). The recipient unwraps and re-verifies
+            // every leg per message — delegator is the claimed sender, the sig recovers to the
+            // delegate, the wire is ERC-1271-valid and unrevoked.
+            signAsPerson: async (h: Hex) => {
               const acct = await interactionsSessionAccount(this.env);
               if (!acct.sign) throw new Error('interactions-session KMS account lacks raw-digest sign');
-              return acct.sign({ hash: h });
+              return wrapSessionSignature(rec.wire, await acct.sign({ hash: h }));
             },
             payload: { envelope: envelope as never, bodyText: new TextDecoder().decode(bodyBytes), conversation: descriptor },
             skill: MESSAGING_DELIVER_SKILL,

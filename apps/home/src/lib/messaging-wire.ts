@@ -127,3 +127,56 @@ export async function issueMessagingWire(input: MessagingWireInput): Promise<Del
   if (!d.signature || d.signature === '0x') throw new Error('messaging wire was not signed');
   return d;
 }
+
+/**
+ * THE TRANSPORT GRANT — the second artifact, and the one the recipient's gate actually reads.
+ *
+ * WHY TWO. `authorizeA2aMessage` requires `delegate === requester === message.sender`, and the
+ * recipient verifies that sender's signature with `r.valid && r.deployed` — a check that a bare key can
+ * never satisfy, because a key has no contract (`eth_getCode` on the session key returns `0x`). So the
+ * A2A sender must be the person's SMART AGENT, not the key that signs for it. That is exactly what
+ * `SESSION_WRAPPED_SIG_TYPE` exists for, and what the spec-329 consult rail already does.
+ *
+ * The two artifacts answer two different questions and cannot be one:
+ *   · this grant (A → A)          — "may this agent invoke `messaging.deliver` on that recipient?"
+ *                                   Its DELEGATOR is what the receiving skill checks `envelope.from`
+ *                                   against (NEW-H1), so it is also what makes the person the author.
+ *   · the wire above (A → key)    — "may this key produce signatures that count as A's?"
+ *
+ * A SELF-GRANT IS NOT A NO-OP. Delegator and delegate are both the person, so it confers nothing the
+ * person did not already have — it exists to CARRY CAVEATS. The recipient list and the skill pin live
+ * here, on-chain-revocable, which is what makes "approve this contact" a real bound rather than a
+ * client-side preference.
+ */
+export async function issueMessagingTransportGrant(
+  input: Omit<MessagingWireInput, 'sessionKey'>,
+): Promise<Delegation> {
+  const skills = [...new Set((input.skills ?? MESSAGING_WIRE_SKILLS).map((s) => s.trim()).filter(Boolean))];
+  if (skills.length === 0) throw new Error('a messaging transport grant must name at least one skill');
+  if (skills.some((s) => s === '*' || s === '0x00000000')) {
+    throw new Error('a messaging transport grant must NAME its skills — the any-skill sentinel is refused by the gate');
+  }
+  const recipients = [...new Set(input.recipients.map((r) => r.toLowerCase() as Address))];
+  if (recipients.length === 0) throw new Error('a messaging transport grant must name at least one recipient');
+
+  const nowSec = Math.floor((input.now?.() ?? Date.now()) / 1000);
+  const validUntil = nowSec + (input.validitySeconds ?? MESSAGING_WIRE_VALIDITY_SECONDS);
+
+  const d: Delegation = {
+    delegator: input.personSA,
+    // The person, again. See above: the value is in the caveats, and in the delegator the receiving
+    // skill reads as the author.
+    delegate: input.personSA,
+    authority: ROOT_AUTHORITY,
+    caveats: [
+      buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+      buildCaveat(CONTRACTS.allowedTargetsEnforcer, encodeAllowedTargetsTerms(recipients)),
+      buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms(skills.map((s) => skillSelector(s)))),
+    ],
+    salt: input.salt ?? randomSalt(),
+    signature: '0x',
+  };
+  d.signature = await input.signHash(hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager));
+  if (!d.signature || d.signature === '0x') throw new Error('messaging transport grant was not signed');
+  return d;
+}
