@@ -13,6 +13,9 @@ import type {
 } from '@agenticprimitives/fabric/messaging';
 import type { ActionCardV1, InteractionCaseV1, InteractionMandateV1 } from '@agenticprimitives/fabric/interactions';
 import type { HomeInboxSummaryV1 } from '@agenticprimitives/home';
+import type { Address } from '@agenticprimitives/types';
+// spec 341 §5.1b — a person's send is their own agent's A2A delivery, not a Home write.
+import { sendMessage, MessagingWireRequiredError, type SendMessageInput } from '../lib/messaging-send';
 
 export interface EnvelopeMeta {
   from: string;
@@ -51,10 +54,13 @@ export interface InboxView {
  * controls (workspace-scoped Messages, spec 315); omitted → the person's own inbox. The server re-verifies
  * control on every read/action (`related-idx`), so passing an uncontrolled SA is a 403.
  */
-export function useInboxView(session: { token: string } | null, targetAgent?: string) {
+export function useInboxView(session: { token: string } | null, targetAgent?: string, sender?: Address) {
   const [view, setView] = useState<InboxView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Set when a send needs the one-prompt ceremony (no wire, or a counterparty it does not cover).
+   *  Kept separate from `error` because it is the one failure the person can actually resolve. */
+  const [wireRequired, setWireRequired] = useState<MessagingWireRequiredError | null>(null);
   const agentQs = targetAgent ? `?agent=${encodeURIComponent(targetAgent)}` : '';
 
   const refresh = useCallback(async () => {
@@ -125,6 +131,62 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [session, refresh, targetAgent],
   );
 
+  /**
+   * SEND — spec 341 §5.1b. Every composer, reply, invite and inquiry in this app goes through here.
+   *
+   * A PERSON's send is an A2A delivery performed by their own agent, under a wire they signed. The
+   * Home is not in the transfer at all: the browser asks the agent, the agent signs and sends, the
+   * recipient's gate re-verifies everything (ADR-0044).
+   *
+   * An ORG or SERVICE inbox still goes through the Home, because `messaging.send` is self-access only
+   * and no org has a messaging wire yet — minting one is a steward ceremony that does not exist. This
+   * is a branch on WHO IS SENDING, decided before any call is made; it is not a fallback, and neither
+   * path is tried after the other fails (ADR-0013). It is the remaining half of the cutover.
+   */
+  const send = useCallback(
+    async (input: Omit<SendMessageInput, 'person'>, key: string): Promise<boolean> => {
+      if (!session) return false;
+      setBusy(key);
+      setError(null);
+      setWireRequired(null);
+      try {
+        if (targetAgent || !sender) {
+          // The Home path, unchanged. `reply` when the caller named only a conversation.
+          const isReply = !!input.conversationId && !input.recipient && !input.recipientName;
+          const legacy: Record<string, unknown> = isReply
+            ? { action: 'reply', conversationId: input.conversationId, bodyText: input.bodyText }
+            : {
+                action: 'send',
+                ...(input.recipient ? { to: input.recipient } : {}),
+                ...(input.recipientName ? { toName: input.recipientName } : {}),
+                ...(input.subject ? { subject: input.subject } : {}),
+                ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+                ...(input.contextRefs?.length ? { contextRefs: input.contextRefs } : {}),
+                bodyText: input.bodyText,
+              };
+          const res = await fetch('/connect/inbox', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+            body: JSON.stringify(targetAgent ? { ...legacy, agent: targetAgent } : legacy),
+          });
+          const out = (await res.json()) as { ok?: boolean; error?: string };
+          if (!res.ok || !out.ok) throw new Error(out.error ?? `failed (${res.status})`);
+        } else {
+          await sendMessage({ person: sender, ...input });
+        }
+        await refresh();
+        return true;
+      } catch (e) {
+        if (e instanceof MessagingWireRequiredError) setWireRequired(e);
+        setError(e instanceof Error ? e.message : String(e));
+        return false;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [session, refresh, targetAgent, sender],
+  );
+
   /** Deterministic chat test (spec 313 §2). */
   const isChat = useCallback(
     (conversationId: string): boolean => {
@@ -157,7 +219,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, loadThread, post, busy, error, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {

@@ -8,6 +8,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../src/context/session';
+import { sendMessage } from '../../../src/lib/messaging-send';
+import { agentNameForLabel } from '../../../src/lib/domain';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
 import { issueDirectoryListing } from '../../../src/home/directory';
@@ -88,19 +90,15 @@ export default function NetworksPage() {
     setError(null);
     setNote(null);
     try {
-      const res = await fetch('/connect/inbox', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
-        body: JSON.stringify({
-          action: 'send',
-          toLabel: contactOrg.label,
-          subject: `Collaboration inquiry — ${contactOrg.listing.displayName}`,
-          bodyText: draft,
-          contextRefs: [{ kind: 'network', id: NETWORKS_INDEX }],
-        }),
+      // spec 341 §5.1b — the person's own agent delivers this over A2A, under a wire they signed.
+      if (!agentAddress) throw new Error('no agent address');
+      await sendMessage({
+        person: agentAddress,
+        recipientName: agentNameForLabel(contactOrg.label),
+        subject: `Collaboration inquiry — ${contactOrg.listing.displayName}`,
+        bodyText: draft,
+        contextRefs: [{ kind: 'network', id: NETWORKS_INDEX }],
       });
-      const out = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !out.ok) throw new Error(out.error ?? `send failed (${res.status})`);
       setNote(`Inquiry delivered to ${contactOrg.listing.displayName}'s inbox.`);
       setContactOrg(null);
       setDraft('');

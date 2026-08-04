@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
+import { sendMessage } from '../../lib/messaging-send';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { Avatar } from './chat/Avatar';
 import { BusyButton } from '../shared/BusyButton';
@@ -15,7 +16,7 @@ import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire 
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 
 export function OrgInvitePanel({ org }: { org: string }) {
-  const { session, profile } = useSession();
+  const { session, profile, agentAddress } = useSession();
   const communityId = org.toLowerCase();
   const authed = { 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` };
 
@@ -52,16 +53,14 @@ export function OrgInvitePanel({ org }: { org: string }) {
       } catch (e) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
       }
-      const res = await fetch('/connect/inbox', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({
-          action: 'send', toName: hit.name,
-          bodyText: `You're invited to join this organization. Open the "Join" chip on this message to accept — you'll sign a listing you can revoke anytime.`,
-          contextRefs: [{ kind: 'org-channels', id: communityId, label: 'Join the organization' }],
-        }),
+      // spec 341 §5.1b — delivered by the inviter's own agent over A2A, not written by the Home.
+      if (!agentAddress) throw new Error('no agent address');
+      await sendMessage({
+        person: agentAddress,
+        recipientName: hit.name,
+        bodyText: `You're invited to join this organization. Open the "Join" chip on this message to accept — you'll sign a listing you can revoke anytime.`,
+        contextRefs: [{ kind: 'org-channels', id: communityId, label: 'Join the organization' }],
       });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || b.ok === false) throw new Error(b.error ?? `invite failed (${res.status})`);
       setNote(`Invitation sent to ${hit.displayName ?? hit.name}.` + grantNote);
       setQuery(''); setHits(null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); setBusyFor(null); }

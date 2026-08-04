@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
+import { sendMessage } from '../../lib/messaging-send';
+import { agentNameForLabel } from '../../lib/domain';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
@@ -275,16 +277,18 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // Messages renders it as a "Join discussion" chip (acceptInvite).
       const nameForSend = listings.find((l) => l.listing.subject.toLowerCase().endsWith(personSA.toLowerCase()))?.label;
       if (nameForSend) {
-        await fetch('/connect/inbox', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({
-            action: 'send', toLabel: nameForSend,
+        // spec 341 §5.1b — the steward's own agent delivers the invitation over A2A. Best-effort as
+        // before: the participant record already stands, so a send failure does not undo the invite.
+        if (agentAddress) {
+          await sendMessage({
+            person: agentAddress,
+            recipientName: agentNameForLabel(nameForSend),
             bodyText: `You're invited to the restricted discussion topic "${b.topicTitle ?? ''}". Open the chip on this message to join.`,
             // id carries org + topic (`<orgSA>/<topicId>`) — ContextRefV1 has no extra fields; the
             // Messages chip splits it to acceptInvite + deep-link.
             contextRefs: [{ kind: 'discussion-topic', id: `${communityId}/${active}`, label: b.topicTitle ?? 'Join discussion' }],
-          }),
-        }).catch(() => null);
+          }).catch(() => null);
+        }
       }
       await loadParticipants();
     } catch (e) {

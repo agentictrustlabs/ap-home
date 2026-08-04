@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInboxView, agentLabel } from '../../../home/use-inbox';
+import { useSession } from '../../../context/session';
 import { searchAgentsKb } from '../../../lib/agent-search';
 import { AvatarUpload } from './AvatarUpload';
 import { MessageBubble } from './MessageBubble';
@@ -28,7 +29,8 @@ export function DmSlideOver({
   channelContext?: { channelTitle: string };
   onClose: () => void;
 }) {
-  const { view, refresh, loadThread, post, busy } = useInboxView(session);
+  const { agentAddress } = useSession();
+  const { view, refresh, loadThread, send: sendMessageViaAgent, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
   const [draft, setDraft] = useState('');
   const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>('resolving');
@@ -142,12 +144,12 @@ export function DmSlideOver({
 
   const send = useCallback(async (body: string) => {
     if (conversationId) {
-      await post({ action: 'reply', conversationId, bodyText: body }, `dm-reply:${conversationId}`);
+      await sendMessageViaAgent({ conversationId, bodyText: body }, `dm-reply:${conversationId}`);
     } else if (resolvedName) {
-      await post({ action: 'send', toName: resolvedName, bodyText: body }, 'dm-send');
+      await sendMessageViaAgent({ recipientName: resolvedName, bodyText: body }, 'dm-send');
       await refresh();
     }
-  }, [conversationId, resolvedName, post, refresh]);
+  }, [conversationId, resolvedName, sendMessageViaAgent, refresh]);
 
   const composerPlaceholder = useMemo(() => {
     if (conversationId || resolution === 'resolved') return `Message ${recipientName}…`;

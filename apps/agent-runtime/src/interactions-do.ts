@@ -2183,10 +2183,60 @@ export class InteractionsDO {
         }
 
         // ── messaging.send ──────────────────────────────────────────────────────────────────────
-        if (!rec) return json({ error: 'no messaging wire — sign one before sending (the ceremony is one prompt)' }, 409);
-        const recipient = String(body.recipient ?? '').toLowerCase();
-        if (!/^0x[0-9a-f]{40}$/.test(recipient)) return json({ error: 'recipient (address) required' }, 400);
+        if (!rec) return json({ error: 'no messaging wire — sign one before sending (the ceremony is one prompt)', code: 'wire_absent', sessionKey }, 409);
         const chainId = Number(this.env.CHAIN_ID ?? 84532);
+
+        // WHO IS THIS FOR. Three CALLER-SELECTED ways to name the recipient, not a fallback chain
+        // (ADR-0013): the caller picks one and it either answers or fails. `conversationId` alone is
+        // the reply case, and it resolves from the OWNER'S OWN descriptor — never from anything the
+        // counterparty sent — which is the rule `replyInConversation` established and the only reason
+        // a reply cannot be redirected by the other party.
+        let recipient = String(body.recipient ?? '').toLowerCase();
+        const recipientName = String(body.recipientName ?? '').trim().toLowerCase();
+        const convId = String(body.conversationId ?? '');
+        if (!recipient && recipientName) {
+          if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
+            return json({ error: 'name resolution is not configured on this deployment' }, 503);
+          }
+          try {
+            const resolved = await new AgentNamingClient({
+              rpcUrl: this.env.RPC_URL,
+              chainId,
+              registry: this.env.AGENT_NAME_REGISTRY as Address,
+              universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+            }).resolveName(recipientName);
+            if (!resolved) return json({ error: `no agent claimed the name "${recipientName}"` }, 404);
+            recipient = resolved.toLowerCase();
+          } catch (e) {
+            return json({ error: `name resolution failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
+          }
+        }
+        if (!recipient && convId) {
+          const doc = await this.readDoc<InboxDataV1>(grant, INBOX_RESOURCE, null as never);
+          const descriptor = ((doc?.conversations ?? []) as ConversationDescriptorV1[]).find((d) => d.id === convId);
+          if (!descriptor) return json({ error: 'unknown conversation' }, 404);
+          const meCaip = caip10(chainId, principal as Address).toLowerCase();
+          const others = descriptor.participants.filter((p) => String(p).toLowerCase() !== meCaip);
+          if (others.length !== 1) return json({ error: 'reply requires a two-party conversation' }, 409);
+          recipient = (String(others[0]).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+        }
+        if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
+          return json({ error: 'recipient (address), recipientName, or conversationId required' }, 400);
+        }
+
+        // IS THIS RECIPIENT INSIDE THE WIRE. The far gate would answer this too, but only as an opaque
+        // authorization failure. Answering here lets the UI do the right thing — run the one-prompt
+        // ceremony that adds this counterparty — instead of showing "delivery rejected" for what is
+        // simply a contact the person has not approved yet (§5.1: one prompt per NEW counterparty).
+        try {
+          const at = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === (this.env.ALLOWED_TARGETS_ENFORCER ?? '').toLowerCase());
+          const targets = at?.terms ? decodeAllowedTargetsTerms(at.terms as Hex).map((a) => a.toLowerCase()) : [];
+          if (!targets.includes(recipient)) {
+            return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: targets, sessionKey }, 409);
+          }
+        } catch {
+          return json({ error: 'messaging wire targets are undecodable — re-sign the wire' }, 409);
+        }
         const built = await buildOutboundMessage({
           from: caip10(chainId, principal as Address) as never,
           to: caip10(chainId, recipient as Address) as never,
