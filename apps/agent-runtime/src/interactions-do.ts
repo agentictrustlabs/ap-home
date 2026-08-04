@@ -1080,6 +1080,22 @@ export class InteractionsDO {
       await this.state.storage.put('state', st);
       return json({ ok: true });
     }
+    // spec 341 §5.5b — `invite.token` carries its own capability and must reach the grant WITHOUT a
+    // session gate. Handled before the session block; the token is checked inside.
+    if (op === 'invite.token') {
+      const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+      const g = st.grant;
+      if (!g) return json({ error: 'no interactions grant' }, 409);
+      const token = String(body.token ?? '');
+      if (!/^[A-Za-z0-9_-]{24,128}$/.test(token)) return json({ error: 'token required' }, 400);
+      const resource = `org.invite:${token}`;
+      if (body.data !== undefined) {
+        await this.writeDoc(g, resource, body.data);
+        return json({ ok: true });
+      }
+      const rec = await this.vaultFor(g).read<unknown>({ owner: '', resource });
+      return json({ ok: true, record: rec?.data ?? null });
+    }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant });
@@ -1103,7 +1119,11 @@ export class InteractionsDO {
       // `content.*` joins them (§5.4). The Home route that drives those ops ALREADY fetched the org's
       // stewardship wire and then authorized the call with the shared secret instead — the authority
       // artifact was obtained and discarded. Now it is the thing that decides.
-      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put';
+      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put'
+        // spec 341 §5.5b — ISSUING an invite is the org acting, so it takes the steward's proof like
+        // every other org act. CLAIMING one is not here: it is the invitee's own op (`invite.claim`),
+        // and they hold no stewardship by definition.
+        || op === 'invite.put';
       if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
         // Require the in-Worker marker, which only co-resident DOs can supply. Any other path
@@ -2328,6 +2348,27 @@ export class InteractionsDO {
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
           return json({ ok: true, routing: r.channel.routing });
         });
+      }
+
+      // ── spec 341 §5.5b — INVITE CLAIM. Not admission: the org ALREADY acted, and the record it
+      //    minted is addressed to this caller. They are collecting, not requesting. ──
+      if (op === 'invite.claim') {
+        // THE KEY IS DERIVED FROM THE SESSION, NEVER SUPPLIED. `invite.get` took a `{ resource }` and
+        // the caller said which record — so "read an invite" and "read ANY invite" were the same op,
+        // separated only by the caller's manners. Deriving it makes the op mean "read the invite
+        // addressed to me", which is the entire security property and the one a caller-supplied key
+        // gives away silently.
+        const mine = `org.invite:agent:${sessionSa.toLowerCase()}`;
+        // Read under the ORG's own grant: the invitee holds nothing here — not having authority yet is
+        // precisely the situation an invite exists to change (§5.5).
+        const rec = await this.vaultFor(grant).read<unknown>({ owner: '', resource: mine });
+        const data = (rec?.data ?? null) as { status?: string } | null;
+        // A REVOKED or already-used invite is not an invite. Returning it and letting the caller check
+        // would make the status advisory; refusing here makes it a gate.
+        if (data && data.status && data.status !== 'pending') {
+          return json({ ok: true, invite: null, reason: data.status });
+        }
+        return json({ ok: true, invite: data });
       }
 
       // ── spec 341 §4.3 — PER-APP READ GRANTS. The person authorizes ONE app to read, and can revoke

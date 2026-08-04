@@ -62,10 +62,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   let mad = body?.memberAccessDelegation;
   if (!mad) {
     try {
-      const vault = await orgVault(env, org);
+      // spec 341 §5.5b — the invitee CLAIMS the invite addressed to them: `orgVault` routes an
+      // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
+      // The address below is not sent — passing one would re-open the hole that op closes.
+      const vault = await orgVault(env, org, token);
       const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string } | null) : null;
       if (rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
-    } catch { /* vault unreachable — membership still records; the grant can be re-looked-up later */ }
+    } catch { /* unreachable — membership still records; the grant can be re-looked-up later */ }
   }
   const madValid = !!mad && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === person && !!mad.signature;
 
