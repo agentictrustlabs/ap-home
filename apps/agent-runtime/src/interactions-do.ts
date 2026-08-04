@@ -1401,7 +1401,7 @@ export class InteractionsDO {
           // spec 341 §5.5a — the ORG admitting an application into its OWN vault, under its OWN grant.
           // Reached only from this Worker (the `org.apply` skill), after the org's A2A gate verified
           // the applicant's transport grant. Nothing the applicant presented reaches this write.
-          const app = body.application as { applicationId?: string; applicant?: string; message?: string; submittedAt?: string } | undefined;
+          const app = body.application as { applicationId?: string; applicant?: string; message?: string; submittedAt?: string; subject?: string; record?: unknown } | undefined;
           const applicant = String(app?.applicant ?? '').toLowerCase();
           if (!app?.applicationId || !/^0x[0-9a-f]{40}$/.test(applicant)) {
             return json({ error: 'application { applicationId, applicant } required' }, 400);
@@ -1411,7 +1411,14 @@ export class InteractionsDO {
             const rows = Array.isArray(doc?.applications) ? doc.applications : [];
             // ONE entry per applicant: re-applying updates in place rather than accumulating, which is
             // what turns "anyone may apply" from a queue-flooding hole into an ordinary inbox.
-            const next = [...rows.filter((r) => String((r as { applicant?: string }).applicant ?? '').toLowerCase() !== applicant), app];
+            // One entry per APPLYING PARTY: the subject when a steward applied for an org, else the
+            // applicant. Keying on the wrong one would let a steward's second attempt queue a
+            // duplicate for the same organization.
+            const key = String((app as { subject?: string }).subject ?? applicant).toLowerCase();
+            const next = [...rows.filter((r) => {
+              const row = r as { applicant?: string; subject?: string };
+              return String(row.subject ?? row.applicant ?? '').toLowerCase() !== key;
+            }), app];
             await this.writeDoc(g, APPLICATIONS_RESOURCE, { applications: next });
             return json({ ok: true });
           });
@@ -2678,7 +2685,12 @@ export class InteractionsDO {
                 if (!acct.sign) throw new Error('interactions-session KMS account lacks raw-digest sign');
                 return wrapSessionSignature(rec.wire, await acct.sign({ hash: h }));
               },
-              payload: { message: applicationMessage, org: recipient } as never,
+              payload: {
+                message: applicationMessage,
+                org: recipient,
+                ...(body.subject ? { subject: String(body.subject) } : {}),
+                ...(body.record && typeof body.record === 'object' ? { record: body.record } : {}),
+              } as never,
               skill: 'org.apply',
               transport: this.a2aTransport(),
             });

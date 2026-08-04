@@ -17,6 +17,17 @@ const json = (b: unknown, s = 200): Response =>
 
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
 
+/** Every session-authorized alliance op goes through here — one place that decides the authority,
+ *  rather than three that each repeat it. */
+async function allianceOp<T = Record<string, unknown>>(
+  env: FnContext['env'], alliance: string, op: string, payload: Record<string, unknown>,
+): Promise<{ ok: boolean; status: number; body: T & { error?: string; ok?: boolean } }> {
+  const { callInteractions } = await import('./channels');
+  const r = await callInteractions(env, alliance, op, payload);
+  return { ok: r.status < 400 && r.body.ok !== false, status: r.status, body: r.body as T & { error?: string; ok?: boolean } };
+}
+
+const sessionOf = (ctx: FnContext): string => (ctx.request.headers.get('authorization') ?? '').replace(/^Bearer /, '');
 const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 interface UupgMembershipRequest {
@@ -63,23 +74,43 @@ async function callerSa({ request, env }: FnContext): Promise<string | null> {
   return (sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
+/** The caller's stewardship delegation for an org, if they have one — the artifact that authorizes
+ *  acting for it, as opposed to the shared secret that merely proved which server called. */
+async function stewardshipFor(env: FnContext['env'], person: string, org: string): Promise<unknown | undefined> {
+  const raw = await env.AUTH_CODES.get(`related:${person.toLowerCase()}:${org.toLowerCase()}`);
+  const link = raw ? (JSON.parse(raw) as { stewardshipDelegation?: unknown }) : null;
+  return link?.stewardshipDelegation ?? undefined;
+}
+
 async function controlsOrgForPerson(env: FnContext['env'], person: string, org: string): Promise<boolean> {
   const raw = await env.AUTH_CODES.get(`related:${person.toLowerCase()}:${org.toLowerCase()}`);
   const link = raw ? (JSON.parse(raw) as { stewardshipDelegation?: IncomingDelegation }) : null;
   return verifyStewardship(env, org.toLowerCase(), person.toLowerCase(), link?.stewardshipDelegation);
 }
 
-async function readRows(env: FnContext['env'], alliance: string): Promise<{ apps: unknown[]; rows: UupgMembershipRequest[] }> {
+/**
+ * spec 341 §5.5a — reachable only by the ALLIANCE's own steward now that `submit` no longer reads.
+ * Authorized by the alliance's stewardship delegation, not a shared secret: the secret proved the
+ * caller was our Home and nothing about whether this person may act for this alliance.
+ */
+async function readRowsViaBridge(env: FnContext['env'], alliance: string): Promise<{ apps: unknown[]; rows: UupgMembershipRequest[] }> {
   const r = await bridgeInteractions<{ doc?: { applications?: unknown[] } }>(env, alliance, 'applications.get', {});
   if (!r.ok) throw new Error(r.body.error ?? `read failed (${r.status})`);
   const apps = Array.isArray(r.body.doc?.applications) ? r.body.doc!.applications : [];
   return { apps, rows: apps.filter(isUupgRequest) };
 }
 
-async function writeRows(env: FnContext['env'], alliance: string, apps: unknown[], rows: UupgMembershipRequest[]): Promise<void> {
+async function readRows(env: FnContext['env'], alliance: string, session: string, stewardship?: unknown): Promise<{ apps: unknown[]; rows: UupgMembershipRequest[] }> {
+  const r = await allianceOp<{ doc?: { applications?: unknown[] } }>(env, alliance, 'applications.get', { session, ...(stewardship ? { stewardship } : {}) });
+  if (!r.ok) throw new Error(r.body.error ?? `read failed (${r.status})`);
+  const apps = Array.isArray(r.body.doc?.applications) ? r.body.doc!.applications : [];
+  return { apps, rows: apps.filter(isUupgRequest) };
+}
+
+async function writeRows(env: FnContext['env'], alliance: string, apps: unknown[], rows: UupgMembershipRequest[], session: string, stewardship?: unknown): Promise<void> {
   const keep = apps.filter((x) => !isUupgRequest(x));
-  const put = await bridgeInteractions(env, alliance, 'applications.put', { doc: { applications: [...keep, ...rows] } });
-  if (!put.ok) throw new Error(put.body.error ?? `write failed (${put.status})`);
+  const put = await allianceOp(env, alliance, 'applications.put', { doc: { applications: [...keep, ...rows] }, session, ...(stewardship ? { stewardship } : {}) });
+  if (!put.ok) throw new Error(String(put.body.error ?? `write failed (${put.status})`));
 }
 
 export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
@@ -99,23 +130,35 @@ export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
     const alliance = (body?.allianceSA ?? '').toLowerCase();
     if (!isAddress(org) || !isAddress(alliance)) return json({ error: 'orgSA and allianceSA required' }, 400);
     if (!(await controlsOrgForPerson(ctx.env, actor, org))) return json({ error: 'you must steward the requesting organization' }, 403);
-    const { apps, rows } = await readRows(ctx.env, alliance);
-    if (!rows.some((r) => r.subject === org && r.status === 'pending')) {
-      rows.push({
-        recordType: 'uupg:membershipRequest',
-        id: Date.now() * 1000 + crypto.getRandomValues(new Uint32Array(1))[0] % 1000,
-        subject: org,
-        subject_name: body?.orgName ?? null,
-        alliance_sa: alliance,
-        alliance_name: body?.allianceName ?? null,
-        custodian_sa: actor,
-        custodian_name: body?.orgName ?? 'org custodian',
-        requested_role: 'member',
-        note: body?.note ?? null,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      });
-      await writeRows(ctx.env, alliance, apps, rows);
+    // spec 341 §5.5a — ADMISSION. This used to READ the alliance's entire application list to dedup —
+    // an org's steward enumerating another organization's pending requests, with no authority over it
+    // — and then rewrite the whole document over the shared secret. Both are gone: the applying org's
+    // agent sends `org.apply`, and the ALLIANCE's own grant appends, deduping by subject on its side.
+    // The applicant never sees the queue it is joining.
+    const record = {
+      recordType: 'uupg:membershipRequest',
+      id: Date.now() * 1000 + crypto.getRandomValues(new Uint32Array(1))[0] % 1000,
+      subject: org,
+      subject_name: body?.orgName ?? null,
+      alliance_sa: alliance,
+      alliance_name: body?.allianceName ?? null,
+      custodian_sa: actor,
+      custodian_name: body?.orgName ?? 'org custodian',
+      requested_role: 'member',
+      note: body?.note ?? null,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    const sent = await allianceOp(ctx.env, org, 'messaging.send', {
+      session: sessionOf(ctx),
+      recipient: alliance,
+      skill: 'org.apply',
+      applicationMessage: body?.note?.trim() || `${body?.orgName ?? 'An organization'} requests to join this alliance.`,
+      subject: org,
+      record,
+    });
+    if (!sent.ok) {
+      return json({ error: sent.body.error ?? 'request failed', code: (sent.body as { code?: string }).code }, sent.status >= 400 ? sent.status : 502);
     }
     return json({ ok: true });
   }
@@ -124,7 +167,7 @@ export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
     const alliance = (body?.allianceSA ?? '').toLowerCase();
     if (!isAddress(alliance)) return json({ error: 'allianceSA required' }, 400);
     if (!(await controlsOrgForPerson(ctx.env, actor, alliance))) return json({ error: 'you must steward the alliance' }, 403);
-    const { rows } = await readRows(ctx.env, alliance);
+    const { rows } = await readRows(ctx.env, alliance, sessionOf(ctx), await stewardshipFor(ctx.env, actor, alliance));
     const status = body?.status ?? 'pending';
     return json({ ok: true, requests: rows.filter((r) => r.status === status).sort((a, b) => b.id - a.id).slice(0, 200) });
   }
@@ -136,7 +179,16 @@ export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
     if (!(await controlsOrgForPerson(ctx.env, actor, org))) return json({ error: 'you must steward the requesting organization' }, 403);
     const all: UupgMembershipRequest[] = [];
     for (const alliance of alliances) {
-      const { rows } = await readRows(ctx.env, alliance).catch(() => ({ rows: [] as UupgMembershipRequest[] }));
+      // ⚠ KNOWN AUTHORITY GAP (spec 341 §5.5a). This reads the ALLIANCE's whole request list as the
+      // requesting ORG's steward — who has no authority over that alliance — and filters to their own
+      // rows afterwards. So the decision about what they may see happens HERE, after an unauthorized
+      // read, and a filter bug is a disclosure rather than a denial. Same shape as the library shared
+      // lens (§5.4).
+      //
+      // Left on the bridge DELIBERATELY rather than converted: a session would fail closed and silently
+      // break the feature for every uupg org, and the real fix is an op that returns only the caller's
+      // own rows — the alliance deciding what to show, not the Home filtering after the fact.
+      const { rows } = await readRowsViaBridge(ctx.env, alliance).catch(() => ({ rows: [] as UupgMembershipRequest[] }));
       all.push(...rows.filter((r) => r.subject === org));
     }
     return json({ ok: true, requests: all.sort((a, b) => b.id - a.id).slice(0, 200) });
@@ -148,14 +200,15 @@ export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
     const decision = body?.decision;
     if (!isAddress(alliance) || !id || (decision !== 'approved' && decision !== 'denied')) return json({ error: 'allianceSA, requestId, decision required' }, 400);
     if (!(await controlsOrgForPerson(ctx.env, actor, alliance))) return json({ error: 'you must steward the alliance' }, 403);
-    const { apps, rows } = await readRows(ctx.env, alliance);
+    const allianceWire = await stewardshipFor(ctx.env, actor, alliance);
+    const { apps, rows } = await readRows(ctx.env, alliance, sessionOf(ctx), allianceWire);
     const row = rows.find((r) => r.id === id && r.status === 'pending');
     if (!row) return json({ error: 'request_not_pending' }, 404);
     row.status = decision;
     row.decided_at = new Date().toISOString();
     row.decided_by = actor;
     if (decision === 'denied' && body?.reason) row.note = `${row.note ?? ''}${row.note ? ' | ' : ''}denied: ${body.reason}`;
-    await writeRows(ctx.env, alliance, apps, rows);
+    await writeRows(ctx.env, alliance, apps, rows, sessionOf(ctx), allianceWire);
     return json({ ok: true, request: row });
   }
 

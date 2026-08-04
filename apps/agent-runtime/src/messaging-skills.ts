@@ -146,7 +146,7 @@ export function makeOrgApplySkill(orgSA: string, appendApplication: AppendApplic
   return {
     skill: 'org.apply',
     handle: async (ctx: SkillContext): Promise<SkillResult> => {
-      const i = (ctx.input ?? {}) as { message?: unknown; org?: unknown };
+      const i = (ctx.input ?? {}) as { message?: unknown; org?: unknown; subject?: unknown; record?: unknown };
       const message = typeof i.message === 'string' ? i.message.trim() : '';
       if (!message) return { state: 'failed', error: 'org.apply requires input { message }' };
       if (message.length > 2000) return { state: 'failed', error: 'application message is too long (2000 chars)' };
@@ -159,11 +159,20 @@ export function makeOrgApplySkill(orgSA: string, appendApplication: AppendApplic
       // verified. Never a field in the payload: a self-declared applicant is how a stranger applies
       // in someone else's name.
       const applicant = ctx.principal.toLowerCase();
+      // `subject` — an ORG applying, submitted by its steward. The APPLICANT stays `ctx.principal`
+      // (who asked, verified), and the subject is what they asked ON BEHALF OF. Collapsing the two
+      // would let a steward's identity stand in for the org's, or worse, let anyone name any subject:
+      // the org's own grant is what makes the claim checkable, and the recipient re-checks it.
+      const subject = typeof i.subject === 'string' && /^0x[0-9a-fA-F]{40}$/.test(i.subject) ? i.subject.toLowerCase() : undefined;
       await appendApplication({
         applicationId: `app_${crypto.randomUUID()}`,
         applicant,
         message,
         submittedAt: new Date().toISOString(),
+        ...(subject ? { subject } : {}),
+        // A bounded, opaque payload for the receiving app's own record shape. NOT interpreted here:
+        // this skill admits applications, it does not understand any particular vertical's schema.
+        ...(i.record && typeof i.record === 'object' ? { record: i.record } : {}),
       });
       const receiptId = await ctx.emitArtifact({
         artifactKind: 'org.application.receipt',
@@ -183,4 +192,8 @@ export type AppendApplicationFn = (application: {
   applicant: string;
   message: string;
   submittedAt: string;
+  /** The org applied FOR, when a steward applied on its behalf. Distinct from `applicant`, who asked. */
+  subject?: string;
+  /** The receiving app's own record shape, passed through uninterpreted. */
+  record?: unknown;
 }) => Promise<void>;
