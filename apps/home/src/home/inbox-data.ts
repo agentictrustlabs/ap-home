@@ -22,7 +22,6 @@ import {
   type MessageEnvelopeV1,
   type MessageEnvelopeV2,
   type MessageEventV1,
-  type MessageBodyStore,
   messageBodyResource,
 } from '@agenticprimitives/fabric/messaging';
 import {
@@ -52,6 +51,8 @@ import {
   type CommitmentRecordV1,
   type DecisionRecordV1,
 } from '@agenticprimitives/fabric';
+// READ-only by type (spec 341 §5.2) — see `MessageBodyReader`.
+import type { MessageBodyReader } from '../../server/connect/message-body-store';
 import type { AuditEvent, AuditSink } from '@agenticprimitives/audit';
 import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
 import { homeCaip10 } from './manifest';
@@ -162,7 +163,7 @@ export interface InboxView {
  *  never a KV fallback — the UI's "Enable vault storage" action is the one path to readable bodies.
  *  Vault reads go to `message.body:<id>` — the resource `putBody` actually keys by — never the
  *  sender-supplied `envelope.body.resource` (an external app's envelope may carry an `inline:*` stub). */
-async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore, conversationId?: string): Promise<Record<string, string>> {
+async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyReader, conversationId?: string): Promise<Record<string, string>> {
   if (!bodyStore) return {};
   const out: Record<string, string> = {};
   // VL-W4 — metadata-first: the list/poll passes NO body store (bodies stay lazy); a thread hydrate passes
@@ -177,21 +178,11 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyStore, con
   return out;
 }
 
-/** Persist a body — to the owner's vault, the ONLY residency (spec 317 cutover). A write without a
- *  store fails LOUDLY: the owner must provision their standing delivery grant first (no KV fallback). */
-async function persistBody(_doc: InboxDataV1, envelope: AnyMessageEnvelope, bodyText: string, bodyStore?: MessageBodyStore): Promise<void> {
-  if (!bodyStore) {
-    throw new Error('vault delivery grant required — enable vault storage for this agent before sending or receiving messages');
-  }
-  await bodyStore.putBody({
-    messageId: envelope.id,
-    bytes: new TextEncoder().encode(bodyText),
-    contentType: envelope.bodyContentType ?? 'text/plain',
-    classification: envelope.classification,
-  });
-}
+// `persistBody` is gone with its callers (spec 341 §5.2): the Home no longer writes message bodies
+// anywhere. Reading them (`resolveBodies` → `loadBody`) is unchanged — an owner reading their own mail
+// is not the same operation as writing into someone else's.
 
-export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyStore, conversationId?: string): Promise<InboxView> {
+export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyReader, conversationId?: string): Promise<InboxView> {
   const doc = await loadInboxData(kv, person);
   const { projector, interactions } = hydrate(person, doc);
   const items = projector.listInbox();
@@ -265,92 +256,16 @@ export interface DeliverPayload {
   conversation?: ConversationDescriptorV1;
 }
 
-/**
- * Audited inbound delivery. Order (all fail-closed, nothing persisted early):
- * validate + body-hash + audit-accept (messaging.createAuditedInboxDelivery) →
- * case binding checks → audited submit+admit transitions → persist.
- */
-export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPayload, bodyStore?: MessageBodyStore): Promise<void> {
-  const recipient: CanonicalAgentId = homeCaip10(person);
-  const doc = await loadInboxData(kv, person);
-  const { projector, interactions } = hydrate(person, doc);
-  const audit = homeAuditSink(kv, person);
-
-  const { envelope, bodyText } = payload;
-  if (!envelope.to.some((t) => t.toLowerCase() === recipient.toLowerCase())) {
-    throw new Error('envelope is not addressed to this agent');
-  }
-
-  const event: MessageEventV1 = {
-    version: 'ap.message.event.v1',
-    messageId: envelope.id,
-    actor: envelope.from,
-    eventType: 'delivered',
-    at: new Date().toISOString(),
-  };
-  const delivery = createAuditedInboxDelivery({ projector, audit, recipient });
-  await delivery.admit(envelope, event, new TextEncoder().encode(bodyText));
-
-  // Typed request → register the case and drive submit/admit, audited.
-  if (payload.interactionCase) {
-    const c = payload.interactionCase;
-    // spec 340 — this one IS safely translatable, unlike the `plain` gate. `performativeForKind` maps
-    // ONLY `request` to REQUEST, so the test is exactly equivalent for V1 and correct for V2. (The
-    // `plain` gate was not, because `plain` and `response` both map to INFORM — see use-inbox.)
-    if (performativeOf(envelope) !== 'REQUEST') throw new Error('interaction case requires a request message');
-    if (envelope.interactionId !== c.id) throw new Error('envelope/case interaction id mismatch');
-    if (c.state !== 'draft') throw new Error('case must arrive in draft state');
-    if (c.requester.toLowerCase() !== envelope.from.toLowerCase()) throw new Error('case requester must be the sender');
-    if (c.responder.toLowerCase() !== recipient.toLowerCase()) throw new Error('case responder must be this agent');
-    if (c.rootMessageId !== envelope.id) throw new Error('case root message must be this envelope');
-
-    interactions.putCase(c);
-    const audited = createAuditedInteractionStore({ store: interactions, audit });
-    const at = new Date().toISOString();
-    const mk = (transition: InteractionTransitionType, actor: CanonicalAgentId): InteractionTransitionEventV1 => ({
-      version: 'ap.interaction.event.v1',
-      interactionId: c.id,
-      transition,
-      actor,
-      at,
-      messageId: envelope.id,
-      idempotencyKey: `${transition}:${c.id}`,
-    });
-    const submitted = await audited.applyEvent(mk('submit', c.requester));
-    if (!submitted.ok) throw new Error(`case submit rejected: ${submitted.reason}`);
-    // 13→11 reconciliation: there is no `admit` case transition — the case stays `submitted`. Delivery is
-    // the message `eventType:'delivered'` event (an inbox fact); the responder's first case move is `triage`
-    // (submitted→triaged). `recipient` is still validated as the responder above.
-    doc.draftCases.push(c);
-    doc.caseEvents.push(mk('submit', c.requester));
-
-    if (payload.card) {
-      if (payload.card.interactionId !== c.id) throw new Error('card interaction id mismatch');
-      const cardErrors = validateActionCard(payload.card);
-      if (cardErrors.length > 0) throw new Error(`invalid action card: ${cardErrors.join(', ')}`);
-      doc.cards[c.id] = payload.card;
-    }
-  }
-
-  if (payload.conversation) {
-    if (payload.conversation.id !== envelope.conversationId) {
-      throw new Error('conversation descriptor does not match envelope conversation');
-    }
-    const mine: ConversationDescriptorV1 = { ...payload.conversation, owner: recipient };
-    const errors = validateConversationDescriptor(mine);
-    if (errors.length > 0) throw new Error(`invalid conversation descriptor: ${errors.join(', ')}`);
-    // First descriptor wins for this owner; later proposals never overwrite — EXCEPT contextRefs,
-    // which UNION by kind:id (fabric upsertConversation, spec 322 W1 — the stale-Join-chip fix).
-    upsertConversation(doc, mine);
-  }
-
-  doc.envelopes.push(envelope);
-  doc.events.push(event);
-  // spec 317 W3 — residency flips to the RECIPIENT: body → the recipient's vault (hash-verified) when a store
-  // is supplied, else the KV map (default). The `delivery.admit` above already verified the bodyHash.
-  await persistBody(doc, envelope, bodyText, bodyStore);
-  await saveInboxData(kv, person, doc);
-}
+// `deliverToInbox` is DELETED too (spec 341 §5.2), and its last caller went with it.
+//
+// It was the ADMISSION side — what a Home does with a message that arrived — and that was a real
+// distinction while `/connect/inbox/deliver` existed. But that endpoint was the second unauthenticated
+// hop: `access-control-allow-origin: *`, no signature on the envelope, `envelope.from` taken on trust.
+// Relying apps now deliver through the SENDER'S OWN AGENT, so admission happens where every other
+// admission happens — at the recipient's InteractionsDO, after the recipient's A2A gate.
+//
+// Nothing at the Home writes into anyone's inbox any more. That is the property §5.2 was after, and it
+// is stronger than "the deliver endpoint verifies a signature": there is no deliver endpoint.
 
 // `sendFromInbox` and `replyInConversation` are DELETED (spec 341 §5.1c).
 //

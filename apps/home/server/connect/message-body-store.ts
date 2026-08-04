@@ -19,7 +19,12 @@
 // → demo-a2a server-mint. No first-party edge-admit rule is required; no proof-of-possession, no Origin
 // rejection (Origin only shapes CORS response headers, which this server-side caller ignores). The edge
 // signs the GatewayAssertion; demo-a2a verifies it + mints the `sub=owner` token.
-import { messageBodyResource, sha256Hex32, type MessageBodyStore, type MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
+import { sha256Hex32, type MessageBodyStore, type MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
+
+/** What the Home still needs of a body store: the READ half. The write half was deleted with the two
+ *  paths that wrote into someone's inbox (spec 341 §5.2), and narrowing the TYPE is what stops one
+ *  quietly coming back — a `MessageBodyStore` would compile the moment somebody re-added `putBody`. */
+export type MessageBodyReader = Pick<MessageBodyStore, 'loadBody'>;
 import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from '../lib/interactions-bridge';
 
 // spec 323 W3 — the body store is FULLY DO-mediated (bridge get/put); the Home no longer needs a
@@ -33,23 +38,19 @@ type BodyStoreEnv = InteractionsBridgeEnv;
  * per-owner provisioning, NOT a runtime error-fallback). Thread into `readInboxView`/`sendFromInbox`/
  * `replyInConversation`/`deliverToInbox`.
  */
-export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Promise<MessageBodyStore | undefined> {
+export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Promise<MessageBodyReader | undefined> {
   return async (owner: string) => {
     // spec 323 W3 — the owner's 1-1 body store is FULLY DO-mediated: the Home holds NO delivery wire.
-    // WRITE rides `dm.body.put` (the DO wields its stored write-only delivery wire); READ rides
-    // `inbox.body.get` (interactions grant, dm-namespace). Same fabric StoredBody format + the same
-    // bodyHash verification. Fail-closed (ADR-0013): no bridge ⇒ no body store (never a KV path).
+    // READ-ONLY since spec 341 §5.2. It rides `inbox.body.get` (interactions grant, dm-namespace) and
+    // hash-verifies against the envelope. Fail-closed (ADR-0013): no bridge ⇒ no body store, never a
+    // KV path.
     if (!interactionsBridgeConfigured(env)) return undefined;
     const toB64 = (bytes: Uint8Array): string => { let bin = ''; for (const b of bytes) bin += String.fromCharCode(b); return btoa(bin); };
     return {
-      async putBody({ messageId, bytes, contentType, classification, resource }) {
-        const bodyHash = await sha256Hex32(bytes);
-        const res = resource ?? messageBodyResource(messageId);
-        const stored = { b64: toB64(bytes), contentType: contentType ?? 'text/plain', bodyHash };
-        const r = await bridgeInteractions(env, owner, 'dm.body.put', { resource: res, data: stored });
-        if (!r.ok) throw new Error(r.body.error ?? `dm body write via InteractionsDO failed (${r.status})`);
-        return { ref: { resource: res, classification: classification ?? 'internal', updatedAt: new Date().toISOString() }, bodyHash };
-      },
+      // `putBody` is GONE (spec 341 §5.2). It rode `dm.body.put` over the shared-secret bridge, and its
+      // only callers were the two Home paths that wrote into someone's inbox — both deleted. Bodies are
+      // now written by the RECIPIENT's own DO, under the recipient's own wire, after the recipient's
+      // gate. One bridge call site fewer; the ratchet moves for the first time.
       async loadBody(envelope: MessageEnvelopeV1): Promise<Uint8Array> {
         const r = await bridgeInteractions<{ record?: { b64?: string } | null }>(env, owner, 'inbox.body.get', { resource: envelope.body.resource });
         if (!r.ok || !r.body.record?.b64) throw new Error(r.body.error ?? `message body ${envelope.body.resource} not readable via InteractionsDO`);
@@ -59,6 +60,6 @@ export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Prom
         if ((await sha256Hex32(bytes)) !== envelope.bodyHash) throw new Error(`message body ${envelope.id} does not match envelope bodyHash`);
         return bytes;
       },
-    } satisfies MessageBodyStore;
+    } satisfies MessageBodyReader;
   };
 }
