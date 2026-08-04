@@ -46,6 +46,20 @@ export interface A2aDeliverInput {
    *  distinct digests, never the same bytes twice. */
   sign: (digest: Hex) => Promise<Hex>;
   /**
+   * A PRE-EXISTING messaging wire to deliver under (spec 341 §5.1a), instead of minting a grant here.
+   *
+   * This is the production path. The wire's delegator is the PERSON and its delegate is a KMS session
+   * key, signed once by the person's custody credential at connect — so the Home never needs the
+   * person's credential at send time, which is what made the per-send mint impossible server-side.
+   *
+   * When supplied, `sign` is the SESSION KEY's signer and `requester` MUST be the wire's delegate:
+   * `authorizeA2aMessage` requires delegate === requester === message.sender, and with a wire all
+   * three are the session key. The fabric envelope's `from` still names the person — the A2A layer
+   * carries who SIGNED, the envelope carries who SENT, and conflating them is what the wire exists to
+   * avoid.
+   */
+  wire?: { delegation: unknown; delegate: Address };
+  /**
    * How to reach agents. Injected so this module holds no hostnames (ADR-0021) and so tests need no
    * network.
    *
@@ -80,8 +94,11 @@ export async function deliverOverA2a(input: A2aDeliverInput): Promise<A2aDeliver
   const skill = input.skill ?? MESSAGING_DELIVER_SKILL;
   const nowMs = input.nowMs ?? Date.now();
 
-  // 1. The grant: this delegate, this recipient, this skill, bounded window.
-  const grant = await mintDeliveryGrant({
+  // 1. The authority. A supplied wire is used AS IS — re-minting would need the person's credential,
+  // which the Home does not hold, and is the whole reason the wire exists.
+  const grant = input.wire
+    ? { delegation: input.wire.delegation as never, digest: '0x' as Hex, skill }
+    : await mintDeliveryGrant({
     senderSA: input.senderSA,
     // The sender presents its own grant. `authorizeA2aMessage` requires
     // delegate === requester === message.sender, so these three are the same account by construction
@@ -91,12 +108,15 @@ export async function deliverOverA2a(input: A2aDeliverInput): Promise<A2aDeliver
     skill,
     sign: input.sign,
     nowSec: Math.floor(nowMs / 1000),
-  });
+      });
 
   // 2. The message: bound to the body hash and the clock, signed separately from the grant.
+  // With a wire, the SIGNER is the session key (the wire's delegate), not the person — the gate
+  // requires delegate === requester === message.sender.
+  const signer = input.wire?.delegate ?? input.senderSA;
   const unsigned = {
     messageId: input.messageId,
-    sender: input.senderSA,
+    sender: signer,
     skill,
     bodyHash: input.bodyHash,
     createdAt: Math.floor(nowMs / 1000),
@@ -116,7 +136,7 @@ export async function deliverOverA2a(input: A2aDeliverInput): Promise<A2aDeliver
   const { taskId, state } = await client.submitTask(input.recipientSA, {
     message,
     delegation: grant.delegation,
-    requester: input.senderSA,
+    requester: signer,
     input: { messageId: input.messageId, bodyRef: input.bodyRef, bodyHash: input.bodyHash },
   });
 

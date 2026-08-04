@@ -146,3 +146,56 @@ describe('failure is failure', () => {
     await expect(deliver({ transport }).run()).rejects.toThrow(/unauthorized/);
   });
 });
+
+
+describe('delivering under a pre-existing wire (spec 341 §5.1a)', () => {
+  const WIRE_DELEGATE = '0xdddddddddddddddddddddddddddddddddddddddd' as Address;
+  const WIRE = { delegator: ALICE, delegate: WIRE_DELEGATE, caveats: [], signature: '0xabc' };
+
+  it('uses the wire as-is and signs as its delegate', async () => {
+    const rec = recordingTransport();
+    const signed: Hex[] = [];
+    await deliverOverA2a({
+      senderSA: ALICE,
+      recipientSA: BOB,
+      bodyRef: { owner: BOB, recordType: 'message.body:dm:msg_1' },
+      bodyHash: BODY_HASH,
+      messageId: MSG_ID,
+      sign: async (d: Hex) => { signed.push(d); return `${d.slice(0, 10)}${'00'.repeat(60)}` as Hex; },
+      transport: rec.transport,
+      nowMs: 1_780_000_000_000,
+      wire: { delegation: WIRE, delegate: WIRE_DELEGATE },
+    });
+
+    const p = rec.calls[0]!.request.params as {
+      delegation: unknown; requester: Address; message: { sender: Address };
+    };
+    // The wire is passed through untouched — re-minting would need the person's credential, which the
+    // Home does not hold, and is the entire reason the wire exists.
+    expect(p.delegation).toEqual(WIRE);
+    // delegate === requester === message.sender, all the SESSION KEY. The gate requires it.
+    expect(p.requester).toBe(WIRE_DELEGATE);
+    expect(p.message.sender).toBe(WIRE_DELEGATE);
+    // ONE signature now — the message. The grant was signed once, at connect, by the person.
+    expect(signed).toHaveLength(1);
+  });
+
+  it('does not mint a second grant when a wire is supplied', async () => {
+    const rec = recordingTransport();
+    let calls = 0;
+    await deliverOverA2a({
+      senderSA: ALICE,
+      recipientSA: BOB,
+      bodyRef: { owner: BOB, recordType: 'message.body:dm:msg_1' },
+      bodyHash: BODY_HASH,
+      messageId: MSG_ID,
+      sign: async (d: Hex) => { calls++; return `${d.slice(0, 10)}${'00'.repeat(60)}` as Hex; },
+      transport: rec.transport,
+      nowMs: 1_780_000_000_000,
+      wire: { delegation: WIRE, delegate: WIRE_DELEGATE },
+    });
+    // Two signatures would mean a grant was minted here — with the session key, producing a wire the
+    // person never authorized.
+    expect(calls).toBe(1);
+  });
+});
