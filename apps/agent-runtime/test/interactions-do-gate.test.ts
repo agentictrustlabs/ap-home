@@ -300,3 +300,43 @@ describe('an organization’s join queue is not reachable by just anyone', () =>
     expect(r.ok).toBe(false);
   });
 });
+
+// ── spec 341 §4.2 — owner-facing reads accept a RELYING id_token, not only a Home session ──────────
+//
+// The hole a downstream migration reverted over: `verifyHomeSession` pins `aud = DEMO_SSO_AUD`, a real
+// Connect client's token carries `aud = client_id`, and `ownerOrBridge` accepted only the first. So an
+// app holding a valid id_token for the very person whose inbox it was reading was refused, while the
+// skills block one screen down accepted the same token.
+//
+// The assertions that matter are the two BOUNDS, not the acceptance: self-only, and no fall-through to
+// the secret. Acceptance without them would be the bearer-as-authority shape.
+describe('owner-facing reads accept either identity, bounded to self', () => {
+  it('ACCEPTS a Home session for the principal (unchanged)', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('inbox.get', token, MEMBER);
+    // Past the gate. 409 = no interactions grant yet, which is a provisioning state reached only
+    // AFTER authorization — the gate itself answers 401.
+    expect(r.status).not.toBe(401);
+  });
+
+  it('REFUSES a session that proves someone ELSE', async () => {
+    // Self-access only. This is the bound that keeps "read your own mail" from becoming "read mail".
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('inbox.get', token, ORG);
+    expect(r.status).toBe(401);
+  });
+
+  it('REFUSES a bad token rather than falling through to the bridge', async () => {
+    // ADR-0013: a request that CARRIES a session has chosen that mechanism and fails closed there. If a
+    // bad token fell through, every caller could reach the secret path by presenting garbage first.
+    const r = await call('inbox.get', 'not-a-jwt', MEMBER);
+    expect(r.status).toBe(401);
+  });
+
+  it('REFUSES an unauthenticated read outright', async () => {
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${MEMBER}/inbox.get`, {
+      method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+});

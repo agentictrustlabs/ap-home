@@ -859,9 +859,32 @@ export class InteractionsDO {
    *  token-redeem substrate flows, not the owner acting on their own records.) */
   private async ownerOrBridge(request: Request, rawBody: string, op: string, principal: string, session: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (session) {
-      const g = await verifyHomeSession(session, this.env);
-      if (!g.ok) return { ok: false, reason: g.error };
-      if (g.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
+      // A HOME SESSION **OR** A RELYING id_token, exactly as the skills block below already accepts
+      // (spec 341 §4.2). The asymmetry was the spec-323-W4 hole: `verifyHomeSession` pins
+      // `aud = DEMO_SSO_AUD`, and a relying app's token carries `aud = client_id`, so a real Connect
+      // client — which holds an id_token and a site delegation and no Home session — could not read its
+      // own user's mail. A downstream migration reverted over exactly this.
+      //
+      // WHY THIS IS NOT A BEARER BECOMING AUTHORITY. The vault read does not run on the token: it runs
+      // on `st0.grant`, a delegation the PERSON signed, ERC-1271-verified when it was stored and
+      // carrying `vault:inbox.data` in its record scope, which demo-mcp re-enforces per record. The
+      // token decides only *may this caller ask the DO to use the grant it already holds*, and the
+      // answer is bounded to `sa === principal` — you may read your own mail and nobody else's.
+      //
+      // WHAT IS STILL MISSING, stated so it is not mistaken for done: revoking ONE app means revoking
+      // its OIDC client registration, not a delegation, because every caller shares the principal's
+      // one grant. Per-app revocation needs a per-app scoped grant (§4.1) and is a separate wave.
+      //
+      // Caller-selected, never a fallback (ADR-0013): a request carrying `session` takes this path and
+      // fails closed here; one carrying the SEC-010 envelope takes the bridge. Neither is tried after
+      // the other fails, and a bad token does NOT fall through to the secret.
+      let gate = await verifyHomeSession(session, this.env);
+      if (!gate.ok) {
+        const relying = await verifyRelyingIdToken(session, this.env);
+        if (relying.ok) gate = relying;
+      }
+      if (!gate.ok) return { ok: false, reason: gate.error };
+      if (gate.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
       return { ok: true };
     }
     return this.bridgeGate(request, rawBody, op);
