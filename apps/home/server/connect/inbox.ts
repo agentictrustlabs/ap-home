@@ -283,7 +283,22 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // A `wire_absent` / `recipient_not_in_wire` refusal is passed through verbatim: applying needs
       // the same one-time approval sending does, and the person resolves it at their Home.
       if (r.status >= 400 || r.body.ok === false) {
-        return jsonCors({ error: r.body.error ?? 'apply failed', code: r.body.code }, request, r.status >= 400 ? r.status : 502);
+        // FORWARD THE WIRE FIELDS, not just the message. `wire_absent` is not a dead end — it is a
+        // request for the one-prompt approval — but the client can only OFFER that ceremony if it is
+        // told which recipient needs approving, which counterparties the current wire already covers,
+        // and which session key every wire must name. Dropping them turned a resolvable refusal into an
+        // error string, which is how applying to an organization became a button that does nothing.
+        return jsonCors(
+          {
+            error: r.body.error ?? 'apply failed',
+            code: r.body.code,
+            ...(r.body.recipient ? { recipient: r.body.recipient } : {}),
+            ...(Array.isArray(r.body.recipients) ? { recipients: r.body.recipients } : {}),
+            ...(r.body.sessionKey ? { sessionKey: r.body.sessionKey } : {}),
+          },
+          request,
+          r.status >= 400 ? r.status : 502,
+        );
       }
       return jsonCors({ ok: true, applicationId: r.body.messageId ?? null }, request);
     }

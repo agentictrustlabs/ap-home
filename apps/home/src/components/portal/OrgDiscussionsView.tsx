@@ -64,6 +64,16 @@ function PosterAvatar({ name, subject }: { name: string; subject?: string }) {
 export function OrgDiscussionsView({ org }: { org: Address }) {
   const { session, profile: homeProfile, agentAddress, agentName } = useSession();
   const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
+  // A REF, because `load` is a useCallback whose deps are [session, communityId, authed, active] — it does
+  // NOT re-memoize when `wireNeeded` changes, so reading the state inside it would capture the value from
+  // the render that created it (null) and clear the error anyway. A guard that is always true is worse
+  // than no guard: it reads as fixed. Adding `wireNeeded` to the deps would work too, but re-fires the
+  // `useEffect(() => void load(), [load])` poll on every change, so a ref is the cheaper correct answer.
+  const wireNeededRef = useRef<MessagingWireRequiredError | null>(null);
+  const noteWireNeeded = useCallback((e: MessagingWireRequiredError | null) => {
+    wireNeededRef.current = e;
+    setWireNeeded(e);
+  }, []);
   const communityId = org.toLowerCase();
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
@@ -118,7 +128,14 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // Non-member: the enrollment card (Request to join / Complete membership) IS the explanation now (spec
       // §12). Don't leak the DO's old listing-first gate message ("publish a directory listing to enter") into
       // it — that framing contradicts request→approve→complete. Clear any stale error too.
-      setMember(false); setChannels(null); setError(null); return;
+      // Clears the DO's stale listing-first message — but NOT a refusal the applicant still has to act
+      // on. `apply` sets `wireNeeded`, and this poll runs every few seconds while a non-member sits on
+      // this exact card, so an unconditional clear erased the only feedback they had. The approval
+      // affordance survives because it lives in `wireNeeded`, not in `error`; the guard keeps a genuine
+      // apply error visible too.
+      setMember(false); setChannels(null);
+      if (!wireNeededRef.current) setError(null);
+      return;
     }
     if (!chRes.ok) {
       const b = (await chRes.json().catch(() => ({}))) as { error?: string };
@@ -213,8 +230,27 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
         method: 'POST', headers: authed,
         body: JSON.stringify({ action: 'apply', org: communityId, bodyText: applyMessage.trim() || 'Requesting to join this organization.' }),
       });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `request failed (${res.status})`);
+      const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // APPLYING RIDES THE MESSAGING WIRE (spec 341 §5.5a), so it can be refused for the same resolvable
+      // reason a first message is: no wire yet. That is a request for the one-prompt ceremony, NOT a
+      // failure — and this path used to turn it into a bare `Error`, so `wireNeeded` stayed null, the
+      // `ApproveMessaging` affordance below never rendered, and the applicant was left pressing a button
+      // that did nothing. Worse, the 403 poll clears `error` a few seconds later, so even the message
+      // disappeared: a silent dead end on the only route into an organization.
+      //
+      // Routed through the same error the send helper raises, so the affordance is the one every other
+      // send already uses rather than a second one that can drift from it.
+      if (b.code === 'wire_absent' || b.code === 'recipient_not_in_wire') {
+        noteWireNeeded(new MessagingWireRequiredError(
+          b.code as 'wire_absent' | 'recipient_not_in_wire',
+          typeof b.recipient === 'string' ? (b.recipient as Address) : undefined,
+          Array.isArray(b.recipients) ? (b.recipients as Address[]) : [],
+          typeof b.sessionKey === 'string' ? (b.sessionKey as Address) : undefined,
+          String(b.error ?? 'approve messaging to send your request'),
+        ));
+        return;
+      }
+      if (!res.ok || b.ok !== true) throw new Error(String(b.error ?? `request failed (${res.status})`));
       setApplied(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -292,7 +328,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
           }).catch((e: unknown) => {
             // Best-effort as before — the participant record already stands. But an approval-shaped
             // failure is offered rather than swallowed: the steward can fix it and re-invite.
-            if (e instanceof MessagingWireRequiredError) setWireNeeded(e);
+            if (e instanceof MessagingWireRequiredError) noteWireNeeded(e);
           });
         }
       }
@@ -508,7 +544,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
         person={agentAddress ?? null}
         session={session}
         credential={homeProfile?.credential}
-        onApproved={() => setWireNeeded(null)}
+        onApproved={() => noteWireNeeded(null)}
         onError={setError}
       />
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
