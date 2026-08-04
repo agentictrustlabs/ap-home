@@ -18,6 +18,11 @@ proxies selected MCP requests during local demos.
   standard `message/send`; the skill delegation-authorizes it, then admits DIRECTLY into the recipient's
   **vault** inbox (`message.body:<id>` + `inbox.data`, via `ctx.delegation`) — no Home callback. A message
   is never authority (ADR-0041).
+- The **mounted gateway** (ADR-0055 amendment): `src/gateway-mount.ts` builds a co-resident
+  `PrincipalGatewayDO` — no second DO binding, no migration tag — with the MCP-backed vault INJECTED, and
+  `InteractionsDO` routes exactly ONE op through it (`gateway.inbox.get`, mirroring `inbox.get` on the
+  same record). The gateway supplies the verdict cache + request-id ledger; the record never leaves the
+  owner's vault. `exchangeStore`/`interactionStore` stay DO-local only because this op touches neither.
 - The **org-assistant turn** (spec 327, 318 §8.1): `InteractionsDO.channels.post` detects a topic
   @-mention → in-Worker dispatch to the org's `A2aTaskDO` `/internal/discussion-respond` (marker-gated,
   NOT on the agent card) → `src/discussion-skill.ts` runs the shared loop → reply lands via

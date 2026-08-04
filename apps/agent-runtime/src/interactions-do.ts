@@ -20,6 +20,8 @@
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
+import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
+import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
@@ -215,6 +217,10 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 const OP_RESOURCE: Record<string, string | undefined> = {
   'inbox.get': 'vault:inbox.data',
   'inbox.put': 'vault:inbox.data',
+  // The SAME resource as `inbox.get`, because it is the same read served by the other plane. A mounted
+  // op that needed a wider scope than the one it mirrors would not be a migration step, it would be a
+  // new capability wearing one as a disguise.
+  'gateway.inbox.get': 'vault:inbox.data',
   'inbox.body.get': 'vault:message.body:dm:',
   'dm.body.put': 'vault:message.body:dm:',
   'controlevents.append': 'vault:control-events.data',
@@ -260,6 +266,10 @@ const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
 const INBOX_RESOURCE = 'inbox.data';
+/** The token handed to the mounted gateway's cold path. The gateway is constructed around ONE grant, so
+ *  there is no second delegation this could select and nothing for it to carry — it exists because
+ *  `verifyToken(token)` is the gateway's cold-path shape, and naming it is better than passing `''`. */
+const GATEWAY_GRANT_TOKEN = 'mounted:grant';
 const DM_BODY_PREFIX = 'message.body:dm:';
 // spec 324 §7 Tier-2 — the org's pending MembershipApplications doc, a plain whole-doc record in the org's
 // vault (NOT the inbox — a non-member's application must surface reliably to the steward). Bridge-only: the
@@ -698,6 +708,62 @@ export class InteractionsDO {
     } as unknown as Vault;
   }
 
+  /**
+   * MOUNT a co-resident `PrincipalGatewayDO` over this grant, with the MCP-backed vault INJECTED.
+   *
+   * Lazy and per-grant. Lazy because constructing the gateway runs the `CREATE TABLE IF NOT EXISTS` of
+   * every store it owns, and those tables should exist only for principals who actually call a mounted
+   * op — not for everyone, on the chance that someone might. Per-grant because `vaultFor` binds the
+   * requester, and a gateway cached across grants would serve one principal's read under another's
+   * authority, which is the one mistake that would make this migration worse than not doing it.
+   *
+   * `vault` is injected; `exchangeStore` / `interactionStore` are not, and so are DO-local. That is
+   * permitted here ONLY because the mounted op touches neither. When an op reaches the exchange stream
+   * the amendment's three conditions come due — the durable fact written to the vault first, an explicit
+   * rebuild in code, and a test that wipes the DO and rebuilds it — and they are not met today.
+   */
+  private mountedGateway(grant: IncomingDelegation): PrincipalGatewayDO {
+    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const manager = (this.env.DELEGATION_MANAGER ?? '') as Address;
+    const vault = this.vaultFor(grant);
+    const deps = buildMountedGatewayDeps({
+      vault,
+      // The gateway is built around ONE grant, so the token parameter carries nothing and is ignored —
+      // there is no second grant it could name. The verification below is the real one either way.
+      verify: async () => {
+        const d: Delegation = {
+          ...grant,
+          salt: BigInt(grant.salt),
+          caveats: grant.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })),
+        } as Delegation;
+        const digest = hashDelegation(d, chainId, manager);
+        // Signature, then revocation. Both, because either alone is a different and weaker claim: a valid
+        // signature on a revoked delegation is exactly what revocation exists to defeat, and this verdict
+        // is about to be CACHED — so a check skipped here is a check skipped for every warm call after it.
+        if (!(await this.erc1271(grant.delegator as Address, digest, grant.signature as Hex))) return null;
+        try {
+          const revoked = (await this.pub().readContract({
+            address: manager, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest as Hex],
+          })) as boolean;
+          if (revoked) return null;
+        } catch {
+          return null; // an unavailable revocation check is a refusal, never an assumption of validity
+        }
+        return {
+          principal: grant.delegator.toLowerCase(),
+          sessionKey: grant.delegate.toLowerCase(),
+          delegationHash: digest,
+          // The epoch keys verdict invalidation (spec 311). `chainId:manager` is the real thing that
+          // changes on a full reset — new contracts, new DelegationManager — so cached verdicts from the
+          // previous deployment cannot be mistaken for current ones. Not a placeholder.
+          epoch: `${chainId}:${manager.toLowerCase()}`,
+          manager: manager.toLowerCase(),
+        };
+      },
+    });
+    return new PrincipalGatewayDO(this.state as never, this.env as never, deps);
+  }
+
   /** BATCHED message-body read: ONE `get_vault_records` round-trip for a whole topic's bodies,
    *  hash-verified per envelope (fabric `verifiedBodiesFromBatch` — the same spec 309 §8.4
    *  verification as `loadBody`, one mechanism). Replaces the per-message delegated reads whose
@@ -1106,13 +1172,13 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
       /** The relying app that called, when one did. Null for the person's own Home. */
       let callerClientId: string | null = null;
-      const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
+      const OWNER_FACING = op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
       // spec 341 §5.3 — an ORG's governance docs are steward-facing, not owner-facing: the principal is
       // the org and it has no session. Same verified delegation the messaging rail uses.
       //
@@ -1195,6 +1261,47 @@ export class InteractionsDO {
             return json({ ok: true, unchanged: true, revision });
           }
           return json({ ok: true, doc, ...(revision ? { revision } : {}) });
+        }
+        // THE MOUNT (ADR-0055 amendment) — the first live traffic served by `PrincipalGatewayDO`.
+        //
+        // Deliberately the same read as `inbox.get` directly above, over the same vault record, returning
+        // the same shape. Mirroring an existing op rather than adding a new one is what makes this
+        // checkable: the two planes read one record, so a difference in what they return is a defect and
+        // not a design question. It is also what makes it disposable — deleting this block leaves the
+        // serving plane exactly as it was, with no migration tag and no addressable object stranded.
+        //
+        // WHAT MOVED: nothing. The record is in the owner's MCP vault before this op and after it. The
+        // gateway supplies its serving-plane machinery (the cached verdict, the single-use request id)
+        // and reaches the record through the INJECTED vault, which is the whole claim being tested here.
+        if (op === 'gateway.inbox.get') {
+          const gw = this.mountedGateway(g);
+          // The cold path, on every call. `invokeFast` refuses on a verdict miss rather than reaching for
+          // a weaker check (ADR-0013), so the verdict must exist first — and re-verifying per call is the
+          // right cost at one op. The warm lane is what a later step earns, not what this one assumes.
+          const verdict = await gw.verifyAndCache(GATEWAY_GRANT_TOKEN);
+          if (!verdict) return json({ error: 'gateway refused the grant', code: 'gateway_verify_failed' }, 403);
+          const out = await gw.invokeFast({
+            key: verdict,
+            // Request ids are single-use and this op is a pollable read, so the id must vary per call or
+            // the second poll is indistinguishable from a replay and is refused. Bound to the caller's
+            // principal + the resource so it stays a request id and not a nonce with a different name.
+            requestId: `gw:${principal.toLowerCase()}:${INBOX_RESOURCE}:${crypto.randomUUID()}`,
+            now: new Date().toISOString(),
+            tool: 'get_vault_record',
+            args: { recordType: INBOX_RESOURCE },
+            // Caveat pass (B) — never cached, run on every invoke. The record scope this op may reach is
+            // pinned to the ONE resource it mirrors; the grant's own scope is re-enforced at demo-mcp,
+            // which remains the authority (ADR-0041). A pass that returned `true` unconditionally would
+            // make the gateway's three-part authorization a two-part one.
+            runCaveatPass: async (_v, tool, args) =>
+              tool === 'get_vault_record' && args.recordType === INBOX_RESOURCE,
+          });
+          if (!out.ok) return json({ error: 'gateway refused the read', code: out.reason }, 403);
+          const doc = (out.result as { data?: unknown } | null)?.data ?? null;
+          const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
+          const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
+          if (revision !== null && since && since === revision) return json({ ok: true, unchanged: true, revision, servedBy: 'gateway' });
+          return json({ ok: true, doc, ...(revision ? { revision } : {}), servedBy: 'gateway' });
         }
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
