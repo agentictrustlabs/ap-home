@@ -213,7 +213,11 @@ export async function verifyHomeSession(
 export async function verifyRelyingIdToken(
   token: string,
   env: { BROKER_JWKS_URL?: string; BROKER_ISS?: string },
-): Promise<{ ok: true; sa: Address; caip: string } | { ok: false; status: number; error: string }> {
+  // spec 341 §4.3 — `clientId` is the VERIFIED `aud`: which relying app is calling. It was already
+  // verified here (`expectedAud`) and then thrown away, which is why per-app anything was impossible.
+  // It is the key a per-app read grant is stored and revoked under; without it every app is
+  // indistinguishable at the gate and revocation can only be all-or-nothing.
+): Promise<{ ok: true; sa: Address; caip: string; clientId: string } | { ok: false; status: number; error: string }> {
   if (!env.BROKER_JWKS_URL || !env.BROKER_ISS) return { ok: false, status: 503, error: 'broker gate not configured' };
   if (!token) return { ok: false, status: 401, error: 'missing session' };
   let keys: VerifyKey[];
@@ -250,5 +254,5 @@ export async function verifyRelyingIdToken(
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;
   const sa = sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
   if (!sa) return { ok: false, status: 400, error: 'no SA in id_token sub' };
-  return { ok: true, sa, caip: sub };
+  return { ok: true, sa, caip: sub, clientId: aud! };
 }

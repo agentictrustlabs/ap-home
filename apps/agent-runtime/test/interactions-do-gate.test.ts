@@ -340,3 +340,47 @@ describe('owner-facing reads accept either identity, bounded to self', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+// ── spec 341 §4.3 — per-app read grants ───────────────────────────────────────────────────────────
+//
+// The property being bought is REVOCATION GRANULARITY. Before this, every caller reached a person's
+// records through one broad `st0.grant`, so revoking an app meant revoking its OIDC client
+// registration — a registry edit at one server, not an authority change, invisible to anyone else and
+// ineffective against another copy of the token.
+//
+// What is reachable in this harness is the REFUSAL side, which is the half that has to hold: an app
+// with no grant must be refused rather than quietly borrowing the broad one. Borrowing is exactly what
+// made revocation all-or-nothing, so it is the regression worth pinning.
+describe('an app without its own read grant is refused, not silently upgraded', () => {
+  it('does not let a NON-principal session install a grant for someone else', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('readgrant.put', token, ORG);
+    // Who may read your records is yours to decide. A steward of the org cannot decide it either —
+    // this op is self-only by design, unlike the governance docs.
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES an unauthenticated grant install', async () => {
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${MEMBER}/readgrant.put`, {
+      method: 'POST', body: JSON.stringify({ clientId: 'app', delegation: {} }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES a grant issued by someone OTHER than the principal', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${MEMBER}/readgrant.put`, {
+      method: 'POST',
+      // Delegator is the ORG, principal is the MEMBER: an app trying to install a grant the person
+      // never issued. Shape-valid, and it must not be stored.
+      body: JSON.stringify({ session: token, clientId: 'app', delegation: { delegator: ORG, delegate: MEMBER, caveats: [], salt: '1', signature: '0xdead' } }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES a grant with no clientId — an unattributable grant cannot be revoked alone', () => {
+    return call('readgrant.put', 'not-a-jwt', MEMBER).then((r) => expect(r.ok).toBe(false));
+  });
+});

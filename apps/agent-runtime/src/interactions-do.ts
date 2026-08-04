@@ -193,6 +193,20 @@ interface RoutingOrgWireRecord { wire: IncomingDelegation; hash: string; session
 // spends it: an artifact stored where it cannot be used is a copy, and a second copy is a second
 // thing to revoke. Clearing this key is the person-side send kill switch; the on-chain revocation is
 // the authority kill at every recipient's gate.
+// spec 341 §4.3 — PER-APP READ GRANTS. One scoped delegation per relying app, keyed by the app's
+// VERIFIED `aud`, so a person can revoke ONE app's read access without disturbing anyone else.
+//
+// WHAT THIS BUYS, precisely: before it, every caller reached the person's records through `st0.grant` —
+// one broad grant shared by the Home and every relying app. Revoking an app meant revoking its OIDC
+// client registration, which is a registry edit at one server, not an authority change; other Homes and
+// other copies of the token kept working. A per-app delegation is revocable ON-CHAIN, and the
+// revocation is visible to everyone who checks rather than to whoever happens to read that registry.
+//
+// The delegate stays the interactions service SA — the same party that performs the vault call either
+// way. What differs per app is WHICH delegation authorizes it, and therefore what a revocation kills.
+const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
+interface ReadGrantRecord { wire: IncomingDelegation; hash: string; clientId: string; storedAt: string }
+
 const MESSAGING_WIRE_KEY = 'messaging.wire';
 /** TWO artifacts, because the gate asks two questions. `wire` (person → session key) authorizes the key
  *  to produce signatures that count as the person's, and travels INSIDE each signature. `transport`
@@ -857,7 +871,7 @@ export class InteractionsDO {
    *  carries the SEC-010 envelope instead takes the incumbent demo-a2a↔Home server transport. Each
    *  fails closed. (Non-owner-facing ops — invite.* — stay bridge-only: they are org-steward /
    *  token-redeem substrate flows, not the owner acting on their own records.) */
-  private async ownerOrBridge(request: Request, rawBody: string, op: string, principal: string, session: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  private async ownerOrBridge(request: Request, rawBody: string, op: string, principal: string, session: string): Promise<{ ok: true; clientId?: string } | { ok: false; reason: string }> {
     if (session) {
       // A HOME SESSION **OR** A RELYING id_token, exactly as the skills block below already accepts
       // (spec 341 §4.2). The asymmetry was the spec-323-W4 hole: `verifyHomeSession` pins
@@ -878,14 +892,17 @@ export class InteractionsDO {
       // Caller-selected, never a fallback (ADR-0013): a request carrying `session` takes this path and
       // fails closed here; one carrying the SEC-010 envelope takes the bridge. Neither is tried after
       // the other fails, and a bad token does NOT fall through to the secret.
-      let gate = await verifyHomeSession(session, this.env);
-      if (!gate.ok) {
-        const relying = await verifyRelyingIdToken(session, this.env);
-        if (relying.ok) gate = relying;
+      const home = await verifyHomeSession(session, this.env);
+      if (home.ok) {
+        if (home.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
+        // The person's own control plane. No clientId ⇒ the read runs under the principal's own grant.
+        return { ok: true };
       }
-      if (!gate.ok) return { ok: false, reason: gate.error };
-      if (gate.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
-      return { ok: true };
+      const relying = await verifyRelyingIdToken(session, this.env);
+      if (!relying.ok) return { ok: false, reason: home.error };
+      if (relying.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
+      // A relying APP. Carry its verified identity out so the read can run under THAT app's grant.
+      return { ok: true, clientId: relying.clientId };
     }
     return this.bridgeGate(request, rawBody, op);
   }
@@ -1040,6 +1057,8 @@ export class InteractionsDO {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
+      /** The relying app that called, when one did. Null for the person's own Home. */
+      let callerClientId: string | null = null;
       const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
       // spec 341 §5.3 — an ORG's governance docs are steward-facing, not owner-facing: the principal is
       // the org and it has no session. Same verified delegation the messaging rail uses.
@@ -1055,17 +1074,40 @@ export class InteractionsDO {
         // be this same value and no longer is (spec 341 §7).
         if (!isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
       } else {
+        const og = OWNER_FACING ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? '')) : null;
+        callerClientId = og?.ok ? (og.clientId ?? null) : null;
         const bg = OWNER_FACING
-          ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''))
+          ? og!
           : STEWARD_FACING
             ? await this.ownerStewardOrBridge(request, rawBody, op, principal, String(body.session ?? ''), body.stewardship as IncomingDelegation | undefined)
             : await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
       }
       const st0 = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      const g = st0.grant;
+      let g = st0.grant;
       if (!g) return json({ error: 'no interactions grant — enable interactions for this agent first' }, 409);
       if (!this.grantIsCurrent(g)) return json({ error: 'interactions grant is stale — re-enable (scope widened this wave)' }, 409);
+      // spec 341 §4.3 — WHICH grant this read runs under is decided by WHO the verified caller is, once,
+      // before any vault call. A relying app runs under its OWN scoped grant; the person's own control
+      // plane runs under the principal's. That is caller-selected, not a fallback: neither is tried
+      // after the other fails, and an app with no grant is REFUSED rather than quietly borrowing the
+      // broad one — which is the whole point, because borrowing it is what made revocation
+      // all-or-nothing (ADR-0013).
+      if (callerClientId) {
+        const rec = (await this.state.storage.get(READ_GRANT_KEY(callerClientId))) as ReadGrantRecord | undefined;
+        if (!rec) {
+          return json({ error: 'this app has no read grant — the person authorizes it once, and can revoke it alone', code: 'read_grant_absent', clientId: callerClientId }, 409);
+        }
+        // Revocation is checked HERE, per read, not at store time: an on-chain revoke must stop the
+        // NEXT read rather than one after a cache expires. Fail-closed on an unreadable chain.
+        try {
+          const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [rec.hash as Hex] })) as boolean;
+          if (revoked) return json({ error: 'this app’s read grant was revoked', code: 'read_grant_revoked', clientId: callerClientId }, 403);
+        } catch {
+          return json({ error: 'revocation check unavailable — read refused (fail-closed)' }, 503);
+        }
+        g = rec.wire;
+      }
       try {
         if (op === 'inbox.get') {
           const doc = await this.readDoc<unknown>(g, INBOX_RESOURCE, null);
@@ -2192,6 +2234,82 @@ export class InteractionsDO {
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.enable', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel', id: channelId } });
           return json({ ok: true, routing: r.channel.routing });
         });
+      }
+
+      // ── spec 341 §4.3 — PER-APP READ GRANTS. The person authorizes ONE app to read, and can revoke
+      //    that app alone. Self-access only: nobody else decides which apps may read your records. ──
+      if (op === 'readgrant.put' || op === 'readgrant.list' || op === 'readgrant.revoke') {
+        if (sessionSa.toLowerCase() !== principal) {
+          return json({ error: 'only this agent may decide which apps read its records' }, 403);
+        }
+        const prefix = READ_GRANT_KEY('');
+
+        if (op === 'readgrant.list') {
+          const rows = await this.state.storage.list({ prefix });
+          const grants: Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }> = [];
+          for (const [, v] of rows) {
+            const rec = v as ReadGrantRecord;
+            let revoked = false;
+            // Report the ON-CHAIN truth, not the stored row: a person auditing their apps needs to see
+            // that a revoke landed. An unreadable chain reports `revoked: true` — the conservative
+            // answer for a list whose purpose is spotting access you did not intend.
+            try {
+              revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [rec.hash as Hex] })) as boolean;
+            } catch { revoked = true; }
+            grants.push({ clientId: rec.clientId, hash: rec.hash, storedAt: rec.storedAt, revoked });
+          }
+          return json({ ok: true, grants });
+        }
+
+        const clientId = String(body.clientId ?? '').trim().toLowerCase();
+        if (!clientId) return json({ error: 'clientId required' }, 400);
+
+        if (op === 'readgrant.revoke') {
+          // LOCAL removal only, and it says so. The authority kill is the on-chain revoke of the
+          // delegation — which stops the app at every gate, not just at this DO. Dropping the row here
+          // stops US using it; a caller who does only this has not revoked anything.
+          await this.state.storage.delete(READ_GRANT_KEY(clientId));
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.readgrant.revoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'app', id: clientId } });
+          return json({ ok: true, note: 'local copy dropped — revoke the delegation on-chain to kill it everywhere' });
+        }
+
+        // readgrant.put — the person authorizes one app to read.
+        const incoming = body.delegation as IncomingDelegation | undefined;
+        if (!incoming) return json({ error: 'a person-signed read grant is required' }, 400);
+        if (incoming.delegator.toLowerCase() !== principal) {
+          return json({ error: 'the read grant must be issued BY this agent' }, 400);
+        }
+        // The delegate is the interactions service SA — the party that actually performs the vault
+        // call. Pinning it stops a grant being installed that routes this person's reads through some
+        // other delegate (NEW-H6, same reasoning as the interactions grant).
+        const expectedDelegate = (this.env.INTERACTIONS_SERVICE_SA ?? '').toLowerCase();
+        if (/^0x[0-9a-f]{40}$/.test(expectedDelegate) && incoming.delegate.toLowerCase() !== expectedDelegate) {
+          return json({ error: 'the read grant must delegate to the interactions service SA' }, 400);
+        }
+        // It must actually CARRY read scope. A grant that names no resources authorizes nothing, and
+        // storing it would produce an app that appears authorized and fails at every read.
+        const scopeCav = (incoming.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+        if (!scopeCav?.terms) return json({ error: 'the read grant must carry a vault-record-scope caveat' }, 400);
+        let resources: string[] = [];
+        try {
+          resources = decodeVaultRecordScopeTerms(scopeCav.terms as Hex).flatMap((gr) => gr.resources);
+        } catch { return json({ error: 'the read grant’s scope terms are undecodable' }, 400); }
+        if (!resources.includes('vault:inbox.data')) {
+          return json({ error: 'the read grant must include vault:inbox.data to be usable for inbox reads' }, 400);
+        }
+        const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
+          return json({ error: 'read grant signature failed verification against this agent' }, 403);
+        }
+        try {
+          const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+          if (revoked) return json({ error: 'that read grant is already revoked on-chain' }, 403);
+        } catch { return json({ error: 'revocation check unavailable — nothing stored (fail-closed)' }, 503); }
+        const rec: ReadGrantRecord = { wire: incoming, hash: digest, clientId, storedAt: new Date().toISOString() };
+        await this.state.storage.put(READ_GRANT_KEY(clientId), rec);
+        await audit.write({ id: crypto.randomUUID(), timestamp: rec.storedAt, action: 'interactions.readgrant.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'app', id: clientId } });
+        return json({ ok: true, clientId, hash: digest, resources });
       }
 
       // ── spec 341 §5.1b — the person's OUTBOUND MESSAGING rail: custody their messaging wire, and
