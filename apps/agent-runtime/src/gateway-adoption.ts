@@ -52,7 +52,13 @@ export const GATEWAY_ADOPTION: Readonly<Record<string, AdoptionEntry>> = {
     // inbox document's shape is what the Home replays on every poll. Ordering is NOT in play — this reads
     // one document, it does not fold the exchange stream.
     concerns: ['auth', 'projection', 'data-shape'],
-    note: 'first op on the ladder; the exchange stream is untouched, so no ordering claim is being made',
+    note:
+      'first op on the ladder; the exchange stream is untouched, so no ordering claim is being made. ' +
+      'BEFORE PROMOTING (audit G-5): the auth concern here is bounded verdict reuse — the gateway caches ' +
+      'verdict (A) for VERDICT_TTL_MS (60s) where InteractionsDO verifies per call, so a revoked ' +
+      'delegation can pass admission for up to that window. demo-mcp re-enforces per record and is the ' +
+      'authority, which bounds the exposure to admission only — but it is a real behaviour change and it ' +
+      'must be stated, not discovered.',
   },
 };
 
