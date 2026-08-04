@@ -155,7 +155,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
   // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
   // the same projection the inbox renders, filtered; never a second index.
-  const inboxKv = await makeInboxKv(env, owner);
+  // spec 341 §1 — the person's OWN inbox rides their session, not the shared secret. An org-scoped
+  // read (`?agent=`) keeps the bridge: `ownerOrBridge` requires sa === principal, and a steward is by
+  // definition not the org. Decided on WHO, before the call.
+  const inboxKv = await makeInboxKv(env, owner, owner.toLowerCase() === person.toLowerCase() ? bearer : undefined);
   const contextKind = url.searchParams.get('contextKind');
   if (contextKind) {
     const items = await readMessagesByContext(inboxKv, owner, {
@@ -234,7 +237,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
 
   // The inbox is vault-resident (spec 316 §11a): each owner's `inbox.data` lives in their MCP vault.
-  const inboxKvFor = (o: string): Promise<InboxKV> => makeInboxKv(env, o);
+  const inboxKvFor = (o: string): Promise<InboxKV> => makeInboxKv(env, o, o.toLowerCase() === person.toLowerCase() ? bearerP : undefined);
   const inboxKv = await inboxKvFor(owner);
 
   try {

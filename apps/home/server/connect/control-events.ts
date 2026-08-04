@@ -58,6 +58,11 @@ export async function appendControlEvent(
   person: Address,
   eventType: HomeControlEventV1['eventType'],
   refs: HomeControlEventV1['refs'] = [],
+  /** spec 341 §1 — the person's OWN broker session, when the caller has one. Converts this append
+   *  from a shared secret to the owner's credential. Absent ⇒ the bridge, unchanged: several callers
+   *  are genuinely server-side flows with no person bearer, which is why the parameter is optional
+   *  rather than the signature being changed under them. */
+  session?: string,
 ): Promise<void> {
   const auditId = globalThis.crypto.randomUUID();
   await homeAuditSink(env.AUTH_CODES, person).write({
@@ -82,8 +87,13 @@ export async function appendControlEvent(
   // (audience interactions.controlevents.append), same rationale as the W3f inbox ops. The KV copy
   // is a rebuildable cache. Best-effort: a person whose interactions plane isn't enabled keeps the
   // KV copy until their ceremony re-syncs.
-  const { bridgeInteractions } = await import('../lib/interactions-bridge');
-  await bridgeInteractions(env, person, 'controlevents.append', { event: row }).catch(() => null);
+  if (session) {
+    const { callInteractions } = await import('./channels');
+    await callInteractions(env, person, 'controlevents.append', { event: row, session }).catch(() => null);
+  } else {
+    const { bridgeInteractions } = await import('../lib/interactions-bridge');
+    await bridgeInteractions(env, person, 'controlevents.append', { event: row }).catch(() => null);
+  }
   const raw = await env.AUTH_CODES.get(KEY(person));
   const rows = raw ? (JSON.parse(raw) as HomeControlEventV1[]) : [];
   rows.push(row);
@@ -117,6 +127,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors({ error: 'valid eventType required' }, request, 400);
   }
   const refs = Array.isArray(body.refs) ? body.refs.slice(0, 8) : [];
-  await appendControlEvent(env, person as Address, body.eventType, refs);
+  // The person's own session authorizes their own timeline append (spec 341 §1) — no shared secret.
+  await appendControlEvent(env, person as Address, body.eventType, refs, (request.headers.get('authorization') ?? '').slice(7));
   return jsonCors({ ok: true }, request);
 };

@@ -13,6 +13,7 @@
 // Enabling interactions (person: sign-in/join ceremony; org: a steward enables it) is the one path
 // to a live inbox.
 import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from './interactions-bridge';
+import { callInteractions } from '../connect/channels';
 
 /** The KV surface the inbox functions consume (raw strings). */
 export interface InboxKV {
@@ -65,8 +66,32 @@ function cacheDrop(owner: string): void {
 
 /** The personal/org inbox document (`inbox-data:<owner>`) → the owner's vault record `inbox.data`,
  *  read + written ONLY via the owner's InteractionsDO. All other keys pass through to the real KV. */
-export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<InboxKV> {
+/**
+ * spec 341 §1 — `session` converts the authority on this read/write from a SHARED SECRET to the
+ * person's own broker session.
+ *
+ * The bridge proved *the caller is our Home*; the session proves *the caller is the owner*, which is
+ * the fact the operation actually turns on. `ownerOrBridge` accepts either (caller-selected, ADR-0013)
+ * and now also accepts a relying id_token (§4.2), so any Home holding the owner's session drives these
+ * with no secret at all — which is what spec 323 W4's portable Home asked for.
+ *
+ * Omitted ⇒ the bridge, unchanged. Kept ONLY for the org-scoped case: `ownerOrBridge` requires
+ * `sa === principal`, and a steward reading their ORG's inbox is by definition not the principal.
+ * Passing a session there would fail closed, so the caller passes it only when owner === the session's
+ * own SA. That is a branch on WHO, decided before the call — not a fallback after one fails.
+ */
+export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: string): Promise<InboxKV> {
   const real = env.AUTH_CODES;
+  /** The one place this module chooses its authority. `session` ⇒ the owner's own credential;
+   *  otherwise the shared secret. Chosen per CALLER, before the request — never after a failure. */
+  const doOp = async <T>(op: 'inbox.get' | 'inbox.put', payload: Record<string, unknown>): Promise<{ ok: boolean; body: T & { error?: string } } | null> => {
+    if (session) {
+      const r = await callInteractions(env as never, owner, op, { ...payload, session }).catch(() => null);
+      return r ? { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string } } : null;
+    }
+    return bridgeInteractions<T>(env, owner, op, payload).catch(() => null);
+  };
+
   const ownerKey = owner.toLowerCase();
   const docKey = `inbox-data:${ownerKey}`;
 
@@ -90,12 +115,7 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<In
       // below still fails closed with the DO's actual error.
       // Present the cursor we hold; the DO answers `unchanged` when the document still digests to it.
       const cached = cacheGet(ownerKey);
-      const r = await bridgeInteractions<{ doc?: unknown; unchanged?: boolean; revision?: string }>(
-        env,
-        owner,
-        'inbox.get',
-        cached ? { sinceRev: cached.revision } : {},
-      ).catch(() => null);
+      const r = await doOp<{ doc?: unknown; unchanged?: boolean; revision?: string }>('inbox.get', cached ? { sinceRev: cached.revision } : {});
       if (!r?.ok) return null;
       if (r.body.unchanged === true) {
         if (cached) return cached.json;
@@ -105,7 +125,7 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<In
         // cursor rather than guess. One retry, and it cannot loop: the second call sends no cursor,
         // so the DO has nothing to match and must return the document (ADR-0013 — one mechanism, and
         // an impossible state is refused rather than interpreted).
-        const full = await bridgeInteractions<{ doc?: unknown; revision?: string }>(env, owner, 'inbox.get', {}).catch(() => null);
+        const full = await doOp<{ doc?: unknown; revision?: string }>('inbox.get', {});
         if (!full?.ok || full.body.doc == null) return null;
         const fullJson = JSON.stringify(full.body.doc);
         if (typeof full.body.revision === 'string') cacheSet(ownerKey, full.body.revision, fullJson);
@@ -119,8 +139,10 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string): Promise<In
     async put(key, value, opts) {
       if (key !== docKey) return real.put(key, value, opts);
       cacheDrop(ownerKey);
-      const r = await bridgeInteractions(env, owner, 'inbox.put', { doc: JSON.parse(value) });
-      if (!r.ok) throw new Error(r.body.error ?? `inbox write via InteractionsDO failed (${r.status})`);
+      const r = await doOp('inbox.put', { doc: JSON.parse(value) });
+      // `null` is a transport failure, `ok:false` an authorization one. Both must THROW: a swallowed
+      // write reads as a successful save and loses the person's mail silently (ADR-0013).
+      if (!r?.ok) throw new Error(r?.body.error ?? 'inbox write via InteractionsDO failed');
     },
   };
 }
