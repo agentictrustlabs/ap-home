@@ -652,12 +652,38 @@ export class InteractionsDO {
     return new Error(`vault ${op} throttled (rate-limited) — this agent's storage budget is momentarily exhausted; retry shortly`);
   }
 
-  /** The fabric Vault port over the delegation-authorized demo-mcp transport (plane B). */
+  /**
+   * The fabric Vault port over the delegation-authorized demo-mcp transport (plane B).
+   *
+   * THE `owner` ARGUMENT IS NOT THE OWNER — the GRANT is. Every record this adapter reaches is scoped by
+   * the delegation it carries, so demo-mcp resolves the owner from the grant's delegator and this
+   * parameter is inert. That is why ~20 call sites in this file pass `owner: ''` and it works.
+   *
+   * IT WAS ALSO A LATENT DIVERGENCE. The adapter DESTRUCTURED `owner` away, so a caller passing something
+   * else was silently ignored — and the mounted gateway's vault tool passes `owner: principal`. The two
+   * planes agreed only because the argument was dropped, and the day anyone taught this adapter to honour
+   * `owner`, InteractionsDO (`''`) and the gateway (the principal) would have disagreed instantly, with a
+   * symptom that reads like an authorization bug.
+   *
+   * So it is CHECKED rather than dropped: a non-empty `owner` must equal the grant's delegator. Empty
+   * stays legal (the established in-file convention), a matching value is now proven rather than assumed,
+   * and a mismatched one is a loud error instead of a silent no-op.
+   */
   private vaultFor(grant: IncomingDelegation): Vault {
     const callTool = (toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record', toolArgs: Record<string, unknown>): Promise<Response> =>
       this.mcpVaultTool(grant, toolName, toolArgs);
+    const assertOwner = (owner: string): void => {
+      if (!owner) return; // the in-file convention: the grant names the owner
+      if (owner.toLowerCase() !== grant.delegator.toLowerCase()) {
+        throw new Error(
+          `vault owner mismatch: caller asked for ${owner} but this grant is the delegator ${grant.delegator}'s — ` +
+            'the grant determines whose vault this reaches, and honouring the argument would cross principals',
+        );
+      }
+    };
     return {
-      async write({ resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
+      async write({ owner, resource, data }: { owner: string; resource: string; data: unknown; classification?: string }): Promise<void> {
+        assertOwner(owner);
         // A rate-limited write was rejected at verify time (never executed) — same bounded retry as reads.
         for (let attempt = 0; attempt < 4; attempt++) {
           const resp = await callTool('set_vault_record', { recordType: resource, data });
@@ -671,7 +697,8 @@ export class InteractionsDO {
         }
         throw InteractionsDO.vaultThrottledError('write');
       },
-      async read<T>({ resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
+      async read<T>({ owner, resource }: { owner: string; resource: string }): Promise<{ data: T } | null> {
+        assertOwner(owner);
         // BOUNDED RETRY (2026-07-11) — cold-cache first read; demo-mcp caches the deterministic vault-key
         // verdict, so only the first op per isolate touches the chain. A real empty (`ok:true, record:null`)
         // returns immediately — empty is an answer, an auth error is not (ADR-0013: retry the SAME call).
