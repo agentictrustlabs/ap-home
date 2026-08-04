@@ -214,3 +214,63 @@ describe('reading what a wire authorizes', () => {
     }
   });
 });
+
+// ── A PAYLOAD THAT IS NOT AN ENVELOPE (spec 341 §5.5a) ────────────────────────────────────────────────
+//
+// `org.apply` rides the same authorized rail as a message but is not an envelope. This module assumed
+// every payload had one and read `payload.envelope.from` unconditionally; the call site passed
+// `as never` to get past the compiler, so the mismatch shipped and surfaced at the ORG as
+// "application rejected by the organization: Cannot read properties of undefined (reading 'from')" —
+// a TypeError wearing a policy refusal's clothes, which is the most expensive kind of error to read.
+//
+// These tests exist because the type no longer forbids it and nothing else would notice if it came back.
+describe('a non-envelope payload (org.apply)', () => {
+  const application = () => ({ message: 'please let me in', org: BOB });
+
+  it('delivers without an envelope', async () => {
+    const { rec, go } = run({ payload: application(), skill: 'org.apply' });
+    await go();
+    expect(rec.calls).toHaveLength(1);
+    const msg = (rec.calls[0]!.request.params as { message: Record<string, unknown> }).message;
+    expect(msg.skill).toBe('org.apply');
+  });
+
+  it('still names the PERSON as the sender', async () => {
+    // The gate requires delegate === requester === message.sender, and the receiving skill takes the
+    // applicant from the verified principal. An application that arrived as the session key would be
+    // recorded against a key rather than a person — or refused outright.
+    const { rec, go } = run({ payload: application(), skill: 'org.apply' });
+    await go();
+    const msg = (rec.calls[0]!.request.params as { message: Record<string, unknown> }).message;
+    expect(String(msg.sender).toLowerCase()).toBe(ALICE.toLowerCase());
+  });
+
+  it('still session-wraps the signature and carries the transport grant', async () => {
+    // Dropping the envelope check must not drop the authority that made the call legitimate. This is the
+    // assertion that keeps "exempt from a field it does not have" from becoming "exempt".
+    const { rec, go } = run({ payload: application(), skill: 'org.apply' });
+    await go();
+    const params = rec.calls[0]!.request.params as { message: Record<string, unknown>; delegation: unknown };
+    expect(String(params.message.signature).startsWith('0x51')).toBe(true);
+    // The grant travels as `params.delegation`, NOT on the message — the shape the existing
+    // envelope tests already assert. My first version read `message.delegation`, got `undefined`, and
+    // would have "passed" against any other wrong location had I asserted merely that it was truthy.
+    expect(params.delegation).toEqual(GRANT);
+  });
+
+  it('hashes the application body so the runtime accepts it', async () => {
+    // The a2a runtime rejects the task when hashBody(input) !== message.bodyHash, so a non-envelope
+    // payload has to be hashed the same way an envelope one is.
+    const { rec, go } = run({ payload: application(), skill: 'org.apply' });
+    await go();
+    const params = rec.calls[0]!.request.params as { message: Record<string, unknown>; input: unknown };
+    expect(params.message.bodyHash).toBe(hashDeliveryBody(params.input));
+  });
+
+  it('STILL rejects an envelope whose from is not the person', async () => {
+    // The positive control for the guard that was loosened: making `envelope` optional must not make the
+    // check optional when an envelope IS present.
+    const bad = { ...payload(), envelope: { ...payload().envelope, from: caip(BOB) } };
+    await expect(run({ payload: bad }).go()).rejects.toThrow(/envelope\.from must be the person/);
+  });
+});

@@ -2955,7 +2955,7 @@ export class InteractionsDO {
                 org: recipient,
                 ...(body.subject ? { subject: String(body.subject) } : {}),
                 ...(body.record && typeof body.record === 'object' ? { record: body.record } : {}),
-              } as never,
+              },
               skill: 'org.apply',
               transport: this.a2aTransport(),
             });

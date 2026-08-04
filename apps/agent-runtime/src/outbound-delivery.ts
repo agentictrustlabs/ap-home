@@ -89,6 +89,23 @@ export interface MessagingDeliverPayload {
   conversation?: unknown;
 }
 
+/**
+ * A payload for a skill that is NOT a message.
+ *
+ * `org.apply` was the first (spec 341 §5.5a): an application rides the same authorized rail as a message
+ * but is not an envelope, so there is nothing to build and nothing to record in the sender's own inbox.
+ * The org's gate admits it and the org's grant writes it.
+ *
+ * IT NEEDS ITS OWN TYPE because the envelope checks below cannot run on it — and the first version of this
+ * module did not have one, so the `org.apply` call site passed `payload: {...} as never` to get past the
+ * compiler, and `input.payload.envelope.from` threw `Cannot read properties of undefined (reading 'from')`
+ * at the org. The cast is what let a shape mismatch reach production looking like a rejection by the
+ * organization. A union is the honest description: some payloads are envelopes and some are not.
+ */
+export type NonEnvelopePayload = Record<string, unknown> & { envelope?: undefined };
+
+export type DeliveryPayload = MessagingDeliverPayload | NonEnvelopePayload;
+
 /** The a2a runtime's body-integrity hash — stable JSON keccak. MUST equal `a2a-task-do.ts`'s `hashBody`,
  *  because the runtime rejects the task when `hashBody(input) !== message.bodyHash`. */
 export const hashDeliveryBody = (data: unknown): Hex => keccak256(toBytes(JSON.stringify(data ?? null)));
@@ -106,8 +123,10 @@ export interface OutboundDeliveryInput {
    * never touches a key or a wire it does not need to see.
    */
   signAsPerson: (digest: Hex) => Promise<Hex>;
-  /** The skill payload. `envelope.from` must be the person; the receiving skill re-checks it. */
-  payload: MessagingDeliverPayload;
+  /** The skill payload. When it carries an `envelope`, `envelope.from` must be the person and the
+   *  receiving skill re-checks it. A non-envelope payload (e.g. `org.apply`) is bound by the transport
+   *  grant's `allowedTargets` + `allowedMethods` and by the receiving skill's own addressee check. */
+  payload: DeliveryPayload;
   /** Which messaging skill. Must be named in the wire's `allowedMethods`. */
   skill?: string;
   transport: A2aTransport;
@@ -139,12 +158,20 @@ export async function deliverOutbound(input: OutboundDeliveryInput): Promise<Out
 
   // The envelope must already name the person. Checking here means a mis-built envelope fails before a
   // signature is spent and a message id is burned, rather than at the recipient's NEW-H1 gate.
+  //
+  // ONLY WHEN THERE IS AN ENVELOPE. A non-envelope payload is not exempt from authorization — it is bound
+  // by the transport grant's `allowedTargets`/`allowedMethods`, re-verified on-chain at the recipient's
+  // gate, and re-checked against the addressee by the receiving skill. What it is exempt from is a check
+  // on a field it does not have.
   const addrOf = (caip: string): string => (caip.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
-  if (addrOf(input.payload.envelope.from) !== input.personSA.toLowerCase()) {
-    throw new Error('envelope.from must be the person this wire speaks for');
-  }
-  if (!input.payload.envelope.to.some((t) => addrOf(t) === input.recipientSA.toLowerCase())) {
-    throw new Error('envelope is not addressed to the recipient being called');
+  const envelope = (input.payload as Partial<MessagingDeliverPayload>).envelope;
+  if (envelope) {
+    if (addrOf(envelope.from) !== input.personSA.toLowerCase()) {
+      throw new Error('envelope.from must be the person this wire speaks for');
+    }
+    if (!envelope.to.some((t) => addrOf(t) === input.recipientSA.toLowerCase())) {
+      throw new Error('envelope is not addressed to the recipient being called');
+    }
   }
 
   const unsigned = {
