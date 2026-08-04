@@ -20,7 +20,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, readCaseDetermination, sendFromInbox, replyInConversation } from '../../src/home/inbox-data';
+import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, readCaseDetermination } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
 import { makeInboxKv, type InboxKV } from '../lib/inbox-store';
 import { mandateDigest } from '../../src/home/mandate';
@@ -238,47 +238,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const inboxKv = await inboxKvFor(owner);
 
   try {
-    if (body?.action === 'send') {
-      // Composer send (spec 312): recipient by claimed name OR by Smart Agent address.
-      // Naming remains the public discovery path; `to` (0x SA) is for known peers — e.g. org
-      // roster / member.profile — without requiring a public name claim (ADR-0041 identity).
-      // Listings are still not a public search plane here (ADR-0025).
-      if (!body.bodyText?.trim()) {
-        return jsonCors({ error: 'bodyText required' }, request, 400);
-      }
-      let recipient: Address | null = null;
-      const toSa = (body.to ?? '').trim().toLowerCase();
-      if (/^0x[0-9a-f]{40}$/.test(toSa)) {
-        recipient = toSa as Address;
-      } else {
-        const fullName = (body.toName ?? '').trim().toLowerCase();
-        const label = (body.toLabel ?? '').trim().toLowerCase();
-        const name = /^[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(fullName)
-          ? fullName
-          : /^[a-z0-9-]{1,63}$/.test(label)
-            ? agentNameForLabel(label)
-            : null;
-        if (!name) {
-          return jsonCors({ error: 'to (0x SA), toName (full), or toLabel + bodyText required' }, request, 400);
-        }
-        const naming = new AgentNamingClient({
-          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
-          chainId: CHAIN_ID,
-          registry: CONTRACTS.agentNameRegistry,
-          universalResolver: CONTRACTS.agentNameUniversalResolver,
-        });
-        recipient = await naming.resolveName(name);
-        if (!recipient) return jsonCors({ error: `no agent claimed the name "${name}"` }, request, 404);
-      }
-      const out = await sendFromInbox(inboxKvFor, owner as Address, {
-        recipient,
-        subject: body.subject,
-        bodyText: body.bodyText,
-        contextRefs: body.contextRefs,
-        conversationId: body.conversationId,
-      }, makeBodyStoreFactory(env));
-      return jsonCors({ ok: true, ...out }, request);
-    }
+    // `action:'send'` and `action:'reply'` are GONE (spec 341 §5.1c). Sending is now an authorized A2A
+    // delivery performed by the sender's OWN agent — person or organization — and the browser drives it
+    // directly. Nothing here writes into a recipient's vault any more, which is what this route did:
+    // it composed as the sender and wrote both copies over a standing grant and a shared secret.
+    //
+    // Recipient RESOLUTION moved with it. The agent resolves a claimed name on-chain, because it is the
+    // party that must also decide whether its wire covers the result — resolving in one place and
+    // authorizing in another is how you get a send addressed to someone the grant never named.
     if (body?.action === 'apply') {
       // spec 324 §7 Tier-2 — submit a MembershipApplication into the ORG's `org.applications` vault doc (a plain
       // whole-doc record via the org's InteractionsDO — NOT the inbox, so it surfaces reliably to the steward).
@@ -299,15 +266,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const put = await bridgeInteractions(env, orgSa, 'applications.put', { doc: { applications: next } });
       if (!put.ok) return jsonCors({ error: put.body.error ?? `submit failed (${put.status})` }, request, 502);
       return jsonCors({ ok: true, applicationId }, request);
-    }
-    if (body?.action === 'reply') {
-      // In-thread chat reply (spec 313): recipient comes from the owner's own
-      // conversation descriptor — never the wire.
-      if (!body.conversationId || !body.bodyText?.trim()) {
-        return jsonCors({ error: 'conversationId + bodyText required' }, request, 400);
-      }
-      const out = await replyInConversation(inboxKvFor, owner as Address, body.conversationId, body.bodyText, makeBodyStoreFactory(env));
-      return jsonCors({ ok: true, ...out }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {
       if (!body.messageId) return jsonCors({ error: 'messageId required' }, request, 400);

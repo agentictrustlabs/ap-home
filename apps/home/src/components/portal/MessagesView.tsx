@@ -17,6 +17,7 @@ import { MessageBubble } from './chat/MessageBubble';
 import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
+import { useManagedAgents } from './ManagedAgents';
 import { ApproveMessaging } from './ApproveMessaging';
 
 
@@ -123,7 +124,15 @@ function ConvAvatar({ conversationId, title, view }: { conversationId: string; t
 
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { session, agentAddress, profile } = useSession();
-  const { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, agentAddress ?? undefined);
+  // WHO IS SENDING. In a workspace-scoped Messages (`/org/<sa>/messages`) it is the ORG, and an org has
+  // no session — so the org→person stewardship delegation travels with every call and the agent
+  // re-verifies it. Absent stewardship on an org workspace is a real refusal, not a fallback to
+  // sending as the person: that would put the person's name on the organization's mail.
+  const { agents } = useManagedAgents(session?.token ?? null);
+  const managed = targetAgent ? agents.find((a) => a.agent.toLowerCase() === targetAgent.toLowerCase()) : undefined;
+  const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
+  const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
+  const { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
@@ -369,7 +378,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     >
       <ApproveMessaging
         need={wireRequired}
-        person={agentAddress ?? null}
+        person={sendingAs ?? null}
+        stewardship={stewardship}
         session={session}
         credential={profile?.credential}
         onApproved={() => setWireRequired(null)}

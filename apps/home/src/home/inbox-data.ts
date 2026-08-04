@@ -352,138 +352,15 @@ export async function deliverToInbox(kv: KV, person: Address, payload: DeliverPa
   await saveInboxData(kv, person, doc);
 }
 
-/**
- * Owner send (spec 312 W2/W3 composer). Both sides live on this Home (demo
- * topology): the recipient's copy goes through the SAME audited delivery
- * pipeline as external mail; the sender's copy is recorded as a 'sent' event
- * in their own store. One descriptor per conversation on each side.
- */
-export async function sendFromInbox(
-  // spec 316 §11a cutover: the inbox is vault-resident + PER-OWNER, so send needs BOTH owners' vault KVs —
-  // `inboxKvFor(owner)` yields each. The recipient copy is admitted into the RECIPIENT's vault (the Home acts
-  // as the recipient-authorized delivery custodian, spec 309 §8.3 — it holds the recipient's delivery grant);
-  // the sender's 'sent' copy lands in the SENDER's vault. No Home KV, no cross-service callback.
-  inboxKvFor: (owner: string) => Promise<KV>,
-  person: Address,
-  opts: {
-    recipient: Address;
-    subject?: string;
-    bodyText: string;
-    contextRefs?: ContextRefV1[];
-    conversationId?: string;
-    title?: string;
-  },
-  // spec 316 §11a / 317 — `bodyStoreFor(owner)` yields the owner's VAULT body store (sender's copy → sender's
-  // vault, delivered copy → recipient's vault). The vault is the ONLY body residency: a missing store makes
-  // `persistBody` throw (fail-closed) — there is NO KV bodies path. A factory (not concrete stores) so
-  // `replyInConversation` — whose counterparty is resolved internally — can reuse it.
-  bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
-): Promise<{ messageId: string; conversationId: string }> {
-  const me = homeCaip10(person);
-  const them = homeCaip10(opts.recipient);
-  const now = new Date().toISOString();
-  const senderKv = await inboxKvFor(person);
-  const recipientKv = await inboxKvFor(opts.recipient);
-  const senderStore = bodyStoreFor ? await bodyStoreFor(person) : undefined;
-  const recipientStore = bodyStoreFor ? await bodyStoreFor(opts.recipient) : undefined;
-  const { generateMessageId, generateConversationId, sha256Hex32 } = await import('@agenticprimitives/fabric/messaging');
-  const conversationId = (opts.conversationId ?? generateConversationId()) as MessageEnvelopeV1['conversationId'];
-  const messageId = generateMessageId();
-  // The body ref IS the vault resource `message.body:<id>` (resolved in each owner's own vault) — the
-  // only residency (spec 317 cutover).
-  const bodyResource = messageBodyResource(messageId);
-  const envelope: MessageEnvelopeV2 = {
-    version: 'ap.message.v2',
-    id: messageId,
-    conversationId,
-    performative: 'INFORM',
-    from: me,
-    to: [them],
-    subject: opts.subject,
-    createdAt: now,
-    classification: 'internal',
-    body: { resource: bodyResource, classification: 'internal', updatedAt: now },
-    bodyHash: await sha256Hex32(new TextEncoder().encode(opts.bodyText)),
-    bodyContentType: 'text/plain',
-    contextRefs: opts.contextRefs,
-  };
-  const descriptor: ConversationDescriptorV1 = {
-    version: 'ap.conversation.v1',
-    id: conversationId,
-    owner: them,
-    title: opts.title ?? opts.subject,
-    participants: [me, them],
-    contextRefs: opts.contextRefs,
-    participantPolicy: 'fixed',
-    createdAt: now,
-  };
-
-  // Recipient side first — audited, fail-closed; nothing recorded on failure. The recipient's body store
-  // (residency flip) is threaded through.
-  await deliverToInbox(recipientKv, opts.recipient, {
-    envelope,
-    bodyText: opts.bodyText,
-    conversation: descriptor,
-  }, recipientStore);
-
-  // Self-send: the delivered copy IS the record; no second copy.
-  if (opts.recipient.toLowerCase() === person.toLowerCase()) {
-    return { messageId: envelope.id, conversationId };
-  }
-
-  // Sender's own copy: same envelope, 'sent' perspective.
-  const doc = await loadInboxData(senderKv, person);
-  const { projector } = hydrate(person, doc);
-  projector.putMessage(envelope);
-  const sent: MessageEventV1 = {
-    version: 'ap.message.event.v1',
-    messageId: envelope.id,
-    actor: me,
-    eventType: 'sent',
-    at: now,
-  };
-  projector.appendEvent(sent);
-  doc.envelopes.push(envelope);
-  doc.events.push(sent);
-  // spec 317 W4 — the sender's own copy → the sender's vault when supplied, else the KV map.
-  await persistBody(doc, envelope, opts.bodyText, senderStore);
-  const mine: ConversationDescriptorV1 = { ...descriptor, owner: me };
-  // Same union-by-kind:id as the recipient side (fabric upsertConversation) — the sender's copy of
-  // the thread shows the new chip too.
-  upsertConversation(doc, mine);
-  await saveInboxData(senderKv, person, doc);
-  return { messageId: envelope.id, conversationId };
-}
-
-/**
- * Reply inside an existing conversation (spec 313 Chats). The recipient comes
- * from the OWNER'S OWN descriptor (never the wire): the other fixed
- * participant. One mechanism — no label round-trip needed.
- */
-export async function replyInConversation(
-  inboxKvFor: (owner: string) => Promise<KV>,
-  person: Address,
-  conversationId: string,
-  bodyText: string,
-  bodyStoreFor?: (owner: string) => Promise<MessageBodyStore | undefined>,
-): Promise<{ messageId: string; conversationId: string }> {
-  const doc = await loadInboxData(await inboxKvFor(person), person);
-  const descriptor = (doc.conversations ?? []).find((d) => d.id === conversationId);
-  if (!descriptor) throw new Error('unknown conversation');
-  const me = homeCaip10(person).toLowerCase();
-  const others = descriptor.participants.filter((p) => p.toLowerCase() !== me);
-  if (others.length !== 1) throw new Error('reply requires a two-party conversation');
-  const otherAddr = others[0]!.match(/0x[0-9a-fA-F]{40}$/)?.[0] as Address | undefined;
-  if (!otherAddr) throw new Error('counterparty is not an EVM agent');
-  return sendFromInbox(inboxKvFor, person, {
-    recipient: otherAddr,
-    subject: descriptor.title,
-    bodyText,
-    contextRefs: descriptor.contextRefs as ContextRefV1[] | undefined,
-    conversationId,
-    title: descriptor.title,
-  }, bodyStoreFor);
-}
+// `sendFromInbox` and `replyInConversation` are DELETED (spec 341 §5.1c).
+//
+// They composed as the sender and wrote BOTH copies — including straight into the RECIPIENT's vault,
+// over a standing grant and a shared HMAC secret. Possession of that secret was the authorization.
+// Sending is now an authorized A2A delivery performed by the sender's own agent (person or org),
+// re-verified at the recipient's gate like a stranger's message would be.
+//
+// `deliverToInbox` above SURVIVES and is not the same thing: it is the ADMISSION side — what a
+// recipient's own execution point does with a message that already passed a gate.
 
 /** Owner-side message action (mark read / archive). */
 export async function applyMessageAction(

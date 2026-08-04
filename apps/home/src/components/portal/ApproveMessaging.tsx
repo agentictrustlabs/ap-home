@@ -20,6 +20,7 @@ import type { MessagingWireRequiredError } from '../../lib/messaging-send';
 export function ApproveMessaging({
   need,
   person,
+  stewardship,
   session,
   credential,
   onApproved,
@@ -27,7 +28,10 @@ export function ApproveMessaging({
 }: {
   /** Null hides the banner entirely — the caller clears it after a successful send. */
   need: MessagingWireRequiredError | null;
+  /** The agent that will send — a person, or an organization the viewer stewards. */
   person: Address | null;
+  /** The org→person stewardship delegation. Required when `person` is an organization. */
+  stewardship?: unknown;
   session: { token: string; via?: string } | null;
   /** `profile.credential` — what routes the signature to passkey / wallet / KMS. */
   credential?: string;
@@ -53,7 +57,7 @@ export function ApproveMessaging({
     <div className="chat-attention" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
       <span style={{ fontSize: '0.85rem' }}>
         {need.reason === 'wire_absent'
-          ? 'Approve your agent to send messages for you — one signature, and you can revoke it anytime.'
+          ? 'Approve this agent to send messages on your behalf — one signature, and you can revoke it anytime.'
           : 'You haven’t approved messaging this contact yet — one signature adds them.'}
       </span>
       <BusyButton
@@ -64,6 +68,7 @@ export function ApproveMessaging({
           try {
             await approveMessagingContact({
               person,
+              ...(stewardship ? { stewardship } : {}),
               recipient,
               via: resolveVia(credential, session.via),
               token: session.token,

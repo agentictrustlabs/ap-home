@@ -2128,8 +2128,18 @@ export class InteractionsDO {
       //    signed A2A delivery, and the key that signs it is here. Self-access only — a session
       //    proving some OTHER person is not authority over this person's mail. ──
       if (op === 'messaging.wireStatus' || op === 'messaging.wireEnable' || op === 'messaging.wireDisable' || op === 'messaging.send') {
-        if (sessionSa.toLowerCase() !== principal) {
-          return json({ error: 'this is the principal’s own outbound rail — self access only' }, 403);
+        // WHO MAY DRIVE THIS RAIL. A person drives their own; an ORGANIZATION has no session of its
+        // own and never will, so its rail is driven by a STEWARD presenting the org's stewardship
+        // delegation — the same proof `consult.routingEnable` requires, verified the same way
+        // (delegator is this org, delegate is the caller, stewardship SHAPE not merely member access
+        // per SEC-C1, and ERC-1271-live against the org).
+        //
+        // The distinction is deliberate: a member-access grant is NOT authority to speak AS the
+        // organization to the outside world.
+        const isSelf = sessionSa.toLowerCase() === principal;
+        const asSteward = isSelf ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!isSelf && !asSteward) {
+          return json({ error: 'only this agent, or a steward presenting its stewardship delegation, may drive its outbound rail' }, 403);
         }
         // The delegate every wire must name. Unprovisioned ⇒ 503 rather than a wire we cannot spend.
         let sessionKey: string;

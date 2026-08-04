@@ -36,8 +36,18 @@ function homeBearer(): string {
 }
 
 export interface SendMessageInput {
-  /** The sender — whose agent performs the send. Their own DO; self-access only. */
+  /**
+   * The SENDER — the agent whose rail performs the send, and whose address becomes `envelope.from`.
+   * A person for their own mail; an ORGANIZATION when acting as one, in which case `stewardship` is
+   * required because an org has no session of its own.
+   */
   person: Address;
+  /**
+   * The org's stewardship delegation (delegator = the org, delegate = the signed-in person). Required
+   * when `person` is an organization, refused as insufficient when it is only member access (SEC-C1).
+   * Omitted for a person sending their own mail.
+   */
+  stewardship?: unknown;
   /**
    * WHO IT IS FOR. Exactly one of these, chosen by the caller — not a chain the agent walks until
    * something answers (ADR-0013):
@@ -98,6 +108,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({
       session,
+      ...(input.stewardship ? { stewardship: input.stewardship } : {}),
       ...(input.recipient ? { recipient: input.recipient.toLowerCase() } : {}),
       ...(input.recipientName ? { recipientName: input.recipientName } : {}),
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
@@ -127,7 +138,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
 
 /** What the person's wire currently authorizes — the ceremony reads this before minting, so a new
  *  wire can carry forward every counterparty the old one covered. */
-export async function readMessagingWire(person: Address): Promise<{
+export async function readMessagingWire(person: Address, stewardship?: unknown): Promise<{
   sessionKey: Address | null;
   wirePresent: boolean;
   recipients: Address[];
@@ -140,7 +151,7 @@ export async function readMessagingWire(person: Address): Promise<{
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session }),
+    body: JSON.stringify({ session, ...(stewardship ? { stewardship } : {}) }),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(body.error ?? `wire status failed (${res.status})`));
@@ -168,22 +179,24 @@ export async function readMessagingWire(person: Address): Promise<{
 export async function approveMessagingRecipient(args: {
   person: Address;
   newRecipient: Address;
+  /** Required when `person` is an organization — see `SendMessageInput.stewardship`. */
+  stewardship?: unknown;
   /** Mints + signs the delegation. Injected so this module stays free of the credential-routing
    *  machinery (`signHashFor`), and so the ceremony is testable without a signer. */
   mintWire: (input: { person: Address; sessionKey: Address; recipients: Address[] }) => Promise<{ wire: unknown; transport: unknown }>;
 }): Promise<void> {
-  const current = await readMessagingWire(args.person);
+  const current = await readMessagingWire(args.person, args.stewardship);
   if (!current.sessionKey) {
     throw new Error('this deployment has no interactions session key — messaging cannot be enabled');
   }
   const recipients = [...new Set([...current.recipients.map((r) => r.toLowerCase() as Address), args.newRecipient.toLowerCase() as Address])];
   const minted = await args.mintWire({ person: args.person, sessionKey: current.sessionKey, recipients });
-  await putMessagingWire(args.person, minted.wire, minted.transport);
+  await putMessagingWire(args.person, minted.wire, minted.transport, args.stewardship);
 }
 
 /** Install a wire the PERSON signed. The agent re-checks delegator, delegate, shape, signature and
  *  on-chain revocation before custodying it — this call cannot install authority by asserting it. */
-export async function putMessagingWire(person: Address, wire: unknown, transport: unknown): Promise<void> {
+export async function putMessagingWire(person: Address, wire: unknown, transport: unknown, stewardship?: unknown): Promise<void> {
   // A freshly minted `Delegation` carries a bigint salt, and `JSON.stringify` throws on one. Left
   // unchecked it surfaces as "Do not know how to serialize a BigInt" from inside the POST below —
   // nowhere near the mint that produced it, and indistinguishable from a network failure to whoever
@@ -200,7 +213,7 @@ export async function putMessagingWire(person: Address, wire: unknown, transport
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session, delegation: wire, transport }),
+    body: JSON.stringify({ session, delegation: wire, transport, ...(stewardship ? { stewardship } : {}) }),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok || body.ok === false) throw new Error(String(body.error ?? `wire enable failed (${res.status})`));

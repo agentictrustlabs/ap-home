@@ -9,13 +9,9 @@
 // EnrollmentDecision record.
 import type { FnContext } from '../_lib/server-broker';
 import type { Address, CanonicalAgentId } from '@agenticprimitives/types';
-import type { ContextRefV1 } from '@agenticprimitives/fabric/messaging';
 import { buildEnrollmentDecision } from '@agenticprimitives/organization';
 import { controlsOrg } from './org-invite';
 import { orgVault } from '../lib/org-vault';
-import { sendFromInbox } from '../../src/home/inbox-data';
-import { makeInboxKv } from '../lib/inbox-store';
-import { makeBodyStoreFactory } from './message-body-store';
 import { bridgeInteractions } from '../lib/interactions-bridge';
 import type { OrgApplication } from '../lib/org-applications';
 import { CHAIN_ID } from '../../src/lib/chain';
@@ -59,8 +55,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     ...(body?.reason ? { reason: body.reason } : {}),
   });
 
-  const inboxKvFor = (o: string) => makeInboxKv(env, o);
-  const bodyStoreFor = makeBodyStoreFactory(env);
 
   if (decision === 'approve') {
     // Store the client-pre-signed org→applicant member-access grant (same shape as the invite path), so the
@@ -70,22 +64,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const vault = await orgVault(env, org).catch(() => null);
       if (vault) await vault.set(`org.invite:agent:${applicant}`, { delegation: mad, createdAt: Date.now(), status: 'pending' }).catch(() => {});
     }
-    const ctx: ContextRefV1[] = [{ kind: 'org-channels', id: org, label: 'Join the organization' }];
-    await sendFromInbox(inboxKvFor, org as Address, {
-      recipient: applicant as Address,
-      subject: 'Membership approved',
-      bodyText: `Your application to join this organization was approved. Open the Join chip to complete — you'll sign a listing you can revoke anytime.`,
-      contextRefs: ctx,
-    }, bodyStoreFor).catch(() => {});
-  } else {
-    const ctx: ContextRefV1[] = [{ kind: 'membership-application', id: org, label: 'Membership application' }];
-    await sendFromInbox(inboxKvFor, org as Address, {
-      recipient: applicant as Address,
-      subject: 'Membership declined',
-      bodyText: `Your application to join this organization was declined.${body?.reason ? ` Reason: ${body.reason}` : ''}`,
-      contextRefs: ctx,
-    }, bodyStoreFor).catch(() => {});
   }
+  // THE DECISION NOTICE IS NOT SENT HERE (spec 341 §5.1c). It used to be: this route wrote the message
+  // straight into the applicant's vault as the org, over a standing grant and a shared secret. Sending
+  // as an organization now means presenting its stewardship delegation and its messaging wire, and the
+  // party that holds both is the STEWARD'S BROWSER — which is where the notice is sent from, right
+  // after this call returns. The decision itself stands either way; a notice is never authority
+  // (ADR-0041), and the Join chip it carries confers nothing the member-access grant above did not.
 
   // Remove the decided application from the org's pending queue (best-effort; the notification + grant already
   // stand). One entry per applicant, so filter by applicant SA.

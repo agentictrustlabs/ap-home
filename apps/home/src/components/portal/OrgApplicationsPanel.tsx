@@ -11,6 +11,9 @@ import { BusyButton } from '../shared/BusyButton';
 import { signHashFor, resolveVia } from '../../home/onboarding';
 import { issueOrganizationResourceAccessDelegation, toWire } from '../../lib/delegation';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
+import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
+import { useManagedAgents } from './ManagedAgents';
+import { ApproveMessaging } from './ApproveMessaging';
 
 interface AppItem { applicationId: string; applicant: string; message: string; submittedAt: string }
 
@@ -18,6 +21,11 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
   const { session, profile } = useSession();
   const communityId = org.toLowerCase();
   const authed = { 'content-type': 'application/json', authorization: `Bearer ${session?.token ?? ''}` };
+
+  // The org's stewardship delegation — an org has no session, so acting as one means presenting this.
+  const { agents } = useManagedAgents(session?.token ?? null);
+  const stewardship = agents.find((a) => a.agent.toLowerCase() === communityId)?.stewardshipDelegation;
+  const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
 
   const [items, setItems] = useState<AppItem[] | null>(null);
   const [busyFor, setBusyFor] = useState<string | null>(null);
@@ -57,16 +65,52 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
       });
       const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!r.ok || !b.ok) throw new Error(b.error ?? `decision failed (${r.status})`);
-      setNote(decision === 'approve' ? 'Approved — the applicant was sent a Join link.' : 'Application declined.');
+
+      // THE NOTICE, SENT AS THE ORG (spec 341 §5.1c). The server used to write this straight into the
+      // applicant's vault over a shared secret; now it is an authorized A2A delivery from the org's own
+      // rail, and the only party holding both the stewardship delegation and the org's messaging wire
+      // is this browser.
+      //
+      // Best-effort, deliberately AFTER the decision: the decision stands regardless, and the Join chip
+      // confers nothing the member-access grant above did not (ADR-0041). An org with no messaging wire
+      // yet surfaces the approve action rather than an error.
+      let noticeNote = '';
+      try {
+        await sendMessage({
+          person: communityId as Address,
+          ...(stewardship ? { stewardship } : {}),
+          recipient: it.applicant as Address,
+          subject: decision === 'approve' ? 'Membership approved' : 'Membership declined',
+          bodyText: decision === 'approve'
+            ? `Your application to join this organization was approved. Open the Join chip to complete — you'll sign a listing you can revoke anytime.`
+            : `Your application to join this organization was declined.`,
+          contextRefs: [decision === 'approve'
+            ? { kind: 'org-channels', id: communityId, label: 'Join the organization' }
+            : { kind: 'membership-application', id: communityId, label: 'Membership application' }],
+        });
+      } catch (e) {
+        if (e instanceof MessagingWireRequiredError) { setWireNeeded(e); noticeNote = ' (notice not sent yet — approve messaging below)'; }
+        else noticeNote = ' (the notice could not be delivered)';
+      }
+      setNote((decision === 'approve' ? 'Approved — the applicant was sent a Join link.' : 'Application declined.') + noticeNote);
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusyFor(null); }
-  }, [session, profile?.credential, communityId, authed, load]);
+  }, [session, profile?.credential, communityId, authed, load, stewardship]);
 
   if (!items || items.length === 0) return null; // no pending applications → nothing to show
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <h3 className="subhead" style={{ marginBottom: '.6rem' }}>Pending join requests · {items.length}</h3>
+      <ApproveMessaging
+        need={wireNeeded}
+        person={communityId as Address}
+        stewardship={stewardship}
+        session={session}
+        credential={profile?.credential}
+        onApproved={() => setWireNeeded(null)}
+        onError={setErr}
+      />
       {err && <p style={{ color: 'var(--color-danger)', fontSize: '.82rem' }}>{err}</p>}
       {note && <p style={{ color: 'var(--color-sage-700, #047857)', fontSize: '.82rem' }}>{note}</p>}
       <div className="dash-section" style={{ maxWidth: 560 }}>

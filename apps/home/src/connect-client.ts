@@ -1264,6 +1264,15 @@ export interface ManagedAgent {
   /** spec 318: 'steward' = custodial control (default); 'member' = authority-only (channels +
    *  switcher visibility, never inbox/data/treasury control). */
   relationship?: 'steward' | 'member';
+  /**
+   * The org→person stewardship delegation, when this person stewards it (spec 341 §5.1c).
+   *
+   * Carried because an ORGANIZATION has no session of its own: acting as one means presenting this,
+   * and an interface that can show the org in a switcher but cannot prove control over it produces
+   * exactly the 403s nobody can diagnose. It is an authority artifact, not a secret — signed, scoped,
+   * and revocable — and the endpoint already returns it.
+   */
+  stewardshipDelegation?: unknown;
 }
 
 export interface CreateManagedAgentResult {
@@ -1619,7 +1628,7 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
   const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as {
-    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string }>;
+    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown }>;
   };
   return (b.orgs ?? []).map((o) => ({
     agent: o.orgAgent,
@@ -1629,6 +1638,7 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
     createdAt: o.createdAt,
     proofHash: o.proofHash,
     relationship: (o.relationship === 'member' ? 'member' : 'steward') as 'steward' | 'member',
+    ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
   }));
 }
 

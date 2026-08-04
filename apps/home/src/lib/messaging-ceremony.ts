@@ -23,9 +23,19 @@ import { issueMessagingTransportGrant, issueMessagingWire } from './messaging-wi
 import { approveMessagingRecipient } from './messaging-send';
 
 export interface MessagingCeremonyInput {
+  /**
+   * The agent that will send — a person, or an ORGANIZATION the caller stewards.
+   *
+   * For an org, `signHashFor(via, orgSA, …)` is what signs: the steward's own credential produces a
+   * signature that the ORG's account validates (approved-hash / ERC-1271 through its custody module).
+   * That is the same route the spec-329 routing ceremony takes, and it is why no org key exists
+   * anywhere — the org never holds one, and the steward never becomes the org.
+   */
   person: Address;
   /** The counterparty being approved. */
   recipient: Address;
+  /** The org's stewardship delegation. Required when `person` is an organization. */
+  stewardship?: unknown;
   /** The person's credential route — passkey / wallet / KMS (`resolveVia(profile.credential, via)`). */
   via: Via;
   /** Home session token. KMS routes need it; passkey and wallet do not. */
@@ -43,6 +53,7 @@ export async function approveMessagingContact(input: MessagingCeremonyInput): Pr
   await approveMessagingRecipient({
     person: input.person,
     newRecipient: input.recipient,
+    ...(input.stewardship ? { stewardship: input.stewardship } : {}),
     mintWire: async ({ person, sessionKey, recipients }) => {
       // The credential-routed signer. `signHashFor` is what decides whether this opens a passkey
       // prompt, a wallet popup, or a server-side KMS signature — routing by the person's credential
