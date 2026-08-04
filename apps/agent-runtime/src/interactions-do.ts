@@ -22,7 +22,7 @@ import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
-import { adoptionStage, compareServed, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
+import { adoptionStage, classifyDivergence, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
 import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
@@ -814,7 +814,16 @@ export class InteractionsDO {
     void (async () => {
       try {
         const shadow = await this.gatewayReadInbox(grant, principal);
-        this.divergences = recordDivergence(this.divergences, compareServed('inbox.get', served, shadow, at));
+        // The RE-READ (audit G-4). A delivery landing between the serving read and the shadow read changes
+        // the document legitimately, and the two planes then honestly report different instants. Without
+        // this, every busy principal manufactures `value` divergences that mean nothing — and a report full
+        // of benign differences is worse than no report, because the mechanism loses credibility exactly
+        // when it is about to be trusted for a promotion. Serving path, run again: same mechanism.
+        const servedAgain = await this.readDoc<unknown>(grant, INBOX_RESOURCE, null);
+        this.divergences = recordDivergence(
+          this.divergences,
+          classifyDivergence({ op: 'inbox.get', served, shadow, servedAgain, at }),
+        );
       } catch (e) {
         // A gateway error is EVIDENCE, recorded like any other outcome — it is the most informative thing
         // a shadow can find, and an op whose shadow errors is one that must not be promoted.

@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  GATEWAY_ADOPTION, adoptionStage, compareServed, shouldShadow, recordDivergence,
+  GATEWAY_ADOPTION, adoptionStage, compareServed, classifyDivergence, shouldShadow, recordDivergence,
   SHADOW_INTERVAL_MS, DIVERGENCE_BUFFER, type Divergence,
 } from '../src/gateway-adoption.js';
 
@@ -199,5 +199,57 @@ describe('comparison against a real InboxDataV1', () => {
       envelopes: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, from: '0xaaa', to: '0xbbb', kind: 'dm', at: AT, bodyHash: h })),
     });
     expect(compareServed('inbox.get', big('0x11'), big('0x22'), AT).detail!.length).toBeLessThan(200);
+  });
+});
+
+// ── G-4: classifying the noise BEFORE the evidence arrives ────────────────────────────────────────────
+describe('volatile fields are declared per op, not discovered', () => {
+  it('makes every ledger entry state its volatile fields', () => {
+    // Declared before evidence, because classifying noise AFTER seeing a report is how a real divergence
+    // gets explained away as expected.
+    for (const [op, e] of Object.entries(GATEWAY_ADOPTION)) {
+      expect(Array.isArray(e.volatileFields), op).toBe(true);
+    }
+  });
+
+  it('claims NONE for inbox.get, and that is a claim', () => {
+    // Both planes read the same stored document and `inboxRevision` is a pure content hash — no clock, no
+    // counter, nothing computed per read. An empty list here asserts that; it is not an omission.
+    expect(GATEWAY_ADOPTION['inbox.get'].volatileFields).toEqual([]);
+    expect(GATEWAY_ADOPTION['inbox.get'].note).toMatch(/race|raced/i);
+  });
+});
+
+describe('a race is not a divergence', () => {
+  const AT = '2026-08-04T00:00:00.000Z';
+  const A = { version: 1, envelopes: [{ id: 'm1' }] };
+  const B = { version: 1, envelopes: [{ id: 'm1' }, { id: 'm2' }] };
+
+  it('classifies a document that MOVED between the reads as raced', () => {
+    // A delivery landed between the serving read and the shadow read. Both planes are correct about
+    // different instants; the shadow proves nothing here and must not be counted as a difference.
+    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: B, at: AT });
+    expect(d.kind).toBe('raced');
+  });
+
+  it('still reports a REAL disagreement when the document did not move', () => {
+    // The case the whole rung exists to catch: serving is stable across both reads and the gateway
+    // disagrees. Suppressing this would make the mechanism decorative.
+    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: A, at: AT });
+    expect(d.kind).toBe('value');
+  });
+
+  it('is conservative when the document moved to a THIRD state', () => {
+    // Two deliveries landed. It might be a race — but it is not PROVABLY one, and a classifier that
+    // guessed "probably benign" would suppress exactly the signal it exists to collect.
+    const C = { version: 1, envelopes: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }] };
+    expect(classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: C, at: AT }).kind).toBe('value');
+  });
+
+  it('does not spend the re-read when the planes already agree', () => {
+    // `equal` short-circuits before the comparison against `servedAgain`, so the common case costs
+    // nothing extra. Proven by handing it a `servedAgain` that would change the verdict if consulted.
+    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: A, servedAgain: B, at: AT });
+    expect(d.kind).toBe('equal');
   });
 });

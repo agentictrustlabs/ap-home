@@ -37,6 +37,15 @@ export interface AdoptionEntry {
   /** Why this op is at this rung. Kept as prose because "it's next" and "it's blocked" look identical
    *  in a stage field, and the difference is the whole state of the migration. */
   note: string;
+  /**
+   * Fields that legitimately differ between the two planes because each computes them at its own instant
+   * (audit G-4). Declared PER OP and BEFORE evidence arrives — classifying noise after seeing a report is
+   * how a real divergence gets explained away as expected.
+   *
+   * An EMPTY list is a claim, not an omission: it asserts this op has no per-read computation, so any
+   * difference is either a race (below) or a defect. Say why in `note` when it is empty.
+   */
+  volatileFields: readonly string[];
 }
 
 /**
@@ -52,13 +61,24 @@ export const GATEWAY_ADOPTION: Readonly<Record<string, AdoptionEntry>> = {
     // inbox document's shape is what the Home replays on every poll. Ordering is NOT in play — this reads
     // one document, it does not fold the exchange stream.
     concerns: ['auth', 'projection', 'data-shape'],
+    // NONE, and this is a finding rather than a default. Both planes read the SAME stored vault document
+    // and `inboxRevision` is a pure content hash — no clock, no counter, nothing computed per read. So the
+    // audit's expected noise source (timestamps, revision counters at different instants) does not exist
+    // here. The real one is TEMPORAL: the serving read and the shadow read happen microseconds apart, and
+    // a delivery landing in between changes the document legitimately. That is a race, not a volatile
+    // field, and a field mask would not have caught it — `raced` classification does.
+    volatileFields: [],
     note:
       'first op on the ladder; the exchange stream is untouched, so no ordering claim is being made. ' +
       'BEFORE PROMOTING (audit G-5): the auth concern here is bounded verdict reuse — the gateway caches ' +
       'verdict (A) for VERDICT_TTL_MS (60s) where InteractionsDO verifies per call, so a revoked ' +
       'delegation can pass admission for up to that window. demo-mcp re-enforces per record and is the ' +
       'authority, which bounds the exposure to admission only — but it is a real behaviour change and it ' +
-      'must be stated, not discovered.',
+      'must be stated, not discovered. ' +
+      'NOISE MODEL (audit G-4): no volatile fields — both planes read the same stored document and ' +
+      'inboxRevision is a pure content hash. The only benign difference is a RACE (a delivery landing ' +
+      'between the two reads), which the re-read classifies as `raced` rather than leaving it to look ' +
+      'like a defect.',
   },
 };
 
@@ -92,7 +112,7 @@ export interface Divergence {
   at: string;
   /** `equal` is recorded too. A shadow that only reports differences cannot distinguish "the planes agree"
    *  from "the shadow never ran", and those justify opposite decisions about promoting. */
-  kind: 'equal' | 'value' | 'gateway-error' | 'shadow-skipped';
+  kind: 'equal' | 'value' | 'raced' | 'gateway-error' | 'shadow-skipped';
   detail?: string;
 }
 
@@ -126,6 +146,41 @@ function firstDifference(a: string, b: string): string {
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   const w = 40;
   return `@${i}: served=${JSON.stringify(a.slice(Math.max(0, i - 8), i + w))} shadow=${JSON.stringify(b.slice(Math.max(0, i - 8), i + w))}`;
+}
+
+/**
+ * Was an apparent divergence just the document moving between the two reads?
+ *
+ * THE NOISE SOURCE THAT ACTUALLY EXISTS on `inbox.get`. The serving read happens, then the shadow read
+ * happens; a delivery landing in between changes the document, and the two planes then honestly report
+ * different things about different instants. Left unclassified, every busy principal generates `value`
+ * divergences that mean nothing — and a report full of benign differences is worse than no report,
+ * because the mechanism loses credibility exactly when it is about to be trusted for a promotion.
+ *
+ * The check: after the shadow read, take the serving read AGAIN.
+ *   · `servedAgain` matches the shadow  ⇒ the document moved. RACED — benign, and evidence of nothing.
+ *   · `servedAgain` still matches the original, and differs from the shadow ⇒ the planes really disagree.
+ *
+ * Costs one extra vault read per SAMPLED shadow (at most one per principal per minute), which is the
+ * price of the difference between evidence and noise.
+ *
+ * DELIBERATELY CONSERVATIVE: anything that is not provably a race stays `value`. A classifier that
+ * guessed "probably a race" would suppress the exact signal the whole rung exists to collect.
+ */
+export function classifyDivergence(input: {
+  op: string;
+  served: unknown;
+  shadow: unknown;
+  servedAgain: unknown;
+  at: string;
+}): Divergence {
+  const first = compareServed(input.op, input.served, input.shadow, input.at);
+  if (first.kind === 'equal') return first;
+  const settled = compareServed(input.op, input.servedAgain, input.shadow, input.at);
+  if (settled.kind === 'equal') {
+    return { op: input.op, at: input.at, kind: 'raced', detail: 'document changed between the serving read and the shadow read' };
+  }
+  return first;
 }
 
 // ── Sampling ──────────────────────────────────────────────────────────────────────────────────────────
