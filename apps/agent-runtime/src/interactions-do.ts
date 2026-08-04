@@ -22,6 +22,7 @@ import { baseSepolia } from 'viem/chains';
 import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
+import { adoptionStage, compareServed, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
 import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
@@ -764,6 +765,66 @@ export class InteractionsDO {
     return new PrincipalGatewayDO(this.state as never, this.env as never, deps);
   }
 
+  /** Last shadow sample, per isolate. In memory: it bounds ADDED LOAD, and a bound that survives isolate
+   *  recycle would mean a durable write on the hottest read path to save one sampled read. */
+  private lastShadowAt: number | undefined;
+  /** Divergence evidence, in memory + bounded. Diagnostics with the shelf life of one investigation. */
+  private divergences: Divergence[] = [];
+
+  /**
+   * Read the inbox record THROUGH the mounted gateway. The ONE gateway read path — both the explicit
+   * `gateway.inbox.get` probe and the shadow comparison call this, because two gateway read paths would
+   * drift and the shadow would then be comparing InteractionsDO against something no probe ever exercised.
+   */
+  private async gatewayReadInbox(grant: IncomingDelegation, principal: string): Promise<unknown> {
+    const gw = this.mountedGateway(grant);
+    const verdict = await gw.verifyAndCache(GATEWAY_GRANT_TOKEN);
+    if (!verdict) throw new Error('gateway refused the grant');
+    const out = await gw.invokeFast({
+      key: verdict,
+      // Single-use, so a pollable read must vary its id or the second poll reads as a replay. Bound to the
+      // principal + resource so it stays a request id rather than a nonce under another name.
+      requestId: `gw:${principal.toLowerCase()}:${INBOX_RESOURCE}:${crypto.randomUUID()}`,
+      now: new Date().toISOString(),
+      tool: 'get_vault_record',
+      args: { recordType: INBOX_RESOURCE },
+      // Caveat pass (B) — never cached, run on every invoke, pinned to the one resource this op mirrors.
+      // The grant's own scope is re-enforced at demo-mcp, which remains the authority (ADR-0041); a pass
+      // that returned `true` unconditionally would make the gateway's three-part check a two-part one.
+      runCaveatPass: async (_v, tool, args) => tool === 'get_vault_record' && args.recordType === INBOX_RESOURCE,
+    });
+    if (!out.ok) throw new Error(`gateway refused the read: ${out.reason}`);
+    return (out.result as { data?: unknown } | null)?.data ?? null;
+  }
+
+  /**
+   * Run the gateway alongside the served answer and record whether they agree (adoption rung 2).
+   *
+   * FIRE-AND-FORGET, AND DELIBERATELY SO. The response has already been decided by the time this runs. A
+   * shadow that could delay the response would make adoption cost latency on every poll, and one that
+   * could throw would let a diagnostic break the op it was diagnosing — which is a worse bug than any it
+   * could find.
+   */
+  private shadowInboxGet(grant: IncomingDelegation, served: unknown): void {
+    const now = Date.now();
+    if (!shouldShadow({ lastShadowAt: this.lastShadowAt, now, intervalMs: SHADOW_INTERVAL_MS })) return;
+    this.lastShadowAt = now; // set BEFORE awaiting: two concurrent polls must not both sample
+    const principal = (grant.delegator ?? '').toLowerCase();
+    const at = new Date(now).toISOString();
+    void (async () => {
+      try {
+        const shadow = await this.gatewayReadInbox(grant, principal);
+        this.divergences = recordDivergence(this.divergences, compareServed('inbox.get', served, shadow, at));
+      } catch (e) {
+        // A gateway error is EVIDENCE, recorded like any other outcome — it is the most informative thing
+        // a shadow can find, and an op whose shadow errors is one that must not be promoted.
+        this.divergences = recordDivergence(this.divergences, {
+          op: 'inbox.get', at, kind: 'gateway-error', detail: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
+  }
+
   /** BATCHED message-body read: ONE `get_vault_records` round-trip for a whole topic's bodies,
    *  hash-verified per envelope (fabric `verifiedBodiesFromBatch` — the same spec 309 §8.4
    *  verification as `loadBody`, one mechanism). Replaces the per-message delegated reads whose
@@ -1164,7 +1225,16 @@ export class InteractionsDO {
     }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      return json({ ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant });
+      return json({
+        ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant,
+        // The migration, visible from outside. A ladder whose rungs can only be read by grepping the
+        // source is one nobody checks before promoting — and promotion is exactly the decision that
+        // needs the evidence in front of it. `divergences` carries outcomes, INCLUDING `equal`: a report
+        // showing only differences cannot distinguish agreement from a shadow that never ran, and those
+        // two justify opposite decisions.
+        gatewayAdoption: GATEWAY_ADOPTION,
+        divergences: this.divergences,
+      });
     }
 
     // ── 1-1 inbox residency (spec 322 W3f) — the Home-server channel + in-Worker delivery. ──
@@ -1255,6 +1325,11 @@ export class InteractionsDO {
           // read to digest), so this does not save the round trip; it saves the TRANSFER and, on the
           // caller's side, `hydrateInboxStores` — an O(events) replay it otherwise performs on every
           // single poll. Absent cursor ⇒ always the document (a first-time caller has seen nothing).
+          // SHADOW (gateway adoption, rung 2). InteractionsDO's answer above IS the response — the shadow
+          // runs after it, cannot change it, and cannot fail the request. Sampled, because this is the
+          // hottest path in the app and doubling its vault reads is how a comparison harness takes down
+          // the thing it was measuring. See `gateway-adoption.ts`.
+          if (adoptionStage('inbox.get') === 'shadow') this.shadowInboxGet(g, doc);
           const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
           const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
           if (revision !== null && since && since === revision) {
@@ -1274,30 +1349,9 @@ export class InteractionsDO {
         // gateway supplies its serving-plane machinery (the cached verdict, the single-use request id)
         // and reaches the record through the INJECTED vault, which is the whole claim being tested here.
         if (op === 'gateway.inbox.get') {
-          const gw = this.mountedGateway(g);
-          // The cold path, on every call. `invokeFast` refuses on a verdict miss rather than reaching for
-          // a weaker check (ADR-0013), so the verdict must exist first — and re-verifying per call is the
-          // right cost at one op. The warm lane is what a later step earns, not what this one assumes.
-          const verdict = await gw.verifyAndCache(GATEWAY_GRANT_TOKEN);
-          if (!verdict) return json({ error: 'gateway refused the grant', code: 'gateway_verify_failed' }, 403);
-          const out = await gw.invokeFast({
-            key: verdict,
-            // Request ids are single-use and this op is a pollable read, so the id must vary per call or
-            // the second poll is indistinguishable from a replay and is refused. Bound to the caller's
-            // principal + the resource so it stays a request id and not a nonce with a different name.
-            requestId: `gw:${principal.toLowerCase()}:${INBOX_RESOURCE}:${crypto.randomUUID()}`,
-            now: new Date().toISOString(),
-            tool: 'get_vault_record',
-            args: { recordType: INBOX_RESOURCE },
-            // Caveat pass (B) — never cached, run on every invoke. The record scope this op may reach is
-            // pinned to the ONE resource it mirrors; the grant's own scope is re-enforced at demo-mcp,
-            // which remains the authority (ADR-0041). A pass that returned `true` unconditionally would
-            // make the gateway's three-part authorization a two-part one.
-            runCaveatPass: async (_v, tool, args) =>
-              tool === 'get_vault_record' && args.recordType === INBOX_RESOURCE,
-          });
-          if (!out.ok) return json({ error: 'gateway refused the read', code: out.reason }, 403);
-          const doc = (out.result as { data?: unknown } | null)?.data ?? null;
+          let doc: unknown;
+          try { doc = await this.gatewayReadInbox(g, principal); }
+          catch (e) { return json({ error: e instanceof Error ? e.message : String(e), code: 'gateway_refused' }, 403); }
           const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
           const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
           if (revision !== null && since && since === revision) return json({ ok: true, unchanged: true, revision, servedBy: 'gateway' });
