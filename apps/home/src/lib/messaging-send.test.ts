@@ -14,7 +14,7 @@ vi.mock('./sso-cookie', () => ({ readSsoCookie: () => ({ token: 'tok' }) }));
 // drags the whole React context (and its JSX) into a test that needs none of it.
 vi.mock('../context/session', () => ({ SESSION_KEY: 'agenticprimitives:home:session' }));
 
-const { sendMessage, readMessagingWire, approveMessagingRecipient, MessagingWireRequiredError } = await import('./messaging-send');
+const { sendMessage, readMessagingWire, approveMessagingRecipient, putMessagingWire, MessagingWireRequiredError } = await import('./messaging-send');
 
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
@@ -144,5 +144,22 @@ describe('reading the wire', () => {
     stubFetch(() => ({ body: { ok: true, sessionKey: KEY, wirePresent: true, recipients: [BOB, CAROL], enabledAt: '2026-08-03T00:00:00Z' } }));
     const r = await readMessagingWire(ALICE);
     expect(r).toEqual({ sessionKey: KEY, wirePresent: true, recipients: [BOB, CAROL], enabledAt: '2026-08-03T00:00:00Z' });
+  });
+});
+
+describe('a minted wire is not a transportable wire', () => {
+  // Found by the live run, not by a unit test: `issueMessagingWire` returns a bigint salt, the POST
+  // threw "Do not know how to serialize a BigInt", and the screen showed that sentence next to an
+  // Approve button — a message about JSON where the reader needed a message about signing.
+  it('refuses a bigint salt with a message that names the fix', async () => {
+    stubFetch(() => ({ body: { ok: true } }));
+    await expect(putMessagingWire(ALICE, { delegator: ALICE, salt: 1n })).rejects.toThrow(/toWire/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('accepts the transport form', async () => {
+    stubFetch(() => ({ body: { ok: true } }));
+    await putMessagingWire(ALICE, { delegator: ALICE, salt: '1' });
+    expect(calls[0]!.url).toBe(`/a2a/interactions/${ALICE}/messaging.wireEnable`);
   });
 });

@@ -184,6 +184,13 @@ export async function approveMessagingRecipient(args: {
 /** Install a wire the PERSON signed. The agent re-checks delegator, delegate, shape, signature and
  *  on-chain revocation before custodying it — this call cannot install authority by asserting it. */
 export async function putMessagingWire(person: Address, wire: unknown): Promise<void> {
+  // A freshly minted `Delegation` carries a bigint salt, and `JSON.stringify` throws on one. Left
+  // unchecked it surfaces as "Do not know how to serialize a BigInt" from inside the POST below —
+  // nowhere near the mint that produced it, and indistinguishable from a network failure to whoever
+  // is reading the screen. Named here instead.
+  if (typeof (wire as { salt?: unknown } | null)?.salt === 'bigint') {
+    throw new Error('the messaging wire must be in its transport form — pass it through toWire() first');
+  }
   await ensureCsrfToken();
   const session = homeBearer();
   if (!session) throw new Error('no home session');
