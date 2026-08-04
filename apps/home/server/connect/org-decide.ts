@@ -72,14 +72,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // after this call returns. The decision itself stands either way; a notice is never authority
   // (ADR-0041), and the Join chip it carries confers nothing the member-access grant above did not.
 
-  // Remove the decided application from the org's pending queue (best-effort; the notification + grant already
-  // stand). One entry per applicant, so filter by applicant SA.
-  try {
-    const cur = await bridgeInteractions<{ doc?: { applications?: OrgApplication[] } }>(env, org, 'applications.get', {});
-    const apps = (cur.ok ? cur.body.doc?.applications : undefined) ?? [];
-    const next = apps.filter((a) => a.applicant.toLowerCase() !== applicant);
-    if (next.length !== apps.length) await bridgeInteractions(env, org, 'applications.put', { doc: { applications: next } });
-  } catch { /* queue cleanup is best-effort */ }
+  // The queue cleanup moved to the steward's browser (spec 341 §5.3), with the same stewardship
+  // delegation that authorizes reading it. It used to happen here over the shared-secret bridge, where
+  // the secret proved the caller was our Home and nothing about whether this person may act for this
+  // organization — a separate `controlsOrg` check against a Home-local projection carried that, which
+  // is a different fact in a different place from the authority itself.
 
   return json({ ok: true, decision: enrollmentDecision });
 };

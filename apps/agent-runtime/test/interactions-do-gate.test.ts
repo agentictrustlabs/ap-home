@@ -257,3 +257,46 @@ describe('the gate is not configured away', () => {
     expect((await r.json() as { error: string }).error).toMatch(/not configured/);
   });
 });
+
+// ── spec 341 §5.3 — the STEWARD gate on an organization's governance docs ──────────────────────────
+//
+// These ops were bridge-only, because `ownerOrBridge` cannot serve them: the principal is an ORG, an
+// org has no session, and its steward's session SA is by definition not the principal. The shared
+// secret stood in for authority — it proves the caller is our Home and nothing about whether the
+// person behind it may act for this organization.
+//
+// What is reachable in this harness is the REFUSAL, and that is the half worth pinning: a session that
+// proves someone else, with no stewardship delegation, must not reach an org's queue. The positive
+// path needs a signed on-chain delegation plus a vault, which is the deps-seam limitation this file's
+// header already records.
+describe('an organization’s join queue is not reachable by just anyone', () => {
+  it('REFUSES a valid session for a different agent, with no stewardship', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('applications.get', token, ORG);
+    // 401 unauthorized (the gate) or 409 no-grant (the plane) — never 200. Asserting "not ok" rather
+    // than a specific code keeps this honest about which check fires first without pinning an order
+    // that is not itself a requirement.
+    expect(r.ok).toBe(false);
+    expect(r.status).not.toBe(200);
+  });
+
+  it('REFUSES a bare unauthenticated write', async () => {
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/applications.put`, {
+      method: 'POST', body: JSON.stringify({ doc: { applications: [] } }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES a junk stewardship delegation', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/applications.get`, {
+      method: 'POST',
+      // Delegator/delegate shaped correctly, signature meaningless. `isSteward` verifies the shape AND
+      // the signature on-chain; a check that stopped at the shape would accept this.
+      body: JSON.stringify({ session: token, stewardship: { delegator: ORG, delegate: MEMBER, caveats: [], salt: '1', signature: '0xdead' } }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+});

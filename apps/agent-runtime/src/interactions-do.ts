@@ -862,6 +862,41 @@ export class InteractionsDO {
   }
 
   /**
+   * spec 341 §5.3 — the STEWARD gate for an ORGANIZATION's governance docs.
+   *
+   * `ownerOrBridge` cannot serve these: their principal is an org, an org has no session, and its
+   * steward's session SA is by definition NOT the principal. So those ops stayed bridge-only — a
+   * shared secret standing in for authority, which is exactly what this spec exists to remove.
+   *
+   * The proof is the org's stewardship delegation, verified the same way `messaging.*` and
+   * `consult.routingEnable` verify it: delegator is this org, delegate is the caller, stewardship
+   * SHAPE not merely member access (SEC-C1), ERC-1271-live and unrevoked. That is strictly stronger
+   * than the secret it replaces — the secret proves the CALLER is our Home, and nothing about whether
+   * the person behind it may act for this organization.
+   *
+   * Caller-selected, never a fallback (ADR-0013): a request carrying `session` takes the delegation
+   * path and fails closed there; one carrying the SEC-010 envelope takes the bridge. Neither is tried
+   * after the other fails.
+   */
+  private async ownerStewardOrBridge(
+    request: Request,
+    rawBody: string,
+    op: string,
+    principal: string,
+    session: string,
+    stewardship: IncomingDelegation | undefined,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (session) {
+      const g = await verifyHomeSession(session, this.env);
+      if (!g.ok) return { ok: false, reason: g.error };
+      if (g.sa.toLowerCase() === principal) return { ok: true };
+      if (await this.isSteward(principal, g.sa, stewardship)) return { ok: true };
+      return { ok: false, reason: 'only this agent, or a steward presenting its stewardship delegation, may reach these records' };
+    }
+    return this.bridgeGate(request, rawBody, op);
+  }
+
+  /**
    * The A2A transport for outbound sends.
    *
    * It dials the recipient's own `A2aTaskDO` — the SAME dispatch `/api/a2a` performs after Host
@@ -977,6 +1012,9 @@ export class InteractionsDO {
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
       const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
+      // spec 341 §5.3 — an ORG's governance queue is steward-facing, not owner-facing: the principal is
+      // the org and it has no session. Same verified delegation the messaging rail uses.
+      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put';
       if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
         // Require an internal marker only in-Worker callers can supply (the bridge secret, shared by
@@ -986,7 +1024,9 @@ export class InteractionsDO {
       } else {
         const bg = OWNER_FACING
           ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''))
-          : await this.bridgeGate(request, rawBody, op);
+          : STEWARD_FACING
+            ? await this.ownerStewardOrBridge(request, rawBody, op, principal, String(body.session ?? ''), body.stewardship as IncomingDelegation | undefined)
+            : await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
       }
       const st0 = ((await this.state.storage.get('state')) ?? {}) as StoredState;

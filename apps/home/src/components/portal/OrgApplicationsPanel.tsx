@@ -1,6 +1,7 @@
 'use client';
 // Org enrollment — the steward's pending MembershipApplications queue (spec 324 §7/§12). Reads the org's
-// `org.applications` vault doc (POST /connect/org-applications, steward-gated) and lets the steward APPROVE
+// `org.applications` vault doc AT THE ORG'S AGENT, authorized by the org's stewardship delegation
+// (spec 341 §5.3 — no Home route, no shared secret), and lets the steward APPROVE
 // (sign the org→applicant member-access grant + POST /connect/org-decide → applicant gets a Join link and
 // completes membership) or REJECT. Approval creates NO membership directly (ADR-0048): the member writes their
 // own membership on join; the decision authorizes + invites it, and clears the application from the queue.
@@ -14,6 +15,7 @@ import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
 import { useManagedAgents } from './ManagedAgents';
 import { ApproveMessaging } from './ApproveMessaging';
+import { readOrgApplications, dropOrgApplication } from '../../lib/org-applications-client';
 
 interface AppItem { applicationId: string; applicant: string; message: string; submittedAt: string }
 
@@ -35,13 +37,13 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
   const load = useCallback(async () => {
     if (!session) return;
     try {
-      const r = await fetch('/connect/org-applications', { method: 'POST', headers: authed, body: JSON.stringify({ org: communityId }) });
-      const b = (await r.json().catch(() => ({}))) as { applications?: AppItem[]; error?: string };
-      if (!r.ok) throw new Error(b.error ?? `read failed (${r.status})`);
-      setItems(b.applications ?? []);
+      // spec 341 §5.3 — read at the ORG'S AGENT, authorized by its stewardship delegation. No Home
+      // route, no shared secret, and the same artifact that authorizes the write below.
+      if (!stewardship) { setItems([]); return; }
+      setItems(await readOrgApplications(communityId as Address, stewardship));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, communityId]);
+  }, [session, communityId, stewardship]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -92,6 +94,9 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
         if (e instanceof MessagingWireRequiredError) { setWireNeeded(e); noticeNote = ' (notice not sent yet — approve messaging below)'; }
         else noticeNote = ' (the notice could not be delivered)';
       }
+      // Clear the decided application from the org's queue — read-modify-write at the agent, after
+      // the decision, so a failure here leaves a stale row rather than an undecided applicant.
+      await dropOrgApplication(communityId as Address, stewardship, it.applicant).catch(() => undefined);
       setNote((decision === 'approve' ? 'Approved — the applicant was sent a Join link.' : 'Application declined.') + noticeNote);
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusyFor(null); }
