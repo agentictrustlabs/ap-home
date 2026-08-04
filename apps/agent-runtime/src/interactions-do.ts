@@ -1329,7 +1329,7 @@ export class InteractionsDO {
           // runs after it, cannot change it, and cannot fail the request. Sampled, because this is the
           // hottest path in the app and doubling its vault reads is how a comparison harness takes down
           // the thing it was measuring. See `gateway-adoption.ts`.
-          if (adoptionStage('inbox.get') === 'shadow') this.shadowInboxGet(g, doc);
+          if (adoptionStage('inbox.get', this.env) === 'shadow') this.shadowInboxGet(g, doc);
           const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
           const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
           if (revision !== null && since && since === revision) {

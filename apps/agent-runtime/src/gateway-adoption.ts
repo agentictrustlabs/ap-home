@@ -56,8 +56,27 @@ export const GATEWAY_ADOPTION: Readonly<Record<string, AdoptionEntry>> = {
   },
 };
 
-export function adoptionStage(op: string): AdoptionStage {
-  return GATEWAY_ADOPTION[op]?.stage ?? 'off';
+/**
+ * The stage this op runs at IN THIS DEPLOYMENT.
+ *
+ * The ledger says how far an op has climbed in the code; `GATEWAY_SHADOW` says whether this deployment is
+ * running the comparison at all. Both are required, and the env one defaults to OFF.
+ *
+ * WHY, CONCRETELY. Constructing the gateway runs the `CREATE TABLE IF NOT EXISTS` of every store it owns.
+ * The probe op made those tables appear only for a principal who explicitly called it. The SHADOW hangs off
+ * `inbox.get` — which every principal polls — so shipping it ungated would create those tables in
+ * essentially every InteractionsDO in the deployment, as a side effect of a commit landing. They are empty
+ * and harmless, and that is beside the point: the previous commit's claim was that adopting the gateway
+ * would not change anyone's storage until someone decided it should, and an ungated shadow quietly makes
+ * the decision for every principal at once.
+ *
+ * Empty string is unset, not enabled — `wrangler`'s `VAR = ""` binds an empty string that `??` sails
+ * straight past.
+ */
+export function adoptionStage(op: string, env?: { GATEWAY_SHADOW?: string }): AdoptionStage {
+  const stage = GATEWAY_ADOPTION[op]?.stage ?? 'off';
+  if (stage === 'shadow' && (env?.GATEWAY_SHADOW ?? '').trim().toLowerCase() !== 'on') return 'off';
+  return stage;
 }
 
 // ── Divergence ────────────────────────────────────────────────────────────────────────────────────────

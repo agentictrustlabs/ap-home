@@ -429,6 +429,10 @@ export interface Env {
   // wrong delegate). Inert until provisioned (unset ⇒ no pin, the pre-Phase-B behavior). These are also the
   // SAs the DO will client-mint AS once the DEL-001 service-session infrastructure lands (kills server-mint).
   INTERACTIONS_SERVICE_SA?: string;
+  /** Gateway adoption (ADR-0055 amendment): `'on'` runs the shadow comparison for ops the ledger has at
+   *  rung 2. Default OFF — shadowing constructs a co-resident gateway (and its tables) in every polling
+   *  principal's DO, which is a decision a deployment makes, not one a commit makes for it. */
+  GATEWAY_SHADOW?: string;
   DELIVERY_SERVICE_SA?: string;
 }
 

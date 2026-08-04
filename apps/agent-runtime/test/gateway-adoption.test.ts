@@ -34,6 +34,23 @@ describe('the ledger', () => {
   it('starts inbox.get at shadow, not serving', () => {
     expect(GATEWAY_ADOPTION['inbox.get'].stage).toBe('shadow');
   });
+
+  it('needs the DEPLOYMENT to opt in before a shadow runs', () => {
+    // The ledger says how far an op has climbed; the env says whether this deployment runs the comparison.
+    // Default OFF, because shadowing hangs off `inbox.get` — which every principal polls — and would
+    // otherwise construct a gateway (and its tables) in every DO as a side effect of a commit landing.
+    expect(adoptionStage('inbox.get')).toBe('off');
+    expect(adoptionStage('inbox.get', {})).toBe('off');
+    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: 'on' })).toBe('shadow');
+  });
+
+  it('treats an empty GATEWAY_SHADOW as unset', () => {
+    // `wrangler`'s `VAR = ""` binds an empty string, which `??` sails straight past — the exact shape of
+    // a previous incident where a fail-closed guard was reached with a value nobody had set.
+    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: '' })).toBe('off');
+    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: '   ' })).toBe('off');
+    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: 'ON' })).toBe('shadow'); // case is not a trap
+  });
 });
 
 describe('comparison', () => {
