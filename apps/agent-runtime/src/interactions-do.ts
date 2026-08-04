@@ -887,7 +887,22 @@ export class InteractionsDO {
    *  carries the SEC-010 envelope instead takes the incumbent demo-a2a↔Home server transport. Each
    *  fails closed. (Non-owner-facing ops — invite.* — stay bridge-only: they are org-steward /
    *  token-redeem substrate flows, not the owner acting on their own records.) */
-  private async ownerOrBridge(request: Request, rawBody: string, op: string, principal: string, session: string): Promise<{ ok: true; clientId?: string } | { ok: false; reason: string }> {
+  private async ownerOrBridge(
+    request: Request,
+    rawBody: string,
+    op: string,
+    principal: string,
+    session: string,
+    /**
+     * spec 341 §1 — the ORG case. An org has no session, so a steward reading its inbox fails the
+     * `sa === principal` test by definition. Presenting the org's stewardship delegation is how they
+     * prove the right to, and it is the SAME proof `applications.*` and `content.*` already take.
+     *
+     * Without this the org path had no option but the shared secret — not because a secret was the
+     * right authority, but because nothing else could express "this person may act for this org".
+     */
+    stewardship?: IncomingDelegation,
+  ): Promise<{ ok: true; clientId?: string } | { ok: false; reason: string }> {
     if (session) {
       // A HOME SESSION **OR** A RELYING id_token, exactly as the skills block below already accepts
       // (spec 341 §4.2). The asymmetry was the spec-323-W4 hole: `verifyHomeSession` pins
@@ -910,13 +925,19 @@ export class InteractionsDO {
       // the other fails, and a bad token does NOT fall through to the secret.
       const home = await verifyHomeSession(session, this.env);
       if (home.ok) {
-        if (home.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
-        // The person's own control plane. No clientId ⇒ the read runs under the principal's own grant.
-        return { ok: true };
+        if (home.sa.toLowerCase() === principal) {
+          // The person's own control plane. No clientId ⇒ the read runs under the principal's own grant.
+          return { ok: true };
+        }
+        if (await this.isSteward(principal, home.sa, stewardship)) return { ok: true };
+        return { ok: false, reason: 'these records belong to the principal — self access, or a steward presenting its stewardship delegation' };
       }
       const relying = await verifyRelyingIdToken(session, this.env);
       if (!relying.ok) return { ok: false, reason: home.error };
       if (relying.sa.toLowerCase() !== principal) return { ok: false, reason: 'these records belong to the principal — self access only' };
+      // A relying app never acts for an ORG here: stewardship is a person's relationship to an
+      // organization, and an app holding that person's token has not been given it.
+      if (stewardship) return { ok: false, reason: 'stewardship is presented by the steward, not by an app acting as them' };
       // A relying APP. Carry its verified identity out so the read can run under THAT app's grant.
       return { ok: true, clientId: relying.clientId };
     }
@@ -1090,7 +1111,7 @@ export class InteractionsDO {
         // be this same value and no longer is (spec 341 §7).
         if (!isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
       } else {
-        const og = OWNER_FACING ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? '')) : null;
+        const og = OWNER_FACING ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''), body.stewardship as IncomingDelegation | undefined) : null;
         callerClientId = og?.ok ? (og.clientId ?? null) : null;
         const bg = OWNER_FACING
           ? og!

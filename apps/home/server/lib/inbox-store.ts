@@ -12,7 +12,7 @@
 // 409) or an unconfigured bridge reads the doc EMPTY and CANNOT write it — never a silent fallback.
 // Enabling interactions (person: sign-in/join ceremony; org: a steward enables it) is the one path
 // to a live inbox.
-import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from './interactions-bridge';
+import { interactionsBridgeConfigured, type InteractionsBridgeEnv } from './interactions-bridge';
 import { callInteractions } from '../connect/channels';
 
 /** The KV surface the inbox functions consume (raw strings). */
@@ -75,21 +75,31 @@ function cacheDrop(owner: string): void {
  * and now also accepts a relying id_token (§4.2), so any Home holding the owner's session drives these
  * with no secret at all — which is what spec 323 W4's portable Home asked for.
  *
- * Omitted ⇒ the bridge, unchanged. Kept ONLY for the org-scoped case: `ownerOrBridge` requires
- * `sa === principal`, and a steward reading their ORG's inbox is by definition not the principal.
- * Passing a session there would fail closed, so the caller passes it only when owner === the session's
- * own SA. That is a branch on WHO, decided before the call — not a fallback after one fails.
+ * `stewardship` covers the ORG case: an org has no session, so a steward fails `sa === principal` by
+ * definition. Presenting the org's stewardship delegation is how they prove the right — the SAME proof
+ * `applications.*` and `content.*` take. Before it existed the org path had no option but the shared
+ * secret, not because a secret was the right authority but because nothing else could express "this
+ * person may act for this org".
+ *
+ * Neither omitted ⇒ the bridge, unchanged.
  */
-export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: string): Promise<InboxKV> {
+export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: string, stewardship?: unknown): Promise<InboxKV> {
   const real = env.AUTH_CODES;
-  /** The one place this module chooses its authority. `session` ⇒ the owner's own credential;
-   *  otherwise the shared secret. Chosen per CALLER, before the request — never after a failure. */
+  /**
+   * The one place this module chooses its authority — and there is now only ONE to choose.
+   *
+   * The bridge branch is GONE (spec 341 §1). Both callers pass a session: the person's own for their
+   * inbox, the same session plus the org's stewardship delegation for an org's. So the shared-secret
+   * path was unreachable, and an unreachable fallback is not a safety net — it is a second mechanism
+   * waiting for someone to route to it (ADR-0013).
+   *
+   * Fail-closed: no session ⇒ no read. That is the correct answer, because without one there is
+   * nothing to check except possession of a secret, which is what this removes.
+   */
   const doOp = async <T>(op: 'inbox.get' | 'inbox.put', payload: Record<string, unknown>): Promise<{ ok: boolean; body: T & { error?: string } } | null> => {
-    if (session) {
-      const r = await callInteractions(env as never, owner, op, { ...payload, session }).catch(() => null);
-      return r ? { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string } } : null;
-    }
-    return bridgeInteractions<T>(env, owner, op, payload).catch(() => null);
+    if (!session) return null;
+    const r = await callInteractions(env as never, owner, op, { ...payload, session, ...(stewardship ? { stewardship } : {}) }).catch(() => null);
+    return r ? { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string } } : null;
   };
 
   const ownerKey = owner.toLowerCase();

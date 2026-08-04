@@ -25,7 +25,7 @@ import { sha256Hex32, type MessageBodyStore, type MessageEnvelopeV1 } from '@age
  *  paths that wrote into someone's inbox (spec 341 §5.2), and narrowing the TYPE is what stops one
  *  quietly coming back — a `MessageBodyStore` would compile the moment somebody re-added `putBody`. */
 export type MessageBodyReader = Pick<MessageBodyStore, 'loadBody'>;
-import { bridgeInteractions, interactionsBridgeConfigured, type InteractionsBridgeEnv } from '../lib/interactions-bridge';
+import { interactionsBridgeConfigured, type InteractionsBridgeEnv } from '../lib/interactions-bridge';
 
 // spec 323 W3 — the body store is FULLY DO-mediated (bridge get/put); the Home no longer needs a
 // vault transport base or the delivery wire, so `BodyStoreEnv` is just the bridge env.
@@ -38,7 +38,14 @@ type BodyStoreEnv = InteractionsBridgeEnv;
  * per-owner provisioning, NOT a runtime error-fallback). Thread into `readInboxView`/`sendFromInbox`/
  * `replyInConversation`/`deliverToInbox`.
  */
-export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Promise<MessageBodyReader | undefined> {
+export function makeBodyStoreFactory(
+  env: BodyStoreEnv,
+  /** spec 341 §1 — the reader's own session, and the org's stewardship delegation when the owner is an
+   *  org. Bodies are the person's mail: what should authorize reading them is being the owner or
+   *  proving the right to act for one, not holding a secret shared with one server. */
+  session?: string,
+  stewardship?: unknown,
+): (owner: string) => Promise<MessageBodyReader | undefined> {
   return async (owner: string) => {
     // spec 323 W3 — the owner's 1-1 body store is FULLY DO-mediated: the Home holds NO delivery wire.
     // READ-ONLY since spec 341 §5.2. It rides `inbox.body.get` (interactions grant, dm-namespace) and
@@ -52,7 +59,12 @@ export function makeBodyStoreFactory(env: BodyStoreEnv): (owner: string) => Prom
       // now written by the RECIPIENT's own DO, under the recipient's own wire, after the recipient's
       // gate. One bridge call site fewer; the ratchet moves for the first time.
       async loadBody(envelope: MessageEnvelopeV1): Promise<Uint8Array> {
-        const r = await bridgeInteractions<{ record?: { b64?: string } | null }>(env, owner, 'inbox.body.get', { resource: envelope.body.resource });
+        const { callInteractions } = await import('./channels');
+        // No session ⇒ no read. The bridge is not kept as a fallback: an unreachable second mechanism
+        // is one waiting to be routed to (ADR-0013).
+        if (!session) throw new Error(`message body ${envelope.body.resource} needs the owner's session`);
+        const raw = await callInteractions(env as never, owner, 'inbox.body.get', { resource: envelope.body.resource, session, ...(stewardship ? { stewardship } : {}) });
+        const r = { ok: raw.status < 400 && raw.body.ok !== false, body: raw.body as { record?: { b64?: string } | null; error?: string } };
         if (!r.ok || !r.body.record?.b64) throw new Error(r.body.error ?? `message body ${envelope.body.resource} not readable via InteractionsDO`);
         const bin = atob(r.body.record.b64);
         const bytes = new Uint8Array(bin.length);

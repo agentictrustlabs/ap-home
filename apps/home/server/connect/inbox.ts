@@ -22,6 +22,8 @@ import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, readCaseDetermination } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
+// spec 341 §1 — the org's stewardship delegation is what lets a steward reach its inbox without a secret.
+import { stewardWireFor } from './channels';
 import { makeInboxKv, type InboxKV } from '../lib/inbox-store';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
@@ -155,10 +157,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
   // ?contextKind=…[&contextId=…] → related-messages view (spec 312 §8.2) —
   // the same projection the inbox renders, filtered; never a second index.
-  // spec 341 §1 — the person's OWN inbox rides their session, not the shared secret. An org-scoped
-  // read (`?agent=`) keeps the bridge: `ownerOrBridge` requires sa === principal, and a steward is by
-  // definition not the org. Decided on WHO, before the call.
-  const inboxKv = await makeInboxKv(env, owner, owner.toLowerCase() === person.toLowerCase() ? bearer : undefined);
+  // spec 341 §1 — the person's own inbox rides their session; an ORG's rides the same session plus the
+  // org's stewardship delegation, which is what proves this person may act for it. Neither is the
+  // shared secret. Decided on WHO, before the call (ADR-0013).
+  const self = owner.toLowerCase() === person.toLowerCase();
+  const stewardWire = self ? undefined : await stewardWireFor(env, person.toLowerCase(), owner.toLowerCase(), bearer).catch(() => null);
+  const inboxKv = await makeInboxKv(env, owner, bearer, stewardWire ?? undefined);
   const contextKind = url.searchParams.get('contextKind');
   if (contextKind) {
     const items = await readMessagesByContext(inboxKv, owner, {
@@ -175,7 +179,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // the portal keeps its metadata-first fast paint. A thread hydrate (?conversationId) is unaffected.
   const wantConversationId = url.searchParams.get('conversationId') ?? undefined;
   const wantPreview = url.searchParams.get('preview') === '1';
-  const bodyStore = wantConversationId || wantPreview ? await makeBodyStoreFactory(env)(owner) : undefined;
+  const bodyStore = wantConversationId || wantPreview ? await makeBodyStoreFactory(env, bearer, stewardWire ?? undefined)(owner) : undefined;
   const view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
@@ -237,7 +241,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!owner) return jsonCors({ error: 'not authorized for that agent inbox' }, request, 403);
 
   // The inbox is vault-resident (spec 316 §11a): each owner's `inbox.data` lives in their MCP vault.
-  const inboxKvFor = (o: string): Promise<InboxKV> => makeInboxKv(env, o, o.toLowerCase() === person.toLowerCase() ? bearerP : undefined);
+  const inboxKvFor = async (o: string): Promise<InboxKV> => {
+    const isSelf = o.toLowerCase() === person.toLowerCase();
+    const wire = isSelf ? undefined : await stewardWireFor(env, person.toLowerCase(), o.toLowerCase(), bearerP).catch(() => null);
+    return makeInboxKv(env, o, bearerP, wire ?? undefined);
+  };
   const inboxKv = await inboxKvFor(owner);
 
   try {
