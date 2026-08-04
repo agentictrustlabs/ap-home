@@ -120,3 +120,67 @@ export function makeMessagingSkills(recipientSA: string, deliverDoc: DeliverDocF
     makeDeliverHandler(recipientSA, 'interactions.deliverCredential', 'interactions.credential.receipt', deliverDoc),
   ];
 }
+
+/**
+ * `org.apply` — a MEMBERSHIP APPLICATION, admitted the way mail is (spec 341 §5.5a).
+ *
+ * WHY THIS IS THE SAME SHAPE AS DELIVERY, not a new one. An application is unsolicited contact from
+ * someone with no standing authority over the organization — which is exactly what mail is, and what
+ * `messaging.deliver` already models. The property both rely on is easy to state and easy to lose:
+ *
+ *   NOTHING THE SENDER PRESENTS CARRIES WRITE AUTHORITY.
+ *
+ * The applicant's transport grant authorizes *asking*: `authorizeA2aMessage` checks it names this org
+ * in `allowedTargets` and this skill in `allowedMethods`, is inside its window, ERC-1271-verifies
+ * against the applicant, is unrevoked on-chain, and carries a single-use message id. Having passed all
+ * of that, it still writes nothing. The ORG's own grant performs the write, inside the org's own DO.
+ *
+ * ANYONE MAY APPLY, and that is correct rather than a gap. A self-grant naming any org can be minted
+ * by anyone, for the same reason anyone can send you mail. The bounds are mail's bounds: the single-use
+ * id stops replay, one entry per applicant means re-applying updates in place rather than flooding, and
+ * the org can simply decline. AN APPLICATION CONFERS NOTHING (ADR-0041) — and neither does approval:
+ * the member writes their own membership on join (ADR-0048).
+ */
+export function makeOrgApplySkill(orgSA: string, appendApplication: AppendApplicationFn): SkillHandler {
+  const org = orgSA.toLowerCase();
+  return {
+    skill: 'org.apply',
+    handle: async (ctx: SkillContext): Promise<SkillResult> => {
+      const i = (ctx.input ?? {}) as { message?: unknown; org?: unknown };
+      const message = typeof i.message === 'string' ? i.message.trim() : '';
+      if (!message) return { state: 'failed', error: 'org.apply requires input { message }' };
+      if (message.length > 2000) return { state: 'failed', error: 'application message is too long (2000 chars)' };
+      // The addressee must be THIS org. `allowedTargets` already bound it, but a payload naming a
+      // different org would be recorded here as if it had been sent elsewhere.
+      if (typeof i.org === 'string' && i.org.toLowerCase() !== org) {
+        return { state: 'failed', error: 'application is not addressed to this organization' };
+      }
+      // The APPLICANT is `ctx.principal` — the transport grant's delegator, the identity the gate
+      // verified. Never a field in the payload: a self-declared applicant is how a stranger applies
+      // in someone else's name.
+      const applicant = ctx.principal.toLowerCase();
+      await appendApplication({
+        applicationId: `app_${crypto.randomUUID()}`,
+        applicant,
+        message,
+        submittedAt: new Date().toISOString(),
+      });
+      const receiptId = await ctx.emitArtifact({
+        artifactKind: 'org.application.receipt',
+        // A receipt that it was RECORDED, explicitly not that it was accepted. The distinction is the
+        // whole of ADR-0041 in one field.
+        body: { org, applicant, recordedAt: new Date().toISOString(), decision: 'pending' },
+      });
+      return { state: 'completed', artifactIds: [receiptId] };
+    },
+  };
+}
+
+/** Appends into the ORG's `org.applications` doc via its own DO, under the ORG's own grant. One entry
+ *  per applicant — re-applying updates in place. */
+export type AppendApplicationFn = (application: {
+  applicationId: string;
+  applicant: string;
+  message: string;
+  submittedAt: string;
+}) => Promise<void>;

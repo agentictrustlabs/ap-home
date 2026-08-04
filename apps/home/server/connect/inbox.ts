@@ -266,17 +266,26 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       const orgSa = (body.org ?? '').trim().toLowerCase();
       if (!/^0x[0-9a-fA-F]{40}$/.test(orgSa)) return jsonCors({ error: 'org (SA) required' }, request, 400);
       if (orgSa === owner.toLowerCase()) return jsonCors({ error: 'cannot apply to your own agent' }, request, 400);
-      const { bridgeInteractions } = await import('../lib/interactions-bridge');
-      const cur = await bridgeInteractions<{ doc?: { applications?: OrgApplication[] } }>(env, orgSa, 'applications.get', {}).catch(() => null);
-      const apps = (cur?.ok ? cur.body.doc?.applications : undefined) ?? [];
-      const applicationId = `app_${crypto.randomUUID()}`;
-      const next = [
-        ...apps.filter((a) => a.applicant.toLowerCase() !== owner.toLowerCase()),
-        { applicationId, applicant: owner, message: body.bodyText?.trim() || 'Requesting to join this organization.', submittedAt: new Date().toISOString() },
-      ];
-      const put = await bridgeInteractions(env, orgSa, 'applications.put', { doc: { applications: next } });
-      if (!put.ok) return jsonCors({ error: put.body.error ?? `submit failed (${put.status})` }, request, 502);
-      return jsonCors({ ok: true, applicationId }, request);
+      // spec 341 §5.5a — ADMISSION, not a write. The Home used to read the org's applications doc,
+      // append, and write it back over the shared secret: a stranger's submission performed with an
+      // authority that could have edited anything in that org. Now the applicant's OWN agent sends
+      // `org.apply` to the org's agent, and the ORG's own grant does the writing after its gate
+      // admits. Nothing the applicant presents carries write authority.
+      //
+      // The Home relays the intent to the applicant's agent; it holds no authority over either party.
+      const { callInteractions } = await import('./channels');
+      const r = await callInteractions(env, owner, 'messaging.send', {
+        session: bearerP,
+        recipient: orgSa,
+        skill: 'org.apply',
+        applicationMessage: body.bodyText?.trim() || 'Requesting to join this organization.',
+      });
+      // A `wire_absent` / `recipient_not_in_wire` refusal is passed through verbatim: applying needs
+      // the same one-time approval sending does, and the person resolves it at their Home.
+      if (r.status >= 400 || r.body.ok === false) {
+        return jsonCors({ error: r.body.error ?? 'apply failed', code: r.body.code }, request, r.status >= 400 ? r.status : 502);
+      }
+      return jsonCors({ ok: true, applicationId: r.body.messageId ?? null }, request);
     }
     if (body?.action === 'read' || body?.action === 'archive') {
       if (!body.messageId) return jsonCors({ error: 'messageId required' }, request, 400);

@@ -48,6 +48,11 @@ export const MESSAGING_WIRE_SKILLS = [
   'messaging.deliver',
   'interactions.respond',
   'interactions.deliverCredential',
+  // spec 341 §5.5a — applying to an organization is the same act as sending mail: the agent asks on
+  // the person's behalf and the recipient decides. It rides the SAME wire because it is the same
+  // consent — "my agent may contact people for me" — and enumerating it keeps that literal. A wildcard
+  // would have covered it silently, which is the difference this list exists to preserve.
+  'org.apply',
 ] as const;
 
 /** Default lifetime. Long enough to span a working session, short enough that expiry is a real bound

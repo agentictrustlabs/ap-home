@@ -49,7 +49,7 @@ import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessio
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
-import { makeMessagingSkills } from './messaging-skills.js';
+import { makeMessagingSkills, makeOrgApplySkill } from './messaging-skills.js';
 import { skillProvenanceMetadata } from './skill-provenance.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
 import { caip10 } from './custody-oidc.js';
@@ -778,7 +778,18 @@ export class A2aTaskDO {
             return { state: 'completed' };
           },
         },
-        makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(), ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+        makeOrchestrateSkill(this.env, agentSA), makeEndeavorRequestSkill(this.env, agentSA), makeEndeavorStateSkill(this.env, agentSA), makeConsultSkill(this.env, agentSA, this.state.storage), ...makeContentSkills(),
+        // spec 341 §5.5a — admission for a stranger: the applicant's grant authorizes ASKING; this
+        // org's own grant does the writing, in its own DO.
+        makeOrgApplySkill(agentSA, async (application) => {
+          const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(agentSA.toLowerCase()));
+          const resp = await stub.fetch(new Request(`https://do/interactions/${agentSA.toLowerCase()}/internal.applications.append`, {
+            method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify({ application }),
+          }));
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!resp.ok || !out.ok) throw new Error(out.error ?? `application append failed (${resp.status})`);
+        }),
+        ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));

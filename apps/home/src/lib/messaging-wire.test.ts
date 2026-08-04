@@ -44,9 +44,16 @@ describe('the wire speaks for the person, signed by the person', () => {
     expect(signed).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it('carries all three delivery skills by default, none of them a wildcard', async () => {
+  it('names every skill it carries, and none of them is a wildcard', async () => {
     const d = await mint();
-    expect(MESSAGING_WIRE_SKILLS).toHaveLength(3);
+    // The COUNT is not the property — it was pinned at 3 and broke the moment `org.apply` joined the
+    // same consent. What must hold is that every entry is a NAMED skill: a wire that could invoke
+    // everything on a recipient is the standing authority this replaces.
+    expect(MESSAGING_WIRE_SKILLS.length).toBeGreaterThan(0);
+    for (const skill of MESSAGING_WIRE_SKILLS) {
+      expect(skill).toMatch(/^[a-z]+\.[a-zA-Z]+$/);
+      expect(skill).not.toBe('*');
+    }
     expect(caveat(d, CONTRACTS.allowedMethodsEnforcer)).toBeDefined();
   });
 

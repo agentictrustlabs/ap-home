@@ -12,10 +12,17 @@
 
 import { describe, it, expect } from 'vitest';
 import { MOUNTED_PEER_SKILLS, withMountedSkills, buildA2aAgentCard, type A2aSkill } from '../src/host-context.js';
-import { makeMessagingSkills } from '../src/messaging-skills.js';
+import { makeMessagingSkills, makeOrgApplySkill } from '../src/messaging-skills.js';
 
 const RECIPIENT = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const mountedIds = makeMessagingSkills(RECIPIENT, async () => undefined).map((h) => h.skill).sort();
+// EVERY factory the runtime mounts peer-callable skills from, not just one. The first version listed
+// `makeMessagingSkills` alone, so it passed happily when `org.apply` was mounted from a DIFFERENT
+// factory and left off the Card — the exact drift this test exists to prevent, reproduced by the test
+// itself. A coupling check that couples to one source is an advertisement for the others.
+const mountedIds = [
+  ...makeMessagingSkills(RECIPIENT, async () => undefined),
+  makeOrgApplySkill(RECIPIENT, async () => undefined),
+].map((h) => h.skill).sort();
 
 describe('the Card and the runtime cannot drift', () => {
   it('advertises EXACTLY the skills the runtime mounts', () => {

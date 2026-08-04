@@ -156,6 +156,12 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
     tags: ['interactions', 'a2a'],
   },
   {
+    id: 'org.apply',
+    name: 'Apply to join',
+    description: 'Submit a membership application to this organization. Anyone may apply; applying confers nothing, and approval creates no membership — the member writes their own on join.',
+    tags: ['membership', 'a2a'],
+  },
+  {
     id: 'interactions.deliverCredential',
     name: 'Deliver a credential',
     description: 'Deliver a verifiable credential into this agent’s inbox. Admission is not acceptance — holding a credential grants nothing here.',

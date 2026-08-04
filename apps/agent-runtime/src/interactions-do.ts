@@ -1106,7 +1106,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1397,6 +1397,25 @@ export class InteractionsDO {
         // AND consult answers) + their display name. Deliberately NOT gated on the auto-reply
         // assistant being enabled: consultability is its own opt-in (the delegation); the playbook
         // is guidance either way. Read-only; returns markdown + name, never bodies or mail.
+        if (op === 'internal.applications.append') {
+          // spec 341 §5.5a — the ORG admitting an application into its OWN vault, under its OWN grant.
+          // Reached only from this Worker (the `org.apply` skill), after the org's A2A gate verified
+          // the applicant's transport grant. Nothing the applicant presented reaches this write.
+          const app = body.application as { applicationId?: string; applicant?: string; message?: string; submittedAt?: string } | undefined;
+          const applicant = String(app?.applicant ?? '').toLowerCase();
+          if (!app?.applicationId || !/^0x[0-9a-f]{40}$/.test(applicant)) {
+            return json({ error: 'application { applicationId, applicant } required' }, 400);
+          }
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ applications?: unknown[] }>(g, APPLICATIONS_RESOURCE, { applications: [] });
+            const rows = Array.isArray(doc?.applications) ? doc.applications : [];
+            // ONE entry per applicant: re-applying updates in place rather than accumulating, which is
+            // what turns "anyone may apply" from a queue-flooding hole into an ordinary inbox.
+            const next = [...rows.filter((r) => String((r as { applicant?: string }).applicant ?? '').toLowerCase() !== applicant), app];
+            await this.writeDoc(g, APPLICATIONS_RESOURCE, { applications: next });
+            return json({ ok: true });
+          });
+        }
         if (op === 'internal.consult.context') {
           const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, PERSON_ASSISTANT_SKILL_RESOURCE, null);
           const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
@@ -2642,6 +2661,35 @@ export class InteractionsDO {
         if (!cover.targets.includes(recipient as Address)) {
           return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: cover.targets, sessionKey }, 409);
         }
+        // spec 341 §5.5a — `org.apply` is a different PAYLOAD on the same rail: an application is not
+        // an envelope, so there is nothing to build and nothing to record in the sender's own inbox.
+        // The org's gate admits it and the org's grant writes it.
+        const requestedSkill = String(body.skill ?? MESSAGING_DELIVER_SKILL);
+        if (requestedSkill === 'org.apply') {
+          const applicationMessage = String(body.applicationMessage ?? '').trim();
+          if (!applicationMessage) return json({ error: 'applicationMessage required' }, 400);
+          try {
+            const out = await deliverOutbound({
+              personSA: principal as Address,
+              recipientSA: recipient as Address,
+              transportGrant: rec.transport,
+              signAsPerson: async (h: Hex) => {
+                const acct = await interactionsSessionAccount(this.env);
+                if (!acct.sign) throw new Error('interactions-session KMS account lacks raw-digest sign');
+                return wrapSessionSignature(rec.wire, await acct.sign({ hash: h }));
+              },
+              payload: { message: applicationMessage, org: recipient } as never,
+              skill: 'org.apply',
+              transport: this.a2aTransport(),
+            });
+            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.org.apply', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'org', id: recipient } });
+            return json({ ok: true, taskId: out.taskId, messageId: out.taskId });
+          } catch (e) {
+            const reason = e instanceof Error ? e.message : String(e);
+            return json({ error: `application rejected by the organization: ${reason}` }, 409);
+          }
+        }
+
         const built = await buildOutboundMessage({
           from: caip10(chainId, principal as Address) as never,
           to: caip10(chainId, recipient as Address) as never,
