@@ -24,7 +24,7 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
-import { callInteractions } from './channels';
+
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -57,11 +57,31 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
-/** The deployment's interactions session key — read from the DO, never from the request. */
-async function sessionKeyFor(env: FnContext['env'], person: string): Promise<string | null> {
-  const r = await callInteractions(env, person, 'routingStatus', {}).catch(() => null);
-  const k = r?.body?.sessionKey as string | undefined;
-  return typeof k === 'string' && /^0x[0-9a-fA-F]{40}$/.test(k) ? k.toLowerCase() : null;
+/**
+ * The deployment's interactions session key — read from demo-a2a's PUBLIC endpoint, never from the
+ * request.
+ *
+ * `GET /agent/interactions-session-key` already exists for exactly this, and its own comment says "the
+ * Home fetches this at the enable ceremony". An earlier version of this file reached it through
+ * `callInteractions` instead, which added a session-RPC call during a wave whose purpose is removing
+ * them — caught by `check:no-hmac-home-bridge`, which is why the ratchet exists.
+ *
+ * The address is public (it is the delegate every wire names) and is NOT per-person, so no session or
+ * principal is involved in reading it. 404 means bound-mint is unconfigured on this deployment, which
+ * is a legitimate state: no key, no wire, and the caller is told so rather than handed a wrong one.
+ */
+async function sessionKeyFor(env: FnContext['env']): Promise<string | null> {
+  const base = (env as { A2A_CUSTODY_URL?: string }).A2A_CUSTODY_URL?.replace(/\/$/, '');
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/agent/interactions-session-key`, { headers: { accept: 'application/json' } });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { ok?: boolean; address?: string };
+    const k = body.ok && typeof body.address === 'string' ? body.address : null;
+    return k && /^0x[0-9a-fA-F]{40}$/.test(k) ? k.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 interface StoredWire {
@@ -78,7 +98,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   return json(
     {
       ok: true,
-      sessionKey: await sessionKeyFor(env, person),
+      sessionKey: await sessionKeyFor(env),
       wirePresent: Boolean(stored),
       recipients: stored?.recipients ?? [],
     },
@@ -102,7 +122,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   // 2. It must delegate to THIS deployment's session key. Without this, a caller could install a wire
   //    delegating to a key they control — perfectly valid, and valid to the wrong party.
-  const expected = await sessionKeyFor(env, person);
+  const expected = await sessionKeyFor(env);
   if (!expected) {
     return json({ error: 'interactions session key is not provisioned on this deployment' }, request, 409);
   }
