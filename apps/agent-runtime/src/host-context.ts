@@ -124,6 +124,52 @@ export function withConsultSkill(skills: A2aSkill[], consultable: boolean): A2aS
   return [...skills, CONSULT_SKILL_CARD];
 }
 
+/**
+ * THE PEER-CALLABLE SKILLS THIS RUNTIME MOUNTS (spec 341 §2.3).
+ *
+ * The Card advertised ONLY the agent's self-asserted `atl:skills` labels, and every bound agent served
+ * `skills: []` because almost nobody sets that property. Meanwhile `makeMessagingSkills` mounts three
+ * handlers on every agent's task runtime. So the Card omitted the entire messaging rail, and the §2 exit
+ * criterion — *a third-party agent, reading only the public Card, can invoke `messaging.deliver`* —
+ * could not be met by any agent on the deployment.
+ *
+ * These are MOUNTED facts, not claims: they are registered for every agent by `makeMessagingSkills`, so
+ * advertising them is honest for all of them. A skill that stops being mounted MUST leave this list —
+ * an over-claiming Card is worse than a silent one, because a peer builds against it and fails at the
+ * gate with an authorization error that has nothing to do with authorization.
+ *
+ * A CARD ENTRY IS A DESCRIPTION, NEVER AUTHORITY (ADR-0041). Learning that `messaging.deliver` exists
+ * tells a peer what to send; it grants nothing. Reaching it still requires a delegation naming this
+ * agent in `allowedTargets` and the skill's selector in `allowedMethods`, verified on-chain per message.
+ */
+export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
+  {
+    id: 'messaging.deliver',
+    name: 'Deliver a message',
+    description: 'Admit a signed message envelope into this agent’s inbox. Requires a delegation scoped to this agent and this skill; a message is never authority.',
+    tags: ['messaging', 'a2a'],
+  },
+  {
+    id: 'interactions.respond',
+    name: 'Respond to an interaction',
+    description: 'Deliver a response within an existing interaction. Same authorization shape as messaging.deliver.',
+    tags: ['interactions', 'a2a'],
+  },
+  {
+    id: 'interactions.deliverCredential',
+    name: 'Deliver a credential',
+    description: 'Deliver a verifiable credential into this agent’s inbox. Admission is not acceptance — holding a credential grants nothing here.',
+    tags: ['interactions', 'credentials', 'a2a'],
+  },
+];
+
+/** Merge the mounted peer skills into an agent's advertised set, dedup by id. Self-asserted labels win
+ *  on collision: the agent's own description of a skill is more specific than this generic one. */
+export function withMountedSkills(skills: A2aSkill[]): A2aSkill[] {
+  const have = new Set(skills.map((s) => s.id));
+  return [...skills, ...MOUNTED_PEER_SKILLS.filter((s) => !have.has(s.id))];
+}
+
 /** Map an agent's publicly-asserted skill labels (spec 282 `atl:skills`, comma-joined) to A2A skill cards. */
 export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
   if (!csv) return [];

@@ -59,7 +59,7 @@ import {
   caip10,
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -885,8 +885,13 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
         args: [ctx.agent, keccak256(toBytes('atl:skills'))],
       })) as string;
       skills = skillsFromLabels(csv);
-    } catch { /* best-effort — serve the card without skills */ }
+    } catch { /* best-effort — serve the card without self-asserted skills */ }
   }
+  // spec 341 §2.3 — advertise what this runtime MOUNTS, not only what the agent claims. Bound agents
+  // only: an unbound host (no `ctx.agent`) serves no per-agent skills, because there is no agent whose
+  // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
+  // self-asserted labels and never the mounted ones.
+  if (ctx.agent) skills = withMountedSkills(skills);
   return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined, !!c.env.SKILLS_CORPUS_URL?.trim()));
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
