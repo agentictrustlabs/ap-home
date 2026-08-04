@@ -415,3 +415,44 @@ describe('a relying app cannot enumerate the vault or write to it', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+// ── spec 341 §4.3c — the owner-only class ─────────────────────────────────────────────────────────
+//
+// "Self access only" read `sessionSa === principal`, which is TRUE for any app holding the person's
+// token — the subject IS the person. So it meant "the person, or anything they ever connected". The
+// list below is what that quietly exposed; `readgrant.*` is the sharpest, because an app administering
+// the mechanism that bounds apps could revoke its peers.
+describe('owner-only ops are not reachable by an app authenticated as the person', () => {
+  const OWNER_ONLY = [
+    'readgrant.put', 'readgrant.list', 'readgrant.revoke',
+    'relationships.get', 'relationships.merge',
+    'inbox.assistantSkill.put', 'member.profile.put', 'membership.put', 'grants.list',
+  ];
+
+  it('every one of them refuses a caller proving someone ELSE', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    for (const op of OWNER_ONLY) {
+      const r = await call(op, token, ORG);
+      expect(r.ok, op).toBe(false);
+    }
+  });
+
+  it('every one of them refuses an unauthenticated caller', async () => {
+    for (const op of OWNER_ONLY) {
+      const r = await doInstance.fetch(new Request(`https://do.test/interactions/${MEMBER}/${op}`, {
+        method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
+      }));
+      expect(r.ok, op).toBe(false);
+    }
+  });
+
+  it('leaves the ops a relying app legitimately drives alone', async () => {
+    // `channels.*` is steward/member-gated by a DELEGATION, not by the session, and driving it with a
+    // relying token is the documented use. Blanket-refusing would have broken uupg — which is why the
+    // owner-only set is enumerated rather than derived from "is self-gated".
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('channels.list', token, ORG);
+    // Refused for want of AUTHORITY (no membership), never with the owner-only code.
+    expect(JSON.stringify(await r.json().catch(() => ({})))).not.toContain('owner_only');
+  });
+});

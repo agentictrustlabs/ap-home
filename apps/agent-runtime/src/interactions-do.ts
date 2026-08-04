@@ -1818,6 +1818,45 @@ export class InteractionsDO {
     const sessionSa = gate.sa;
     const sessionCaip = gate.caip;
 
+    /**
+     * OWNER-ONLY OPS — spec 341 §4.3c, the audit of this block.
+     *
+     * THE CLASS. Every op here is reachable with a relying id_token, because this block has accepted
+     * one since before per-app grants existed. Its self-checks read `sessionSa === principal`, and that
+     * is TRUE for any app holding the person's token — the subject IS the person. So "self access only"
+     * meant "the person, or anything they ever connected", which is not what it says and not what a
+     * person reading it would expect.
+     *
+     * THE LINE. A relying app AUTHENTICATES as the person; it is not the person. Ops that CONFIGURE the
+     * person's agent or write their private records belong to the owner. Ops a relying app legitimately
+     * drives — `channels.*`, `directory.*` — are steward/member-gated by a delegation and are the
+     * documented use; they are deliberately untouched.
+     *
+     * WHY THESE, specifically:
+     *  · `readgrant.*` — GRANT MANAGEMENT. Left open, any connected app could revoke another app's read
+     *    grant (a denial of service against its peers) or install one under a clientId of its choosing.
+     *    An app administering the very mechanism that bounds apps is the sharpest edge found here.
+     *  · `relationships.*` — person↔org links are PRIVATE vault credentials, never app-readable
+     *    (ADR-0025). This is the one with the clearest existing doctrine and no gate enforcing it.
+     *  · `inbox.assistant*` — the auto-reply config and the SKILL.md playbook. An app could rewrite what
+     *    the person's agent says on their behalf, which is authorship, not access.
+     *  · `member.profile.put`, `membership.put` — identity and membership writes.
+     *  · `grants.list` — enumerating a person's authority surface.
+     *
+     * Verified against both live consumers before landing: `uupg` drives `channels.*`, `status` and the
+     * `messaging.*` rail; the `~/skills` registry drives none of these. Neither is affected.
+     */
+    const OWNER_ONLY = new Set([
+      'readgrant.put', 'readgrant.list', 'readgrant.revoke',
+      'relationships.get', 'relationships.merge',
+      'inbox.assistantEnable', 'inbox.assistantDisable', 'inbox.assistantGet',
+      'inbox.assistantSkill.get', 'inbox.assistantSkill.put',
+      'member.profile.put', 'membership.put', 'grants.list',
+    ]);
+    if (skillsClientId && OWNER_ONLY.has(op)) {
+      return json({ error: 'this is the owner’s own operation — an app authenticated as them may not perform it', code: 'owner_only' }, 403);
+    }
+
     const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
     const grant = st.grant;
     if (!grant) return json({ error: 'no interactions grant — a steward must enable storage for this agent' }, 409);
