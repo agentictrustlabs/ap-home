@@ -1808,9 +1808,11 @@ export class InteractionsDO {
     // so verifyHomeSession is tried first and verifyRelyingIdToken second. Both resolve to the person's
     // SA; AUTHORIZATION is still enforced below by the on-chain steward/member gate. ──
     let gate = await verifyHomeSession(String(body.session ?? ''), this.env);
+    /** The relying app that called, when one did. Null for the person's own Home (spec 341 §4.3b). */
+    let skillsClientId: string | null = null;
     if (!gate.ok) {
       const relying = await verifyRelyingIdToken(String(body.session ?? ''), this.env);
-      if (relying.ok) gate = relying;
+      if (relying.ok) { gate = relying; skillsClientId = relying.clientId; }
     }
     if (!gate.ok) return json({ error: gate.error }, gate.status);
     const sessionSa = gate.sa;
@@ -2839,6 +2841,18 @@ export class InteractionsDO {
         // demo-mcp's list is record-scope-filtered to the interactions grant, so app-specific records under
         // other grants never appear (least-privilege).
         if (sessionSa.toLowerCase() !== principal) return json({ error: 'this vault belongs to the principal — self access only' }, 403);
+        // spec 341 §4.3b — NOT for relying apps, and this is a pre-existing exposure the per-app work
+        // surfaced rather than created. This block has accepted relying id_tokens since before per-app
+        // grants existed, and `sessionSa === principal` is TRUE for any app holding the person's token
+        // — the subject IS the person. So enumeration was reachable by every connected app, under the
+        // broad interactions grant, which is precisely what scoped grants exist to prevent: an app that
+        // may read ONE record family could still learn every record type the person has.
+        //
+        // Reading a named record under a scoped grant is `record.get`. There is no scoped form of
+        // "list everything", so there is nothing to widen to — this is refused, not deferred.
+        if (skillsClientId) {
+          return json({ error: 'enumerating this vault is the owner’s own operation — an app reads named records under its grant', code: 'read_grant_no_enumerate' }, 403);
+        }
         const records = await this.vaultFor(grant).list('');
         return json({ ok: true, records });
       }
@@ -2846,6 +2860,47 @@ export class InteractionsDO {
         if (sessionSa.toLowerCase() !== principal) return json({ error: 'this record belongs to the principal — self access only' }, 403);
         const recordType = String(body.recordType ?? '');
         if (!recordType) return json({ error: 'recordType required' }, 400);
+        // spec 341 §4.3b — A RELYING APP READS UNDER ITS OWN GRANT.
+        //
+        // This is what lets an app read a person's PRIVATE CAPABILITY RECORD (`skills.data`) without
+        // being handed the broad interactions grant that reaches everything else. `readgrant.put` could
+        // already store such a grant; until now nothing consumed one, so a capability-scoped grant was
+        // issuable and inert.
+        //
+        // WRITES STAY OFF THIS RAIL, permanently as far as this op is concerned. A read grant is
+        // read-only by construction (`ops: ['read']`), so an app presenting one cannot write — but
+        // relying on demo-mcp to refuse would mean the request is made and the refusal arrives from a
+        // hop away. Refused here, by identity, so the boundary is visible where the decision is.
+        let recordGrant = grant;
+        if (skillsClientId) {
+          if (op === 'record.put') {
+            return json({ error: 'a relying app may read records, never write them', code: 'read_grant_read_only' }, 403);
+          }
+          const rec = (await this.state.storage.get(READ_GRANT_KEY(skillsClientId))) as ReadGrantRecord | undefined;
+          if (!rec) {
+            return json({ error: 'this app has no read grant — the person authorizes it once, and can revoke it alone', code: 'read_grant_absent', clientId: skillsClientId }, 409);
+          }
+          try {
+            const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [rec.hash as Hex] })) as boolean;
+            if (revoked) return json({ error: 'this app’s read grant was revoked', code: 'read_grant_revoked', clientId: skillsClientId }, 403);
+          } catch {
+            return json({ error: 'revocation check unavailable — read refused (fail-closed)' }, 503);
+          }
+          // The record IS the resource here, so coverage is checked directly rather than through
+          // `OP_RESOURCE`: `record.get` touches whatever the caller names, which is exactly why an app
+          // must not inherit a grant scoped for something else.
+          const need = `vault:${recordType}`;
+          let covered = false;
+          try {
+            const scopeCav = (rec.wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+            const granted = scopeCav?.terms ? decodeVaultRecordScopeTerms(scopeCav.terms as Hex).flatMap((gr) => gr.resources) : [];
+            covered = granted.some((r) => (r.endsWith('*') ? need.startsWith(r.slice(0, -1)) : r === need));
+          } catch { covered = false; }
+          if (!covered) {
+            return json({ error: `this app's read grant does not cover ${need}`, code: 'read_grant_scope', clientId: skillsClientId, need }, 403);
+          }
+          recordGrant = rec.wire;
+        }
         // WRITES stay whitelisted (only the known capability records may be written from here). READS defer
         // to demo-mcp's record-scope gate (the interactions grant's scope) so the vault viewer (spec 315)
         // can VIEW any Home-managed record; an out-of-scope record is denied at demo-mcp, never silently.
@@ -2854,7 +2909,7 @@ export class InteractionsDO {
           return json({ error: `recordType must be a capability record or a content.* record` }, 400);
         }
         if (op === 'record.get') {
-          const r = await this.vaultFor(grant).read<unknown>({ owner: '', resource: recordType });
+          const r = await this.vaultFor(recordGrant).read<unknown>({ owner: '', resource: recordType });
           return json({ ok: true, record: r?.data ?? null });
         }
         if (body.record === undefined) return json({ error: 'record required' }, 400);

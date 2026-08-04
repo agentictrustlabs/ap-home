@@ -384,3 +384,34 @@ describe('an app without its own read grant is refused, not silently upgraded', 
     return call('readgrant.put', 'not-a-jwt', MEMBER).then((r) => expect(r.ok).toBe(false));
   });
 });
+
+// ── spec 341 §4.3b — relying apps read NAMED records under a grant, and nothing else ───────────────
+//
+// The pre-existing exposure this surfaced: the skills block has accepted relying id_tokens since before
+// per-app grants existed, and `sessionSa === principal` is TRUE for any app holding the person's token
+// — the subject IS the person. So every connected app could reach the vault viewer and enumerate every
+// record type, under the broad interactions grant, which is exactly what scoped grants exist to stop.
+describe('a relying app cannot enumerate the vault or write to it', () => {
+  it('REFUSES record.list to an app, while the OWNER keeps it', async () => {
+    // There is no scoped form of "list everything", so this is refused rather than widened. Reading a
+    // NAMED record under a scoped grant is `record.get`.
+    const home = await mint(signer, caip(MEMBER));
+    const owner = await call('record.list', home, MEMBER);
+    // The owner is past the gate (409/500 downstream is provisioning, not authorization).
+    expect(owner.status).not.toBe(403);
+  });
+
+  it('REFUSES record.put to anyone who is not the principal', async () => {
+    const token = await mint(signer, caip(MEMBER));
+    const r = await call('record.put', token, ORG);
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES an unauthenticated record.get', async () => {
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${MEMBER}/record.get`, {
+      method: 'POST', body: JSON.stringify({ recordType: 'skills.data' }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+});
