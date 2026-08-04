@@ -47,6 +47,8 @@ const env = (over: Record<string, unknown> = {}) => ({
   CHAIN_ID: '84532',
   DELEGATION_MANAGER: '0x3333333333333333333333333333333333333333',
   A2A_CUSTODY_BRIDGE_SECRET: SECRET,
+  // spec 341 §7 — `internal.*` is gated by its OWN value now, not the custody secret.
+  A2A_INTERNAL_MARKER: SECRET,
   ...over,
 }) as unknown as ConstructorParameters<typeof A2aTaskDO>[1];
 
@@ -147,7 +149,7 @@ describe('the internal op is unreachable from outside (spec 327 §4)', () => {
   // FAIL-CLOSED on missing config, which is the direction that matters: an unset secret must not make
   // the marker check vacuous and open the op to anyone.
   it('REFUSES when the secret is UNCONFIGURED — an absent secret is not an open door', async () => {
-    const bare = new A2aTaskDO(fakeState() as unknown as DurableObjectState, env({ A2A_CUSTODY_BRIDGE_SECRET: '' }), permissive);
+    const bare = new A2aTaskDO(fakeState() as unknown as DurableObjectState, env({ A2A_INTERNAL_MARKER: '' }), permissive);
     const r = await bare.fetch(new Request('https://do.test/internal/discussion-respond', {
       method: 'POST', body: JSON.stringify({ principal: CALLER, channelId: 'ch_1' }),
       headers: { 'x-ap-internal': '' },

@@ -168,7 +168,7 @@ describe('archetypeSkillReader', () => {
     return {
       calls,
       env: {
-        A2A_CUSTODY_BRIDGE_SECRET: 'marker',
+        A2A_INTERNAL_MARKER: 'marker',
         INTERACTIONS: {
           idFromName: (n: string) => n,
           get: () => ({
@@ -215,8 +215,8 @@ describe('archetypeSkillReader', () => {
 
   it('refuses to read without the in-Worker marker', async () => {
     const { env } = envWith(() => ok({ ok: true, found: true, text: 'x' }));
-    await expect(archetypeSkillReader({ ...(env as object), A2A_CUSTODY_BRIDGE_SECRET: '' } as never, '0xabc')('ontologist'))
-      .rejects.toThrow(/no internal marker/);
+    await expect(archetypeSkillReader({ ...(env as object), A2A_INTERNAL_MARKER: '' } as never, '0xabc')('ontologist'))
+      .rejects.toThrow(/A2A_INTERNAL_MARKER/);
   });
 });
 
@@ -301,7 +301,7 @@ describe('resolveArchetypeMethod', () => {
     'ontology-grounding': '---\nname: ontology-grounding\n---\nGround first.',
   };
   const env = () => ({
-    A2A_CUSTODY_BRIDGE_SECRET: 'marker',
+    A2A_INTERNAL_MARKER: 'marker',
     INTERACTIONS: {
       idFromName: (n: string) => n,
       get: () => ({

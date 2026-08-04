@@ -70,6 +70,16 @@ printf '0x%s' "$(openssl rand -hex 32)" \
   | (cd "$APP_DIR" && wrangler secret put A2A_SESSION_SECRET --env "$ENV") >/dev/null
 echo "  ✓ A2A_SESSION_SECRET"
 
+# 3b. A2A_INTERNAL_MARKER (spec 341 §7) — the in-Worker DO↔DO marker.
+#     Generated HERE and never written anywhere: setter and checker are the same deployed Worker, so
+#     nothing else ever needs to know it. It used to be A2A_CUSTODY_BRIDGE_SECRET, which meant a leak
+#     of the Home↔demo-a2a custody secret also opened `internal.*` against any principal — one value
+#     carrying two very different trust levels. Rotating this one now affects nothing else.
+#     demo-a2a ONLY: the Home has no use for it and must not be given it.
+printf '0x%s' "$(openssl rand -hex 32)" \
+  | (cd "$APP_DIR" && wrangler secret put A2A_INTERNAL_MARKER --env "$ENV") >/dev/null
+echo "  ✓ A2A_INTERNAL_MARKER"
+
 # 4. Signer backend — branch on A2A_KMS_BACKEND.
 #    'gcp-kms'   → set GCP_SERVICE_ACCOUNT_JSON from .gcp-service-account.local.json
 #    other/unset → generate a fresh local EOA into A2A_MASTER_PRIVATE_KEY

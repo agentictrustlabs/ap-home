@@ -415,6 +415,10 @@ export interface Env {
    *  demo-a2a to derive SA_expected during the OIDC callback). Constant-time
    *  compared; the user's Google authn already happened at the broker. */
   A2A_CUSTODY_BRIDGE_SECRET?: string;
+  /** spec 341 §7 — the in-Worker DO↔DO marker. Split OFF the custody secret so a leak of that secret
+   *  no longer confers `internal.*` against any principal. Never leaves this Worker; fail-closed when
+   *  unset (see `internal-marker.ts`). */
+  A2A_INTERNAL_MARKER?: string;
   /** skill-provenance/v1 — base URL of the skills corpus (@skills/skill-corpus).
    *  When set, a SkillHandler tags its Artifact with the verifiable SKILL.md that
    *  shaped it (GET {SKILLS_CORPUS_URL}/tools/skill_reference). Unset ⇒ inert. */

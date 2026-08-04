@@ -46,6 +46,8 @@ import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext 
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
+// spec 341 §7 — the in-Worker marker, split off the custody secret.
+import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills } from './messaging-skills.js';
 import { skillProvenanceMetadata } from './skill-provenance.js';
@@ -146,14 +148,13 @@ async function fileEndeavorIntake(
   env: Env,
   args: { principal: Address; sender: Address; taskId: Hex; goal: string },
 ): Promise<{ ok: true; requestId: string } | { ok: false; error: string }> {
-  const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
-  if (!secret) return { ok: false, error: 'endeavor intake requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
+  if (!internalMarker(env)) return { ok: false, error: 'endeavor intake requires A2A_INTERNAL_MARKER' };
   const opBody = endeavorRequestFromA2aTask({ taskId: args.taskId, goal: args.goal });
   const target = args.principal.toLowerCase();
   const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
   const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.request`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+    headers: internalHeaders(env),
     body: JSON.stringify({ ...opBody, requester: args.sender.toLowerCase() }),
   }));
   const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; requestId?: string; error?: string };
@@ -260,13 +261,12 @@ function makeEndeavorStateSkill(env: Env, agentSA: Address): SkillHandler {
       const parsed = parseEndeavorStateInput(ctx.input);
       if (!parsed.ok) return { state: 'failed', error: parsed.error };
 
-      const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret) return { state: 'failed', error: 'endeavor.state requires the internal marker (A2A_CUSTODY_BRIDGE_SECRET)' };
+      if (!internalMarker(env)) return { state: 'failed', error: 'endeavor.state requires A2A_INTERNAL_MARKER' };
       const target = ctx.principal.toLowerCase();
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(target));
       const resp = await stub.fetch(new Request(`https://do/interactions/${target}/internal.endeavor.state`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        headers: internalHeaders(env),
         body: JSON.stringify({ endeavorId: parsed.endeavorId }),
       }));
       const out = (await resp.json().catch(() => ({}))) as {
@@ -494,11 +494,9 @@ function makeConsultSkill(env: Env, agentSA: Address, storage: DurableObjectStor
           // marker-gated internal op on THEIR InteractionsDO. Best-effort enrichment — a member who
           // never enabled interactions answers under the default playbook, same mechanism.
           readContext: async () => {
-            const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
-            if (!secret) throw new Error('no internal marker configured');
             const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(agentSA.toLowerCase()));
             const resp = await stub.fetch(new Request(`https://do/interactions/${agentSA.toLowerCase()}/internal.consult.context`, {
-              method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify({}),
+              method: 'POST', headers: internalHeaders(env), body: JSON.stringify({}),
             }));
             const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
             if (!resp.ok || out.ok === false) throw new Error(out.error ?? `consult context read failed (${resp.status})`);
@@ -787,7 +785,7 @@ export class A2aTaskDO {
         const call = async (op: string, payload: unknown): Promise<void> => {
           const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
             // ARCH-H2 — the in-Worker internal marker the InteractionsDO requires for internal.* ops.
-            method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '' }, body: JSON.stringify(payload),
+            method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
           }));
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);
@@ -811,8 +809,7 @@ export class A2aTaskDO {
     // substrate observed a triggering post", not a caller delegation, so a public `message/send`
     // can never reach it (fail-closed by path: the JSON-RPC dispatcher below has no such method).
     if (url.pathname === '/internal/discussion-respond') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !p.channelId) {
         return Response.json({ ok: false, error: 'principal + channelId required' }, { status: 400 });
@@ -820,7 +817,7 @@ export class A2aTaskDO {
       const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(p.principal.toLowerCase()));
       const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
         const resp = await stub.fetch(new Request(`https://do/interactions/${p.principal.toLowerCase()}/${op}`, {
-          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+          method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
         }));
         const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
@@ -941,8 +938,7 @@ export class A2aTaskDO {
     // marker-gated; called by the org's InteractionsDO). Cancellation is a DROP + audit — the
     // member-side tasks run to completion on their own store; their answers are simply never read.
     if (url.pathname === '/internal/routing-cancel') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as { channelId?: string } | null;
       if (!p?.channelId) return Response.json({ ok: false, error: 'channelId required' }, { status: 400 });
       const audit = buildAuditSink(this.env);
@@ -958,8 +954,7 @@ export class A2aTaskDO {
     // signature verified); this body fetch re-checks sender-ship against the task record as the
     // belt. Bounded to a2a artifacts of the named task — never a general vault read.
     if (url.pathname === '/internal/consult-artifact') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as { taskId?: Hex; caller?: string; artifactId?: string } | null;
       if (!p?.taskId || !p.caller || !p.artifactId) return Response.json({ ok: false, error: 'taskId + caller + artifactId required' }, { status: 400 });
       const store = createDurableObjectTaskStore(this.state.storage);
@@ -978,8 +973,7 @@ export class A2aTaskDO {
     // public `message/send` can never reach it (fail-closed by path, exactly like spec 327's
     // /internal/discussion-respond above).
     if (url.pathname === '/internal/inbox-respond') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as InboxRespondInput | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !p.conversationId) {
         return Response.json({ ok: false, error: 'principal + conversationId required' }, { status: 400 });
@@ -987,7 +981,7 @@ export class A2aTaskDO {
       const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(p.principal.toLowerCase()));
       const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
         const resp = await stub.fetch(new Request(`https://do/interactions/${p.principal.toLowerCase()}/${op}`, {
-          method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+          method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
         }));
         const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
         if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
@@ -1011,8 +1005,7 @@ export class A2aTaskDO {
     // single-tool planner over the goal, then posts the drafted steps back as a plan PROPOSAL via
     // `internal.endeavor.proposePlan` (org = actor; the steward reviews/edits/adopts).
     if (url.pathname === '/internal/endeavor-plan') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string; goal?: string; autoWork?: boolean } | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.endeavorId ?? '').startsWith('end_') || !String(p.goal ?? '').trim()) {
         return Response.json({ ok: false, error: 'principal + endeavorId + goal required' }, { status: 400 });
@@ -1064,8 +1057,7 @@ export class A2aTaskDO {
     // spec 334 §6 auto-work — the org agent auto-triages (ADOPTS) a pending request, then the
     // adoption seeds the plan draft (which, being auto-work, chains into execute).
     if (url.pathname === '/internal/endeavor-adopt') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as { principal?: string; requestId?: string } | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.requestId ?? '').startsWith('ereq_')) {
         return Response.json({ ok: false, error: 'principal + requestId required' }, { status: 400 });
@@ -1081,8 +1073,7 @@ export class A2aTaskDO {
     // spec 334 §6 auto-work — run the autopilot for one endeavor (adopt latest plan if needed →
     // execute every open step the principal can do itself → satisfy).
     if (url.pathname === '/internal/endeavor-work') {
-      const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-      if (!secret || req.headers.get('x-ap-internal') !== secret) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as { principal?: string; endeavorId?: string } | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !String(p.endeavorId ?? '').startsWith('end_')) {
         return Response.json({ ok: false, error: 'principal + endeavorId required' }, { status: 400 });
@@ -1149,11 +1140,9 @@ export class A2aTaskDO {
   }
 
   private async interactionsInternal(principal: string, op: string, payload: unknown): Promise<Record<string, unknown>> {
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) throw new Error('no internal marker configured');
     const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(principal.toLowerCase()));
     const resp = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret }, body: JSON.stringify(payload),
+      method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
     }));
     const out = (await resp.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
     if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${op} failed (${resp.status})`);
@@ -1734,10 +1723,9 @@ export class A2aTaskDO {
   /** Read one completed consult's answer artifact from the MEMBER's runtime (marker-gated body
    *  fetch AFTER the signed tasks/get proved sender-ship — see /internal/consult-artifact). */
   private async readConsultArtifact(memberSA: string, taskId: Hex, org: string, artifactId: string): Promise<unknown> {
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '';
     const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(memberSA));
     const resp = await stub.fetch(new Request(`https://a2a-task-do/internal/consult-artifact?agent=${memberSA}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+      method: 'POST', headers: internalHeaders(this.env),
       body: JSON.stringify({ taskId, caller: org, artifactId }),
     }));
     const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; body?: unknown; error?: string };

@@ -66,6 +66,8 @@ import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticpri
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
 import { wrapSessionSignature } from './session-wire.js';
+// spec 341 §7 — the in-Worker marker, split off the custody secret.
+import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
@@ -347,8 +349,8 @@ export class InteractionsDO {
    *  DROPPED — no retry into another mechanism (ADR-0013), no queue, no effect on the human post. */
   private dispatchAssistant(opts: { entry: ChannelV1; channelId: string; principal: string; triggerAuthor: string; triggerBody: string }): void {
     const assistant = opts.entry.assistant;
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!assistant || !secret) return;
+    // The in-Worker marker, not the custody secret: this dispatch is a DO↔DO call (spec 341 §7).
+    if (!assistant || !internalMarker(this.env)) return;
     const audit = buildAuditSink(this.env);
     void (async () => {
       const key = ASSISTANT_RATE_KEY(opts.channelId);
@@ -363,7 +365,7 @@ export class InteractionsDO {
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(opts.principal));
       const resp = await stub.fetch(new Request(`https://do/internal/discussion-respond?agent=${opts.principal}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        headers: internalHeaders(this.env),
         body: JSON.stringify({
           principal: opts.principal, channelId: opts.channelId, topicTitle: opts.entry.title,
           trigger: assistant.trigger, displayName: assistant.displayName, mentionHandle: assistant.mentionHandle,
@@ -383,8 +385,9 @@ export class InteractionsDO {
    *  through `internal.endeavor.proposePlan`, org = actor). Every failure is AUDITED and DROPPED
    *  (ADR-0013): the steward can always author the plan by hand — no retry, no queue. */
   private dispatchEndeavorPlanDraft(principal: string, endeavorId: string, goal: string): void {
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) return;
+    // Unprovisioned marker ⇒ `internalHeaders` throws; these paths are best-effort and their
+    // callers already swallow, so the effect is the same silence with the right cause.
+    if (!internalMarker(this.env)) return;
     const audit = buildAuditSink(this.env);
     void (async () => {
       // Auto-work: when the flag is on, the SAME turn that drafts the plan continues straight into
@@ -393,7 +396,7 @@ export class InteractionsDO {
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
       const resp = await stub.fetch(new Request(`https://do/internal/endeavor-plan?agent=${principal}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        headers: internalHeaders(this.env),
         body: JSON.stringify({ principal, endeavorId, goal, autoWork }),
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -409,8 +412,9 @@ export class InteractionsDO {
    *  principal's own A2aTaskDO; per-endeavor rate-limited so re-triggers don't stampede. Every
    *  failure is AUDITED and DROPPED (ADR-0013): the human path in Work always remains available. */
   private dispatchEndeavorWork(principal: string, endeavorId: string): void {
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) return;
+    // Unprovisioned marker ⇒ `internalHeaders` throws; these paths are best-effort and their
+    // callers already swallow, so the effect is the same silence with the right cause.
+    if (!internalMarker(this.env)) return;
     const audit = buildAuditSink(this.env);
     void (async () => {
       if ((await this.state.storage.get(AUTO_WORK_FLAG_KEY)) !== true) return;
@@ -422,7 +426,7 @@ export class InteractionsDO {
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
       const resp = await stub.fetch(new Request(`https://do/internal/endeavor-work?agent=${principal}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        headers: internalHeaders(this.env),
         body: JSON.stringify({ principal, endeavorId }),
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -437,15 +441,16 @@ export class InteractionsDO {
    *  switch is on, so a request flows all the way to done with no human. Adoption seeds the plan
    *  draft (which, with auto-work, chains into execute). Audited + dropped on failure. */
   private dispatchEndeavorAutoAdopt(principal: string, requestId: string): void {
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) return;
+    // Unprovisioned marker ⇒ `internalHeaders` throws; these paths are best-effort and their
+    // callers already swallow, so the effect is the same silence with the right cause.
+    if (!internalMarker(this.env)) return;
     const audit = buildAuditSink(this.env);
     void (async () => {
       if ((await this.state.storage.get(AUTO_WORK_FLAG_KEY)) !== true) return;
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
       const resp = await stub.fetch(new Request(`https://do/internal/endeavor-adopt?agent=${principal}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+        headers: internalHeaders(this.env),
         body: JSON.stringify({ principal, requestId }),
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -491,8 +496,9 @@ export class InteractionsDO {
    *  AUDITED and DROPPED (ADR-0013): no retry, no queue, no effect on the committed delivery. */
   private queueInboxAssistantScan(principal: string, envelopes: MessageEnvelopeV1[]): void {
     const audit = buildAuditSink(this.env);
-    const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) return;
+    // Unprovisioned marker ⇒ `internalHeaders` throws; these paths are best-effort and their
+    // callers already swallow, so the effect is the same silence with the right cause.
+    if (!internalMarker(this.env)) return;
     void this.serialize<MessageEnvelopeV1[]>(async () => {
       if (!(await this.state.storage.get(INBOX_ASSISTANT_FLAG_KEY))) return [];
       const seen = (await this.state.storage.get(INBOX_ASSISTANT_SEEN_KEY)) as string[] | undefined;
@@ -529,7 +535,7 @@ export class InteractionsDO {
           const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
           const resp = await stub.fetch(new Request(`https://do/internal/inbox-respond?agent=${principal}`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+            headers: internalHeaders(this.env),
             body: JSON.stringify({
               principal, conversationId: envelope.conversationId, messageId: envelope.id,
               senderCaip: envelope.from, ...(envelope.subject ? { subject: envelope.subject } : {}),
@@ -1021,10 +1027,10 @@ export class InteractionsDO {
       const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put';
       if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
-        // Require an internal marker only in-Worker callers can supply (the bridge secret, shared by
-        // co-resident DOs in this Worker). Any other path reaching internal.* fails closed.
-        const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
-        if (!secret || request.headers.get('x-ap-internal') !== secret) return json({ error: 'internal op — not authorized' }, 403);
+        // Require the in-Worker marker, which only co-resident DOs can supply. Any other path
+        // reaching internal.* fails closed — including one holding the CUSTODY secret, which used to
+        // be this same value and no longer is (spec 341 §7).
+        if (!isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
       } else {
         const bg = OWNER_FACING
           ? await this.ownerOrBridge(request, rawBody, op, principal, String(body.session ?? ''))
@@ -1196,7 +1202,6 @@ export class InteractionsDO {
           const bodyText = String(body.bodyText ?? '').trim();
           if (!conversationId || !bodyText) return json({ error: 'conversationId + bodyText required' }, 400);
           const audit = buildAuditSink(this.env);
-          const internalSecret = this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '';
           return this.serialize(async () => { // ARCH-H1 — same single-writer merge as every inbox mutation
             const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
             if (!cfg?.enabled) return json({ error: 'assistant is not enabled for this inbox' }, 409);
@@ -1226,7 +1231,7 @@ export class InteractionsDO {
             const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(counterpartyAddr));
             const callOther = async (cop: string, payload: unknown): Promise<void> => {
               const resp = await stub.fetch(new Request(`https://do/interactions/${counterpartyAddr}/${cop}`, {
-                method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': internalSecret }, body: JSON.stringify(payload),
+                method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
               }));
               const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
               if (!resp.ok || out.ok === false) throw new Error(out.error ?? `${cop} failed (${resp.status})`);
@@ -2113,7 +2118,7 @@ export class InteractionsDO {
             try {
               const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
               await stub.fetch(new Request(`https://do/internal/routing-cancel?agent=${principal}`, {
-                method: 'POST', headers: { 'content-type': 'application/json', 'x-ap-internal': this.env.A2A_CUSTODY_BRIDGE_SECRET ?? '' },
+                method: 'POST', headers: internalHeaders(this.env),
                 body: JSON.stringify({ channelId }),
               }));
             } catch { /* audited by the poller's own drop path */ }

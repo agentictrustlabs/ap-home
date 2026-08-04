@@ -302,6 +302,10 @@ export function archetypeGoal(input: ArchetypeWorkInputV1): string {
 export interface ArchetypeLibraryEnv {
   INTERACTIONS: DurableObjectNamespace;
   A2A_CUSTODY_BRIDGE_SECRET?: string;
+  /** spec 341 §7 — the in-Worker DO↔DO marker. Split OFF the custody secret so a leak of that secret
+   *  no longer confers `internal.*` against any principal. Never leaves this Worker; fail-closed when
+   *  unset (see `internal-marker.ts`). */
+  A2A_INTERNAL_MARKER?: string;
 }
 
 /**
@@ -317,13 +321,12 @@ export interface ArchetypeLibraryEnv {
  */
 export function archetypeSkillReader(env: ArchetypeLibraryEnv, agentSA: string): (slug: string) => Promise<string | null> {
   return async (slug: string): Promise<string | null> => {
-    const secret = env.A2A_CUSTODY_BRIDGE_SECRET;
-    if (!secret) throw new Error('no internal marker configured — cannot read the archetype library');
+    // The marker guard lives in `internalHeaders`, which throws with the right variable name.
     const id = agentSA.toLowerCase();
     const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(id));
     const resp = await stub.fetch(new Request(`https://do/interactions/${id}/internal.library.skillMd`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-ap-internal': secret },
+      headers: internalHeaders(env),
       body: JSON.stringify({ name: slug, file: 'SKILL.md' }),
     }));
     const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; found?: boolean; text?: string | null; error?: string };
@@ -590,6 +593,8 @@ export async function runArchetypeTurn(
 // archetype can never shadow a skill the agent actually declared.
 
 import type { SkillHandler } from '@agenticprimitives/a2a';
+// spec 341 §7 — the in-Worker marker, split off the custody secret.
+import { internalHeaders } from './internal-marker.js';
 
 /** `archetype.ontologist` → `ontologist`; any other method → null. */
 export function archetypeSlugFromMethod(method: string): string | null {
