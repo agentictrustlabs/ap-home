@@ -259,14 +259,28 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     // only as the gate; content itself rides the DO's `content.*` op (steward-bridged, ADR-0055).
     const { orgVault } = await import('../lib/org-vault');
     if (!(await orgVault(env, orgSA))) return { ok: false, res: jsonCors({ error: 'organization storage not enabled' }, request, 503) };
-    const { bridgeInteractions } = await import('../lib/interactions-bridge');
-    const putRecord = async (recordType: string, data: unknown) => { const r = await bridgeInteractions(env, orgSA, 'content.put', { resource: recordType, data }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); };
+    // spec 341 §5.4 — the WIRE fetched three lines up is now what authorizes these ops, instead of the
+    // shared secret. It was already required, already verified downstream, and then not used: the call
+    // went out under `A2A_CUSTODY_BRIDGE_SECRET`, so what actually decided was *the caller is our Home*
+    // rather than *this person may act for this organization*. Two different facts; only one of them is
+    // about authority (ADR-0041).
+    //
+    // This remains a private RPC shape — not `message/send`, not a Card-declared skill — which is the
+    // OTHER half of the violation and a separate wave. Fixing who-decided without fixing the shape is
+    // real progress, and the gate's `total` ceiling exists so it can be made.
+    const { callInteractions } = await import('./channels');
+    const stewardArgs = { session: bearer, stewardship: wire };
+    const orgOp = async <T>(op: string, payload: Record<string, unknown>): Promise<{ ok: boolean; body: T & { error?: string }; status: number }> => {
+      const r = await callInteractions(env, orgSA, op, { ...stewardArgs, ...payload });
+      return { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string }, status: r.status };
+    };
+    const putRecord = async (recordType: string, data: unknown) => { const r = await orgOp('content.put', { resource: recordType, data }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); };
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
-      read: async () => { const r = await bridgeInteractions<{ record?: unknown }>(env, orgSA, 'content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
+      read: async () => { const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
       write: async (list) => { await putRecord('content.catalog', list); },
       putRecord,
-      delRecord: async (recordType) => { await bridgeInteractions(env, orgSA, 'content.put', { resource: recordType, data: null }); },
+      delRecord: async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); },
     };
   }
   // Person scope — authoritative in the person's VAULT via A2A→MCP (the InteractionsDO `record.*` seam,
@@ -549,9 +563,22 @@ async function revokeInbound(env: FnContext['env'], grantee: string, ownerScope:
   if (changed) await env.AUTH_CODES.put(key, JSON.stringify(listInbound));
 }
 
-/** Read the OWNER's authoritative library list — the origin acting as the owner's vault resource server
- *  (Phase 3). In this demo the shared worker plays both A's vault and B's client; a real deployment would
- *  make an A2A/MCP call to A's vault. Person: the KV-cached index; org: the org vault index. */
+/**
+ * Read the OWNER's authoritative library list — the origin acting as the owner's vault resource server
+ * (Phase 3). Person: the KV-cached index; org: the org vault index.
+ *
+ * ⚠ THE LAST HMAC AUTHORITY GAP IN THIS ROUTE (spec 341 §5.4), and it is NOT a conversion candidate.
+ * The other `content.*` ops here moved to the org's stewardship delegation because the caller IS a
+ * steward. This one is the SHARED lens: B reading what A shared with them, so B has no stewardship over
+ * A's org and no wire to present. Today the Home reads A's ENTIRE catalog under the shared secret and
+ * then filters it by A's sharing grants in `activeEffectiveGrants` — so the authority decision happens
+ * at the Home, AFTER an unauthorized read, and a bug in the filter is a disclosure rather than a denial.
+ *
+ * The fix is the one the original comment gestured at without naming the consequence: an A2A/MCP call
+ * to A's vault carrying B'S OWN grant, so A's side decides what B may see and never returns the rest.
+ * That is a sharing-grant → delegation change, not a transport swap, which is why it is left standing
+ * and counted rather than quietly worked around.
+ */
 async function readOwnerList(env: FnContext['env'], ownerScope: string, ownerKind: AgentKind): Promise<LibraryArtifact[]> {
   if (ownerKind === 'org') {
     const org = ownerScope.toLowerCase();

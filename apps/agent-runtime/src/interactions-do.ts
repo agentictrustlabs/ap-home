@@ -1012,9 +1012,13 @@ export class InteractionsDO {
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
       const OWNER_FACING = op === 'inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
-      // spec 341 §5.3 — an ORG's governance queue is steward-facing, not owner-facing: the principal is
+      // spec 341 §5.3 — an ORG's governance docs are steward-facing, not owner-facing: the principal is
       // the org and it has no session. Same verified delegation the messaging rail uses.
-      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put';
+      //
+      // `content.*` joins them (§5.4). The Home route that drives those ops ALREADY fetched the org's
+      // stewardship wire and then authorized the call with the shared secret instead — the authority
+      // artifact was obtained and discarded. Now it is the thing that decides.
+      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put';
       if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
         // Require an internal marker only in-Worker callers can supply (the bridge secret, shared by
