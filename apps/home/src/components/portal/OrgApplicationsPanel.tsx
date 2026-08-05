@@ -54,12 +54,29 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
       let memberAccessDelegation: unknown;
       if (decision === 'approve') {
         // Sign the org→applicant member-access grant (custody stays with the steward's credential — route by
-        // profile.credential, never raw session.via). Best-effort: a failed sign still records the decision.
+        // profile.credential, never raw session.via).
+        //
+        // NOT BEST-EFFORT, AND THIS IS THE FIX. It was `catch { /* proceed without a pre-signed grant */ }`,
+        // and the consequence was worse than a lost grant: the decision still went through, the note still
+        // said "Approved — the applicant was sent a Join link", and `dropOrgApplication` still cleared the
+        // queue. The applicant then hit
+        //   403 "this organization has not authorized you to join — an invite (member-access grant) or
+        //        stewardship is required"
+        // on "Sign & complete membership", with nothing left in the steward's queue to re-approve. An
+        // approval that cannot grant access is not an approval; it is a deletion of the request wearing
+        // one's clothes.
+        //
+        // So it throws. The application stays pending, the steward sees why, and they can retry — which is
+        // the whole point of leaving the row in place. REJECT still needs no grant and is unaffected.
         try {
           const via = resolveVia(profile?.credential, session.via);
           const sign = await signHashFor(via, communityId as Address, { token: session.token });
           memberAccessDelegation = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, it.applicant as Address, MCP_SERVER_ID, sign));
-        } catch { /* proceed without a pre-signed grant */ }
+        } catch (e) {
+          throw new Error(
+            `could not sign the member-access grant, so the approval was not recorded — the request is still pending: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       }
       const r = await fetch('/connect/org-decide', {
         method: 'POST', headers: authed,
