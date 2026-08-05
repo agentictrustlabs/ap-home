@@ -1409,6 +1409,13 @@ export class InteractionsDO {
         }
         if (op === 'applications.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
+          // DIAGNOSTIC (apply-chain): the other writer of this doc. `dropOrgApplication` is the only
+          // caller and it should run ONLY after an approve/reject — so a put arriving with an empty list
+          // when nobody decided anything is the thing worth catching. Logs the caller so an unexpected
+          // one names itself rather than being inferred.
+          const putRows = Array.isArray((body.doc as { applications?: unknown[] })?.applications)
+            ? ((body.doc as { applications: unknown[] }).applications).length : -1;
+          console.log(`[apply-put] org=${principal} rows=${putRows} client=${callerClientId ?? 'home'}`);
           await this.writeDoc(g, APPLICATIONS_RESOURCE, body.doc);
           return json({ ok: true });
         }
@@ -1616,6 +1623,11 @@ export class InteractionsDO {
               const row = r as { applicant?: string; subject?: string };
               return String(row.subject ?? row.applicant ?? '').toLowerCase() !== key;
             }), app];
+            // DIAGNOSTIC (apply-chain): the applications doc lands populated and is later observed EMPTY,
+            // with no approve/reject having run. An append can never PRODUCE an empty array — it always
+            // writes at least the incoming row — so this logs what it read and what it wrote, to establish
+            // whether the row is lost here (a stale read) or by some other writer.
+            console.log(`[apply-append] org=${principal} read=${rows.length} write=${next.length} key=${key} appId=${app.applicationId}`);
             await this.writeDoc(g, APPLICATIONS_RESOURCE, { applications: next });
             return json({ ok: true });
           });
