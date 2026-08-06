@@ -58,10 +58,32 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (decision === 'approve') {
     // Store the client-pre-signed org→applicant member-access grant (same shape as the invite path), so the
     // applicant's join picks it up. Best-effort: a missing/invalid grant still approves — the org can re-grant.
+    // AN APPROVAL THAT CANNOT STORE THE GRANT IS NOT AN APPROVAL. This was best-effort at three separate
+    // points — a missing/mismatched grant, an unavailable org vault, and a failed write — and each one
+    // returned `ok: true` while leaving the applicant with a `403 this organization has not authorized
+    // you to join` on "Sign & complete membership", and the steward with a cleared queue and nothing to
+    // re-approve. Both parties believe it worked. That is the e2e `join.member` failure, and it is the
+    // same shape already fixed on the client (`OrgApplicationsPanel.decide`): a silent catch over the one
+    // artifact that authorizes joining.
+    //
+    // The reasons are now DISTINGUISHED rather than collapsed, because "you sent no grant" and "this
+    // org's vault is unavailable" need different fixes and were previously the same silence. The invite
+    // path writes this identical key, which is why invited members can join and approved ones cannot.
     const mad = body?.memberAccessDelegation;
-    if (mad?.signature && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === applicant) {
-      const vault = await orgVault(env, org).catch(() => null);
-      if (vault) await vault.set(`org.invite:agent:${applicant}`, { delegation: mad, createdAt: Date.now(), status: 'pending' }).catch(() => {});
+    if (!mad?.signature) {
+      return json({ error: 'approval requires a signed member-access grant — the request is still pending', code: 'grant_absent' }, 400);
+    }
+    if ((mad.delegator ?? '').toLowerCase() !== org || (mad.delegate ?? '').toLowerCase() !== applicant) {
+      return json({ error: 'member-access grant must be from this org to this applicant', code: 'grant_mismatched' }, 400);
+    }
+    const vault = await orgVault(env, org).catch(() => null);
+    if (!vault) {
+      return json({ error: "this organization's storage is unavailable — a steward must enable it before approving", code: 'org_vault_unavailable' }, 409);
+    }
+    try {
+      await vault.set(`org.invite:agent:${applicant}`, { delegation: mad, createdAt: Date.now(), status: 'pending' });
+    } catch (e) {
+      return json({ error: `could not store the member-access grant, so the approval was not recorded: ${e instanceof Error ? e.message : String(e)}`, code: 'grant_write_failed' }, 502);
     }
   }
   // THE DECISION NOTICE IS NOT SENT HERE (spec 341 §5.1c). It used to be: this route wrote the message
