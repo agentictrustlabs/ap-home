@@ -1,0 +1,71 @@
+{
+  "alice": {
+    "name": "Alice Okoro",
+    "sa": "0xc35c8f17c9cbf58c20a4f4cd8bd702b8c91f532b",
+    "custodies": [
+      {
+        "sa": "0xe26157068af46629691e2AB19726Bf61476e6b6c",
+        "name": "Missio Nexus"
+      }
+    ],
+    "eoaPrivateKey": "0xbf33d6e9a6c66eff4185226021a054903fc8e9ad2d30ad6fff527d81eef32359"
+  },
+  "bob": {
+    "name": "Bob Tanaka",
+    "sa": "0xeef5ed02e052ee221afcbbd2708919473c4e2b28",
+    "custodies": [
+      {
+        "sa": "0x4DDFA7f924a64B3206A216F5f28F499DDeD90682",
+        "name": "Reach Laos"
+      }
+    ],
+    "eoaPrivateKey": "0xda2f785e3eeffe9467f46c611bdc5a192227348a2d307c8716083d131c41c2ce"
+  },
+  "carol": {
+    "name": "Carol Mbeki",
+    "sa": "0x1a8fc7f44b4500e5817c2b7e863c7aebf5739a9e",
+    "custodies": [
+      {
+        "sa": "0xbCb766966Ead65cFA8A058C1d76f7A02fBf0478f",
+        "name": "UUPG+ Alliance"
+      }
+    ],
+    "eoaPrivateKey": "0x9305655ed0cce4e611a5bb0708d160129c1b70cf264fef6f857a46c33b10ca41"
+  },
+  "dave": {
+    "name": "Dave Silva",
+    "sa": "0x2431c1f1fe7d9fea1ad6ce755d18ed75164336cb",
+    "custodies": [],
+    "eoaPrivateKey": "0x987a67b11653f031cb5e4cb9dc82254ab2f7a73cdaacde4c7f8264e2c94f9756"
+  },
+  "elena": {
+    "name": "Elena Voss",
+    "sa": "0xbc7266764d87110b8b3507ffa376225f3a105956",
+    "custodies": [],
+    "eoaPrivateKey": "0xa5136bca54c77fc2328471ee6befbe38b64ce8502ac4954ac65144ed42e85d0d"
+  },
+  "nathan": {
+    "name": "Nathan",
+    "sa": "0x866e8c9b95f35a88c1785eabfccda85c1d355f07",
+    "custodies": [
+      {
+        "sa": "0x2B9D3356cB34851882E5Ca10Fa7d9d21D2a191F9",
+        "name": "Accelerate"
+      }
+    ],
+    "eoaPrivateKey": "0x75c1022e5e3debfef80f44a8c7f10a1c6412acc6cae98c092ec4edb324a68f05",
+    "eoaAddress": "0xFfcE797B2766726b418Ad7daB92F00E6a1B937fF"
+  },
+  "david": {
+    "name": "David",
+    "sa": "0xfd131a8abab7ebcb9b553b95a5e66928abdf6d7f",
+    "custodies": [
+      {
+        "sa": "0x2B9D3356cB34851882E5Ca10Fa7d9d21D2a191F9",
+        "name": "Accelerate"
+      }
+    ],
+    "eoaPrivateKey": "0x3613f979d1beee81c76bff527332af4a004a68d68fc4a3637613537c5df7d406",
+    "eoaAddress": "0x4d71C7248A565ACA98d608E1c6C561d457D2f080"
+  }
+}
