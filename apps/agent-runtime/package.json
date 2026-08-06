@@ -35,7 +35,7 @@
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
-    "hono": "^4.12.29",
+    "hono": "^4.12.33",
     "viem": "^2.52.2",
     "@agenticprimitives/agent-resolution": "workspace:*"
   },
