@@ -80,7 +80,10 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
       }
       const r = await fetch('/connect/org-decide', {
         method: 'POST', headers: authed,
-        body: JSON.stringify({ org: communityId, applicant: it.applicant, applicationId: it.applicationId, decision, ...(memberAccessDelegation ? { memberAccessDelegation } : {}) }),
+        // `stewardship` travels because the server needs it to write the AGENT-KEYED member-access
+        // record — the same artifact this panel already presents to READ the queue. Omitting it made the
+        // write fail closed at the agent, which is what broke joining after approval.
+        body: JSON.stringify({ org: communityId, applicant: it.applicant, applicationId: it.applicationId, decision, stewardship, ...(memberAccessDelegation ? { memberAccessDelegation } : {}) }),
       });
       const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!r.ok || !b.ok) throw new Error(b.error ?? `decision failed (${r.status})`);

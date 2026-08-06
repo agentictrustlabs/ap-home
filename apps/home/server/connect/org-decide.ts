@@ -33,6 +33,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         decision?: 'approve' | 'reject';
         reason?: string;
         memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
+        /** The org's stewardship delegation. REQUIRED to write the agent-keyed member-access record —
+         *  see the `orgVault` call below. */
+        stewardship?: unknown;
       }
     | null;
   const org = (body?.org ?? '').toLowerCase();
@@ -76,7 +79,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if ((mad.delegator ?? '').toLowerCase() !== org || (mad.delegate ?? '').toLowerCase() !== applicant) {
       return json({ error: 'member-access grant must be from this org to this applicant', code: 'grant_mismatched' }, 400);
     }
-    const vault = await orgVault(env, org).catch(() => null);
+    // PASS THE SESSION AND THE STEWARDSHIP. `org.invite:agent:<applicant>` is an AGENT-KEYED record, and
+    // `orgVault`'s own doc says it plainly: "absent on an agent-keyed record simply fails closed at the
+    // agent". This route called `orgVault(env, org)` with neither, so the write was refused with
+    // `unauthorized: bridge envelope missing` — and, until the commit before this one, swallowed.
+    //
+    // That is the whole `join.member` failure: the approval reported success, stored nothing, cleared the
+    // steward's queue, and left the applicant with a 403 they could not act on. The INVITE path writes
+    // this identical key WITH these artifacts, which is why invited members join and approved ones did not.
+    const auth = request.headers.get('authorization') ?? '';
+    const sessionToken = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const vault = await orgVault(env, org, sessionToken || undefined, body?.stewardship).catch(() => null);
     if (!vault) {
       return json({ error: "this organization's storage is unavailable — a steward must enable it before approving", code: 'org_vault_unavailable' }, 409);
     }
