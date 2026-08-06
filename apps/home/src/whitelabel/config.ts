@@ -57,6 +57,44 @@ const faithImpact: WhiteLabelConfig = {
       // Where the service-agent-wire ceremony talks to skills-a2a.
       serviceAgentConfig: { a2aBase: 'https://skills-a2a-production.richardpedersen3.workers.dev' },
     },
+    // engage-app — the engagement layer for faith and impact work (agentictrustlabs/engage). Turns a
+    // stated need into a mandate-authorized, receipted fulfilment. Login-grade connect via the
+    // Personal Home; no PII held by the broker.
+    //
+    // `org-create` for the same reason skills has it: a DOMAIN in that app is an ORGANIZATION in the
+    // member's own Home, holding the domain's published needs/offerings and the agent that runs
+    // them. One org per domain, deployed by the member's own credential in a single consent — the
+    // app cannot mint it, which is the point.
+    {
+      client_id: 'engage-app',
+      name: 'Engage',
+      // A redirect_uri is exact-match (CN-1) and is where this broker HANDS OVER an authorization
+      // code, so it must name a domain we CONTROL — never a guessed one. An earlier revision of this
+      // entry read `https://engage.pages.dev/`, inferred from the project name; that domain belongs
+      // to someone else. Cloudflare appends a suffix when a project name is taken, and it did here:
+      // the project is `engage-web`, the domain is `engage-web-7um.pages.dev`. Read from
+      // `wrangler pages project list`, never derived.
+      redirect_uris: ['https://engage-web-7um.pages.dev/', 'http://localhost:5173/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // `engage-service.impact` — the service agent orgs grant to and engage-a2a signs AS. Custodied
+      // OUTSIDE engage-a2a (1 custodian, 0 passkeys on chain today); the worker signs with a KMS key
+      // the `service-agent-wire` ceremony authorizes as a DELEGATE, so compromising the worker
+      // yields something the custodian revokes rather than the identity itself (ADR-0019 +
+      // docs/architecture/agent-rules/service-agent-signing.md).
+      //
+      // engage-a2a asserts that separation at RUNTIME rather than trusting this comment: it reads
+      // `isCustodian(kmsKey)` on this SA before its first signature and refuses to start if the key
+      // it signs with is also a custodian of the identity it signs as. See engage's
+      // `apps/engage-a2a/src/custody.ts`.
+      //
+      // NOT the shared `delegate` above, which a dozen entries name — operational authority granted
+      // to that address is granted to all of them.
+      operational_delegate: '0x0d9be26B9F52AF06354c3eFA19173BcBA60176d3',
+      // Where the service-agent-wire ceremony talks to engage-a2a.
+      serviceAgentConfig: { a2aBase: 'https://engage-a2a-production.richardpedersen3.workers.dev' },
+    },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
       client_id: 'skills-corpus',
