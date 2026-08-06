@@ -248,6 +248,25 @@ interface LibraryScope {
   putRecord: (recordType: string, data: unknown) => Promise<void>;
   delRecord: (recordType: string) => Promise<void>;
 }
+/**
+ * A write that the ORG's own plane refused.
+ *
+ * Distinct from a thrown Error so the route can answer with the upstream status and resource rather
+ * than turning every cause into a 500. A 503 from the org means "storage/plane unavailable"; a 403
+ * means "this wire does not authorize it" — collapsing both loses the only information a caller can
+ * act on.
+ */
+class LibraryWriteError extends Error {
+  constructor(
+    message: string,
+    readonly resource: string,
+    readonly upstreamStatus: number,
+  ) {
+    super(message);
+    this.name = 'LibraryWriteError';
+  }
+}
+
 async function scopeFor(request: Request, env: FnContext['env'], person: string, org?: string): Promise<LibraryScope | { ok: false; res: Response }> {
   const bearer = (request.headers.get('authorization') ?? '').slice(7);
   if (org) {
@@ -274,7 +293,19 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
       const r = await callInteractions(env, orgSA, op, { ...stewardArgs, ...payload });
       return { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string }, status: r.status };
     };
-    const putRecord = async (recordType: string, data: unknown) => { const r = await orgOp('content.put', { resource: recordType, data }); if (!r.ok) throw new Error(r.body.error ?? `org content write failed (${r.status})`); };
+    // THROWS WITH THE ORG DO'S OWN REASON, and the message matters more than it looks.
+    //
+    // Every org-scoped WRITE previously surfaced as a bare 500 while the same scope's READ returned
+    // 200 — because `read` degrades to `[]` on failure and this throws. A caller therefore saw
+    // "reads work, writes 500", with nothing to distinguish "storage off" from "wire rejected" from
+    // "content.put not allow-listed". Diagnosing it took isolating the call by hand with curl.
+    //
+    // Carrying `resource` and the upstream status makes the next one readable, and `LibraryWriteError`
+    // lets the route answer with the real cause instead of collapsing to 500.
+    const putRecord = async (recordType: string, data: unknown) => {
+      const r = await orgOp('content.put', { resource: recordType, data });
+      if (!r.ok) throw new LibraryWriteError(r.body.error ?? 'org content write failed', recordType, r.status);
+    };
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
       read: async () => { const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
@@ -358,8 +389,21 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
       if (!Array.isArray(body.artifacts) || body.artifacts.length === 0) return jsonCors({ error: 'artifacts[] required' }, request, 400);
       const saved = (await Promise.all(body.artifacts.slice(0, 200).map((a) => upsert(list, a)))).filter((e): e is LibraryArtifact => !!e);
-      await scope.write(list.slice(0, 200));
-      await Promise.all(saved.map((e) => writeArtifactRecord(scope, e)));
+      try {
+        await scope.write(list.slice(0, 200));
+        await Promise.all(saved.map((e) => writeArtifactRecord(scope, e)));
+      } catch (e) {
+        // Answer with the org plane's own verdict. Previously this escaped as a bare 500 and the
+        // caller could not tell an unavailable plane from an unauthorized one.
+        if (e instanceof LibraryWriteError) {
+          return jsonCors(
+            { error: e.message, resource: e.resource, scope: scope.ownerKind, owner: scope.owner, upstreamStatus: e.upstreamStatus },
+            request,
+            e.upstreamStatus === 403 ? 403 : 503,
+          );
+        }
+        throw e;
+      }
       return jsonCors({ ok: true, count: saved.length }, request);
     }
     case 'delete': {
