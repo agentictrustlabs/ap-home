@@ -456,3 +456,66 @@ describe('owner-only ops are not reachable by an app authenticated as the person
     expect(JSON.stringify(await r.json().catch(() => ({})))).not.toContain('owner_only');
   });
 });
+
+// ── spec 341 §5.4 — an ORG's Content Artifacts accept a RELYING id_token, on the SAME steward proof ─
+//
+// The same asymmetry §4.2 closed for owner-facing reads, left open on the steward path.
+// `verifyHomeSession` pins `aud = DEMO_SSO_AUD`; a registered Connect client's token carries
+// `aud = client_id`. So `content.*` on an ORG principal was reachable from the Home and from nowhere
+// else, and a real client's org write failed with `invalid session: aud mismatch` — a 401 that reads
+// as "your storage is off", which is where it was mistaken for a provisioning problem for a long time.
+//
+// The assertions that matter are the BOUNDS, not the acceptance. Accepting the second token without
+// them would be the bearer-as-authority shape this file exists to prevent.
+describe('org content accepts either identity, still gated on stewardship', () => {
+  const relying = (sub: string) => mint(signer, sub, { aud: 'engage-app' });
+
+  it('REFUSES a relying id_token with NO stewardship', async () => {
+    // The bound that carries everything: an app authenticated as a person is not thereby a steward.
+    const token = await relying(caip(MEMBER));
+    const r = await call('content.put', token, ORG);
+    expect(r.ok).toBe(false);
+    expect(r.status).not.toBe(200);
+  });
+
+  it('REFUSES a relying id_token presenting a JUNK stewardship delegation', async () => {
+    // Shape-valid, signature meaningless. `isSteward` verifies the signature on-chain, so a check
+    // that stopped at the shape would accept this — and an app can always SHAPE a wire.
+    const token = await relying(caip(MEMBER));
+    const r = await doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/content.put`, {
+      method: 'POST',
+      body: JSON.stringify({ session: token, stewardship: { delegator: ORG, delegate: MEMBER, caveats: [], salt: '1', signature: '0xdead' } }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('REFUSES a junk token rather than falling through to the bridge', async () => {
+    // ADR-0013. If a bad token fell through, presenting garbage first would be a route to the secret.
+    const r = await call('content.put', 'not-a-jwt', ORG);
+    expect(r.status).toBe(401);
+  });
+
+  it('REFUSES a relying id_token signed by a key that is not the broker', async () => {
+    // Acceptance is of a VERIFIED token, never of the `aud` claim being different.
+    const other = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const token = await mint(other.privateKey, caip(MEMBER), { aud: 'engage-app' });
+    const r = await call('content.put', token, ORG);
+    expect(r.status).toBe(401);
+  });
+
+  it('lets a relying id_token for the PRINCIPAL past the gate, as a Home session already did', async () => {
+    // Self-access: the person's own content, reached by an app they authorized. Past the gate means
+    // not-401; 409 downstream is provisioning (no interactions grant), which is reached only AFTER
+    // authorization.
+    const token = await relying(caip(MEMBER));
+    const r = await call('content.get', token, MEMBER);
+    expect(r.status).not.toBe(401);
+  });
+
+  it('REFUSES a relying id_token for someone ELSE against a person principal', async () => {
+    const token = await relying(caip(ORG));
+    const r = await call('content.get', token, MEMBER);
+    expect(r.status).toBe(401);
+  });
+});

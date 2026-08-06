@@ -1123,6 +1123,30 @@ export class InteractionsDO {
    * Caller-selected, never a fallback (ADR-0013): a request carrying `session` takes the delegation
    * path and fails closed there; one carrying the SEC-010 envelope takes the bridge. Neither is tried
    * after the other fails.
+   *
+   * IDENTITY IS EITHER TOKEN; AUTHORITY IS ALWAYS THE DELEGATION. `verifyHomeSession` pins
+   * `aud = DEMO_SSO_AUD`, so a REGISTERED relying app — which by construction holds `aud = client_id`
+   * — was refused here even when the person behind it stewards the org. That is the same asymmetry
+   * §4.2 already closed for `ownerOrBridge`, left open on the steward path: an org's Content
+   * Artifacts were reachable from the Home and from nowhere else, so every Connect client had to
+   * either give up or reach for the shared secret.
+   *
+   * WHY ACCEPTING THE SECOND TOKEN GRANTS NOTHING NEW. Both verifiers resolve to a PERSON's SA and
+   * nothing more; the decision that follows is `isSteward(principal, sa, stewardship)` — delegator is
+   * this org, delegate is that person, stewardship SHAPE not mere membership, ERC-1271-live and
+   * unrevoked on-chain. An app cannot manufacture that, and presenting someone else's wire does not
+   * help, because the wire must name the person its own token proves. So the token answers *who is
+   * asking* and the delegation answers *may they act for this org* — unchanged.
+   *
+   * WHY THIS DIFFERS FROM `ownerOrBridge`, which deliberately refuses a relying app that presents
+   * stewardship: there, the principal is a PERSON, so accepting stewardship would let an app holding
+   * a person's token pivot to a DIFFERENT principal — an escalation. Here the principal is ALREADY
+   * the org, and stewardship is the only authority that ever reaches it. There is nothing to pivot to.
+   *
+   * RESIDUAL RISK, stated rather than implied: any app the person authorized can act for every org
+   * that person stewards, because they all share the person's one identity. Narrowing that needs the
+   * per-app scoped grants of §4.1/§4.3, not an audience check — an audience check only decided which
+   * ONE app could do it, and made a real client indistinguishable from an attacker.
    */
   private async ownerStewardOrBridge(
     request: Request,
@@ -1134,9 +1158,15 @@ export class InteractionsDO {
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (session) {
       const g = await verifyHomeSession(session, this.env);
-      if (!g.ok) return { ok: false, reason: g.error };
-      if (g.sa.toLowerCase() === principal) return { ok: true };
-      if (await this.isSteward(principal, g.sa, stewardship)) return { ok: true };
+      // Home session first, exactly as `ownerOrBridge` orders them. Still not a fallback chain: both
+      // branches end in the SAME steward check, and a token that verifies as neither fails closed
+      // here rather than reaching the bridge.
+      const sa = g.ok
+        ? g.sa
+        : await verifyRelyingIdToken(session, this.env).then((r) => (r.ok ? r.sa : null));
+      if (!sa) return { ok: false, reason: g.ok ? 'no SA in session' : g.error };
+      if (sa.toLowerCase() === principal) return { ok: true };
+      if (await this.isSteward(principal, sa, stewardship)) return { ok: true };
       return { ok: false, reason: 'only this agent, or a steward presenting its stewardship delegation, may reach these records' };
     }
     return this.bridgeGate(request, rawBody, op);
