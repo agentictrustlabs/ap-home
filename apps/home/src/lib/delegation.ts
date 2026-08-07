@@ -328,6 +328,13 @@ export const COORDINATION_ENDEAVOR_WILDCARD_SCOPE = 'vault:coordination.endeavor
 export const APP_COORDINATION_READ_SCOPES = [
   'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed',
   'vault:uupg:coalition', 'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy',
+  // The HOTSPOT TRACKER's own record set (same relying-app family, same public tier). Its ✦ Ask turn
+  // is grounded in exactly these: the minted people-group identities, the tracked bodies and their
+  // delineations, and what was observed happening. Their absence is why that feature answered "no
+  // reference facts reached me" for every question — the gather turn asked for `uupg:identity` and
+  // `uupg:community` and got `record_scope_denied` from demo-mcp, which reaches a person as an agent
+  // that cannot see its own organization's records.
+  'vault:uupg:identity', 'vault:uupg:community', 'vault:uupg:observations',
 ] as const;
 
 /** The org's OWN app-record NAMESPACE, READ-only. Where APP_COORDINATION_READ_SCOPES enumerates the
