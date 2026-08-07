@@ -101,9 +101,26 @@ export async function gatherReferenceContext(
       const recordType = String(args.recordType ?? '').trim();
       const r = await input.readOrgRecord(recordType);
       if (!r.ok) return { ok: false, error: r.error ?? (r.needsEnable ? 'org reads not enabled' : 'not readable') };
-      // A compact JSON digest, hard-capped so a big record can't blow the downstream context budget.
-      digests.push(`Org record "${recordType}":\n${JSON.stringify(r.data ?? null).slice(0, 1500)}`);
-      return { ok: true, recordType };
+      // A compact JSON digest, capped so a big record cannot blow the downstream context budget.
+      //
+      // THE CAP MUST ANNOUNCE ITSELF. It was a silent `.slice(0, 1500)`, and a real org record is
+      // 80–130 KB — so the model received the first ~1.5% of a registry, could not tell a clipped
+      // record from a whole one, and answered "no Afghan people groups were delivered" about a
+      // registry that holds them. That is the worst shape a limit can take: the answer was honest,
+      // confident, and wrong, and nothing in it hinted that 98% of the record had been cut.
+      //
+      // So the clip is now stated in the digest itself. A model told "showing the first 20,000 of
+      // 131,479 characters" can say the record is larger than it can see; one told nothing cannot.
+      const json = JSON.stringify(r.data ?? null);
+      const clip = clipBound(env as unknown as Record<string, unknown>);
+      const shown = json.slice(0, clip.record);
+      const note = json.length > clip.record
+        ? `\n[TRUNCATED — showing the first ${shown.length} of ${json.length} characters of this record. `
+          + 'What is not shown is NOT absent from the record. Do not report anything as missing on the '
+          + 'basis of this excerpt; say the record is larger than this turn can read.]'
+        : '';
+      digests.push(`Org record "${recordType}":\n${shown}${note}`);
+      return { ok: true, recordType, chars: json.length, shown: shown.length, truncated: json.length > clip.record };
     }
     throw new Error(`unknown tool: ${toolId}`);
   };
@@ -115,7 +132,27 @@ export async function gatherReferenceContext(
     );
   } catch { /* gather is best-effort enrichment — a failed turn just yields no reference data */ }
 
-  return digests.join('\n\n').slice(0, 4500);
+  const joined = digests.join('\n\n');
+  const clip = clipBound(env as unknown as Record<string, unknown>);
+  if (joined.length <= clip.total) return joined;
+  return joined.slice(0, clip.total)
+    + `\n\n[TRUNCATED — the gathered facts came to ${joined.length} characters and this turn carries `
+    + `${clip.total}. Later records are cut. Treat this as a partial view, never as the whole record set.]`;
+}
+
+/** How much gathered reference data a turn may carry. Config, not a second mechanism (ADR-0013) —
+ *  the shipping values are the defaults, and a deployment whose org records are large raises them
+ *  rather than editing this file. The old constants were 1500 per record and 4500 total, which on a
+ *  real registry is under 2% of one record. */
+export function clipBound(env: Record<string, unknown>): { record: number; total: number } {
+  const num = (v: unknown, d: number) => {
+    const n = Number(String(v ?? '').trim());
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : d;
+  };
+  return {
+    record: num(env.GATHER_RECORD_CLIP, 1500),
+    total: num(env.GATHER_DIGEST_MAX, 4500),
+  };
 }
 
 const WORK_TOOLS: ToolSpec[] = [

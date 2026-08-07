@@ -423,6 +423,12 @@ export interface Env {
    *  When set, a SkillHandler tags its Artifact with the verifiable SKILL.md that
    *  shaped it (GET {SKILLS_CORPUS_URL}/tools/skill_reference). Unset ⇒ inert. */
   SKILLS_CORPUS_URL?: string;
+  /** spec 334 §6 gather bounds — how much of an org record, and how much total, a turn may carry.
+   *  Config, not a constant (ADR-0013). Defaults are the shipping values (1500 / 4500); a deployment
+   *  whose org records are large raises them. At the defaults a 130 KB registry arrives ~1% intact,
+   *  and the model cannot tell that from a whole record unless the digest says so — which it now does. */
+  GATHER_RECORD_CLIP?: string;
+  GATHER_DIGEST_MAX?: string;
   // Phase B / NEW-H6: the provisioned interactions + delivery service SAs. When set, the InteractionsDO PINS
   // the custodied grant's delegate to these — a grant to any other delegate is rejected (vaultFor runs every
   // op as requester=grant.delegate, so an unpinned grant would route the principal's whole vault through the

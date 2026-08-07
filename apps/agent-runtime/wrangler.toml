@@ -110,6 +110,13 @@ ORCHESTRATION_LLM = "anthropic"
 # Lower it to the code defaults the day real traffic exists.
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
+# spec 334 §6 gather bounds. The code defaults (1500 per record / 4500 total) were written for small
+# attestation records; the UUPG registry's own records are 80–130 KB, so a default-bounded turn read
+# about 1.5% of one and reported the other 98.5% as absent. Raised here because this deployment's
+# relying app genuinely holds records that size. The digest now STATES when it clipped, so a turn
+# that still overflows says so instead of answering confidently from a fragment.
+GATHER_RECORD_CLIP = "60000"
+GATHER_DIGEST_MAX = "120000"
 # spec 334 §6 gather phase — OPTIONAL public reference-graph endpoint. Left UNSET here on purpose:
 # the coordination agent's gather phase is inert until this is configured, so enabling it (and thereby
 # pointing the platform at a specific public graph) is a deliberate deploy choice, not a default. To
