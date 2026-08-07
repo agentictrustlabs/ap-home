@@ -103,6 +103,13 @@ CHAIN_ID = "84532"
 # `--var` flags that deploy passes. If the LLM planner is unexpectedly off, CHECK THE LIVE WORKER
 # rather than this file: `wrangler versions view <id> --env production --json`.
 ORCHESTRATION_LLM = "anthropic"
+# spec 327 — org/inbox assistant dispatch bound (defaults 6 per 10 min per topic, in code). Raised
+# here because there are NO production users of this deployment: its actual load is people building
+# against it, and a dropped assistant turn is silent to the poster by design (audited, never queued),
+# so a production-tuned limit is indistinguishable from a broken assistant to whoever is integrating.
+# Lower it to the code defaults the day real traffic exists.
+ASSISTANT_RATE_MAX = "60"
+ASSISTANT_RATE_WINDOW_MS = "600000"
 # spec 334 §6 gather phase — OPTIONAL public reference-graph endpoint. Left UNSET here on purpose:
 # the coordination agent's gather phase is inert until this is configured, so enabling it (and thereby
 # pointing the platform at a specific public graph) is a deliberate deploy choice, not a default. To

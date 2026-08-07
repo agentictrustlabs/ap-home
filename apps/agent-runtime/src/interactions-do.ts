@@ -120,8 +120,24 @@ interface AssistantSkillDocV1 { version: 'ap.assistant-skill.v1'; markdown: stri
 // spec 327 — org-assistant dispatch bounds. Per-topic fixed window in DO storage: member-driven
 // mention storms are bounded; drops are audited (`interactions.assistant.rateLimited`), never queued.
 const ASSISTANT_RATE_KEY = (topicId: string): string => `assistant.rate:${topicId}`;
-const ASSISTANT_RATE_WINDOW_MS = 10 * 60_000;
-const ASSISTANT_RATE_MAX = 6;
+const ASSISTANT_RATE_WINDOW_MS_DEFAULT = 10 * 60_000;
+const ASSISTANT_RATE_MAX_DEFAULT = 6;
+/** The bound is DEPLOY CONFIG, not a constant (ADR-0013 — a config choice, not a second mechanism).
+ *  The defaults are the shipping values; an env override exists because the limit is the difference
+ *  between "bounded against a mention storm" and "cannot be exercised", and an app integrating
+ *  against this plane hits the second long before a room full of people hits the first. A dropped
+ *  turn is silent to the poster BY DESIGN (audited, never queued), so a limit tuned for production
+ *  reads exactly like a broken assistant to whoever is building against it. */
+const rateBound = (env: Record<string, unknown>): { windowMs: number; max: number } => {
+  const n = (v: unknown, d: number): number => {
+    const x = Number(v);
+    return Number.isFinite(x) && x > 0 ? x : d;
+  };
+  return {
+    windowMs: n(env.ASSISTANT_RATE_WINDOW_MS, ASSISTANT_RATE_WINDOW_MS_DEFAULT),
+    max: n(env.ASSISTANT_RATE_MAX, ASSISTANT_RATE_MAX_DEFAULT),
+  };
+};
 /** Context bound for the assistant's topic reads (spec 327 §4). */
 const ASSISTANT_READ_LIMIT = 20;
 const ASSISTANT_BODY_CLIP = 2000;
@@ -397,8 +413,9 @@ export class InteractionsDO {
       const key = ASSISTANT_RATE_KEY(opts.channelId);
       const now = Date.now();
       const rate = ((await this.state.storage.get(key)) ?? { windowStart: now, count: 0 }) as { windowStart: number; count: number };
-      const inWindow = now - rate.windowStart < ASSISTANT_RATE_WINDOW_MS;
-      if (inWindow && rate.count >= ASSISTANT_RATE_MAX) {
+      const bound = rateBound(this.env as unknown as Record<string, unknown>);
+      const inWindow = now - rate.windowStart < bound.windowMs;
+      if (inWindow && rate.count >= bound.max) {
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.rateLimited', outcome: 'denied', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId } });
         return;
       }
@@ -461,7 +478,7 @@ export class InteractionsDO {
       if ((await this.state.storage.get(AUTO_WORK_FLAG_KEY)) !== true) return;
       const key = AUTO_WORK_RATE_KEY(endeavorId);
       const prev = (await this.state.storage.get(key)) as FixedWindowState | undefined;
-      const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ASSISTANT_RATE_WINDOW_MS, max: 1 });
+      const rate = fixedWindowAllow(prev, Date.now(), { windowMs: rateBound(this.env as unknown as Record<string, unknown>).windowMs, max: 1 });
       if (!rate.allowed) return;
       await this.state.storage.put(key, rate.next);
       const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(principal));
@@ -566,7 +583,7 @@ export class InteractionsDO {
       for (const envelope of candidates) {
         const rateKey = INBOX_ASSISTANT_RATE_KEY(envelope.conversationId);
         const prev = (await this.state.storage.get(rateKey)) as FixedWindowState | undefined;
-        const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ASSISTANT_RATE_WINDOW_MS, max: ASSISTANT_RATE_MAX });
+        const rate = fixedWindowAllow(prev, Date.now(), rateBound(this.env as unknown as Record<string, unknown>));
         if (!rate.allowed) {
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.inboxAssistant.rateLimited', outcome: 'denied', actor: { type: 'service', id: principal }, subject: { type: 'conversation', id: envelope.conversationId } });
           continue;
