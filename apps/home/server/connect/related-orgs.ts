@@ -189,6 +189,20 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // AUDIT NEW-RAG-2 — the ERC-1271 write path binds the signature to a one-shot nonce + short expiry.
     nonce?: string;
     expiry?: number;
+    /**
+     * Retire this link. Mirrors `relationships.merge`'s own `remove: true` on the authoritative doc.
+     *
+     * The KV here is a PROJECTION of that doc, and until now it could only ever GAIN rows: the GET
+     * synthesizes a link for anything in the doc that KV lacks, and nothing removed one. So a person
+     * who deleted an org from the authoritative record still saw it in every app that reads this
+     * endpoint, permanently, with no route to fix it.
+     *
+     * EXPLICIT rather than inferred. The obvious alternative — have the GET prune whatever is absent
+     * from the doc — would delete legitimate links the moment the doc read returned partial or empty,
+     * which it does whenever the person's interactions plane is not enabled. A removal should happen
+     * because somebody asked for it, not because a read came back thin.
+     */
+    remove?: boolean;
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -282,6 +296,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     } catch (e) {
       return jsonCors({ error: 'invalid custody descriptor', detail: e instanceof Error ? e.message : String(e) }, request, 400);
     }
+  }
+
+  // ── RETIRE THE LINK ───────────────────────────────────────────────────────────────────────────
+  // Runs after the same authorization the upsert requires: control of the person SA, proven by a
+  // home-session bearer whose `sub` is this person or an ERC-1271 signature over the bound challenge.
+  // Deleting a link you control is not a lesser act than creating one, so it is not a lesser gate.
+  //
+  // Idempotent: removing an absent link reports ok with `removed: false`, because a caller retrying
+  // after a timeout should not be told it failed.
+  if (body?.remove === true) {
+    const had = await env.AUTH_CODES.get(`related:${person}:${org}`);
+    await env.AUTH_CODES.delete(`related:${person}:${org}`);
+    const idxNow = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
+    const pruned = idxNow.filter((a) => a.toLowerCase() !== org);
+    if (pruned.length !== idxNow.length) {
+      await env.AUTH_CODES.put(`related-idx:${person}`, JSON.stringify(pruned));
+    }
+    // The AUTHORITATIVE doc is not touched here. It is the source this KV projects, it has its own
+    // removal (`relationships.merge` + `remove: true`), and quietly writing it from the projection
+    // side would invert which one is in charge. A caller retiring a link should do both, in that
+    // order; if it does not, the next GET re-synthesizes this row from the doc — which is the
+    // projection behaving correctly, not the removal failing.
+    return jsonCors({ ok: true, removed: Boolean(had), orgAgent: org }, request, 200);
   }
 
   // MERGE with any existing record so a partial re-save (e.g. spec-275 name-later, which sends
