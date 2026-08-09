@@ -67,5 +67,27 @@
     ],
     "eoaPrivateKey": "0x3613f979d1beee81c76bff527332af4a004a68d68fc4a3637613537c5df7d406",
     "eoaAddress": "0x4d71C7248A565ACA98d608E1c6C561d457D2f080"
+  },
+  "jpreg": {
+    "name": "Jordan Pike \u2014 Joshua Project",
+    "sa": "0xdc94ef1f5c3dd1027859502d8b77665291cdaa95",
+    "custodies": [
+      {
+        "sa": "0x5A87b4196B9807706C0AD5E4f21637442568C906",
+        "name": "Joshua Project"
+      }
+    ],
+    "eoaPrivateKey": "0xfa6583d164259c0de9373fef4ceea6f4d30db4d8876d875a7922daf0dfd31e35"
+  },
+  "imbreg": {
+    "name": "Imani Bell \u2014 PeopleGroups.org (IMB)",
+    "sa": "0x263a0e2fb14b17873307e5913cc25a9429ebb39d",
+    "custodies": [
+      {
+        "sa": "0x499526493Dc74b8523401b5EC6E5b3E53FB9dA22",
+        "name": "PeopleGroups.org (IMB)"
+      }
+    ],
+    "eoaPrivateKey": "0x08d6e3a1bf0608e582a419c92aaa8d32a1f157a65865c74295d7225eb0d462e7"
   }
 }
