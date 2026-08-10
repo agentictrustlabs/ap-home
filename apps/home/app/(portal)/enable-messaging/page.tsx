@@ -27,7 +27,9 @@ export default function EnableMessagingPage() {
     const r = (() => { try { return new URL(window.location.href).searchParams.get('return') || ''; } catch { return ''; } })();
     setRet(r && isAllowedRelyingOrigin(r) ? r : '');
     if (!session || !agentAddress) { setState('error'); setMsg('Sign in to your Home first, then retry.'); return; }
-    if (!loaded) return; // wait for the stewarded-orgs list before provisioning them too
+    if (!loaded) { setState('working'); setMsg('Turning on messaging…'); return; } // wait for stewarded-orgs
+    setState('working');
+    setMsg('Turning on messaging…');
     let cancelled = false;
     void (async () => {
       // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback),

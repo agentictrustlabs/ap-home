@@ -87,13 +87,23 @@ function hasGoogleReturn(): boolean {
   }
 }
 
+/** Relying-app `#session=` handoff (demo personas / SIWE) — treat like restore so pages that require
+ *  a Home session (e.g. /enable-messaging) wait instead of flashing "Sign in first". */
+function hasSessionHandoff(): boolean {
+  try {
+    return !!new URLSearchParams(window.location.hash.replace(/^#/, '')).get('session');
+  } catch {
+    return false;
+  }
+}
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<BasicProfile | null>(null);
-  // 'restoring' while we validate a stored session or finish a Google ?code exchange.
+  // 'restoring' while we validate a stored session, finish a Google ?code exchange, or consume `#session=`.
   const [phase, setPhase] = useState<SessionPhase>(() => {
     if (typeof window === 'undefined') return 'restoring';
-    return shouldRestore() || hasGoogleReturn() ? 'restoring' : 'anon';
+    return shouldRestore() || hasGoogleReturn() || hasSessionHandoff() ? 'restoring' : 'anon';
   });
   const [notice, setNotice] = useState<string | null>(null);
   const ran = useRef(false);
