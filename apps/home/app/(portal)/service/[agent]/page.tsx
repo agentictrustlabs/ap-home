@@ -16,7 +16,9 @@ const lc = (s: string) => s.toLowerCase();
 export default function ServiceWorkspacePage({ params }: { params: Promise<{ agent: string }> }) {
   const { agent } = use(params);
   const { session, agentAddress, agentName } = useSession();
-  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null);
+  // 'any' (spec 342) — a service is addressed by its own SA, and the default filter would also drop
+  // it whenever its parent org is deactivated.
+  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null, 'any');
 
   if (!session || !agentAddress) return <SectionShell title="Service"><p>Not signed in.</p></SectionShell>;
 

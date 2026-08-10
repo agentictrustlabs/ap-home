@@ -7,7 +7,8 @@ import { usePathname } from 'next/navigation';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
-import { parseWorkspacePath } from '../../lib/workspace';
+import { parseWorkspacePath, orgHref } from '../../lib/workspace';
+import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { buildNav, bottomNav } from './nav';
 import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
@@ -19,7 +20,9 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const pathname = usePathname();
   const active = parseWorkspacePath(pathname ?? '/');
   const { session } = useSession();
-  const { agents } = useManagedAgents(session?.token ?? null);
+  // 'any' (spec 342): the shell must name and route the workspace the URL points at, whatever the
+  // org's lifecycle status — a deactivated org is hidden from lists, not made unreachable.
+  const { agents } = useManagedAgents(session?.token ?? null, 'any');
   const { view } = useInboxView(active.kind === 'person' ? session : null);
   const inboxUnread = active.kind === 'person' ? (view?.summary.unreadTotal ?? 0) : 0;
   const activeAgent = active.kind === 'org'
@@ -34,12 +37,31 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
   }, active, rel, workspaceName);
   const tabs = bottomNav(groups);
+  // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
+  // decision, not a locked door), but it must SAY why it is missing from everywhere else.
+  const orgStatus = active.kind === 'org' && activeAgent ? orgStatusOf(activeAgent) : 'active';
   return (
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} />
       <div className="portal-body">
         <PortalSidebar groups={groups} />
-        <main className="portal-main">{children}</main>
+        <main className="portal-main">
+          {orgStatus !== 'active' && active.kind === 'org' && (
+            <div
+              role="status"
+              style={{
+                margin: '0 0 1rem', padding: '.6rem .8rem', borderRadius: 10, fontSize: '.85rem',
+                background: 'var(--color-amber-50, #fffbeb)', color: 'var(--color-amber-800, #92400e)',
+                border: '1px solid var(--color-amber-200, #fde68a)',
+              }}
+            >
+              This organization is <b>{STATUS_LABEL[orgStatus].toLowerCase()}</b> — hidden from the rest of your
+              home. Its records, address and delegations are untouched. Change that under{' '}
+              <a href={orgHref(active.org, 'settings')}>Manage → Settings</a>.
+            </div>
+          )}
+          {children}
+        </main>
       </div>
       <PortalBottomNav groups={groups} tabs={tabs} />
     </div>

@@ -7,6 +7,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
 import { fetchWorkList, type WorkListResponse } from '../../../lib/work-client';
+import { isHiddenOrg } from '../../../lib/org-lifecycle';
 
 export interface RelatedOrg {
   orgAgent: string;
@@ -26,11 +27,12 @@ export function useRelatedOrgsState(session: Session | null): { orgs: RelatedOrg
     void (async () => {
       try {
         const res = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${session.token}` } });
-        const b = (await res.json().catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; orgName?: string; relationship?: string; kind?: string }> };
+        const b = (await res.json().catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; orgName?: string; relationship?: string; kind?: string; status?: string }> };
         if (cancelled) return;
         setOrgs(
           (b.orgs ?? [])
-            .filter((o) => o.orgAgent && (o.kind ?? 'org') === 'org')
+            // spec 342 — a working surface: no deactivated or deleted org in a request-target picker.
+            .filter((o) => o.orgAgent && (o.kind ?? 'org') === 'org' && !isHiddenOrg(o))
             .map((o) => ({
               orgAgent: (o.orgAgent ?? '').toLowerCase(),
               ...(o.orgName ? { orgName: o.orgName } : {}),

@@ -38,6 +38,7 @@ import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership } from './lib/org-membership';
+import { filterByLifecycle, filterMyOrgsByLifecycle, type OrgLifecycleStatus, type OrgSurface } from './lib/org-lifecycle';
 import { buildApprovedSiteDelegation,
   buildApprovedOperationalIntentDelegation, toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
@@ -1273,6 +1274,8 @@ export interface ManagedAgent {
    * and revocable — and the endpoint already returns it.
    */
   stewardshipDelegation?: unknown;
+  /** spec 342 — projected lifecycle status (absent = active). See `lib/org-lifecycle.ts`. */
+  status?: OrgLifecycleStatus;
 }
 
 export interface CreateManagedAgentResult {
@@ -1623,14 +1626,17 @@ export async function resolveTreasuryByConvention(memberName: string | undefined
 }
 
 /** List the member's managed agents (all kinds) from their home vault — one read path
- *  (the same /connect/related-orgs the orgs view already uses, MAM-D7). */
-export async function listManagedAgents(sessionToken: string): Promise<ManagedAgent[]> {
+ *  (the same /connect/related-orgs the orgs view already uses, MAM-D7).
+ *
+ *  spec 342 — lifecycle-filtered at the read boundary, and the filter CASCADES: an org-treasury
+ *  whose parent org is hidden goes with it, so a deleted org can't reappear as a parent label. */
+export async function listManagedAgents(sessionToken: string, surface: OrgSurface = 'working'): Promise<ManagedAgent[]> {
   const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as {
-    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown }>;
+    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string }>;
   };
-  return (b.orgs ?? []).map((o) => ({
+  const rows = (b.orgs ?? []).map((o) => ({
     agent: o.orgAgent,
     name: o.orgName,
     kind: (o.kind ?? 'org') as AgentKind,
@@ -1639,7 +1645,9 @@ export async function listManagedAgents(sessionToken: string): Promise<ManagedAg
     proofHash: o.proofHash,
     relationship: (o.relationship === 'member' ? 'member' : 'steward') as 'steward' | 'member',
     ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
+    ...(o.status ? { status: o.status as OrgLifecycleStatus } : {}),
   }));
+  return filterByLifecycle(rows, surface);
 }
 
 const MINT_ABI = [
@@ -2364,6 +2372,9 @@ export interface MyOrg {
   kind?: AgentKind;
   /** steward = custody; member = authority-only membership (no org custody). */
   relationship?: 'steward' | 'member';
+  /** spec 342 — the org's lifecycle status, PROJECTED from its `org.lifecycle` vault record so a
+   *  roster can be filtered without a vault read per row. Absent means active. */
+  status?: OrgLifecycleStatus;
   /** The scoped org→site delegation the person granted (absent for self-governed orgs).
    *  Carries the full wire struct so /you can revoke it (revokeGrantedDelegation). */
   delegation?: DelegationWire;
@@ -2541,12 +2552,17 @@ export async function saveSkillClaims(token: string, skills: SkillClaim[]): Prom
 }
 
 /** List ALL the connected person's organizations (private vault credentials), for the
- *  /you portal. Same-origin, authorized by the home session token (aud = the home aud). */
-export async function listMyOrgs(token: string): Promise<MyOrg[]> {
+ *  /you portal. Same-origin, authorized by the home session token (aud = the home aud).
+ *
+ *  spec 342 — filtered by lifecycle status HERE, at the read boundary, so a screen that never
+ *  heard of the spec still hides deleted orgs. `surface` widens it: 'roster' adds inactive orgs
+ *  (the organizations list, where they can be reactivated), 'any' filters nothing (a workspace
+ *  page addressed by SA, and the Settings section itself). */
+export async function listMyOrgs(token: string, surface: OrgSurface = 'working'): Promise<MyOrg[]> {
   const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } });
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as { orgs?: MyOrg[] };
-  return b.orgs ?? [];
+  return filterMyOrgsByLifecycle(b.orgs ?? [], surface);
 }
 
 export async function fetchSensitive(

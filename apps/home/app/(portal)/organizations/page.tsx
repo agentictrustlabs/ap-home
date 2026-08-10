@@ -21,7 +21,9 @@ export default function OrganizationsPage() {
   useEffect(() => {
     if (!session?.token) return;
     let cancelled = false;
-    void listMyOrgs(session.token).then((o) => { if (!cancelled) setOrgs(o); }).catch(() => {});
+    // 'roster' (spec 342): the organizations page lists deactivated orgs too, so selecting one
+    // must still resolve its full record.
+    void listMyOrgs(session.token, 'roster').then((o) => { if (!cancelled) setOrgs(o); }).catch(() => {});
     return () => { cancelled = true; };
   }, [session?.token]);
 

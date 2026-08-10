@@ -116,7 +116,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       membershipDelegation?: unknown; stewardshipDelegation?: unknown; memberAccessDelegation?: unknown; operationalDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
-    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string };
+    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string };
     // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
     // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
@@ -155,6 +155,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
       // records default to 'steward' — the pre-membership control semantics, preserved.
       relationship: l.relationship ?? 'steward',
+      // spec 342 — the org's lifecycle status, PROJECTED from its `org.lifecycle` vault record (the
+      // authority for it is the org's vault, not this KV). Omitted when never set: absent means
+      // active, so a link that predates the feature reads as active without a migration.
+      ...(l.status ? { status: l.status } : {}),
     });
   }
   return jsonCors({ orgs }, request);
@@ -186,6 +190,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     relationship?: 'steward' | 'member';
     /** Org-context display name the member shares (shown on the steward's roster / delegated-idx). */
     displayName?: string;
+    /**
+     * spec 342 — the org's lifecycle status, PROJECTED here so a roster can be filtered without one
+     * vault read per row. The RECORD is `org.lifecycle` in the org's own vault, written over the
+     * stewardship delegation; this field is its cache and carries no authority of its own.
+     *
+     * Rejected rather than coerced when unrecognised: a projection that can hold an arbitrary string
+     * is one that can hide an organization by typo.
+     */
+    status?: string;
     // AUDIT NEW-RAG-2 — the ERC-1271 write path binds the signature to a one-shot nonce + short expiry.
     nonce?: string;
     expiry?: number;
@@ -330,6 +343,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     ? 'member'
     : (body?.relationship === 'steward' ? 'steward' : ((existing.relationship as 'steward' | 'member' | undefined) ?? 'steward'));
   const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 80) : '';
+  // spec 342 — validate the projected status against the closed codelist; absent leaves the
+  // existing value alone (a partial re-save must not silently reactivate a retired org).
+  if (body?.status !== undefined && !['active', 'inactive', 'deleted'].includes(String(body.status))) {
+    return jsonCors({ error: 'status must be one of active | inactive | deleted' }, request, 400);
+  }
   const link = {
     ...existing,
     orgAgent: org,
@@ -349,6 +367,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     parent: pick(body?.parent, existing.parent, person).toLowerCase(),
     relationship,
     ...(displayName ? { displayName } : {}),
+    // spec 342 — set only when the caller decided something; otherwise whatever `...existing` held
+    // stands, and a link that never carried a status keeps not carrying one (absent = active).
+    ...(body?.status !== undefined ? { status: String(body.status) } : {}),
     createdAt: (existing.createdAt as number) ?? Date.now(),
   };
   // Index the WHOLE tree under the person (root) so the home renders org-treasuries too (MAM-D7).

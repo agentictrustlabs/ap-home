@@ -99,3 +99,7 @@ export const GlobeIcon: IconComponent = (p) => (
 export const BotIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" /></Svg>
 );
+/** Sliders — settings that are choices about a thing, not a machine's gears. */
+export const SettingsIcon: IconComponent = (p) => (
+  <Svg {...p}><path d="M4 6h10" /><path d="M18 6h2" /><circle cx="16" cy="6" r="2" /><path d="M4 12h4" /><path d="M12 12h8" /><circle cx="10" cy="12" r="2" /><path d="M4 18h10" /><path d="M18 18h2" /><circle cx="16" cy="18" r="2" /></Svg>
+);

@@ -14,7 +14,8 @@ const lc = (s: string) => s.toLowerCase();
 export default function OrgTreasuryPage({ params }: { params: Promise<{ org: string }> }) {
   const { org } = use(params);
   const { session, agentAddress } = useSession();
-  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null);
+  // 'any' (spec 342) — addressed by the org's SA; see the overview page.
+  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null, 'any');
 
   if (!session || !agentAddress) return <SectionShell title="Treasury"><p>Not signed in.</p></SectionShell>;
 

@@ -16,7 +16,7 @@ export default function OrgAccessPage({ params }: { params: Promise<{ org: strin
   useEffect(() => {
     if (!session?.token) return;
     let cancelled = false;
-    void listMyOrgs(session.token)
+    void listMyOrgs(session.token, 'any')
       .then((all) => {
         if (cancelled) return;
         setRecord(all.find((o) => o.orgAgent.toLowerCase() === org.toLowerCase()) ?? null);

@@ -6,7 +6,7 @@ import type { WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
-  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon,
+  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -93,6 +93,10 @@ export function buildNav(
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-trust-graph', label: 'Trust graph', href: orgHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
+          // spec 342 — the org's lifecycle: activate / deactivate / delete. Last in the band because
+          // it is where an organization is put aside, and steward-only by construction (the Manage
+          // band never renders for members, and the write needs the stewardship delegation anyway).
+          { id: 'org-settings', label: 'Settings', href: orgHref(a, 'settings'), Icon: SettingsIcon, status: 'live' },
         ],
       },
       backHome,

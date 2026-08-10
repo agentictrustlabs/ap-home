@@ -19,7 +19,8 @@ const lc = (s: string) => s.toLowerCase();
 export default function OrgOverviewPage({ params }: { params: Promise<{ org: string }> }) {
   const { org } = use(params);
   const { session, agentAddress } = useSession();
-  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null);
+  // 'any' (spec 342) — this page is addressed by the org's SA; hiding it here would 'lose' the org.
+  const { agents, loaded, version, reload } = useManagedAgents(session?.token ?? null, 'any');
 
   if (!session || !agentAddress) return <SectionShell title="Organization"><p>Not signed in.</p></SectionShell>;
 

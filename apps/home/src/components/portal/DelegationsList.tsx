@@ -16,6 +16,7 @@ import {
   type ReceivedDelegation,
 } from '../../connect-client';
 import type { DelegationWire } from '../../lib/delegation';
+import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { emitControlEvent, toConnectedAppGrant } from '../../home/control-plane';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
@@ -43,7 +44,10 @@ function grantItems(orgs: MyOrg[]): GrantItem[] {
 }
 
 function grantCopy(it: GrantItem): { badge: string; title: string; blurb: ReactNode } {
-  const name = it.org.orgName || 'this org';
+  // spec 342 — say when the org is hidden elsewhere, so a live grant from an org the person can't
+  // see in any list isn't a mystery. The grant itself is unaffected by the status.
+  const status = orgStatusOf(it.org);
+  const name = `${it.org.orgName || 'this org'}${status === 'active' ? '' : ` (${STATUS_LABEL[status].toLowerCase()})`}`;
   if (it.kind === 'membership') {
     // spec 324 §12 — this is the member→org PROFILE-ACCESS delegation, NOT membership itself (ADR-0048 #3):
     // membership is a private Situation; revoking this authority never ends the membership.
@@ -79,7 +83,11 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
   useEffect(() => {
     if (!token) { setLoaded(true); return; }
     let cancelled = false;
-    Promise.all([listMyOrgs(token), listMyReceivedDelegations(token)])
+    // 'any' (spec 342) — deliberately NOT lifecycle-filtered. Deactivating an org revokes nothing,
+    // so a grant it still holds is still live; dropping the row would hide an authority that exists
+    // and take away the only place to revoke it. Hiding an org is a view decision about ROSTERS,
+    // never about credentials.
+    Promise.all([listMyOrgs(token, 'any'), listMyReceivedDelegations(token)])
       .then(([o, rec]) => {
         if (cancelled) return;
         setOrgs(o);

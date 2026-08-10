@@ -13,6 +13,9 @@ import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, 
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
+import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
+import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
+import type { DelegationWire } from '../../lib/delegation';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
@@ -39,8 +42,13 @@ const KIND_LABEL: Record<AgentKind, string> = {
 export const AGENTS_CHANGED_EVENT = 'ap:agents-changed';
 export const notifyAgentsChanged = (): void => { window.dispatchEvent(new Event(AGENTS_CHANGED_EVENT)); };
 
-/** Shared loader for the member's managed agents — one read path (MAM-D7). */
-export function useManagedAgents(token: string | null) {
+/** Shared loader for the member's managed agents — one read path (MAM-D7).
+ *
+ *  spec 342 — `surface` decides which lifecycle states come back, and the DEFAULT IS THE NARROW
+ *  ONE: a screen that never heard of the spec shows only active organizations (and drops the
+ *  treasuries hanging off hidden ones). Pass 'roster' for the organizations list, which must show
+ *  inactive orgs so they can be reactivated, and 'any' for a page addressed by a specific SA. */
+export function useManagedAgents(token: string | null, surface: OrgSurface = 'working') {
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -52,11 +60,11 @@ export function useManagedAgents(token: string | null) {
   useEffect(() => {
     if (!token) { setLoaded(true); return; }
     let cancelled = false;
-    void listManagedAgents(token)
+    void listManagedAgents(token, surface)
       .then((a) => { if (!cancelled) { setAgents(a); setLoaded(true); } })
       .catch(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
-  }, [token, reloadKey]);
+  }, [token, reloadKey, surface]);
   // `version` bumps on every reload — treasury balances re-read when it changes (e.g. after funding).
   return { agents, loaded, version: reloadKey, reload: () => setReloadKey((k) => k + 1) };
 }
@@ -374,11 +382,63 @@ export function PersonalTreasurySection({ token, person, via }: { token: string 
   );
 }
 
+/** spec 342 — the one place an inactive org is shown, so it is the one place it can be brought
+ *  back. Writes the org's own `org.lifecycle` record over the stewardship delegation the tree row
+ *  already carries; without that delegation there is nothing to present, so the row says so
+ *  instead of offering a button that would 403. */
+function ActivateOrgRow({ org, person, token, onDone }: {
+  org: ManagedAgent; person: string; token: string; onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const stewardship = org.stewardshipDelegation as DelegationWire | undefined;
+
+  return (
+    <div style={{ marginTop: '.5rem', padding: '.55rem .65rem', borderRadius: 8, background: 'var(--color-amber-50, #fffbeb)' }}>
+      <p className="manage-card-blurb" style={{ margin: '0 0 .45rem', fontSize: '.78rem' }}>
+        Deactivated — hidden everywhere else in your home.
+      </p>
+      {stewardship ? (
+        <BusyButton
+          busy={busy}
+          busyLabel="Activating…"
+          className="btn-ghost"
+          style={{ fontSize: '.78rem', padding: '.25rem .55rem' }}
+          onClick={() => {
+            setBusy(true);
+            setErr(null);
+            void setOrgLifecycleStatus({
+              person: person as `0x${string}`,
+              org: org.agent,
+              token,
+              stewardship,
+              status: 'active',
+            }).then((r) => {
+              setBusy(false);
+              if (!r.ok) { setErr(r.error); return; }
+              notifyAgentsChanged();
+              onDone();
+            });
+          }}
+        >
+          Activate
+        </BusyButton>
+      ) : (
+        <p className="manage-card-blurb" style={{ margin: 0, fontSize: '.75rem' }}>
+          You hold no stewardship delegation on this organization, so only a steward can activate it.
+        </p>
+      )}
+      {err && <p className="manage-card-blurb" style={{ margin: '.35rem 0 0', fontSize: '.75rem', color: 'var(--c-danger, #dc2626)' }}>{err}</p>}
+    </div>
+  );
+}
+
 // ── /organizations — orgs + each org's treasury + create ────────────────
 export function OrganizationsManager({
   token, person, via, onSelect,
 }: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void }) {
-  const { agents, loaded, version, reload } = useManagedAgents(token);
+  // 'roster' (spec 342): this list shows deactivated orgs — it is the route back to activating them.
+  const { agents, loaded, version, reload } = useManagedAgents(token, 'roster');
   if (!token || !person) return null;
   const orgs = agents.filter((a) => a.kind === 'org');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
@@ -391,12 +451,15 @@ export function OrganizationsManager({
         <div className="manage-grid">
           {orgs.map((org) => {
             const t = treasuryFor(org.agent);
+            const inactive = orgStatusOf(org) === 'inactive';
             return (
-              <div className="manage-card" key={org.agent}>
+              <div className="manage-card" key={org.agent} style={inactive ? { opacity: 0.72 } : undefined}>
                 <div className="manage-card-head">
                   <span className="manage-card-icon"><BuildingIcon size={17} /></span>
                   <span className="manage-card-label">{org.name || 'Unnamed organization'}</span>
-                  <span className="manage-card-badge live">{KIND_LABEL.org}</span>
+                  <span className={`manage-card-badge${inactive ? '' : ' live'}`}>
+                    {inactive ? STATUS_LABEL.inactive : KIND_LABEL.org}
+                  </span>
                 </div>
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
                 <p className="manage-card-blurb">
@@ -404,6 +467,7 @@ export function OrganizationsManager({
                   {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
                 {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
+                {inactive && <ActivateOrgRow org={org} person={person} token={token} onDone={reload} />}
                 <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
                   {t ? (
                     <div style={{ fontSize: '.82rem', display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
