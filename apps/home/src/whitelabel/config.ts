@@ -228,6 +228,21 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // Engagement Campaign Studio (uupg apps/campaign) — org-scoped ask over demo-a2a needs a
+    // session whose `aud` is THIS client_id. Borrowing `uupg-tracker` mints a valid token that
+    // demo-a2a then refuses as aud mismatch. Same demo delegate as the other uupg apps.
+    {
+      client_id: 'campaign-studio',
+      name: 'Engagement Campaign Studio',
+      redirect_uris: [
+        'https://campaign-studio.richardpedersen3.workers.dev/',
+        'http://127.0.0.1:8801/',
+        'http://localhost:8801/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // Single-organization site (agentictrustlabs/uupg apps/org) — ONE Worker serving a dedicated
     // per-org website; the org is resolved from the hostname (or `?org=<label>` on the workers.dev
     // and local-dev origins, which is why those redirect_uris are enough for now). site-login only.

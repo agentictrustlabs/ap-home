@@ -24,7 +24,12 @@ export default function EnableMessagingPage() {
 
   useEffect(() => {
     if (phase === 'restoring') return;
-    const r = (() => { try { return new URL(window.location.href).searchParams.get('return') || ''; } catch { return ''; } })();
+    const params = (() => { try { return new URL(window.location.href).searchParams; } catch { return null; } })();
+    const r = params?.get('return') || '';
+    // Relying apps (uupg Ask / Messages) pass the active org SA — seeded demo custodians often have
+    // on-chain custody of that org without a related-orgs vault row yet, so ManagedAgents alone would
+    // enable only the person and leave the org's planes off.
+    const orgHint = (params?.get('org') || '').trim().toLowerCase();
     setRet(r && isAllowedRelyingOrigin(r) ? r : '');
     if (!session || !agentAddress) { setState('error'); setMsg('Sign in to your Home first, then retry.'); return; }
     if (!loaded) { setState('working'); setMsg('Turning on messaging…'); return; } // wait for stewarded-orgs
@@ -43,6 +48,9 @@ export default function EnableMessagingPage() {
       // (org-create deploys them under the same custodian), so it can sign their grants.
       const orgs = agents.filter((a) => a.kind === 'org' && a.relationship !== 'member').map((a) => a.agent as Address);
       const principals: Address[] = [agentAddress as Address, ...orgs];
+      if (/^0x[0-9a-f]{40}$/.test(orgHint) && !principals.some((p) => p.toLowerCase() === orgHint)) {
+        principals.push(orgHint as Address);
+      }
       const failures: string[] = [];
       for (const p of principals) {
         const a = await activateInteractionsIfNeeded(p, via, auth, true);
@@ -53,7 +61,8 @@ export default function EnableMessagingPage() {
       if (cancelled) return;
       if (failures.length) { setState('error'); setMsg(failures.join(' · ')); return; }
       setState('done');
-      setMsg(`Messaging is on for you${orgs.length ? ` and ${orgs.length} organization${orgs.length === 1 ? '' : 's'}` : ''}.`);
+      const orgCount = principals.length - 1;
+      setMsg(`Messaging is on for you${orgCount > 0 ? ` and ${orgCount} organization${orgCount === 1 ? '' : 's'}` : ''}.`);
       if (r && isAllowedRelyingOrigin(r)) setTimeout(() => { window.location.href = r; }, 1200);
     })();
     return () => { cancelled = true; };
