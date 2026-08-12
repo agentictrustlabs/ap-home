@@ -19,7 +19,7 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { hashDelegation, decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER, type Delegation } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { adoptionStage, classifyDivergence, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
@@ -242,6 +242,29 @@ const OP_RESOURCE: Record<string, string | undefined> = {
   'dm.body.put': 'vault:message.body:dm:',
   'controlevents.append': 'vault:control-events.data',
 };
+
+/**
+ * Which scoped-grant question a content op asks, or none.
+ *
+ * `content.put` with `data: null` is how a DELETE arrives (demo-sso-next `library.ts` `delRecord`),
+ * so it asks for `delete` — a grant saying `ops: ['write']` must not erase records.
+ *
+ * `content.catalog` returns undefined for WRITES: the index lists every artifact in the org, so
+ * rewriting it under a scope that names one community could silently drop another's. Reading it is
+ * allowed to be scoped, which is itself a limit worth naming — the catalog is an aggregate, so a
+ * scope covering it discloses the whole index and cannot be narrowed further until the catalog is
+ * split per family.
+ */
+function scopedContentOp(
+  op: string,
+  resource: string,
+  data: unknown,
+): { resource: string; op: 'read' | 'write' | 'delete' } | undefined {
+  if (op === 'content.get') return { resource, op: 'read' };
+  if (op !== 'content.put') return undefined;
+  if (!resource.startsWith('content.artifact.')) return undefined;
+  return { resource, op: data === null ? 'delete' : 'write' };
+}
 
 const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
 interface ReadGrantRecord { wire: IncomingDelegation; hash: string; clientId: string; storedAt: string }
@@ -1029,6 +1052,62 @@ export class InteractionsDO {
     return this.verifyWire(wire, principal, sessionSa);
   }
 
+  /**
+   * A SCOPED READ wire is sufficient to READ one resource — the caveat decides, not the shape.
+   *
+   * WHY THIS IS NOT "MEMBERS CAN READ EVERYTHING". The tempting version of this admits any
+   * member-access wire for `content.get`, which grants the whole org's content to anyone in the body
+   * and can never be narrowed afterwards. This instead asks the wire what it actually authorizes:
+   * a vault-record-scope caveat naming resources and ops, evaluated against THIS resource for `read`.
+   * A wire that does not name it is refused, so the same mechanism scales from "read everything" down
+   * to "read the progress records of one community" with no second code path.
+   *
+   * NO SCOPE ⇒ NO. `vaultRecordScopeAllows` returns TRUE for an empty scope set (an unscoped grant is
+   * unrestricted), which is right for its own callers and exactly wrong here: it would make a wire
+   * with no record-scope caveat — including a stewardship wire arriving on the wrong field — pass as a
+   * scoped read. The caveat's PRESENCE is what makes this a data grant, so its absence fails first.
+   *
+   * WRITES AND DELETES GO THROUGH THE SAME DOOR, with the op the caller is actually performing —
+   * `content.put` carrying `data: null` is a DELETE, and admitting it as a write would let a grant
+   * that says `ops: ['write']` erase records. The op is decided at the call site from the payload,
+   * not inferred here.
+   *
+   * NEVER THE AGGREGATE. `content.catalog` is one record listing every artifact in the organization,
+   * so a scoped writer who could rewrite it could drop another community's records from the index
+   * while holding a grant that names only their own. The call site refuses it before asking; there is
+   * no scope string that should buy it, which is why the refusal is structural and not a policy line.
+   */
+  private async hasScopedAccess(
+    principal: string,
+    sessionSa: Address,
+    wire: IncomingDelegation | undefined,
+    resource: string,
+    op: 'read' | 'write' | 'delete',
+  ): Promise<{ ok: false } | { ok: true; grants: VaultRecordScopeGrant[] }> {
+    if (!wire || !resource) return { ok: false };
+    if (wire.delegator.toLowerCase() !== principal.toLowerCase()) return { ok: false };
+    if (wire.delegate.toLowerCase() !== sessionSa.toLowerCase()) return { ok: false };
+    const cav = (wire.caveats ?? []).find(
+      (c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase(),
+    );
+    if (!cav?.terms) return { ok: false }; // see NO SCOPE ⇒ NO above
+    let grants;
+    try {
+      grants = decodeVaultRecordScopeTerms(cav.terms as Hex);
+    } catch {
+      return { ok: false }; // undecodable terms grant nothing
+    }
+    if (grants.length === 0) return { ok: false };
+    // `vault:`-PREFIXED, because that is the namespace grant resources are written in
+    // (`buildVaultRecordScopeCaveat` rejects anything else, and REQUIRED_SCOPES above is all
+    // `vault:*`). The op's `resource` arrives bare — `content.artifact.<id>` — so comparing the two
+    // unprefixed would never match any real grant and this would refuse every scoped read while
+    // looking like it worked.
+    if (!vaultRecordScopeAllows(grants, { server: 'demo-mcp', resource: `vault:${resource}`, op })) return { ok: false };
+    // SHAPE + SCOPE decided above (app policy); LIVENESS by the substrate, same as every other proof.
+    return (await this.verifyWire(wire, principal, sessionSa)) ? { ok: true, grants } : { ok: false };
+  }
+
   /** Steward proof: a presented org→person organizationStewardshipDelegation wire, org-verified + unrevoked on-chain, AND
    *  carrying the stewardship caveat shape (SEC-C1 — never a data grant). */
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
@@ -1172,7 +1251,14 @@ export class InteractionsDO {
     principal: string,
     session: string,
     stewardship: IncomingDelegation | undefined,
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    /**
+     * SCOPED ADMISSION. Present for `content.get` / `content.put` on a single ARTIFACT: a data wire
+     * covering that exact resource for that exact op is sufficient, without being — or being mistaken
+     * for — stewardship. Absent for `content.catalog`, `applications.*` and `invite.put`, so each of
+     * those still requires the steward proof.
+     */
+    scoped?: { readonly wire: IncomingDelegation | undefined; readonly resource: string; readonly op: 'read' | 'write' | 'delete' },
+  ): Promise<{ ok: true; scopedGrants?: VaultRecordScopeGrant[] } | { ok: false; reason: string }> {
     if (session) {
       const g = await verifyHomeSession(session, this.env);
       // Home session first, exactly as `ownerOrBridge` orders them. Still not a fallback chain: both
@@ -1184,7 +1270,16 @@ export class InteractionsDO {
       if (!sa) return { ok: false, reason: g.ok ? 'no SA in session' : g.error };
       if (sa.toLowerCase() === principal) return { ok: true };
       if (await this.isSteward(principal, sa, stewardship)) return { ok: true };
-      return { ok: false, reason: 'only this agent, or a steward presenting its stewardship delegation, may reach these records' };
+      // Ordered after stewardship deliberately: a steward is already admitted above, so this branch
+      // only ever decides for a caller who is NOT one. Not a fallback — the two proofs are different
+      // artifacts answering different questions, and neither is tried because the other failed.
+      if (scoped) {
+        const r = await this.hasScopedAccess(principal, sa, scoped.wire, scoped.resource, scoped.op);
+        // The grants travel with the verdict: index maintenance below has to know what this caller
+        // may write, and re-deriving it there would be a second decode that could disagree.
+        if (r.ok) return { ok: true, scopedGrants: r.grants };
+      }
+      return { ok: false, reason: 'only this agent, a steward presenting its stewardship delegation, or a scoped grant covering this record, may reach it' };
     }
     return this.bridgeGate(request, rawBody, op);
   }
@@ -1331,6 +1426,8 @@ export class InteractionsDO {
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
       /** The relying app that called, when one did. Null for the person's own Home. */
       let callerClientId: string | null = null;
+      /** Set only when the caller got in on a SCOPED data grant — see the content handler's merge. */
+      let scopedGrants: VaultRecordScopeGrant[] | null = null;
       const OWNER_FACING = op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
       // spec 341 §5.3 — an ORG's governance docs are steward-facing, not owner-facing: the principal is
       // the org and it has no session. Same verified delegation the messaging rail uses.
@@ -1355,9 +1452,28 @@ export class InteractionsDO {
         const bg = OWNER_FACING
           ? og!
           : STEWARD_FACING
-            ? await this.ownerStewardOrBridge(request, rawBody, op, principal, String(body.session ?? ''), body.stewardship as IncomingDelegation | undefined)
+            ? await this.ownerStewardOrBridge(
+                request,
+                rawBody,
+                op,
+                principal,
+                String(body.session ?? ''),
+                body.stewardship as IncomingDelegation | undefined,
+                // ARTIFACTS ONLY, and only for content ops. `content.catalog` is deliberately excluded:
+                // it is the org-wide index, and no scope string should buy the right to rewrite it.
+                // `applications.*` and `invite.put` are steward-facing acts of a different sensitivity
+                // and stay exactly as they were.
+                ((q) => (q ? { ...q, wire: body.scopedAccess as IncomingDelegation | undefined } : undefined))(
+                  scopedContentOp(op, String(body.resource ?? ''), body.data),
+                ),
+              )
             : await this.bridgeGate(request, rawBody, op);
         if (!bg.ok) return json({ error: `unauthorized: ${bg.reason}` }, 401);
+        // A caller admitted ONLY by a scoped grant may not replace org-wide state; the content
+        // handler merges instead. Absent for a steward, an owner or the bridge — all of whom may.
+        // `bg` unions three gate shapes and only one carries grants; narrow explicitly rather than
+        // by `in`, which widens to `{}` here and would silently type the merge's input as unknown.
+        scopedGrants = (bg as { scopedGrants?: VaultRecordScopeGrant[] }).scopedGrants ?? null;
       }
       const st0 = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       let g = st0.grant;
@@ -1996,6 +2112,33 @@ export class InteractionsDO {
             return json({ ok: true, record: r?.data ?? null });
           }
           if (body.data === undefined) return json({ error: 'data required' }, 400);
+          /*
+            THE INDEX IS MAINTAINED HERE, NOT REPLACED BY THE CALLER.
+
+            `content.catalog` lists every artifact in the organization, and demo-sso-next rewrites the
+            WHOLE list on every save (`library.ts` — `scope.write(list)` runs before the artifact is
+            written). For a steward that is harmless: they may write all of it anyway. For a SCOPED
+            writer it is the entire problem — replacing the index wholesale would let a grant naming
+            one community drop another community's records out of it, which is a deletion wearing a
+            save, and it would also let a stale list roll back somebody else's concurrent write.
+
+            So a scoped caller's catalog write is MERGED. Entries their grant actually covers are
+            taken from the submission; every other entry is preserved from what is stored. They cannot
+            remove what they could not have written. A steward still replaces the list outright —
+            merging for them would only stop their deletes working.
+          */
+          if (resource === 'content.catalog' && scopedGrants && Array.isArray(body.data)) {
+            const stored = ((await this.vaultFor(dg).read<unknown>({ owner: '', resource }))?.data ?? []) as Array<{ id?: string }>;
+            const mine = (e: { id?: string }): boolean =>
+              vaultRecordScopeAllows(scopedGrants!, {
+                server: 'demo-mcp',
+                resource: `vault:content.artifact.${String(e.id ?? '')}`,
+                op: 'write',
+              });
+            const merged = [...stored.filter((e) => !mine(e)), ...(body.data as Array<{ id?: string }>).filter(mine)];
+            await this.vaultFor(dg).write({ owner: '', resource, data: merged, classification: 'internal' } as never);
+            return json({ ok: true, merged: merged.length });
+          }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           return json({ ok: true });
         }
