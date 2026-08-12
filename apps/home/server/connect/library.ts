@@ -324,22 +324,27 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
       const r = await orgOp('content.put', { resource: recordType, data });
       if (!r.ok) throw new LibraryWriteError(r.body.error ?? 'org content write failed', recordType, r.status);
     };
-    /** A read-only scope REFUSES rather than silently succeeding — a no-op write reads as a save. */
-    const readOnly = async (what: string): Promise<never> => {
-      throw new LibraryWriteError(
-        'you may view this organization\'s records, not change them — writing needs a grant that covers this record',
-        what,
-        403,
-      );
-    };
+    /*
+      A SCOPED CALLER MAY WRITE THE RECORDS THEIR GRANT NAMES — and only those.
+
+      This refused every write from a scoped caller, which made a `read,write` grant unreachable: the
+      wire said write, the layer in front of it offered no path, so a community progress steward could
+      assert nothing. The refusal belonged one layer down all along — the DO evaluates the caveat per
+      resource and answers 403 for a record the grant does not cover, which is the only place that can
+      know.
+
+      SO THE PATH IS OPEN AND THE DECISION IS DELEGATED. `putRecord` and `delRecord` present the wire;
+      the DO decides. What stays refused HERE is nothing — a scoped catalog write reaches the DO too,
+      where it is MERGED rather than applied, so a grant naming one community cannot drop another's
+      records out of the index. Enforcing that here as a blanket refusal would have broken the very
+      writes it was meant to make safe, because every save rewrites the catalog.
+    */
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
       read: async () => { const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
-      write: wire ? async (list) => { await putRecord('content.catalog', list); } : async () => readOnly('content.catalog'),
-      putRecord: wire ? putRecord : async (recordType) => readOnly(recordType),
-      delRecord: wire
-        ? async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); }
-        : async (recordType) => readOnly(recordType),
+      write: async (list) => { await putRecord('content.catalog', list); },
+      putRecord,
+      delRecord: async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); },
     };
   }
   // Person scope — authoritative in the person's VAULT via A2A→MCP (the InteractionsDO `record.*` seam,
