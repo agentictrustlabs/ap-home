@@ -138,6 +138,25 @@ export async function stewardWireFor(
   }
 }
 
+/**
+ * The org→person SCOPED DATA wire from their link — the proof a non-steward presents to read.
+ *
+ * Stewardship is not the only way to reach an organization's records, and treating it as the only one
+ * is what made "member" mean "sees nothing". A scoped grant carries a vault-record-scope caveat naming
+ * exactly which resources and ops it covers; the DO evaluates that caveat per resource
+ * (`hasScopedAccess`), so this only has to FIND the artifact — the same rule `memberAccessWireFor`
+ * states about its own source being untrusted.
+ *
+ * KV ONLY, no reconcile. A missing scoped wire is an answer: this person was never given one. There is
+ * nothing to self-heal from, unlike a stewardship projection that the org-create ceremony can drop.
+ */
+export async function scopedWireFor(env: FnContext['env'], person: string, org: string): Promise<unknown | null> {
+  const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+  if (!raw) return null;
+  const link = JSON.parse(raw) as { membershipDelegation?: unknown; memberAccessDelegation?: unknown };
+  return link.membershipDelegation ?? link.memberAccessDelegation ?? null;
+}
+
 /** The org→person MEMBER-ACCESS wire (SEC-H1) — the ORG's authorization that `person` may join,
  *  minted by the steward at invite time and stored in the org vault at `org.invite:agent:<person>`.
  *  The DO re-verifies it on-chain (ERC-1271 by the org + unrevoked + data-grant scope), so the

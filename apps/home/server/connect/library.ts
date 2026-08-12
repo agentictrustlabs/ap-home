@@ -17,7 +17,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { signCredential, canonicalHash } from '@agenticprimitives/verifiable-credentials';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
-import { stewardWireFor, callInteractions } from './channels';
+import { stewardWireFor, scopedWireFor, callInteractions } from './channels';
 import { appendControlEvent } from './control-events';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { CHAIN_ID } from '../../src/lib/chain';
@@ -273,7 +273,25 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     const orgSA = org.toLowerCase();
     // Authorization to act FOR the org is a stewardship wire, re-verified downstream by the org DO.
     const wire = await stewardWireFor(env, person, orgSA, bearer);
-    if (!wire) return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
+    /*
+      A SCOPED GRANT IS ALSO A WAY IN — for READS.
+
+      Stewardship used to be the only proof this function would look for, so an organization's own
+      members saw nothing of its records: every screen answered 403 and the app could only offer
+      "view only" by making somebody a steward, which is read AND write AND act.
+
+      A scoped data wire carries a vault-record-scope caveat naming exactly which resources and ops it
+      covers. The DO evaluates that caveat per resource (`hasScopedAccess`), so presenting one here
+      grants nothing by itself — it lets the record layer decide, which is the only place that can.
+
+      WRITES STILL REFUSE, and not by accident: the scope returned below has no write path at all.
+      That asymmetry is where "member views, steward acts" is actually enforced, and it is deliberate
+      that it lives here rather than in a flag a caller could be wrong about.
+    */
+    const scopedAccess = wire ? null : await scopedWireFor(env, person, orgSA);
+    if (!wire && !scopedAccess) {
+      return { ok: false, res: jsonCors({ error: 'not a steward of this organization' }, request, 403) };
+    }
     // Storage gate: orgVault is null unless the org enabled storage (a delivery grant exists). We reuse it
     // only as the gate; content itself rides the DO's `content.*` op (steward-bridged, ADR-0055).
     const { orgVault } = await import('../lib/org-vault');
@@ -288,7 +306,7 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     // OTHER half of the violation and a separate wave. Fixing who-decided without fixing the shape is
     // real progress, and the gate's `total` ceiling exists so it can be made.
     const { callInteractions } = await import('./channels');
-    const stewardArgs = { session: bearer, stewardship: wire };
+    const stewardArgs = wire ? { session: bearer, stewardship: wire } : { session: bearer, scopedAccess };
     const orgOp = async <T>(op: string, payload: Record<string, unknown>): Promise<{ ok: boolean; body: T & { error?: string }; status: number }> => {
       const r = await callInteractions(env, orgSA, op, { ...stewardArgs, ...payload });
       return { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string }, status: r.status };
@@ -306,12 +324,22 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
       const r = await orgOp('content.put', { resource: recordType, data });
       if (!r.ok) throw new LibraryWriteError(r.body.error ?? 'org content write failed', recordType, r.status);
     };
+    /** A read-only scope REFUSES rather than silently succeeding — a no-op write reads as a save. */
+    const readOnly = async (what: string): Promise<never> => {
+      throw new LibraryWriteError(
+        'you may view this organization\'s records, not change them — writing needs a grant that covers this record',
+        what,
+        403,
+      );
+    };
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
       read: async () => { const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
-      write: async (list) => { await putRecord('content.catalog', list); },
-      putRecord,
-      delRecord: async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); },
+      write: wire ? async (list) => { await putRecord('content.catalog', list); } : async () => readOnly('content.catalog'),
+      putRecord: wire ? putRecord : async (recordType) => readOnly(recordType),
+      delRecord: wire
+        ? async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); }
+        : async (recordType) => readOnly(recordType),
     };
   }
   // Person scope — authoritative in the person's VAULT via A2A→MCP (the InteractionsDO `record.*` seam,
