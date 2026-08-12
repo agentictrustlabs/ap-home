@@ -77,10 +77,29 @@ export async function stewardWireFor(
 ): Promise<unknown | null> {
   const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
   const link = raw ? (JSON.parse(raw) as { relationship?: string; stewardshipDelegation?: unknown }) : null;
-  if (link && link.relationship !== 'member' && link.stewardshipDelegation) return link.stewardshipDelegation;
-  // An explicit MEMBER link is an answer, not a gap: they are not a steward, and reconciling would
-  // not change that.
-  if (link?.relationship === 'member') return null;
+  /*
+    THE WIRE DECIDES, NOT THE WORD.
+
+    This used to require `relationship !== 'member'` as well as the wire, and refused outright on an
+    explicit member link. Two things were wrong with that:
+
+      IT WAS NOT A CHECK. `relationship` is a display label on a KV projection. The thing that
+      authorizes is the delegation, and the DO re-verifies it in full downstream — org-signed via
+      ERC-1271, unrevoked on chain, and carrying the stewardship caveat shape (`isSteward`). This
+      function only has to FIND the artifact; `memberAccessWireFor` below already says exactly that
+      about its own source being untrusted. A label in front of a verified grant adds no safety and
+      one more way to be wrong.
+
+      IT WAS A ONE-WAY DOOR. `/connect/related-orgs` makes `relationship` sticky — once `member`,
+      always `member` (`body?.relationship === 'member' || existing.relationship === 'member'`). So a
+      link demoted to member could never regain library access even after a valid stewardship wire was
+      re-issued to it, and no API call could undo that. Withdrawing stewardship has to be reversible
+      by re-granting it; anything else makes a demotion an unrecoverable state.
+
+    A member link with no wire still returns null, which is the honest answer — it just comes from the
+    wire's absence rather than from the word.
+  */
+  if (link?.stewardshipDelegation) return link.stewardshipDelegation;
 
   // SELF-HEAL FROM THE AUTHORITATIVE DOC (spec 323 W1 — the person's `relationships.data` in their
   // own vault is the source; this KV is its projection). The projection is written by several
@@ -99,7 +118,9 @@ export async function stewardWireFor(
     // person as a non-steward of their own org, which is the bug this exists to fix.
     const entry = Object.entries(doc?.orgs ?? {})
       .find(([k]) => k.toLowerCase() === org.toLowerCase())?.[1];
-    if (!entry || entry.relationship === 'member') return null;
+    // Same rule as above: the wire decides. A relationship word in the authoritative doc is no more
+    // a verification than the one in the KV projection.
+    if (!entry) return null;
     const wire = Array.isArray(entry.delegations) ? entry.delegations[0] ?? null : null;
     if (!wire) return null;
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({
