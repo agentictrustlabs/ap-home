@@ -8,6 +8,7 @@ import { keccak256, toBytes } from 'viem';
 import {
   type Delegation,
   type Caveat,
+  type VaultRecordScopeGrant,
   buildCaveat,
   encodeTimestampTerms,
   encodeAllowedTargetsTerms,
@@ -107,6 +108,31 @@ export async function issueScopedDelegation(
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = await signHash(digest);
   return d;
+}
+
+/** Issue `delegator -> delegateSA` authority over explicit vault record scopes.
+ *
+ * This is the generic substrate for vault-subject role ceremonies: the role row explains why the grant
+ * exists; this delegation is the executable authority a resource server verifies.
+ */
+export async function issueVaultRecordScopeDelegation(
+  delegator: Address,
+  delegateSA: Address,
+  grants: readonly VaultRecordScopeGrant[],
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  return issueScopedDelegation(
+    delegator,
+    delegateSA,
+    [
+      buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+      buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+      buildVaultRecordScopeCaveat([...grants]),
+    ],
+    signHash,
+  );
 }
 
 /** spec 253 — build a `delegator → delegateSA` site delegation WITHOUT an off-chain signature.
