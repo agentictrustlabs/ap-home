@@ -142,11 +142,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const expiresAt = Date.now() + 60 * 60 * 24 * 7 * 1000;
   const vault = await orgVault(env, org);
   if (!vault) return json({ error: 'org vault storage not enabled — a steward must enable it before inviting' }, 409);
-  await vault.set(`org.invite:${token}`, {
-    emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
-    ...(mad ? { memberAccessDelegation: mad } : {}),
-    ...(returnUrl ? { returnUrl, appName } : {}),
-  });
+  // `ServerVaultTransport.set` THROWS on refusal, and this call was not guarded — so any vault
+  // denial became a bare 500 with no body from the endpoint that creates invitations. A caller
+  // could not tell a refusal from an outage, and the steward gate had already passed, so the
+  // obvious explanations were all wrong ones. The write is still REQUIRED (an invite with no
+  // record is not an invite); what changes is that its failure says so.
+  try {
+    await vault.set(`org.invite:${token}`, {
+      emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
+      ...(mad ? { memberAccessDelegation: mad } : {}),
+      ...(returnUrl ? { returnUrl, appName } : {}),
+    });
+  } catch (e) {
+    return json(
+      { error: `could not record the invitation in the organization's vault: ${e instanceof Error ? e.message : String(e)}` },
+      502,
+    );
+  }
 
   const joinUrl = `${resolveOrigin(request, env)}/invite/${token}?o=${org}`;
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName));
