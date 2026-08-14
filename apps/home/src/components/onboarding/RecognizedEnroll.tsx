@@ -222,7 +222,28 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
-      const auth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+      /*
+        PASS THE SESSION TOKEN FOR EVERY CREDENTIAL, not only the KMS ones.
+
+        `signHashFor` uses it in two different ways, and gating it on `isKmsVia` served only the
+        first:
+
+          KMS (google / youversion / email / phone) — the token IS the signer; without it the
+            ceremony cannot sign at all.
+          WALLET — the token is how the DEMO-CUSTODY probe runs. A seeded demo person has a wallet
+            CREDENTIAL whose key this Home holds and whose browser has no wallet at all, so
+            `isDemoCustodyHome(token)` is what routes them to a prompt-free server-side signature.
+
+        Withholding it here meant `auth?.token` was undefined, the probe never ran, and the wallet
+        branch fell through to the injected provider — "No Ethereum wallet found — install MetaMask"
+        at the end of a ceremony for an account whose key nobody can hold in a browser. A dead end
+        reachable by every shared test identity, on the last click.
+
+        A REAL wallet home is unaffected: the probe answers false once per session (cached) and falls
+        straight through to its provider, exactly as before. `EntryExperience` already passes the
+        token unconditionally; this brings the recognized path in line with it.
+      */
+      const auth: Auth | undefined = token ? { token } : undefined;
 
       let code: string;
       if (enroll.template === 'org-create') {
@@ -242,16 +263,31 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // organization was chosen" while the chosen organization sat in the URL. `createOrganization`
         // handles the existing branch first and uses `base` only as the link's display name.
         if (!orgBase && !existingOrg) return fail('No organization was chosen for this request.');
-        const created = await createOrganization(
-          home,
-          orgBase ?? '',
-          delegate,
-          viaLower,
-          auth,
-          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
-        );
-        if (!created.ok) return fail(created.error);
-        code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
+        // A member connects as themselves with the org as context. Only a steward may sign as the
+        // org (select-existing remints org→app grants). The URL `existing_org` path is steward-only.
+        const asSteward = existingOrg ? (enroll.existingOrg ? true : !!orgSel?.asSteward) : true;
+        if (existingOrg && !asSteward) {
+          const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
+          if (!granted.ok) return fail(granted.error);
+          code = await submitEnrollGrant(grant_id, granted.grant, {
+            orgAgent: existingOrg,
+            orgName: orgBase,
+            person: home.address,
+            purpose: enroll.purpose,
+            requestedBy: enroll.aud,
+          }, granted.sessionDelegation);
+        } else {
+          const created = await createOrganization(
+            home,
+            orgBase ?? '',
+            delegate,
+            viaLower,
+            auth,
+            { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
+          );
+          if (!created.ok) return fail(created.error);
+          code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
+        }
       } else {
         // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
         // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so
@@ -363,6 +399,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         <OrgChooser
           token={token}
           appHost={appHost}
+          purpose={enroll.purpose}
           onChoose={(c) => { setOrgSel(c); setPhase('consent'); }}
           onDecline={onDecline}
         />
