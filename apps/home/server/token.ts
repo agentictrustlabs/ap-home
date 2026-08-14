@@ -12,9 +12,11 @@
 //      { code, aud } and gets { agentSession }.
 import { verifyPkceS256, mintIdToken } from '@agenticprimitives/connect';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
-import { getServer, jsonCors, preflight, resolveOrigin, type FnContext } from './_lib/server-broker';
+import { getServer, jsonCors as jsonCorsBase, preflight, resolveOrigin, type FnContext } from './_lib/server-broker';
 import { verifyDelegation, type IncomingDelegation } from './_lib/verify-delegation';
-import { getClient, clientAllowsRedirect } from '../src/lib/oidc-clients';
+import { clientAllowsRedirect } from '../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient, isAllowedRelyingOriginAsync } from './_lib/oidc-registry';
 import { CHAIN_ID } from '../src/lib/chain';
 import { idTokenTtl } from './_lib/session-ttl';
 
@@ -31,9 +33,20 @@ interface TokenBody {
   agent_name?: string;
 }
 
-export const onRequestOptions = ({ request }: FnContext): Response => preflight(request);
+// The preflight must answer for member-registered origins too. Resolving the verdict here (one
+// KV read) and handing it to the sync helper keeps `corsHeaders` synchronous for its ~200 other
+// call sites, which is the only reason this endpoint reads a little unusual.
+export const onRequestOptions = async ({ request, env }: FnContext): Promise<Response> =>
+  preflight(request, await isAllowedRelyingOriginAsync(env, request.headers.get('Origin') ?? ''));
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+  // Resolve the CORS verdict ONCE for this request — including the member-registered registry —
+  // and shadow `jsonCors` with a bound form, so every response below reflects the same decision
+  // without threading a flag through twenty call sites.
+  const dynamicOrigin = await isAllowedRelyingOriginAsync(env, request.headers.get('Origin') ?? '');
+  const jsonCors = (body: unknown, req: Request, status = 200): Response =>
+    jsonCorsBase(body, req, status, dynamicOrigin);
+
   // One lifetime for this request: the minted token, and any KV binding that must not outlive it.
   const ttl = idTokenTtl(env);
   const body = (await request.json().catch(() => ({}))) as TokenBody;
@@ -46,7 +59,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // for THIS client (the `oidc-deleg:<digest>` binding written at /oidc/grant time —
   // closes cross-client replay).
   if ((body.grant_type === 'delegation' || (body.delegation && !body.code)) && body.client_id) {
-    const client = getClient(body.client_id);
+    const client = await resolveClient(env, body.client_id);
     if (!client) return jsonCors({ error: `unknown client_id "${body.client_id}"` }, request, 400);
     if (body.redirect_uri && !clientAllowsRedirect(client, body.redirect_uri)) {
       return jsonCors({ error: 'redirect_uri not allowed for client' }, request, 400);

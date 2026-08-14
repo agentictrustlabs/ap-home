@@ -6,7 +6,8 @@
 import { importJwks, verifyAgentSession, verifyIdToken } from '@agenticprimitives/connect';
 import type { FnContext } from '../_lib/server-broker';
 import { getServer, ownIssuer } from '../_lib/server-broker';
-import { getClient } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 import { verifyStewardship } from '../_lib/verify-stewardship';
 import type { IncomingDelegation } from '../_lib/verify-delegation';
 
@@ -66,7 +67,7 @@ async function callerSa({ request, env }: FnContext): Promise<string | null> {
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
-  if (!iss || !ownIssuer(request, env)(iss) || !aud || !getClient(aud)) return null;
+  if (!iss || !ownIssuer(request, env)(iss) || !aud || !(await resolveClient(env, aud))) return null;
   const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;

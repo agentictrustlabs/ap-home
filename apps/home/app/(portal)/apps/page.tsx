@@ -12,6 +12,8 @@ import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCar
 import { YouVersionData } from '../../../src/components/portal/YouVersionData';
 import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
 import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
+import { AppReadGrants } from '../../../src/components/portal/AppReadGrants';
+import '../../../src/components/portal/developer-apps.css';
 import { LinkIcon } from '../../../src/components/shared/Icons';
 
 export default function AppsPage() {
@@ -43,6 +45,12 @@ export default function AppsPage() {
           </p>
         </>
       )}
+
+      {/* spec 341 §4.3 — the other half of "connected": which apps may READ, per app and per record
+          family. Connecting proves identity; this authorizes access, and the two are separate yeses. */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <AppReadGrants />
+      </div>
 
       {/* Moved here from the old /you Connected tab (spec 315): how other agents find + reach you. */}
       <div style={{ marginTop: '1.5rem' }}>

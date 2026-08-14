@@ -6,9 +6,11 @@
 //
 // SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { getClient, isAllowedRelyingOrigin } from '../../lib/oidc-clients';
+// Curated clients resolve synchronously from the bundle; MEMBER-REGISTERED ones are looked up
+// once via /connect/client-info and then answer synchronously too (src/lib/relying-clients.ts).
+import { knownRelyingClient, primeRelyingClient, relyingOriginAllowed } from '../../lib/relying-clients';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -47,7 +49,7 @@ export function parseEnrollReq(): EnrollReq | null {
     // registry value here too (openbook-tyndale sends a plain OIDC request with no delegate — without
     // this default the request wasn't recognized as an enroll at all and the member was never
     // redirected back). Unregistered client + no delegate still returns null.
-    const delegate = p.get('delegate') ?? (clientId ? (getClient(clientId)?.delegate ?? null) : null);
+    const delegate = p.get('delegate') ?? (clientId ? (knownRelyingClient(clientId)?.delegate ?? null) : null);
     const codeChallenge = p.get('code_challenge');
     // `delegation_template` is ours; accept `template` as an alias for plain-OIDC relying apps.
     const template = p.get('delegation_template') ?? p.get('template');
@@ -95,7 +97,7 @@ export function hostOf(redirectUri: string): string {
 }
 
 export function relyingAllowed(redirectUri: string): boolean {
-  return isAllowedRelyingOrigin(redirectUri);
+  return relyingOriginAllowed(redirectUri);
 }
 
 // ── Standalone grant + delivery (used by the hook AND the Google-resume path) ──────────────
@@ -232,6 +234,9 @@ export interface EnrollApi {
   enroll: EnrollReq | null;
   popupMode: boolean;
   allowed: boolean;
+  /** True while a MEMBER-REGISTERED client is being looked up. `allowed` is not yet meaningful —
+   *  wait, rather than rendering "request blocked" at an app that is in fact registered. */
+  resolvingClient: boolean;
   host: string;
   postToOpener(msg: Record<string, unknown>): void;
   /** OIDC error bounce to the relying app (prompt=none outcomes) — see deliverEnrollError. */
@@ -257,6 +262,32 @@ export function useEnrollReq(): EnrollApi {
     // still falls back to the same-origin relay (`ac_relay`) when postMessage can't reach the opener.
     return !!enroll && new URL(window.location.href).searchParams.get('mode') === 'popup';
   });
+
+  // RESOLVE BEFORE DECIDING. A member-registered client is not in this bundle, so `allowed`
+  // cannot be answered until `/connect/client-info` has replied. `resolvingClient` is true for
+  // that window, and the entry screen waits rather than flashing "request blocked" at an app
+  // that is perfectly well registered — a false accusation the person cannot act on.
+  //
+  // A curated client resolves synchronously, so this never delays the common path.
+  const [resolvingClient, setResolvingClient] = useState<boolean>(
+    () => !!enroll && !knownRelyingClient(enroll.aud),
+  );
+  const [, setResolvedTick] = useState(0);
+  useEffect(() => {
+    if (!enroll || knownRelyingClient(enroll.aud)) {
+      setResolvingClient(false);
+      return;
+    }
+    let live = true;
+    void primeRelyingClient(enroll.aud).finally(() => {
+      if (!live) return;
+      setResolvingClient(false);
+      setResolvedTick((n) => n + 1); // re-read the now-populated origin allowlist
+    });
+    return () => {
+      live = false;
+    };
+  }, [enroll]);
 
   // Post to the opener ONLY at the validated relying origin (audit F3 — exact targetOrigin).
   const postToOpener = useCallback(
@@ -317,6 +348,7 @@ export function useEnrollReq(): EnrollApi {
     enroll,
     popupMode,
     allowed: enroll ? relyingAllowed(enroll.redirectUri) : false,
+    resolvingClient,
     host: enroll ? hostOf(enroll.redirectUri) : '',
     postToOpener,
     deliverError,

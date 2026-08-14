@@ -57,6 +57,30 @@ const faithImpact: WhiteLabelConfig = {
       // Where the service-agent-wire ceremony talks to skills-a2a.
       serviceAgentConfig: { a2aBase: 'https://skills-a2a-production.richardpedersen3.workers.dev' },
     },
+    // commons-app — the reference third-party app from the PUBLIC starter repo
+    // (agentic-primitives-starter, apps/commons). It is the one entry here that exists to be COPIED:
+    // a plain relying app with no privileged template, no social custody, and no payment config —
+    // exactly what a member gets from the self-service registry at /developer.
+    //
+    // It is curated rather than self-registered only so the starter runs against a fresh deployment
+    // before anyone has opened the portal. A developer deploying their own copy registers THEIR
+    // origin at /developer instead of editing this file.
+    {
+      client_id: 'commons-app',
+      name: 'Commons',
+      // The deployed starter, plus `wrangler dev` on 8799. Exact match (CN-1), so the trailing
+      // slash is load-bearing — and note the `-production` suffix: `wrangler deploy --env
+      // production` names the Worker `<name>-<env>`, so the origin is NOT `commons.workers.dev`.
+      // A developer deploying their own copy adds THEIR origin through /developer, not here.
+      redirect_uris: [
+        'https://commons-production.richardpedersen3.workers.dev/',
+        'http://localhost:8799/',
+        'http://127.0.0.1:8799/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // engage-app — the engagement layer for faith and impact work (agentictrustlabs/engage). Turns a
     // stated need into a mandate-authorized, receipted fulfilment. Login-grade connect via the
     // Personal Home; no PII held by the broker.

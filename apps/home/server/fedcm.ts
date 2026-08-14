@@ -25,7 +25,8 @@ import {
 import { importJwks, verifyAgentSession, mintIdToken } from '@agenticprimitives/connect';
 import type { Address, CredentialPrincipal } from '@agenticprimitives/types';
 import { whitelabel } from '../src/whitelabel/config';
-import { getClient, isAllowedRelyingOrigin } from '../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient, isAllowedRelyingOriginAsync } from './_lib/oidc-registry';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
 import { signBridgeCall } from './_lib/bridge-hmac';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
@@ -231,7 +232,7 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
   if (!parsed) return json(buildErrorResponse('invalid_request'), 400, cors);
 
   // Origin must be a registered origin of the client (the IdP can't learn the RP otherwise).
-  const client = getClient(parsed.clientId);
+  const client = await resolveClient(env, parsed.clientId);
   if (!client) return json(buildErrorResponse('unauthorized_client'), 400, cors);
   const clientOrigins = new Set(
     client.redirect_uris.map((u) => {
@@ -281,13 +282,13 @@ function grantCors(rpOrigin: string): Record<string, string> {
 }
 
 /** CORS preflight for `/fedcm/grant` (JSON body → non-simple request → preflighted). */
-export const onFedcmGrantOptions = ({ request }: FnContext): Response => {
+export const onFedcmGrantOptions = async ({ request, env }: FnContext): Promise<Response> => {
   const rpOrigin = request.headers.get('origin') ?? '';
   // L-1: only advertise CORS to a REGISTERED relying origin.
   return new Response(null, {
     status: 204,
     headers: {
-      ...(isAllowedRelyingOrigin(rpOrigin) ? grantCors(rpOrigin) : {}),
+      ...((await isAllowedRelyingOriginAsync(env, rpOrigin)) ? grantCors(rpOrigin) : {}),
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'content-type',
     },
@@ -315,7 +316,7 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
   // L-1: reflect CORS ONLY for a REGISTERED relying origin — never echo `Access-Control-Allow-Origin` to
   // an arbitrary caller. (The exact client_id↔origin match is still enforced below; this is the coarse
   // gate so an unknown origin can't read any response body.)
-  const cors = isAllowedRelyingOrigin(rpOrigin) ? grantCors(rpOrigin) : {};
+  const cors = (await isAllowedRelyingOriginAsync(env, rpOrigin)) ? grantCors(rpOrigin) : {};
   const body = (await request.json().catch(() => null)) as { id_token?: string; client_id?: string } | null;
 
   // M-3 (audit AC-0032): this is the only NEW browser-reachable authority-issuance surface, so EVERY
@@ -336,7 +337,7 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
   }
 
   // The RP must be a registered client, and the request Origin one of its registered origins.
-  const client = getClient(body.client_id);
+  const client = await resolveClient(env, body.client_id);
   if (!client) {
     audit('reject', { reason: 'unknown_client' });
     return json({ error: 'unauthorized_client' }, 400, cors);

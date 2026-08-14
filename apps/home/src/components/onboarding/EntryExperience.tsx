@@ -10,6 +10,7 @@ import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { initRemoteSigner } from '../../lib/remote-signer';
 import { whitelabel } from '../../whitelabel/config';
+import { knownRelyingClient } from '../../lib/relying-clients';
 import { useSession } from '../../context/session';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
@@ -156,7 +157,13 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     // is a public handle, not a login key; social/passkey resolve the home without it.
     return { k: 'credential' };
   });
-  const clientCfg = api.enroll ? whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) : undefined;
+  // Curated entry first; a member-registered one once the hook has primed it. Both give the app
+  // a NAME on the consent screen, which is the whole reason the person can tell who is asking.
+  const clientCfg = api.enroll
+    ? (whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) ??
+       knownRelyingClient(api.enroll.aud) ??
+       undefined)
+    : undefined;
   const appName = clientCfg?.name ?? (api.enroll ? (() => {
     try { return new URL(api.enroll!.redirectUri).host; } catch { return api.enroll!.redirectUri; }
   })() : whitelabel.brand.name);
@@ -187,6 +194,9 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // Enroll mode: resolve the requested name → new vs existing vs org-create.
   useEffect(() => {
     if (mode !== 'enroll' || !api.enroll) return;
+    // Still resolving a member-registered client — decide nothing yet. Blocking here would
+    // accuse a registered app of being untrusted for the length of one KV read.
+    if (api.resolvingClient) return;
     if (!api.allowed) {
       setView({ k: 'blocked' });
       return;
@@ -283,7 +293,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       }
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
-  }, [mode, api.enroll, api.allowed]);
+  }, [mode, api.enroll, api.allowed, api.resolvingClient]);
 
   if (view.k === 'checking') {
     return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">One moment…</p></div></Shell>;

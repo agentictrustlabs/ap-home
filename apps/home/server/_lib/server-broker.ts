@@ -150,10 +150,16 @@ export function json(body: unknown, status = 200): Response {
 }
 
 /** CORS headers for the cross-origin OIDC endpoints (/token, /jwks) — reflects the request
- *  Origin ONLY if it's a registered client origin (spec 230 §8.10; not a broad `*`). */
-export function corsHeaders(request: Request): Record<string, string> {
+ *  Origin ONLY if it's a registered client origin (spec 230 §8.10; not a broad `*`).
+ *
+ *  `alsoAllowed` admits an origin the CALLER already resolved — used by the endpoints that
+ *  consult the member-registered client registry (`server/_lib/oidc-registry.ts`), which is a KV
+ *  read and therefore async. Passing the verdict in keeps this helper synchronous for its 200-odd
+ *  existing call sites while letting the OIDC endpoints answer for self-registered apps too. It
+ *  defaults to `false`, so a caller that does not opt in behaves exactly as before. */
+export function corsHeaders(request: Request, alsoAllowed = false): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
-  if (!origin || !isAllowedClientOrigin(origin)) return {};
+  if (!origin || !(isAllowedClientOrigin(origin) || alsoAllowed)) return {};
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'POST, GET, OPTIONS',
@@ -163,15 +169,15 @@ export function corsHeaders(request: Request): Record<string, string> {
   };
 }
 
-/** json() + CORS for a registered client origin. */
-export function jsonCors(body: unknown, request: Request, status = 200): Response {
+/** json() + CORS for a registered client origin. See `corsHeaders` for `alsoAllowed`. */
+export function jsonCors(body: unknown, request: Request, status = 200, alsoAllowed = false): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ...corsHeaders(request) },
+    headers: { 'content-type': 'application/json', ...corsHeaders(request, alsoAllowed) },
   });
 }
 
-/** CORS preflight (204). */
-export function preflight(request: Request): Response {
-  return new Response(null, { status: 204, headers: corsHeaders(request) });
+/** CORS preflight (204). See `corsHeaders` for `alsoAllowed`. */
+export function preflight(request: Request, alsoAllowed = false): Response {
+  return new Response(null, { status: 204, headers: corsHeaders(request, alsoAllowed) });
 }

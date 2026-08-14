@@ -16,7 +16,9 @@ type AgentKind = 'person' | 'org' | 'service';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { signCredential, canonicalHash } from '@agenticprimitives/verifiable-credentials';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 import { stewardWireFor, scopedWireFor, callInteractions } from './channels';
 import { appendControlEvent } from './control-events';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
@@ -64,7 +66,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   //    MAY ASK and not WHAT MAY BE ASKED — scope, ownership and every gate below are unchanged.
   if (!v.ok) {
     const aud = unverifiedAud(token);
-    if (aud && getClient(aud)) {
+    if (aud && (await resolveClient(env, aud))) {
       v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
     }
   }

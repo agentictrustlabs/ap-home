@@ -24,7 +24,9 @@
 // SEC-001 closure.
 
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
-import { getClient, clientAllowsRedirect, clientAllowsTemplate, getClientDelegate, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
+import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegate } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones, in that order (server/_lib/oidc-registry.ts).
+import { resolveClient, isAllowedRelyingOriginAsync } from '../_lib/oidc-registry';
 
 const GRANT_TTL_SEC = 600; // 10 min — covers ceremony + one retry
 
@@ -61,7 +63,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 
   // Client registry — exact redirect + allowed template (CN-1, spec 230 §6).
-  const client = getClient(body.client_id);
+  const client = await resolveClient(env, body.client_id);
   if (!client) return json({ error: `unknown client_id "${body.client_id}"` }, 400);
   if (!clientAllowsRedirect(client, body.redirect_uri)) {
     return json({ error: 'redirect_uri not allowed for client' }, 400);
@@ -72,7 +74,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // SEC-005: defense in depth — the redirect_uri's origin must ALSO be in the global
   // relying-origins allowlist (which is derived from this same registry, so this is a
   // sanity check; failure means the registry itself is misconfigured).
-  if (!isAllowedRelyingOrigin(body.redirect_uri)) {
+  if (!(await isAllowedRelyingOriginAsync(env, body.redirect_uri))) {
     return json({ error: 'redirect_uri origin not in allowlist' }, 400);
   }
 
