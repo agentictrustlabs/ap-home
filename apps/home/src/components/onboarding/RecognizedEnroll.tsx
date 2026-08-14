@@ -179,7 +179,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.collectionConfig;
         if (!cfg) return fail('this app is not configured for subscription collection');
         if (!enroll.collectToken) return fail('missing owner token for collection');
-        const collectAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        // Same reason as the grant path below: a wallet-credential demo home needs the token to
+        // reach its server-side custodian, and a real wallet home is unaffected by receiving it.
+        const collectAuth: Auth | undefined = token ? { token } : undefined;
         const res = await collectDueSubscriptions(
           cfg.treasury as Address, viaLower, collectAuth,
           { asset: cfg.asset as Address, edition: cfg.edition, a2aBase: cfg.a2aBase, idToken: enroll.collectToken },
@@ -197,7 +199,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.collectionConfig;
         if (!cfg) return fail('this app is not configured for content-signer authorization');
         if (!enroll.collectToken) return fail('missing owner token for content-signer authorization');
-        const csAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        // Same reason as the grant path below (demo-custody probe needs the token on the wallet via).
+        const csAuth: Auth | undefined = token ? { token } : undefined;
         const res = await authorizeContentSigningForOwner(viaLower, csAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken, targetSigner: enroll.contentSignerTarget });
         if (!res.ok) return fail(res.error);
         setSsoCookie(token, viaLower);
@@ -212,7 +215,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.serviceAgentConfig;
         if (!cfg) return fail('this app is not configured for service-agent authorization');
         if (!enroll.collectToken) return fail('missing owner token for service-agent authorization');
-        const swAuth: Auth | undefined = isKmsVia(viaLower) ? { token } : undefined;
+        // Same reason as the grant path below (demo-custody probe needs the token on the wallet via).
+        const swAuth: Auth | undefined = token ? { token } : undefined;
         const res = await authorizeServiceAgentWire(viaLower, swAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
         if (!res.ok) return fail(res.error);
         setSsoCookie(token, viaLower);
@@ -350,7 +354,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // VaultKeyAuthorization on-device — ONE extra signature at connect (the deliberate "custodian backs all
       // authority" tradeoff). Idempotent (skipped if already bound) + best-effort (a vault hiccup never blocks
       // the connect — the delegation is already minted, and /vault-key + the journey remain as a re-bind path).
-      try { await activateVaultIfNeeded(home.address, viaLower, isKmsVia(viaLower) ? { token } : undefined); }
+      // Same reason again: the vault-key ceremony signs, so a wallet-credential demo home needs the
+      // token to reach its server-side custodian instead of a wallet that is not in this browser.
+      try { await activateVaultIfNeeded(home.address, viaLower, token ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
       // spec 280 carve-out — self-heal the published connection KIND on every successful social connect
       // (idempotent, gasless, kind-only) so a named social home stops being EOA-ambiguous at re-entry.
