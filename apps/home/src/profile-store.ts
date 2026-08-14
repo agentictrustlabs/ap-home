@@ -13,6 +13,16 @@ import type { Address } from '@agenticprimitives/types';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { SESSION_KEY } from './context/session';
 import { readSsoCookie } from './lib/sso-cookie';
+import {
+  hydrateLocationFields,
+  locationFieldFilled,
+  locationFieldValue,
+  persistLocationFields,
+  type ProfileLocation,
+} from './lib/profile-location';
+
+export type { LocationPrecision, ProfileLocation } from './lib/profile-location';
+export { formatLocation, normalizeLocation, projectLocationForShare } from './lib/profile-location';
 
 /** The broker home-session token the InteractionsDO verifies (self-gated record ops). */
 function homeBearer(): string {
@@ -32,7 +42,15 @@ export interface ImpactContactProfile {
   lastName?: string;
   email?: string;
   phone?: string;
+  /**
+   * Structured location the person chose to share. Precision is country, state/province,
+   * city, or street address. Apps granted this profile receive only that precision.
+   * Private vault PII — never published as a public `approf:` facet.
+   */
+  location?: ProfileLocation;
+  /** Legacy alias of `location.country`. Kept so existing grants and required=country still work. */
   country?: string;
+  /** Legacy alias of `location.locality` when precision is city or address. */
   city?: string;
   /** For church / organization / network adopters or members — held at Impact because
    *  "the org you're part of" is a community-wide identity fact, not app-specific. */
@@ -58,7 +76,31 @@ export interface ImpactStoredProfile {
   };
 }
 
+export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location'>;
 export type ImpactProfileFieldKey = keyof ImpactContactProfile;
+
+export const SHAREABLE_PROFILE_KEYS: readonly ImpactProfileFieldKey[] = [
+  'firstName', 'lastName', 'email', 'phone', 'location', 'country', 'city',
+  'organizationName', 'organizationCountry',
+];
+
+export function hydrateContact(contact: ImpactContactProfile = {}): ImpactContactProfile {
+  return hydrateLocationFields(contact);
+}
+
+export function persistContact(contact: ImpactContactProfile): ImpactContactProfile {
+  return persistLocationFields(contact);
+}
+
+export function contactFieldFilled(contact: ImpactContactProfile, key: ImpactProfileFieldKey): boolean {
+  if (key === 'location' || key === 'country' || key === 'city') return locationFieldFilled(contact, key);
+  return Boolean((contact[key] ?? '').trim());
+}
+
+export function contactFieldValue(contact: ImpactContactProfile, key: ImpactProfileFieldKey): string {
+  if (key === 'location' || key === 'country' || key === 'city') return locationFieldValue(contact, key);
+  return (contact[key] ?? '').trim();
+}
 
 /** Raised when the member has no vault-key binding yet (must run the /vault-key ceremony first). */
 export class VaultKeyUnauthorizedError extends Error {
@@ -78,13 +120,11 @@ export class InteractionsNotEnabledError extends Error {
   }
 }
 
-export const PROFILE_FIELDS: { key: ImpactProfileFieldKey; label: string; type: 'email' | 'tel' | 'text'; placeholder: string; help: string }[] = [
+export const PROFILE_FIELDS: { key: ImpactContactScalarKey; label: string; type: 'email' | 'tel' | 'text'; placeholder: string; help: string }[] = [
   { key: 'firstName',           label: 'First name',            type: 'text',  placeholder: 'Rich',                     help: 'Used to greet you across community apps.' },
   { key: 'lastName',            label: 'Last name',             type: 'text',  placeholder: 'Pedersen',                 help: 'Used together with your first name to render a friendly display name.' },
   { key: 'email',               label: 'Email',                 type: 'email', placeholder: 'you@example.com',          help: 'How community apps reach you. Shared on your terms.' },
   { key: 'phone',               label: 'Phone',                 type: 'tel',   placeholder: '+1 555 0100',              help: 'Optional. Shared only when you explicitly grant the scope.' },
-  { key: 'country',             label: 'Country',               type: 'text',  placeholder: 'United States',            help: 'Where you live.' },
-  { key: 'city',                label: 'City',                  type: 'text',  placeholder: 'San Francisco',            help: 'Optional. Useful for local-team apps.' },
   { key: 'organizationName',    label: 'Organization name',     type: 'text',  placeholder: 'Grace Community Church',    help: 'If you act on behalf of a church, organization, or network in the community.' },
   { key: 'organizationCountry', label: 'Organization country',  type: 'text',  placeholder: 'United States',            help: 'Where your organization is based.' },
 ];
@@ -180,14 +220,20 @@ export async function readPersonRecord(principal: Address, recordType: string): 
 export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProfile> {
   const out = await postProfile('get', addr);
   const record = out.record as ImpactStoredProfile | null | undefined;
-  if (record && record.v === 1) return record;
+  if (record && record.v === 1) {
+    return { ...record, contact: hydrateContact(record.contact ?? {}) };
+  }
   return { v: 1 };
 }
 
 /** Seal the member's community profile into their vault under their own KEK. Throws
  *  `VaultKeyUnauthorizedError` if they haven't activated their vault key yet. */
 export async function saveImpactProfile(addr: Address, profile: ImpactStoredProfile): Promise<void> {
-  const out = await postProfile('set', addr, profile);
+  const next: ImpactStoredProfile = {
+    ...profile,
+    contact: profile.contact ? persistContact(profile.contact) : profile.contact,
+  };
+  const out = await postProfile('set', addr, next);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
 }
 
@@ -201,8 +247,10 @@ export async function seedImpactProfileFields(addr: Address, fields: Partial<Imp
       const cur = await loadImpactProfile(addr);
       const contact: ImpactContactProfile = { ...(cur.contact ?? {}) };
       let changed = false;
-      for (const [k, v] of Object.entries(fields) as Array<[ImpactProfileFieldKey, string | undefined]>) {
-        if (v && !contact[k]) { contact[k] = v; changed = true; }
+      for (const [k, v] of Object.entries(fields)) {
+        if (k === 'location' || typeof v !== 'string' || !v) continue;
+        const key = k as ImpactContactScalarKey;
+        if (!contact[key]) { contact[key] = v; changed = true; }
       }
       if (changed) await saveImpactProfile(addr, { ...cur, contact });
       return;

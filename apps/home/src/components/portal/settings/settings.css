@@ -261,6 +261,38 @@
   padding: 0.75rem 0.85rem;
 }
 
+.settings-location-precision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.settings-location-precision__opt {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-body);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.settings-location-precision__opt.is-active {
+  border-color: var(--color-amber-400);
+  background: var(--color-amber-50);
+  color: var(--color-amber-700);
+}
+
+.settings-location-preview {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin-top: 0.15rem;
+}
+
 .settings-banner {
   display: flex;
   gap: 0.75rem;

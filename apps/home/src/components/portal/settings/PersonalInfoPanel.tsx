@@ -5,16 +5,21 @@ import type { Address } from '@agenticprimitives/types';
 import {
   loadImpactProfile,
   saveImpactProfile,
+  persistContact,
   PROFILE_FIELDS,
+  contactFieldFilled,
   VaultKeyUnauthorizedError,
   InteractionsNotEnabledError,
   type ImpactStoredProfile,
   type ImpactContactProfile,
+  type ImpactContactScalarKey,
   type ImpactProfileFieldKey,
 } from '../../../profile-store';
 import { useSession } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia, isKmsVia } from '../../../home/onboarding';
 import { BusyButton } from '../../shared/BusyButton';
+import { LocationFields } from './LocationFields';
+import type { ProfileLocation } from '../../../lib/profile-location';
 
 export function PersonalInfoPanel({
   agentAddress,
@@ -43,9 +48,11 @@ export function PersonalInfoPanel({
 
   const required = useMemo(() => new Set(requiredKeys ?? []), [requiredKeys]);
   const missingRequired = useMemo(
-    () => (requiredKeys ?? []).filter((k) => !(contact[k] ?? '').trim()),
+    () => (requiredKeys ?? []).filter((k) => !contactFieldFilled(contact, k)),
     [requiredKeys, contact],
   );
+  const locationRequired = required.has('location') || required.has('country') || required.has('city');
+  const locationMissing = locationRequired && missingRequired.some((k) => k === 'location' || k === 'country' || k === 'city');
 
   // Enable the person's INTERACTIONS plane (distinct from the vault key). Returns true on success.
   // Silent on KMS homes (server-signed); wallet/passkey need a user gesture, so callers that aren't
@@ -92,8 +99,13 @@ export function PersonalInfoPanel({
     else setLoadError('Could not turn on your private storage — please try again.');
   }, [enableInteractions, load]);
 
-  function handleChange(key: ImpactProfileFieldKey, v: string) {
+  function handleChange(key: ImpactContactScalarKey, v: string) {
     setContact((c) => ({ ...c, [key]: v }));
+    setSavedNotice(null);
+  }
+
+  function handleLocation(next: ProfileLocation) {
+    setContact((c) => ({ ...c, location: next, country: next.country, city: next.locality }));
     setSavedNotice(null);
   }
 
@@ -104,11 +116,13 @@ export function PersonalInfoPanel({
     setSavedNotice(null);
     setLoadError(null);
     try {
-      const next: ImpactStoredProfile = { v: 1, contact, attestations: stored?.attestations };
+      const savedContact = persistContact(contact);
+      const next: ImpactStoredProfile = { v: 1, contact: savedContact, attestations: stored?.attestations };
       await saveImpactProfile(agentAddress, next);
       setStored(next);
+      setContact(savedContact);
       setSavedNotice('Saved to your encrypted vault');
-      onSaved?.(contact);
+      onSaved?.(savedContact);
     } catch (err) {
       if (err instanceof VaultKeyUnauthorizedError) {
         setNeedsVaultKey(true);
@@ -175,32 +189,35 @@ export function PersonalInfoPanel({
       {loadError && <div className="settings-banner settings-banner--error" role="alert">{loadError}</div>}
       {savedNotice && <div className="settings-banner settings-banner--success" role="status">✓ {savedNotice}</div>}
 
-      {PROFILE_FIELDS.map((f) => {
-        const isRequired = required.has(f.key);
-        const missing = isRequired && !(contact[f.key] ?? '').trim();
-        return (
-          <div key={f.key} className={`settings-field${isRequired ? ' settings-field--required' : ''}`}>
-            <label htmlFor={`profile-${f.key}`}>
-              {f.label}
-              {isRequired && appLabel && (
-                <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-amber-700)' }}>
-                  required by {appLabel}
-                </span>
-              )}
-            </label>
-            <input
-              id={`profile-${f.key}`}
-              type={f.type}
-              value={contact[f.key] ?? ''}
-              onChange={(e) => handleChange(f.key, e.target.value)}
-              placeholder={f.placeholder}
-              autoComplete={autoCompleteFor(f.key)}
-              style={missing ? { borderColor: 'var(--color-danger)' } : undefined}
-            />
-            <div className="settings-field__help">{f.help}</div>
-          </div>
-        );
-      })}
+      {PROFILE_FIELDS.filter((f) => f.key === 'firstName' || f.key === 'lastName' || f.key === 'email' || f.key === 'phone').map((f) => (
+        <ScalarField
+          key={f.key}
+          field={f}
+          value={contact[f.key] ?? ''}
+          required={required.has(f.key)}
+          appLabel={appLabel}
+          onChange={(v) => handleChange(f.key, v)}
+        />
+      ))}
+
+      <LocationFields
+        value={contact.location}
+        onChange={handleLocation}
+        required={locationRequired}
+        appLabel={appLabel}
+        missing={locationMissing}
+      />
+
+      {PROFILE_FIELDS.filter((f) => f.key === 'organizationName' || f.key === 'organizationCountry').map((f) => (
+        <ScalarField
+          key={f.key}
+          field={f}
+          value={contact[f.key] ?? ''}
+          required={required.has(f.key)}
+          appLabel={appLabel}
+          onChange={(v) => handleChange(f.key, v)}
+        />
+      ))}
 
       <div className="settings-form-footer">
         <button type="submit" className="btn-primary" style={{ width: 'auto' }} disabled={submitting || missingRequired.length > 0}>
@@ -211,7 +228,45 @@ export function PersonalInfoPanel({
   );
 }
 
-function autoCompleteFor(k: ImpactProfileFieldKey): string {
+function ScalarField({
+  field,
+  value,
+  required,
+  appLabel,
+  onChange,
+}: {
+  field: (typeof PROFILE_FIELDS)[number];
+  value: string;
+  required: boolean;
+  appLabel?: string;
+  onChange: (v: string) => void;
+}) {
+  const missing = required && !value.trim();
+  return (
+    <div className={`settings-field${required ? ' settings-field--required' : ''}`}>
+      <label htmlFor={`profile-${field.key}`}>
+        {field.label}
+        {required && appLabel && (
+          <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-amber-700)' }}>
+            required by {appLabel}
+          </span>
+        )}
+      </label>
+      <input
+        id={`profile-${field.key}`}
+        type={field.type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={field.placeholder}
+        autoComplete={autoCompleteFor(field.key)}
+        style={missing ? { borderColor: 'var(--color-danger)' } : undefined}
+      />
+      <div className="settings-field__help">{field.help}</div>
+    </div>
+  );
+}
+
+function autoCompleteFor(k: ImpactContactScalarKey): string {
   switch (k) {
     case 'firstName': return 'given-name';
     case 'lastName': return 'family-name';
