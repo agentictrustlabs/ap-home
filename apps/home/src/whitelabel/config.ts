@@ -74,7 +74,17 @@ const faithImpact: WhiteLabelConfig = {
       // to someone else. Cloudflare appends a suffix when a project name is taken, and it did here:
       // the project is `engage-web`, the domain is `engage-web-7um.pages.dev`. Read from
       // `wrangler pages project list`, never derived.
-      redirect_uris: ['https://engage-web-7um.pages.dev/', 'http://localhost:5173/'],
+      redirect_uris: [
+        'https://engage-web-7um.pages.dev/',
+        'http://localhost:5173/',
+        // Field Workspace still sends `engage-app` today (field-a2a accepts that audience until
+        // field-app tokens exist). Without this exact URI, Home fail-closes the enroll as
+        // "Request blocked / Only start setup from a site you trust." Comes off this list once
+        // field-web's CLIENT_ID is `field-app`.
+        'https://field-web.richardpedersen3.workers.dev/',
+        'http://localhost:5174/',
+        'http://127.0.0.1:5174/',
+      ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
@@ -94,6 +104,24 @@ const faithImpact: WhiteLabelConfig = {
       operational_delegate: '0x0d9be26B9F52AF06354c3eFA19173BcBA60176d3',
       // Where the service-agent-wire ceremony talks to engage-a2a.
       serviceAgentConfig: { a2aBase: 'https://engage-a2a-production.richardpedersen3.workers.dev' },
+    },
+    // field-app — Field Circles / Field Workspace (agentictrustlabs/engage apps/field-*).
+    // A SEPARATE product (ADR-0007), not a mode of Engage. Login-grade connect via the Personal
+    // Home; no PII held by the broker. No service-agent-wire yet — field-a2a signs nothing as
+    // itself until F2 (outbound send). operational_delegate is field-service.impact, not the
+    // shared `delegate` below.
+    {
+      client_id: 'field-app',
+      name: 'Field',
+      redirect_uris: [
+        'https://field-web.richardpedersen3.workers.dev/',
+        'http://localhost:5174/',
+        'http://127.0.0.1:5174/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      operational_delegate: '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
