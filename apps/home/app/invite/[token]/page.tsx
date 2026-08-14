@@ -175,6 +175,21 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                   <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`} style={{ display: 'block', marginTop: '.7rem' }}>
                     Already have a home? Use a passkey, wallet, or Google
                   </a>
+                  {/*
+                    THE CONSEQUENCE, SAID BEFORE THE CLICK.
+
+                    This invitation's access grant is pre-signed against the address derived from the
+                    invited EMAIL. Signing in as a different home leaves it inert — never re-targeted,
+                    because re-aiming a steward's signature at whoever clicked is not a grant. Without
+                    this line the affordance reads as an equivalent route and is not one: it ends at
+                    "this organization has not authorized you to join", two screens later, with no
+                    mention of an address.
+                  */}
+                  <p style={{ fontSize: '.72rem', opacity: 0.62, marginTop: '.45rem', lineHeight: 1.45 }}>
+                    This invitation is addressed to the email it was sent to. If you sign in as a
+                    different home, you can still get in — but a steward has to invite that agent
+                    directly, because the access it carries is bound to the invited address.
+                  </p>
                 </>
               ) : (
                 <>
