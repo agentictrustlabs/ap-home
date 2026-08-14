@@ -21,8 +21,6 @@ export interface OrgChoice {
   existingOrg?: Address;
   /** The org's display name (existing) or the new org's label to claim. */
   orgName: string;
-  /** True when they can sign as the org. Members connect as themselves with this org as context. */
-  asSteward?: boolean;
 }
 
 /** Same slug rule the relying apps use app-side: the `.impact` subregistry only accepts
