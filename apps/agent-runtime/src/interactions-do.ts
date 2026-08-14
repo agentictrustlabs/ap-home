@@ -1389,17 +1389,34 @@ export class InteractionsDO {
     // session gate. Handled before the session block; the token is checked inside.
     if (op === 'invite.token') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      const g = st.grant;
-      if (!g) return json({ error: 'no interactions grant' }, 409);
+      // THE DELIVERY WIRE, not the interactions grant.
+      //
+      // `org.invite:*` is in the DELIVERY grant's record scope (`ORG_INVITE_RESOURCE_SCOPE`,
+      // read+write) and in NO scope the interactions grant carries. Reading it under `st.grant`
+      // was denied at the vault every time, and the denial surfaced as an unhandled throw — a bare
+      // 500 from the op that creates email invitations, for an org whose storage was fully enabled.
+      //
+      // `invite.get`/`invite.put` already use `st.deliveryGrant` for the same record family, and
+      // `orgVault` probes `deliveryGranted` before calling here — so this was the one path reaching
+      // for the wrong wire, and the probe it sits behind was already checking for the right one.
+      const dg = st.deliveryGrant;
+      if (!dg) return json({ error: 'no delivery grant — enable storage for this org first' }, 409);
       const token = String(body.token ?? '');
       if (!/^[A-Za-z0-9_-]{24,128}$/.test(token)) return json({ error: 'token required' }, 400);
       const resource = `org.invite:${token}`;
-      if (body.data !== undefined) {
-        await this.writeDoc(g, resource, body.data);
-        return json({ ok: true });
+      // A vault refusal is an ANSWER and must arrive as one. Uncaught, it became a 500 with no body,
+      // which tells a caller nothing about whether they were denied, throttled, or hit an outage —
+      // and the invite path had no other signal to go on.
+      try {
+        if (body.data !== undefined) {
+          await this.writeDoc(dg, resource, body.data);
+          return json({ ok: true });
+        }
+        const rec = await this.vaultFor(dg).read<unknown>({ owner: '', resource });
+        return json({ ok: true, record: rec?.data ?? null });
+      } catch (e) {
+        return json({ error: `invite record unavailable: ${e instanceof Error ? e.message : String(e)}` }, 502);
       }
-      const rec = await this.vaultFor(g).read<unknown>({ owner: '', resource });
-      return json({ ok: true, record: rec?.data ?? null });
     }
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;

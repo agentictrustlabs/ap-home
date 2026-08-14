@@ -123,10 +123,37 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const returnUrl = await appReturnUrl(env, caller.clientId, body?.returnUrl);
   if (body?.returnUrl && !returnUrl) return json({ error: 'returnUrl must be an origin registered for your app' }, 400);
   const appName = returnUrl ? ((await resolveClient(env, caller.clientId!))?.name ?? null) : null;
-  // spec 321 W2 — optional pre-signed member-access grant (org → the invitee's counterfactual home,
-  // from /org-invite/predict). Reject a grant whose delegator isn't THIS org — never fix up authority.
+  /*
+    spec 321 W2 — the pre-signed member-access grant (org → the invitee's counterfactual home, from
+    /org-invite/predict). REQUIRED, where it used to be optional.
+
+    Without it the invitee gets a working home and no membership: they accept, land in the org, and
+    are refused with "this organization has not authorized you to join — an invite (member-access
+    grant) or stewardship is required". The invitation looked issued at every step and admitted
+    nobody, which is the worst shape a credential-adjacent artifact can take — it fails at the far
+    end, to the person who did nothing wrong, long after the steward believed they had invited them.
+
+    An invite that cannot admit is not an invite, so this refuses to mint one.
+
+    WHO CAN SUPPLY IT. Signing org → invitee needs the ORG's custody, reached through the steward's
+    credential (`signHashFor(via, orgSA, { token })`). That is a Home session. A RELYING APP cannot
+    produce it — it authenticates as the person and holds no custody — so the refusal names the
+    ceremony rather than implying the caller did something wrong.
+  */
   const mad = body?.memberAccessDelegation;
-  if (mad && (mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
+  if (!mad) {
+    return json(
+      {
+        error:
+          'an invitation needs a signed member-access grant, or it creates a home that the organization will not admit. ' +
+          'Minting one takes the organization\u2019s custody, reached through the steward\u2019s credential at their Home.',
+        code: 'member_access_grant_required',
+        org,
+      },
+      409,
+    );
+  }
+  if ((mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
 
   const orgName = await new AgentNamingClient({
     rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
@@ -142,11 +169,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const expiresAt = Date.now() + 60 * 60 * 24 * 7 * 1000;
   const vault = await orgVault(env, org);
   if (!vault) return json({ error: 'org vault storage not enabled — a steward must enable it before inviting' }, 409);
-  await vault.set(`org.invite:${token}`, {
-    emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
-    ...(mad ? { memberAccessDelegation: mad } : {}),
-    ...(returnUrl ? { returnUrl, appName } : {}),
-  });
+  // `ServerVaultTransport.set` THROWS on refusal, and this call was not guarded — so any vault
+  // denial became a bare 500 with no body from the endpoint that creates invitations. A caller
+  // could not tell a refusal from an outage, and the steward gate had already passed, so the
+  // obvious explanations were all wrong ones. The write is still REQUIRED (an invite with no
+  // record is not an invite); what changes is that its failure says so.
+  try {
+    await vault.set(`org.invite:${token}`, {
+      emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
+      ...(mad ? { memberAccessDelegation: mad } : {}),
+      ...(returnUrl ? { returnUrl, appName } : {}),
+    });
+  } catch (e) {
+    return json(
+      { error: `could not record the invitation in the organization's vault: ${e instanceof Error ? e.message : String(e)}` },
+      502,
+    );
+  }
 
   const joinUrl = `${resolveOrigin(request, env)}/invite/${token}?o=${org}`;
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName));
