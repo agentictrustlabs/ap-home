@@ -179,8 +179,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.collectionConfig;
         if (!cfg) return fail('this app is not configured for subscription collection');
         if (!enroll.collectToken) return fail('missing owner token for collection');
-        // Same reason as the grant path below: a wallet-credential demo home needs the token to
-        // reach its server-side custodian, and a real wallet home is unaffected by receiving it.
+        // Same reason as the grant path: the demo-custody probe needs the token on the wallet via.
         const collectAuth: Auth | undefined = token ? { token } : undefined;
         const res = await collectDueSubscriptions(
           cfg.treasury as Address, viaLower, collectAuth,
@@ -199,7 +198,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.collectionConfig;
         if (!cfg) return fail('this app is not configured for content-signer authorization');
         if (!enroll.collectToken) return fail('missing owner token for content-signer authorization');
-        // Same reason as the grant path below (demo-custody probe needs the token on the wallet via).
+        // Same reason as the grant path: the demo-custody probe needs the token on the wallet via.
         const csAuth: Auth | undefined = token ? { token } : undefined;
         const res = await authorizeContentSigningForOwner(viaLower, csAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken, targetSigner: enroll.contentSignerTarget });
         if (!res.ok) return fail(res.error);
@@ -215,7 +214,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const cfg = relyingApp?.serviceAgentConfig;
         if (!cfg) return fail('this app is not configured for service-agent authorization');
         if (!enroll.collectToken) return fail('missing owner token for service-agent authorization');
-        // Same reason as the grant path below (demo-custody probe needs the token on the wallet via).
+        // Same reason as the grant path: the demo-custody probe needs the token on the wallet via.
         const swAuth: Auth | undefined = token ? { token } : undefined;
         const res = await authorizeServiceAgentWire(viaLower, swAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
         if (!res.ok) return fail(res.error);
@@ -229,23 +228,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       /*
         PASS THE SESSION TOKEN FOR EVERY CREDENTIAL, not only the KMS ones.
 
-        `signHashFor` uses it in two different ways, and gating it on `isKmsVia` served only the
-        first:
-
-          KMS (google / youversion / email / phone) — the token IS the signer; without it the
-            ceremony cannot sign at all.
-          WALLET — the token is how the DEMO-CUSTODY probe runs. A seeded demo person has a wallet
-            CREDENTIAL whose key this Home holds and whose browser has no wallet at all, so
+        `signHashFor` uses it two ways, and gating on `isKmsVia` served only the first:
+          KMS   — the token IS the signer.
+          WALLET — the token runs the DEMO-CUSTODY probe. A seeded demo person has a wallet
+            CREDENTIAL whose key this Home holds and a browser with no wallet, so
             `isDemoCustodyHome(token)` is what routes them to a prompt-free server-side signature.
 
-        Withholding it here meant `auth?.token` was undefined, the probe never ran, and the wallet
-        branch fell through to the injected provider — "No Ethereum wallet found — install MetaMask"
-        at the end of a ceremony for an account whose key nobody can hold in a browser. A dead end
-        reachable by every shared test identity, on the last click.
+        Withholding it left `auth?.token` undefined, the probe never ran, and the wallet branch fell
+        through to the injected provider — "No Ethereum wallet found" at the last click of a ceremony
+        for an account whose key cannot be in that browser.
 
-        A REAL wallet home is unaffected: the probe answers false once per session (cached) and falls
-        straight through to its provider, exactly as before. `EntryExperience` already passes the
-        token unconditionally; this brings the recognized path in line with it.
+        Real wallet homes are unaffected: the probe answers false once per session and falls through.
       */
       const auth: Auth | undefined = token ? { token } : undefined;
 
@@ -267,31 +260,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // organization was chosen" while the chosen organization sat in the URL. `createOrganization`
         // handles the existing branch first and uses `base` only as the link's display name.
         if (!orgBase && !existingOrg) return fail('No organization was chosen for this request.');
-        // A member connects as themselves with the org as context. Only a steward may sign as the
-        // org (select-existing remints org→app grants). The URL `existing_org` path is steward-only.
-        const asSteward = existingOrg ? (enroll.existingOrg ? true : !!orgSel?.asSteward) : true;
-        if (existingOrg && !asSteward) {
-          const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey);
-          if (!granted.ok) return fail(granted.error);
-          code = await submitEnrollGrant(grant_id, granted.grant, {
-            orgAgent: existingOrg,
-            orgName: orgBase,
-            person: home.address,
-            purpose: enroll.purpose,
-            requestedBy: enroll.aud,
-          }, granted.sessionDelegation);
-        } else {
-          const created = await createOrganization(
-            home,
-            orgBase ?? '',
-            delegate,
-            viaLower,
-            auth,
-            { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
-          );
-          if (!created.ok) return fail(created.error);
-          code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
-        }
+        const created = await createOrganization(
+          home,
+          orgBase ?? '',
+          delegate,
+          viaLower,
+          auth,
+          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
+        );
+        if (!created.ok) return fail(created.error);
+        code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
       } else {
         // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
         // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so
@@ -354,8 +332,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // VaultKeyAuthorization on-device — ONE extra signature at connect (the deliberate "custodian backs all
       // authority" tradeoff). Idempotent (skipped if already bound) + best-effort (a vault hiccup never blocks
       // the connect — the delegation is already minted, and /vault-key + the journey remain as a re-bind path).
-      // Same reason again: the vault-key ceremony signs, so a wallet-credential demo home needs the
-      // token to reach its server-side custodian instead of a wallet that is not in this browser.
+      // Same reason: the vault-key ceremony signs, so a wallet-credential demo home needs the token.
       try { await activateVaultIfNeeded(home.address, viaLower, token ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
       // spec 280 carve-out — self-heal the published connection KIND on every successful social connect
@@ -405,7 +382,6 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         <OrgChooser
           token={token}
           appHost={appHost}
-          purpose={enroll.purpose}
           onChoose={(c) => { setOrgSel(c); setPhase('consent'); }}
           onDecline={onDecline}
         />
