@@ -1,0 +1,143 @@
+/* "Your apps" — the member-owned OIDC client registry page.
+   Only the handful of bits `globals.css` + `settings.css` don't already cover. */
+
+.dev-apps__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dev-apps__spacer {
+  margin-left: auto;
+}
+
+.dev-apps__check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 400;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.dev-apps__check input {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.dev-apps__item {
+  border-top: 1px solid var(--line, #e3e2de);
+  padding: 12px 0;
+}
+
+.dev-apps__item:first-of-type {
+  border-top: 0;
+}
+
+.dev-apps__uris {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+/* Endpoints and ids are long and must not force the page to scroll sideways. */
+.dev-apps__facts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.dev-apps__facts td {
+  padding: 4px 8px 4px 0;
+  border-top: 1px solid var(--line, #e3e2de);
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.dev-apps__facts td:first-child {
+  white-space: nowrap;
+  width: 8.5rem;
+  opacity: 0.7;
+  word-break: normal;
+}
+
+.dev-apps__danger {
+  color: var(--danger, #8c2f28);
+}
+
+.dev-apps .settings-field input,
+.dev-apps .settings-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #e3e2de);
+  border-radius: 8px;
+  font: inherit;
+  background: inherit;
+  color: inherit;
+}
+
+.dev-apps .settings-field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.dev-apps details.settings-field > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+/* ── Per-app read grants (Connected Apps) ─────────────────────────────── */
+
+.read-grants__choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 400;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.read-grants__choice input {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.read-grants__list {
+  margin-top: 16px;
+}
+
+.read-grants__row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border-top: 1px solid var(--line, #e3e2de);
+  padding: 12px 0;
+}
+
+.read-grants__row > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.read-grants .settings-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #e3e2de);
+  border-radius: 8px;
+  font: inherit;
+  background: inherit;
+  color: inherit;
+}
+
+.read-grants .settings-field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}

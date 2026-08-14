@@ -18,7 +18,9 @@ import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import type { InteractionMandateV1, InteractionTransitionType } from '@agenticprimitives/fabric/interactions';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTransition, applyApproveWithMandate, readCaseDetermination } from '../../src/home/inbox-data';
 import { makeBodyStoreFactory } from './message-body-store';
@@ -59,7 +61,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   // the person SA. Org inboxes stay gated by resolveInboxOwner's on-chain relationships-doc steward check,
   // so an id_token only ever reaches the person's own inbox + orgs they actually steward. No new grant is
   // needed: the interactions plane was provisioned at onboarding/org-create.
-  const idv = await verifyIdTokenForRelyingClient(token, keys, ownIssuer(request, env));
+  const idv = await verifyIdTokenForRelyingClient(env, token, keys, ownIssuer(request, env));
   return idv;
 }
 
@@ -68,6 +70,9 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
  *  session path uses (accepts apex/www/subdomain forms); aud must be a registered client_id. Returns the
  *  subject SA (lowercased) or null. */
 async function verifyIdTokenForRelyingClient(
+  // `env` reaches the CLIENT REGISTRY — curated entries plus the member-registered ones, which
+  // live in KV and therefore need the binding rather than a compiled-in table.
+  env: FnContext['env'],
   token: string,
   keys: Awaited<ReturnType<typeof importJwks>>,
   isOwnIss: (iss: string) => boolean,
@@ -81,7 +86,7 @@ async function verifyIdTokenForRelyingClient(
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
-  if (!iss || !isOwnIss(iss) || !aud || !getClient(aud)) return null;
+  if (!iss || !isOwnIss(iss) || !aud || !(await resolveClient(env, aud))) return null;
   const r = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
   if (!r.ok) return null;
   const sub = (r.claims.canonical_agent_id ?? r.claims.sub ?? '') as string;

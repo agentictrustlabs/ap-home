@@ -10,7 +10,9 @@ import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { buildCustodyDescriptor, relatedAgentWriteContentHash, hashRelatedAgentWriteChallenge, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 
 /** The `aud` of a JWT without verifying it (only used to pick which expectedAud to verify against). */
 function unverifiedAud(token: string): string | null {
@@ -62,7 +64,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // own links. Mirrors the /connect/channels relying-token fallback.
   if (!v.ok && !clientId) {
     const aud = unverifiedAud(token);
-    if (aud && getClient(aud)) v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
+    if (aud && (await resolveClient(env, aud))) v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: ownIssuer(request, env) });
   }
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 

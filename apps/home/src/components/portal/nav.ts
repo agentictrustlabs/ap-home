@@ -6,7 +6,7 @@ import type { WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
-  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon,
+  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon, CodeIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -177,6 +177,9 @@ export function buildNav(
   }
   if (wl.services.connectedApps) {
     manage.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', badge: badges.apps });
+    // The other side of Connected: apps you BUILT. Registering one is what lets your own app send
+    // people here to sign in — and it is a member decision, not a deployment one (spec 230 §6).
+    manage.push({ id: 'developer', label: 'Your apps', href: '/developer', Icon: CodeIcon, status: 'live' });
   }
 
   // Activity: the record of what you've asserted + what your agents have done — attestations + the

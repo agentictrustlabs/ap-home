@@ -50,6 +50,9 @@ export const AwardIcon: IconComponent = (p) => (
 export const LinkIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8" /></Svg>
 );
+export const CodeIcon: IconComponent = (p) => (
+  <Svg {...p}><path d="m16 18 6-6-6-6M8 6l-6 6 6 6" /></Svg>
+);
 export const ShieldIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></Svg>
 );

@@ -12,7 +12,9 @@
 //   POST { action:'create'|'post', … } → { ok, channelId?|messageId? } | { error }
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { isAllowedClientOrigin, getClient } from '../../src/lib/oidc-clients';
+import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 import { ensureOrgMemberLink } from './membership';
 import { orgVault } from '../lib/org-vault';
 
@@ -54,7 +56,7 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<{ pe
   //    of registered clients are accepted; everything else is refused.
   if (!v.ok) {
     const aud = unverifiedAud(token);
-    if (aud && getClient(aud)) {
+    if (aud && (await resolveClient(env, aud))) {
       v = await verifyAgentSession(token, { keys, expectedAud: aud, expectedIss: iss });
     }
   }

@@ -19,7 +19,8 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
-import { getClient } from '../../src/lib/oidc-clients';
+// Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
+import { resolveClient } from '../_lib/oidc-registry';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -57,7 +58,7 @@ async function callerFromInviteAuth(env: FnContext['env'], request: Request): Pr
     iss = typeof payload.iss === 'string' ? payload.iss : undefined;
     aud = typeof payload.aud === 'string' ? payload.aud : undefined;
   } catch { return null; }
-  if (!iss || !issOk(iss) || !aud || !getClient(aud)) return null;
+  if (!iss || !issOk(iss) || !aud || !(await resolveClient(env, aud))) return null;
   const idv = await verifyIdToken(token, { keys, expectedIss: iss, expectedAud: aud });
   if (!idv.ok) return null;
   const sub = (idv.claims.canonical_agent_id ?? idv.claims.sub ?? '') as string;
@@ -86,9 +87,13 @@ async function stewardsOrg(env: FnContext['env'], person: string, org: string): 
  *  (e.g. back into the UUPG+ Tracker workspace they were invited to work in). CN-1 discipline: the
  *  URL must belong to the ORIGIN of a redirect_uri registered for the CALLING client — an app can
  *  only ever send its invitees back to itself, never to an attacker-chosen origin. */
-function appReturnUrl(clientId: string | null, raw: string | undefined): string | null {
+async function appReturnUrl(
+  env: FnContext['env'],
+  clientId: string | null,
+  raw: string | undefined,
+): Promise<string | null> {
   if (!raw || !clientId) return null;
-  const client = getClient(clientId);
+  const client = await resolveClient(env, clientId);
   if (!client) return null;
   let url: URL;
   try { url = new URL(raw); } catch { return null; }
@@ -115,9 +120,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!caller || !(await stewardsOrg(env, caller.person, org))) {
     return json({ error: 'you must steward this organization to invite' }, 403);
   }
-  const returnUrl = appReturnUrl(caller.clientId, body?.returnUrl);
+  const returnUrl = await appReturnUrl(env, caller.clientId, body?.returnUrl);
   if (body?.returnUrl && !returnUrl) return json({ error: 'returnUrl must be an origin registered for your app' }, 400);
-  const appName = returnUrl ? (getClient(caller.clientId!)?.name ?? null) : null;
+  const appName = returnUrl ? ((await resolveClient(env, caller.clientId!))?.name ?? null) : null;
   // spec 321 W2 — optional pre-signed member-access grant (org → the invitee's counterfactual home,
   // from /org-invite/predict). Reject a grant whose delegator isn't THIS org — never fix up authority.
   const mad = body?.memberAccessDelegation;
