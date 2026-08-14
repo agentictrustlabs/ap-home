@@ -105,7 +105,11 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const pub = await fetch('/connect/directory', {
         method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${d.token}` },
-        body: JSON.stringify({ action: 'publish', listing }),
+        // PRESENT THE GRANT WE WERE JUST HANDED. The org authorized this join when the steward signed
+        // it; redeem returned it two lines ago. Publishing without it made the server look the grant
+        // up in a record `recordOrgMembership` writes on the NEXT line — so the join could only ever
+        // have worked on a second attempt, and the invite was already marked redeemed by then.
+        body: JSON.stringify({ action: 'publish', listing, ...(d.memberAccessDelegation ? { memberAccess: d.memberAccessDelegation } : {}) }),
       });
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));

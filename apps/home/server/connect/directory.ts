@@ -69,7 +69,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const who = await personFrom(request, env);
   if (!who) return jsonCors({ error: 'home session required' }, request, 401);
   const body = (await request.json().catch(() => null)) as
-    | { action?: string; listing?: DirectoryListingV1; communityId?: string }
+    | {
+        action?: string;
+        listing?: DirectoryListingV1;
+        communityId?: string;
+        /** spec 321 W2 — the org→member access grant, presented by a caller that holds one (an
+         *  email invitee, straight from `/org-invite/redeem`). Verified on-chain at the DO. */
+        memberAccess?: unknown;
+      }
     | null;
 
   if (body?.action === 'revoke') {
@@ -102,7 +109,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // SEC-H1 — a SELF-join must carry the org's authorization: the org→you member-access grant (from
     // an invite) OR your stewardship wire (steward self-card). The DO requires one; it re-verifies
     // both on-chain, so these are just artifact lookups.
-    const selfMemberAccess = subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person) : null;
+    //
+    // TWO SOURCES FOR ONE ARTIFACT, chosen by which one the caller HAS — not by one failing.
+    //
+    // An EMAIL invitee is handed their grant by `/org-invite/redeem` and holds it in hand. Looking
+    // it up instead required a prior write to have landed: the invite page published the listing
+    // BEFORE `recordOrgMembership` stored the grant, so the lookup found nothing, the DO refused
+    // with "this organization has not authorized you to join", and the throw skipped the very write
+    // the lookup needed. A join that could only succeed on the second attempt, except the invite
+    // was already marked redeemed.
+    //
+    // (The token-keyed record `org.invite:<token>` is not where `memberAccessWireFor` looks either —
+    // that key is `org.invite:agent:<sa>`, which only the in-app invite path writes.)
+    //
+    // So a caller that HAS the grant sends it. Accepting it from the body grants nothing: the DO
+    // re-verifies delegator, delegate, signature and revocation on-chain, so this is an artifact
+    // being presented, never a claim being trusted.
+    const suppliedMemberAccess = subjectAddr === who.person ? (body.memberAccess ?? null) : null;
+    const selfMemberAccess =
+      suppliedMemberAccess ?? (subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person) : null);
     const selfStewardship = subjectAddr === who.person ? await stewardWireFor(env, who.person, communityId, who.token) : null;
     const r = await callInteractions(env, communityId, 'directory.publish', {
       session: who.token,
