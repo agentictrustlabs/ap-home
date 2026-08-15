@@ -8,9 +8,9 @@
 //
 // WHAT THE PERSON IS ACTUALLY APPROVING, and it is worth being precise because "let my agent message
 // people for me" is a standing authority: a delegation from them to this deployment's interactions
-// session key, naming three messaging skills, pinned to an explicit list of counterparties, valid for
-// twelve hours, revocable on-chain at any moment. It does not let the agent read their mail, spend
-// anything, or speak to anyone not on the list.
+// session key, naming three messaging skills, pinned to an explicit list of counterparties. Ad-hoc
+// approve is twelve hours; join / invite uses ninety days. Revocable on-chain at any moment. It does
+// not let the agent read their mail, spend anything, or speak to anyone not on the list.
 //
 // ONE PROMPT PER NEW COUNTERPARTY, never per message (spec 341 §5.1). Adding a contact re-mints over
 // the UNION of the existing targets and the new one — see `approveMessagingRecipient` for why a
@@ -19,8 +19,11 @@
 import type { Address } from '@agenticprimitives/types';
 import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../home/onboarding';
 import { toWire } from './delegation';
-import { issueMessagingTransportGrant, issueMessagingWire } from './messaging-wire';
+import { issueMessagingTransportGrant, issueMessagingWire, MESSAGING_WIRE_VALIDITY_SECONDS } from './messaging-wire';
 import { approveMessagingRecipient } from './messaging-send';
+
+/** Join / invite wires last long enough that send from the app is not a second ceremony the next day. */
+export const COMMUNITY_MESSAGING_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
 
 export interface MessagingCeremonyInput {
   /**
@@ -42,6 +45,8 @@ export interface MessagingCeremonyInput {
   via: Via;
   /** Home session token. KMS routes need it; passkey and wallet do not. */
   token?: string | null;
+  /** Override the default 12h window. Join / invite use `COMMUNITY_MESSAGING_VALIDITY_SECONDS`. */
+  validitySeconds?: number;
 }
 
 /** Addresses this community currently lists. The wire names people, not the org. */
@@ -78,8 +83,9 @@ export async function approveMessagingContact(input: MessagingCeremonyInput): Pr
       // `toWire` is NOT cosmetic: a `Delegation`'s salt is a bigint, `JSON.stringify` throws on one,
       // and the throw surfaces as "Do not know how to serialize a BigInt" from inside the POST —
       // nowhere near the mint that produced it. Only a live run found that.
-      const wire = toWire(await issueMessagingWire({ personSA: person, sessionKey, recipients, signHash }));
-      const transport = toWire(await issueMessagingTransportGrant({ personSA: person, recipients, signHash }));
+      const validitySeconds = input.validitySeconds ?? MESSAGING_WIRE_VALIDITY_SECONDS;
+      const wire = toWire(await issueMessagingWire({ personSA: person, sessionKey, recipients, signHash, validitySeconds }));
+      const transport = toWire(await issueMessagingTransportGrant({ personSA: person, recipients, signHash, validitySeconds }));
       return { wire, transport };
     },
   });
@@ -110,5 +116,6 @@ export async function provisionCommunityMessaging(input: {
     recipients,
     via: input.via,
     token: input.token,
+    validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS,
   });
 }

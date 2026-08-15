@@ -15,6 +15,7 @@ import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
 import { recordOrgMembership } from '../../lib/org-membership';
+import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
 import { type DelegationWire } from '../../lib/delegation';
@@ -210,6 +211,12 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
       // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
       await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, displayName);
+      await provisionCommunityMessaging({
+        person: agentAddress as Address,
+        org: communityId,
+        via: joinVia,
+        token: session.token,
+      }).catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });
       await load();
       // The join added this org to the member's tree — reload every dropdown/list instance NOW (the
       // triggered related-orgs read also runs the org-name self-heal, so it arrives named, not 0x…).

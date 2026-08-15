@@ -8,7 +8,7 @@ import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
-import { approveMessagingContact } from '../../lib/messaging-ceremony';
+import { approveMessagingContact, COMMUNITY_MESSAGING_VALIDITY_SECONDS } from '../../lib/messaging-ceremony';
 import { ApproveMessaging } from './ApproveMessaging';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { Avatar } from './chat/Avatar';
@@ -85,7 +85,8 @@ export function OrgInvitePanel({ org }: { org: string }) {
         recipient: hit.smartAgent.toLowerCase() as Address,
         via,
         token: session.token,
-      }).catch(() => { /* send will ask if the wire is still missing */ });
+        validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS,
+      });
       await sendMessage({
         person: agentAddress,
         recipientName: hit.name,
@@ -116,16 +117,21 @@ export function OrgInvitePanel({ org }: { org: string }) {
         const via = resolveVia(profile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
         memberAccessDelegation = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, pb.agent, MCP_SERVER_ID, sign));
-        if (agentAddress) {
-          await approveMessagingContact({
-            person: agentAddress,
-            recipient: pb.agent.toLowerCase() as Address,
-            via,
-            token: session.token,
-          }).catch(() => { /* invite still stands; first Commons send will ask */ });
-        }
       } catch (e) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
+      }
+      if (agentAddress && memberAccessDelegation) {
+        const via = resolveVia(profile?.credential, session.via);
+        const invited = (memberAccessDelegation.delegate ?? '').toLowerCase();
+        if (/^0x[0-9a-f]{40}$/.test(invited)) {
+          await approveMessagingContact({
+            person: agentAddress,
+            recipient: invited as Address,
+            via,
+            token: session.token,
+            validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS,
+          });
+        }
       }
       const res = await fetch('/connect/org-invite/email', {
         method: 'POST', headers: authed,

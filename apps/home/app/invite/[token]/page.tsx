@@ -141,7 +141,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         extra: invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy) ? [invite.invitedBy as Address] : [],
         via,
         token: session.token,
-      }).catch(() => { /* join stands; first send will ask */ });
+      }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
       goOn(invite.org.toLowerCase(), agentAddress, name, session.token, agentName || `${joinLabel(name)}.impact`);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
@@ -189,7 +189,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         extra: invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy) ? [invite.invitedBy as Address] : [],
         via: 'email',
         token: d.token,
-      }).catch(() => { /* join stands; first send will ask */ });
+      }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
       await openSession(d.token, 'email', false);
       goOn(invite.org.toLowerCase(), res.home.address, name, d.token, `${joinLabel(name)}.impact`);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
