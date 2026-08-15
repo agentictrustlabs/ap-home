@@ -170,6 +170,12 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       if (!r.ok || !d.ok || !d.token) throw new Error(asMsg(d.error, 'could not accept the invitation'));
       const res = await secureHomeNoName({ token: d.token });
       if (!res.ok) throw new Error(res.error);
+      // Open the session NOW, not after the join writes. The messaging provision below installs the
+      // wire through calls that authenticate with the STORED session (`homeBearer()` reads
+      // localStorage, not a parameter) — opened last, every one of them threw 'no home session'
+      // into the non-fatal catch, and the invitee arrived with no wire at all: the send back to
+      // the person who invited them was refused as the very first thing they tried.
+      await openSession(d.token, 'email', false);
       void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
       // Fresh email-bootstrapped home → KMS via; signs server-side with the session token (no device prompt).
       const sign = await signHashFor('email', res.home.address, { token: d.token });
@@ -203,7 +209,6 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         via: 'email',
         token: d.token,
       }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
-      await openSession(d.token, 'email', false);
       goOn(invite.org.toLowerCase(), res.home.address, name, d.token);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
