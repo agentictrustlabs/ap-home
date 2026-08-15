@@ -41,13 +41,19 @@ function joinLabel(displayName: string): string {
   return raw || 'member';
 }
 
+/** Returns the home's ACTUAL public name. For an already-named home `claimName` is a NO-OP that
+ *  reports the established name (spec 257 — one name per agent): the typed join name becomes the
+ *  ORG-LOCAL listing displayName only, never a second public name. Callers must continue under the
+ *  returned name, not the typed one — pinning a name the home does not hold onto the app's sign-in
+ *  makes the enroll chase a name that resolves to nobody. */
 async function claimJoinName(
   agent: Address,
   sign: (h: Hex) => Promise<Hex>,
   displayName: string,
-): Promise<void> {
+): Promise<string> {
   const claimed = await claimName(agent, sign, joinLabel(displayName));
   if (!claimed.ok) throw new Error(claimed.error);
+  return claimed.name.includes('.') ? claimed.name : `${joinLabel(displayName)}.impact`;
 }
 
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
@@ -123,7 +129,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const via = resolveVia(profile?.credential, session.via);
       const sign = await signHashFor(via, agentAddress as Address, { token: session.token });
       const name = displayName.trim() || (agentName ? agentName.split('.')[0]! : 'Member');
-      await claimJoinName(agentAddress as Address, sign, name);
+      const publicName = await claimJoinName(agentAddress as Address, sign, name);
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId: invite.org.toLowerCase(),
         displayName: name,
@@ -143,7 +149,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         via,
         token: session.token,
       }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
-      goOn(invite.org.toLowerCase(), agentAddress, name, session.token, agentName || `${joinLabel(name)}.impact`);
+      goOn(invite.org.toLowerCase(), agentAddress, name, session.token, agentName || publicName);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
@@ -168,7 +174,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       // Fresh email-bootstrapped home → KMS via; signs server-side with the session token (no device prompt).
       const sign = await signHashFor('email', res.home.address, { token: d.token });
       const name = displayName.trim() || 'Member';
-      await claimJoinName(res.home.address, sign, name);
+      const publicName = await claimJoinName(res.home.address, sign, name);
       const listing = await issueDirectoryListing(res.home.address, sign, {
         communityId: invite.org.toLowerCase(),
         displayName: name,
@@ -193,7 +199,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         token: d.token,
       }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
       await openSession(d.token, 'email', false);
-      goOn(invite.org.toLowerCase(), res.home.address, name, d.token, `${joinLabel(name)}.impact`);
+      goOn(invite.org.toLowerCase(), res.home.address, name, d.token, publicName);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
