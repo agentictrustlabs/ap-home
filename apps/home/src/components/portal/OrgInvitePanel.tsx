@@ -8,6 +8,7 @@ import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
+import { approveMessagingContact } from '../../lib/messaging-ceremony';
 import { ApproveMessaging } from './ApproveMessaging';
 import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
 import { Avatar } from './chat/Avatar';
@@ -78,6 +79,13 @@ export function OrgInvitePanel({ org }: { org: string }) {
       }
       // spec 341 §5.1b — delivered by the inviter's own agent over A2A, not written by the Home.
       if (!agentAddress) throw new Error('no agent address');
+      const via = resolveVia(profile?.credential, session.via);
+      await approveMessagingContact({
+        person: agentAddress,
+        recipient: hit.smartAgent.toLowerCase() as Address,
+        via,
+        token: session.token,
+      }).catch(() => { /* send will ask if the wire is still missing */ });
       await sendMessage({
         person: agentAddress,
         recipientName: hit.name,
@@ -108,6 +116,14 @@ export function OrgInvitePanel({ org }: { org: string }) {
         const via = resolveVia(profile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
         memberAccessDelegation = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, pb.agent, MCP_SERVER_ID, sign));
+        if (agentAddress) {
+          await approveMessagingContact({
+            person: agentAddress,
+            recipient: pb.agent.toLowerCase() as Address,
+            via,
+            token: session.token,
+          }).catch(() => { /* invite still stands; first Commons send will ask */ });
+        }
       } catch (e) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
       }

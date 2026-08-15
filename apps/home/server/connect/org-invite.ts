@@ -200,6 +200,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ...(returnUrl ? { returnUrl } : {}),
       ...(appName ? { appName } : {}),
       ...(namedApp ? { app: namedApp } : {}),
+      invitedBy: caller.person.toLowerCase(),
     });
   } catch (e) {
     return json(

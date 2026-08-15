@@ -14,6 +14,7 @@ import { recordOrgMembership } from '../../../src/lib/org-membership';
 import { emailInviteNeedsSignOut } from '../../../src/lib/email-invite-home';
 import { inviteAcceptLabel, inviteHeadline, inviteLead } from '../../../src/lib/invite-copy';
 import { claimName } from '../../../src/connect-client';
+import { approveMessagingContact } from '../../../src/lib/messaging-ceremony';
 import { nameLabel } from '../../../src/lib/domain';
 import { BusyButton } from '../../../src/components/shared/BusyButton';
 import type { Hex } from '@agenticprimitives/types';
@@ -58,6 +59,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     returnUrl?: string;
     appName?: string | null;
     invitedAgent?: string | null;
+    invitedBy?: string | null;
   } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -80,6 +82,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
             returnUrl: d.returnUrl,
             appName: d.appName ?? null,
             invitedAgent: typeof d.invitedAgent === 'string' ? d.invitedAgent : null,
+            invitedBy: typeof d.invitedBy === 'string' ? d.invitedBy : null,
           });
         } else setErr(d.error ?? 'invalid invitation');
       })
@@ -132,6 +135,14 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
       await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token, null, name);
+      if (invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy)) {
+        await approveMessagingContact({
+          person: agentAddress as Address,
+          recipient: invite.invitedBy as Address,
+          via,
+          token: session.token,
+        }).catch(() => { /* join stands; first send will ask */ });
+      }
       goOn(invite.org.toLowerCase(), agentAddress, name, session.token, agentName || `${joinLabel(name)}.impact`);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
@@ -173,6 +184,14 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
+      if (invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy)) {
+        await approveMessagingContact({
+          person: res.home.address,
+          recipient: invite.invitedBy as Address,
+          via: 'email',
+          token: d.token,
+        }).catch(() => { /* join stands; first send will ask */ });
+      }
       await openSession(d.token, 'email', false);
       goOn(invite.org.toLowerCase(), res.home.address, name, d.token, `${joinLabel(name)}.impact`);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }

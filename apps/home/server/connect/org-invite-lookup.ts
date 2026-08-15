@@ -33,6 +33,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
         appName?: string;
         app?: string;
         memberAccessDelegation?: { delegate?: string };
+        invitedBy?: string;
       } | null)
     : null;
   if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
@@ -69,5 +70,8 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     ...(invitedAgent ? { invitedAgent } : {}),
     ...(appName ? { appName } : {}),
     ...(returnUrl ? { returnUrl } : {}),
+    ...(typeof rec.invitedBy === 'string' && /^0x[0-9a-fA-F]{40}$/i.test(rec.invitedBy)
+      ? { invitedBy: rec.invitedBy.toLowerCase() }
+      : {}),
   });
 };
