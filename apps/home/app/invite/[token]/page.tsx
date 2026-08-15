@@ -173,8 +173,11 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
       // Fresh email-bootstrapped home → KMS via; signs server-side with the session token (no device prompt).
       const sign = await signHashFor('email', res.home.address, { token: d.token });
+      // NAMELESS BY DESIGN. The typed name is how this ORGANIZATION knows them — the directory
+      // listing's displayName — never a public handle. A public name is its own ceremony the person
+      // runs later at their Home if they want one; claiming one here would spend a global,
+      // transferable identifier on a word typed into a join box.
       const name = displayName.trim() || 'Member';
-      const publicName = await claimJoinName(res.home.address, sign, name);
       const listing = await issueDirectoryListing(res.home.address, sign, {
         communityId: invite.org.toLowerCase(),
         displayName: name,
@@ -190,16 +193,18 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
+      // A nameless member's reach is exactly the scope-class rule: co-members of this org (the org-SA
+      // class, resolved live at the gate) plus the person who invited them. No registry class — they
+      // hold no public name for the named-to-named scope to stand on.
       await provisionCommunityMessaging({
         person: res.home.address,
         org: invite.org.toLowerCase(),
-        named: true, // claimJoinName just claimed their public name
         extra: invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy) ? [invite.invitedBy as Address] : [],
         via: 'email',
         token: d.token,
       }).catch((e) => { console.warn('[invite] community messaging provision failed (non-fatal):', e); });
       await openSession(d.token, 'email', false);
-      goOn(invite.org.toLowerCase(), res.home.address, name, d.token, publicName);
+      goOn(invite.org.toLowerCase(), res.home.address, name, d.token);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
