@@ -102,8 +102,20 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
     });
     const name = await naming.reverseResolve(subjectAddr).catch(() => null);
-    // Delivery is name-addressed — a listing without a claimed name is unreachable.
-    if (!name) return jsonCors({ error: 'claim a public name before joining — listings are name-addressed' }, request, 409);
+    // TWO KINDS OF LABEL, chosen by what the subject IS — not one failing into the other. A NAMED
+    // agent's label is their public one (the naming read above). A NAMELESS agent is a full member
+    // too: their label is the org-local display name they signed into this listing — how this
+    // community, and only this community, knows them. Inside the org that is enough to be reached
+    // (the directory maps it to their address); outside it they are deliberately unreachable by
+    // name, because they chose not to hold one.
+    const localLabel = (body.listing.displayName ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 63);
+    if (!name && !localLabel) {
+      return jsonCors({ error: 'a listing needs a name — a public one, or a display name for this organization' }, request, 400);
+    }
     // spec 313 §4 — a steward publishing an ORG's listing attaches the SUBJECT's stewardship wire.
     const subjectStewardship = subjectAddr !== who.person ? await stewardWireFor(env, who.person, subjectAddr, who.token) : null;
     // SEC-H1 — a SELF-join must carry the org's authorization: the org→you member-access grant (from
@@ -132,7 +144,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const r = await callInteractions(env, communityId, 'directory.publish', {
       session: who.token,
       listing: body.listing,
-      label: nameLabel(name),
+      label: name ? nameLabel(name) : localLabel,
       ...(subjectStewardship ? { subjectStewardship } : {}),
       ...(selfMemberAccess ? { memberAccess: selfMemberAccess } : {}),
       ...(selfStewardship ? { stewardship: selfStewardship } : {}),
