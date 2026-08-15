@@ -157,14 +157,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // One-click SIWE handoff (spec 247): a relying app (e.g. demo-jp) signed the operator
       // in with their key and opened us at `…/you#session=<token>`. Establish the session
       // straight from the fragment, then strip it so the token never lingers in history.
-      const handoff = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('session');
+      const hashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+      const handoff = hashParams.get('session');
       if (handoff) {
         window.history.replaceState({}, '', url.pathname + url.search);
         try {
           await openSession(handoff, 'Wallet', true);
-          // A relying app that signed someone in server-side (demo personas) sends them here
-          // to plant the Home cookie, then wants them back. `return` is origin-gated.
-          const ret = url.searchParams.get('return');
+          // `return` rides in the fragment with the session. A query `return` is lost on a
+          // www↔apex hop; the fragment is not. Origin-gated either way.
+          const ret = hashParams.get('return') ?? url.searchParams.get('return');
           if (ret && isAllowedRelyingOrigin(ret)) {
             window.location.replace(ret);
             return;
