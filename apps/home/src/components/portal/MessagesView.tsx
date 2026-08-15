@@ -19,6 +19,8 @@ import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
 import { useManagedAgents } from './ManagedAgents';
 import { ApproveMessaging } from './ApproveMessaging';
+import { MessagingWireRequiredError } from '../../lib/messaging-send';
+import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 
 
 const PENDING_STATES = ['submitted', 'triaged'];
@@ -153,6 +155,24 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
     if (!to) return;
     let cancelled = false;
+    // An address is the identity. A relying app already resolved the name; do not search again.
+    if (/^0x[0-9a-f]{40}$/.test(to)) {
+      setRecipient({
+        name: to,
+        label: to,
+        smartAgent: to,
+        displayName: null,
+        description: null,
+        skills: null,
+        registryStatus: null,
+        facets: [],
+      });
+      setComposeOpen(true);
+      setWireRequired(
+        new MessagingWireRequiredError('wire_absent', to as Address, [], undefined, 'approve this contact'),
+      );
+      return;
+    }
     void searchAgentsKb(to).then((found) => {
       if (cancelled || found.length === 0) return;
       const hit = found.find((h) => h.label.toLowerCase() === to) ?? found[0]!;
@@ -160,7 +180,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       setComposeOpen(true);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [setWireRequired]);
 
   const conversations = useMemo(
     () => [...(view?.conversations ?? [])].sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt)),
@@ -276,7 +296,11 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const sendNew = async (body: string) => {
     if (!recipient || !body.trim()) return;
     const subject = composeSubject.trim();
-    const ok = await send({ recipientName: recipient.name, bodyText: body, ...(subject ? { subject } : {}) }, 'compose');
+    const addr = recipient.smartAgent.trim().toLowerCase();
+    const to = /^0x[0-9a-f]{40}$/.test(addr)
+      ? { recipient: addr as Address }
+      : { recipientName: recipient.name };
+    const ok = await send({ ...to, bodyText: body, ...(subject ? { subject } : {}) }, 'compose');
     if (ok) {
       setComposeOpen(false);
       setRecipient(null);
@@ -382,7 +406,11 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         stewardship={stewardship}
         session={session}
         credential={profile?.credential}
-        onApproved={() => setWireRequired(null)}
+        onApproved={() => {
+          setWireRequired(null);
+          const ret = new URLSearchParams(window.location.search).get('return');
+          if (ret && isAllowedRelyingOrigin(ret)) window.location.assign(ret);
+        }}
         onError={setError}
       />
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
