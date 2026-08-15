@@ -336,15 +336,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Same reason: the vault-key ceremony signs, so a wallet-credential demo home needs the token.
       try { await activateVaultIfNeeded(home.address, viaLower, token ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
-      // Same consent as connect: storage, delivery, and a wire covering communities they
-      // already belong to — so the first send from the app is not a second ceremony.
+      // Same consent as connect: storage, delivery, and a SCOPED wire — the communities they belong
+      // to plus, for a named home, the named-to-named class — so the first send from the app is not
+      // a second ceremony. One signature; the gate resolves membership and namedness live.
       if (token && (enroll.template === 'site-login' || enroll.aud === 'commons-app')) {
         try {
-          const orgs = await listManagedAgents(token);
-          for (const o of orgs.filter((a) => a.kind === 'org')) {
+          const named = !!home.name?.trim();
+          const orgs = (await listManagedAgents(token)).filter((a) => a.kind === 'org');
+          if (orgs.length === 0) {
+            await provisionCommunityMessaging({ person: home.address, named, via: viaLower, token });
+          }
+          for (const o of orgs) {
             await provisionCommunityMessaging({
               person: home.address,
               org: o.agent,
+              named,
               via: viaLower,
               token,
             });

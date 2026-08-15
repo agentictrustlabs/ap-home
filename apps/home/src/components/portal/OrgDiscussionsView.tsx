@@ -214,6 +214,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       await provisionCommunityMessaging({
         person: agentAddress as Address,
         org: communityId,
+        named: !!agentName?.trim(),
         via: joinVia,
         token: session.token,
       }).catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });

@@ -159,11 +159,11 @@ function seedOpenTopic(id = 'conv_abc') {
   }]);
 }
 
-async function call(op: string, asSa: string) {
+async function call(op: string, asSa: string, extra: Record<string, unknown> = {}) {
   const token = await mint(signer, caip(asSa));
   return doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/${op}`, {
     method: 'POST',
-    body: JSON.stringify({ session: token }),
+    body: JSON.stringify({ session: token, ...extra }),
     headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
   }));
 }
@@ -197,6 +197,26 @@ describe('membership is a re-verified proof, not an index entry (spec 322 §4)',
   it('REFUSES an outsider even when someone else is listed', async () => {
     seedListing('Alice', MEMBER);
     expect((await call('channels.list', OUTSIDER)).status).toBe(403);
+  });
+
+  it('a listed member may set an org-local name, and that is how they are known', async () => {
+    seedListing('Alice', MEMBER);
+    const set = await call('directory.setLocalName', MEMBER, { displayName: 'Ali in Outreach' });
+    expect(set.status).toBe(200);
+    expect((await set.json() as { you: string }).you).toBe('Ali in Outreach');
+    const listed = await (await call('channels.list', MEMBER)).json() as { you: string };
+    expect(listed.you).toBe('Ali in Outreach');
+  });
+
+  it('REFUSES an address as a local name', async () => {
+    seedListing('Alice', MEMBER);
+    const r = await call('directory.setLocalName', MEMBER, { displayName: MEMBER });
+    expect(r.status).toBe(400);
+    expect((await r.json() as { code: string }).code).toBe('local_name_required');
+  });
+
+  it('REFUSES an outsider setting a local name', async () => {
+    expect((await call('directory.setLocalName', OUTSIDER, { displayName: 'Eve' })).status).toBe(403);
   });
 });
 

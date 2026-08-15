@@ -138,6 +138,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       await provisionCommunityMessaging({
         person: agentAddress as Address,
         org: invite.org.toLowerCase(),
+        named: true, // claimJoinName just claimed (or confirmed) their public name
         extra: invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy) ? [invite.invitedBy as Address] : [],
         via,
         token: session.token,
@@ -186,6 +187,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       await provisionCommunityMessaging({
         person: res.home.address,
         org: invite.org.toLowerCase(),
+        named: true, // claimJoinName just claimed their public name
         extra: invite.invitedBy && /^0x[0-9a-f]{40}$/.test(invite.invitedBy) ? [invite.invitedBy as Address] : [],
         via: 'email',
         token: d.token,

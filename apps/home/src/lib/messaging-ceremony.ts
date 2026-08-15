@@ -18,6 +18,7 @@
 
 import type { Address } from '@agenticprimitives/types';
 import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../home/onboarding';
+import { CONTRACTS } from './chain';
 import { toWire } from './delegation';
 import { issueMessagingTransportGrant, issueMessagingWire, MESSAGING_WIRE_VALIDITY_SECONDS } from './messaging-wire';
 import { approveMessagingRecipient } from './messaging-send';
@@ -49,21 +50,6 @@ export interface MessagingCeremonyInput {
   validitySeconds?: number;
 }
 
-/** Addresses this community currently lists. The wire names people, not the org. */
-export async function communityMemberAddresses(org: string, token: string): Promise<Address[]> {
-  const r = await fetch(`/connect/directory?communityId=${encodeURIComponent(org.toLowerCase())}`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
-  const d = (await r.json().catch(() => ({}))) as { listings?: Array<{ listing?: { subject?: string }; subject?: string }> };
-  const out: Address[] = [];
-  for (const row of d.listings ?? []) {
-    const subject = String(row.listing?.subject ?? row.subject ?? '');
-    const addr = subject.match(/0x[0-9a-fA-F]{40}/)?.[0];
-    if (addr) out.push(addr.toLowerCase() as Address);
-  }
-  return [...new Set(out)];
-}
-
 export async function approveMessagingContact(input: MessagingCeremonyInput): Promise<void> {
   await approveMessagingRecipient({
     person: input.person,
@@ -92,12 +78,22 @@ export async function approveMessagingContact(input: MessagingCeremonyInput): Pr
 }
 
 /**
- * Storage, delivery, and a wire covering this community — signed once at join / enroll
- * so the first send from a relying app is not a second ceremony.
+ * Storage, delivery, and a SCOPED wire — signed once at join / enroll so the first send from a
+ * relying app is not a second ceremony.
+ *
+ * The wire names CLASSES, not a member snapshot (spec 341 §5.1c — the gate resolves them live):
+ *   · the org SA        — "my agent may DM current members of this community". Never stale: a new
+ *     joiner is reachable because they joined, and a kick severs reach instantly.
+ *   · the name registry — "my agent may DM any agent with a valid public name" (only minted for a
+ *     NAMED person; the gate also requires the sender's name to still be valid at send time).
+ * A nameless person therefore reaches exactly their co-members, and nobody else.
  */
 export async function provisionCommunityMessaging(input: {
   person: Address;
   org?: string;
+  /** The person holds a valid public name → include the named-to-named scope. */
+  named?: boolean;
+  /** Explicit extra counterparties (e.g. the inviter, reachable before the roster reflects them). */
   extra?: readonly Address[];
   via: Via;
   token: string;
@@ -105,11 +101,12 @@ export async function provisionCommunityMessaging(input: {
   const auth = { token: input.token };
   await activateInteractionsIfNeeded(input.person, input.via, auth);
   await activateInboxDeliveryIfNeeded(input.person, input.via, auth);
-  const members = input.org
-    ? await communityMemberAddresses(input.org, input.token).catch(() => [])
-    : [];
   const self = input.person.toLowerCase();
-  const recipients = [...members, ...(input.extra ?? [])].filter((a) => a.toLowerCase() !== self);
+  const recipients = [
+    ...(input.org ? [input.org.toLowerCase() as Address] : []),
+    ...(input.named ? [CONTRACTS.agentNameRegistry.toLowerCase() as Address] : []),
+    ...(input.extra ?? []),
+  ].filter((a) => a.toLowerCase() !== self);
   if (recipients.length === 0) return;
   await approveMessagingContact({
     person: input.person,

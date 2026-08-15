@@ -15,6 +15,7 @@ import { Avatar } from './chat/Avatar';
 import { BusyButton } from '../shared/BusyButton';
 import { signHashFor, resolveVia } from '../../home/onboarding';
 import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { CONTRACTS } from '../../lib/chain';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 
 /** Steward arrived from a relying app — send invitees back there after they join.
@@ -37,7 +38,7 @@ function inviteReturnFromPage(org: string): { returnUrl?: string; app?: string }
 }
 
 export function OrgInvitePanel({ org }: { org: string }) {
-  const { session, profile, agentAddress } = useSession();
+  const { session, profile, agentAddress, agentName } = useSession();
   const dest = inviteReturnFromPage(org);
   // spec 341 §5.1b — an invite blocked only for want of the person's approval.
   const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
@@ -78,11 +79,17 @@ export function OrgInvitePanel({ org }: { org: string }) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
       }
       // spec 341 §5.1b — delivered by the inviter's own agent over A2A, not written by the Home.
+      // One signature covers the invitee (explicitly — they may not be a member yet), this community
+      // (its current members, resolved live at the gate), and — for a named steward — anyone named.
       if (!agentAddress) throw new Error('no agent address');
       const via = resolveVia(profile?.credential, session.via);
       await approveMessagingContact({
         person: agentAddress,
-        recipient: hit.smartAgent.toLowerCase() as Address,
+        recipients: [
+          hit.smartAgent.toLowerCase() as Address,
+          communityId as Address,
+          ...(agentName?.trim() ? [CONTRACTS.agentNameRegistry.toLowerCase() as Address] : []),
+        ],
         via,
         token: session.token,
         validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS,
@@ -126,7 +133,11 @@ export function OrgInvitePanel({ org }: { org: string }) {
         if (/^0x[0-9a-f]{40}$/.test(invited)) {
           await approveMessagingContact({
             person: agentAddress,
-            recipient: invited as Address,
+            recipients: [
+              invited as Address,
+              communityId as Address,
+              ...(agentName?.trim() ? [CONTRACTS.agentNameRegistry.toLowerCase() as Address] : []),
+            ],
             via,
             token: session.token,
             validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS,

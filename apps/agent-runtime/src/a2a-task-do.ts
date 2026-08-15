@@ -48,6 +48,7 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills, makeOrgApplySkill } from './messaging-skills.js';
 import { skillProvenanceMetadata } from './skill-provenance.js';
@@ -736,6 +737,11 @@ export class A2aTaskDO {
     this.agent = createA2aAgent({
       agentSA, chainId, delegationManager: dm,
       enforcers: { timestamp: this.env.TIMESTAMP_ENFORCER as Address, allowedTargets: this.env.ALLOWED_TARGETS_ENFORCER as Address, allowedMethods: this.env.ALLOWED_METHODS_ENFORCER as Address },
+      // spec 341 §5.1c — messaging scope classes: an `allowedTargets` entry that is the naming
+      // registry covers any NAMED recipient (named sender required); an org SA covers its CURRENT
+      // members (both parties). Only the three messaging skills read classes — everything else keeps
+      // FR-4.2's exact-address rule. Fail-closed inside the resolver.
+      scopeCovers: (i) => messagingScopeCovers(messagingScopeDepsFromEnv(this.env as never), { ...i, recipient: agentSA }),
       taskStore: createDurableObjectTaskStore(this.state.storage),
       // spec 309 §7 / spec 316 §11a — the A2A messaging skills (messaging.deliver / interactions.respond /
       // interactions.deliverCredential): delivery rides standard `message/send`, authorized by the delegation

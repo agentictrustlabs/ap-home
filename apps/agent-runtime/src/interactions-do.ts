@@ -68,6 +68,7 @@ import {
 import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
+import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { wrapSessionSignature } from './session-wire.js';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
@@ -94,6 +95,9 @@ const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 
 const CONVERSATION_INDEX_RESOURCE = 'conversation.index';
 const TOPIC_RESOURCE = (conversationId: string): string => `conversation.topic:${conversationId}`;
 const DIRECTORY_RESOURCE = 'directory.data';
+// Org-local display names for members who have not published a signed listing.
+// Rides `vault:org.membership:*` so existing interactions grants stay current.
+const LOCAL_NAMES_RESOURCE = 'org.membership:local-names';
 
 // Topic participation (tbox/messaging.ttl §Topic participation). RESTRICTED topics ASSERT participation:
 // apmsg:DiscussionInvitation rows live in `conversation.topic:invitations`; accepted participations
@@ -1052,6 +1056,49 @@ export class InteractionsDO {
     return this.verifyWire(wire, principal, sessionSa);
   }
 
+  private async readLocalNames(grant: IncomingDelegation): Promise<Record<string, string>> {
+    const raw = await this.readDoc<Record<string, string>>(grant, LOCAL_NAMES_RESOURCE, {});
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  }
+
+  /** An org-scoped facet — never an address. The address stays the identity. */
+  private normalizeLocalName(raw: unknown): string | null {
+    const s = String(raw ?? '').trim().replace(/\s+/g, ' ');
+    if (s.length < 1 || s.length > 80) return null;
+    if (/^0x[0-9a-fA-F]{40}$/.test(s) || /^eip155:/i.test(s)) return null;
+    return s;
+  }
+
+  /**
+   * Who may enter this community's channels, and how they are known here.
+   *
+   * Admission is one of three independent proofs — a current listing, a member-access grant, or
+   * stewardship. The name is a facet: a local name they chose, else the listing displayName, else
+   * "Steward". The canonical person address is never the name.
+   */
+  private async communityPresence(
+    grant: IncomingDelegation,
+    principal: string,
+    sessionSa: Address,
+    sessionCaip: string,
+    body: Record<string, unknown>,
+  ): Promise<{ admitted: boolean; steward: boolean; listed: boolean; you: string | null }> {
+    const listingName = await this.memberName(grant, principal, sessionCaip);
+    const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+    const memberAccess =
+      listingName || steward
+        ? false
+        : await this.hasMemberAccess(principal, sessionSa, body.memberAccess as IncomingDelegation | undefined);
+    if (!listingName && !steward && !memberAccess) {
+      return { admitted: false, steward: false, listed: false, you: null };
+    }
+    const names = await this.readLocalNames(grant);
+    const local = names[sessionSa.toLowerCase()];
+    const localName = typeof local === 'string' && local.trim() ? local.trim() : null;
+    const you = localName ?? listingName ?? (steward ? 'Steward' : null);
+    return { admitted: true, steward, listed: !!listingName, you };
+  }
+
   /**
    * A SCOPED READ wire is sufficient to READ one resource — the caveat decides, not the shape.
    *
@@ -1437,7 +1484,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1866,6 +1913,33 @@ export class InteractionsDO {
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const rec = (await this.state.storage.get(consultGrantRecordKey(member))) as { wire?: IncomingDelegation } | undefined;
           return json({ ok: true, wire: rec?.wire ?? null });
+        }
+        if (op === 'internal.member.current') {
+          // The messaging scope-class roster read (spec 341 §5.1c): which of these agents are CURRENT
+          // members of THIS org — a current, ERC-1271-proven, non-tombstoned directory listing, the
+          // same three tests `memberName` applies at the admission gate. Answered by the org's own DO
+          // (the single reader of its directory) so the messaging gates never parse a roster they do
+          // not own. Asked about a PERSON's DO by mistake, the directory is empty and the answer is
+          // nobody — which is exactly "this target entry is not an org".
+          const asked = Array.isArray(body.agents) ? (body.agents as unknown[]).map((a) => String(a).toLowerCase()) : [];
+          if (asked.length === 0 || asked.length > 8) return json({ error: 'agents (1–8 addresses) required' }, 400);
+          const rows = await this.readDoc<IndexedListing[]>(g, DIRECTORY_RESOURCE, []);
+          const nowIso = new Date().toISOString();
+          const stTomb = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+          const current: string[] = [];
+          for (const addr of asked) {
+            if (!/^0x[0-9a-f]{40}$/.test(addr)) continue;
+            const row = rows.find(
+              (l) => (l.listing.subject.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() === addr && isListingCurrent(l.listing, nowIso),
+            );
+            if (!row) continue;
+            if (stTomb.subjects?.[row.listing.subject.toLowerCase()]?.tombstoned) continue;
+            const { proof, ...draft } = row.listing;
+            const digest = await sha256Hex32(canonicalizeMessage(draft));
+            if (!(await this.erc1271(addr as Address, digest as Hex, proof.signature as Hex))) continue;
+            current.push(addr);
+          }
+          return json({ ok: true, current });
         }
         if (op === 'internal.library.packages') {
           // Every package in this org's library, FRONTMATTER ONLY. The archetype catalog is derived
@@ -2430,19 +2504,48 @@ export class InteractionsDO {
         return json({ ok: true });
       }
 
+      if (op === 'directory.setLocalName') {
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
+        const localName = this.normalizeLocalName(body.displayName);
+        if (!localName) {
+          return json({ error: 'choose a name this community will know you by — not an address', code: 'local_name_required' }, 400);
+        }
+        return this.serialize(async () => {
+          const names = await this.readLocalNames(grant);
+          names[sessionSa.toLowerCase()] = localName;
+          await this.writeDoc(grant, LOCAL_NAMES_RESOURCE, names);
+          return json({ ok: true, you: localName });
+        });
+      }
+
       if (op === 'directory.list') {
-        const name = await this.memberName(grant, principal, sessionCaip);
-        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter' }, 403);
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
         const now = new Date().toISOString();
         const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => isListingCurrent(l.listing, now));
-        return json({ ok: true, listings: rows });
+        const localNames = await this.readLocalNames(grant);
+        const listings = rows.map((r) => {
+          const subject = String((r.listing as { subject?: string } | undefined)?.subject ?? '');
+          const addr = (subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase();
+          const localName = addr ? localNames[addr] : undefined;
+          return localName && r.listing
+            ? { ...r, listing: { ...r.listing, localName } }
+            : r;
+        });
+        return json({ ok: true, listings, you: presence.you ?? '' });
       }
 
       if (op === 'channels.list' || op === 'channels.read') {
-        const name = await this.memberName(grant, principal, sessionCaip);
-        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
+        const steward = presence.steward;
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
@@ -2469,13 +2572,19 @@ export class InteractionsDO {
           // O(board size) per-poll amplification behind the 2026-07-18 "auth failed" regression).
           Object.assign(bodies, await this.readTopicBodies(grant, messages.map((m) => m.envelope)));
         }
-        return json({ ok: true, channels: wire, bodies, you: name ?? 'Steward', steward });
+        return json({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward });
       }
 
       if (op === 'channels.create') {
-        const name = await this.memberName(grant, principal, sessionCaip);
-        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
+        if (!presence.you) {
+          return json({ error: 'choose a name this community will know you by before opening a topic', code: 'local_name_required' }, 403);
+        }
+        const name = presence.you;
+        const steward = presence.steward;
         // Participation policy: `open` (every org member participates — derived, no stored list) or
         // `restricted` (invite-only). Legacy callers still say visibility public/private. Any member may
         // create an OPEN topic; creating a RESTRICTED one is a facilitator act — steward/custodian only.
@@ -2507,11 +2616,16 @@ export class InteractionsDO {
       }
 
       if (op === 'channels.post') {
-        const name = await this.memberName(grant, principal, sessionCaip);
-        // A listed member posts as themselves; the community's STEWARD may also post (they administer it),
-        // authored as "Steward" — mirrors the list/read/create gate and the `you: name ?? 'Steward'` label.
-        const posterSteward = name ? false : await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!name && !posterSteward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
+        if (!presence.you) {
+          return json({ error: 'choose a name this community will know you by before posting', code: 'local_name_required' }, 403);
+        }
+        const name = presence.you;
+        // A named member posts as themselves; an unnamed steward still facilitates restricted topics.
+        const posterSteward = !presence.listed && presence.steward;
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
@@ -3101,7 +3215,9 @@ export class InteractionsDO {
         // counterparty sent — which is the rule `replyInConversation` established and the only reason
         // a reply cannot be redirected by the other party.
         let recipient = String(body.recipient ?? '').toLowerCase();
-        const recipientName = String(body.recipientName ?? '').trim().toLowerCase();
+        let recipientName = String(body.recipientName ?? '').trim().toLowerCase();
+        // Bare label → public agent name. The send is still to an address; this is the map.
+        if (recipientName && !recipientName.includes('.')) recipientName = `${recipientName}.impact`;
         const convId = String(body.conversationId ?? '');
         if (!recipient && recipientName) {
           if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
@@ -3149,13 +3265,25 @@ export class InteractionsDO {
           // ceremony for it would loop, because the ceremony cannot fix either.
           return json({ error: `messaging wire targets are ${cover.reason} — re-sign the wire` }, 409);
         }
-        if (!cover.targets.includes(recipient as Address)) {
-          return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: cover.targets, sessionKey }, 409);
-        }
         // spec 341 §5.5a — `org.apply` is a different PAYLOAD on the same rail: an application is not
         // an envelope, so there is nothing to build and nothing to record in the sender's own inbox.
         // The org's gate admits it and the org's grant writes it.
         const requestedSkill = String(body.skill ?? MESSAGING_DELIVER_SKILL);
+        if (!cover.targets.includes(recipient as Address)) {
+          // Exact address first, then the scope CLASSES (spec 341 §5.1c): a target entry that is the
+          // naming registry covers any named recipient when the sender is named too; an org SA covers
+          // its current members when both parties are. Same resolver the recipient's far gate runs —
+          // this near check exists only so the refusal can name who to approve.
+          const scoped = await messagingScopeCovers(messagingScopeDepsFromEnv(this.env as never), {
+            targets: cover.targets,
+            sender: principal,
+            recipient,
+            skill: requestedSkill,
+          });
+          if (!scoped) {
+            return json({ error: 'your messaging wire does not cover this recipient — approve them once to send', code: 'recipient_not_in_wire', recipient, recipients: cover.targets, sessionKey }, 409);
+          }
+        }
         if (requestedSkill === 'org.apply') {
           const applicationMessage = String(body.applicationMessage ?? '').trim();
           if (!applicationMessage) return json({ error: 'applicationMessage required' }, 400);
