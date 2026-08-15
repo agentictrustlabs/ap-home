@@ -16,8 +16,18 @@ import { signHashFor, resolveVia } from '../../home/onboarding';
 import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 
+/** Steward arrived from a relying app (Field Workspace) — send invitees back there after they join. */
+function inviteReturnFromPage(): { returnUrl?: string; app?: string } {
+  if (typeof window === 'undefined') return {};
+  const p = new URLSearchParams(window.location.search);
+  const returnUrl = p.get('return') ?? p.get('returnUrl') ?? undefined;
+  const app = p.get('app') ?? undefined;
+  return { ...(returnUrl ? { returnUrl } : {}), ...(app ? { app } : {}) };
+}
+
 export function OrgInvitePanel({ org }: { org: string }) {
   const { session, profile, agentAddress } = useSession();
+  const dest = inviteReturnFromPage();
   // spec 341 §5.1b — an invite blocked only for want of the person's approval.
   const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const communityId = org.toLowerCase();
@@ -93,7 +103,13 @@ export function OrgInvitePanel({ org }: { org: string }) {
       }
       const res = await fetch('/connect/org-invite/email', {
         method: 'POST', headers: authed,
-        body: JSON.stringify({ org: communityId, email: addr, ...(memberAccessDelegation ? { memberAccessDelegation } : {}) }),
+        body: JSON.stringify({
+          org: communityId,
+          email: addr,
+          ...(memberAccessDelegation ? { memberAccessDelegation } : {}),
+          ...(dest.returnUrl ? { returnUrl: dest.returnUrl } : {}),
+          ...(dest.app ? { app: dest.app } : {}),
+        }),
       });
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string };
       if (!res.ok || !b.ok) throw new Error(b.error ?? `invite failed (${res.status})`);
@@ -102,7 +118,7 @@ export function OrgInvitePanel({ org }: { org: string }) {
         : `Invitation emailed to ${email.trim()}.`) + grantNote);
       setEmail('');
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  }, [authed, communityId, email, profile?.credential, session?.via, session?.token]);
+  }, [authed, communityId, dest.app, dest.returnUrl, email, profile?.credential, session?.via, session?.token]);
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
@@ -142,7 +158,10 @@ export function OrgInvitePanel({ org }: { org: string }) {
       <div className="dash-section" style={{ maxWidth: 560, marginTop: '1.25rem' }}>
         <h2>Invite by email</h2>
         <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .6rem' }}>
-          Anyone with an email — they get a link, confirm their email, and join.
+          Anyone with an email — they get a link, confirm their email, and join
+          {dest.returnUrl
+            ? ' this organization and the app you invited them from. After they accept they continue there, signed in.'
+            : '.'}
         </p>
         <div style={{ display: 'flex', gap: '.5rem' }}>
           <input type="email" placeholder="name@example.org" value={email}

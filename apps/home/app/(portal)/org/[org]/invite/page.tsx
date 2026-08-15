@@ -1,8 +1,24 @@
-// Org → Invite: consolidated into the Members surface (spec 324 §12 — ONE enrollment surface). This standalone
-// route 308-permanent-redirects to /org/<sa>/members, where the Invite panel now lives with the roster.
-import { permanentRedirect } from 'next/navigation';
+// Org → Invite lives on Members (spec 324 §12). Keep this URL so relying-app ceremony
+// links still work — but never 308, and never drop `return` / `app`. A cached 308 to
+// `/members` without those params is why Commons invitees stayed on Home after joining.
+import { redirect } from 'next/navigation';
 
-export default async function OrgInviteRedirect({ params }: { params: Promise<{ org: string }> }) {
+const KEEP = ['return', 'returnUrl', 'app'] as const;
+
+export default async function OrgInviteRedirect({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ org: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { org } = await params;
-  permanentRedirect(`/org/${org}/members`);
+  const q = await searchParams;
+  const next = new URLSearchParams();
+  for (const key of KEEP) {
+    const v = q[key];
+    if (typeof v === 'string' && v) next.set(key, v);
+  }
+  const qs = next.toString();
+  redirect(`/org/${org}/members${qs ? `?${qs}` : ''}`);
 }

@@ -87,6 +87,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
   const goOn = (org: string, member: string, name: string) => {
     if (!invite?.returnUrl) { window.location.assign(orgHref(org, 'discussions')); return; }
     const u = new URL(invite.returnUrl);
+    if (!u.searchParams.get('org')) u.searchParams.set('org', org);
     u.searchParams.set('n', name);
     u.searchParams.set('sa', member);
     window.location.assign(u.toString());
