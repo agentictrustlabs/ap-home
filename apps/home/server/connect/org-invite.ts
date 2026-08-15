@@ -20,7 +20,7 @@ import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
-import { resolveClient } from '../_lib/oidc-registry';
+import { isAllowedRelyingOriginAsync, resolveClient } from '../_lib/oidc-registry';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -83,24 +83,39 @@ async function stewardsOrg(env: FnContext['env'], person: string, org: string): 
   return verifyStewardship(env, org.toLowerCase(), person, link?.stewardshipDelegation);
 }
 
-/** An invite raised FROM a relying app can name where the invitee continues once they've joined
- *  (e.g. back into the UUPG+ Tracker workspace they were invited to work in). CN-1 discipline: the
- *  URL must belong to the ORIGIN of a redirect_uri registered for the CALLING client — an app can
- *  only ever send its invitees back to itself, never to an attacker-chosen origin. */
+/** An invite can name where the invitee continues once they've joined (Field Workspace, a tracker).
+ *  CN-1: the URL origin must be a registered relying-app redirect origin — never an attacker-chosen
+ *  host. A relying-app id_token may only send people back to THAT app. A Home session (the ceremony
+ *  that can mint the member-access grant) may send them to any registered app the steward named. */
 async function appReturnUrl(
   env: FnContext['env'],
   clientId: string | null,
   raw: string | undefined,
-): Promise<string | null> {
-  if (!raw || !clientId) return null;
-  const client = await resolveClient(env, clientId);
-  if (!client) return null;
+): Promise<{ url: string; appName: string | null } | null> {
+  if (!raw) return null;
   let url: URL;
   try { url = new URL(raw); } catch { return null; }
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))) return null;
-  const origins = new Set(client.redirect_uris.map((u) => { try { return new URL(u).origin; } catch { return ''; } }));
-  if (!origins.has(url.origin)) return null;
-  return url.toString().slice(0, 500);
+  if (clientId) {
+    const client = await resolveClient(env, clientId);
+    if (!client) return null;
+    const origins = new Set(client.redirect_uris.map((u) => { try { return new URL(u).origin; } catch { return ''; } }));
+    if (!origins.has(url.origin)) return null;
+    return { url: url.toString().slice(0, 500), appName: client.name ?? null };
+  }
+  if (!(await isAllowedRelyingOriginAsync(env, raw))) return null;
+  return { url: url.toString().slice(0, 500), appName: appNameForOrigin(url.origin, null) };
+}
+
+function appNameForOrigin(origin: string, prefer: string | null): string | null {
+  const hits = whitelabel.relyingApps.filter((app) =>
+    app.redirect_uris.some((u) => { try { return new URL(u).origin === origin; } catch { return false; } }),
+  );
+  const named =
+    (prefer ? hits.find((a) => a.client_id === prefer) : undefined)
+    ?? hits.find((a) => a.client_id === 'field-app')
+    ?? hits[0];
+  return named?.name ?? null;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -109,8 +124,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         org?: string;
         email?: string;
         memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
-        /** Where the invitee continues after joining — validated against the calling client. */
+        /** Where the invitee continues after joining — validated against a registered app origin. */
         returnUrl?: string;
+        /** Optional client_id when the steward is on a Home session and naming the destination app. */
+        app?: string;
       }
     | null;
   const org = (body?.org ?? '').toLowerCase();
@@ -120,9 +137,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!caller || !(await stewardsOrg(env, caller.person, org))) {
     return json({ error: 'you must steward this organization to invite' }, 403);
   }
-  const returnUrl = await appReturnUrl(env, caller.clientId, body?.returnUrl);
-  if (body?.returnUrl && !returnUrl) return json({ error: 'returnUrl must be an origin registered for your app' }, 400);
-  const appName = returnUrl ? ((await resolveClient(env, caller.clientId!))?.name ?? null) : null;
+  const namedApp = caller.clientId ?? (typeof body?.app === 'string' ? body.app : null);
+  const returned = await appReturnUrl(env, namedApp, body?.returnUrl);
+  if (body?.returnUrl && !returned) return json({ error: 'returnUrl must be an origin registered for your app' }, 400);
+  const returnUrl = returned?.url ?? null;
+  const appName = returned?.appName ?? (namedApp ? ((await resolveClient(env, namedApp))?.name ?? null) : null);
   /*
     spec 321 W2 — the pre-signed member-access grant (org → the invitee's counterfactual home, from
     /org-invite/predict). REQUIRED, where it used to be optional.
@@ -178,7 +197,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await vault.set(`org.invite:${token}`, {
       emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
       ...(mad ? { memberAccessDelegation: mad } : {}),
-      ...(returnUrl ? { returnUrl, appName } : {}),
+      ...(returnUrl ? { returnUrl } : {}),
+      ...(appName ? { appName } : {}),
+      ...(namedApp ? { app: namedApp } : {}),
     });
   } catch (e) {
     return json(
@@ -187,7 +208,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     );
   }
 
-  const joinUrl = `${resolveOrigin(request, env)}/invite/${token}?o=${org}`;
+  const join = new URL(`/invite/${token}`, resolveOrigin(request, env));
+  join.searchParams.set('o', org);
+  if (namedApp) join.searchParams.set('app', namedApp);
+  const joinUrl = join.toString();
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName));
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
   return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}) });

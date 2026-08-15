@@ -16,18 +16,28 @@ import { signHashFor, resolveVia } from '../../home/onboarding';
 import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 
-/** Steward arrived from a relying app (Field Workspace) — send invitees back there after they join. */
-function inviteReturnFromPage(): { returnUrl?: string; app?: string } {
+/** Steward arrived from a relying app — send invitees back there after they join.
+ *  Stash on the org so a later client nav that drops `?return=&app=` still records the app. */
+function inviteReturnFromPage(org: string): { returnUrl?: string; app?: string } {
   if (typeof window === 'undefined') return {};
+  const key = `ap:invite-dest:${org.toLowerCase()}`;
   const p = new URLSearchParams(window.location.search);
   const returnUrl = p.get('return') ?? p.get('returnUrl') ?? undefined;
   const app = p.get('app') ?? undefined;
-  return { ...(returnUrl ? { returnUrl } : {}), ...(app ? { app } : {}) };
+  if (returnUrl || app) {
+    try { sessionStorage.setItem(key, JSON.stringify({ returnUrl, app })); } catch { /* blocked */ }
+    return { ...(returnUrl ? { returnUrl } : {}), ...(app ? { app } : {}) };
+  }
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as { returnUrl?: string; app?: string };
+  } catch { /* blocked or malformed */ }
+  return {};
 }
 
 export function OrgInvitePanel({ org }: { org: string }) {
   const { session, profile, agentAddress } = useSession();
-  const dest = inviteReturnFromPage();
+  const dest = inviteReturnFromPage(org);
   // spec 341 §5.1b — an invite blocked only for want of the person's approval.
   const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const communityId = org.toLowerCase();
@@ -122,7 +132,9 @@ export function OrgInvitePanel({ org }: { org: string }) {
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
-      <h3 className="subhead" style={{ marginBottom: '.6rem' }}>Invite people</h3>
+      <h3 className="subhead" style={{ marginBottom: '.6rem' }}>
+        {dest.app ? `Invite to ${dest.app === 'commons-app' ? 'Commons' : dest.app}` : 'Invite people'}
+      </h3>
       <ApproveMessaging
         need={wireNeeded}
         person={agentAddress ?? null}
@@ -158,10 +170,9 @@ export function OrgInvitePanel({ org }: { org: string }) {
       <div className="dash-section" style={{ maxWidth: 560, marginTop: '1.25rem' }}>
         <h2>Invite by email</h2>
         <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .6rem' }}>
-          Anyone with an email — they get a link, confirm their email, and join
-          {dest.returnUrl
-            ? ' this organization and the app you invited them from. After they accept they continue there, signed in.'
-            : '.'}
+          {dest.app
+            ? 'This invitation is to that app, for this organization. They accept, then continue there signed in.'
+            : 'Anyone with an email — they get a link and join this organization. Start from an app if you want them to land there.'}
         </p>
         <div style={{ display: 'flex', gap: '.5rem' }}>
           <input type="email" placeholder="name@example.org" value={email}

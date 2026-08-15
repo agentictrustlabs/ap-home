@@ -12,6 +12,7 @@ import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 import { recordOrgMembership } from '../../../src/lib/org-membership';
 import { emailInviteNeedsSignOut } from '../../../src/lib/email-invite-home';
+import { inviteAcceptLabel, inviteHeadline, inviteLead } from '../../../src/lib/invite-copy';
 import { claimName } from '../../../src/connect-client';
 import { nameLabel } from '../../../src/lib/domain';
 import { BusyButton } from '../../../src/components/shared/BusyButton';
@@ -64,8 +65,12 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
   const [otpFallback, setOtpFallback] = useState(false);
 
   useEffect(() => {
-    const org = new URLSearchParams(window.location.search).get('o') ?? '';
-    void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}&o=${encodeURIComponent(org)}`)
+    const q = new URLSearchParams(window.location.search);
+    const org = q.get('o') ?? '';
+    const app = q.get('app') ?? '';
+    const lookup = new URLSearchParams({ token, o: org });
+    if (app) lookup.set('app', app);
+    void fetch(`/connect/org-invite/lookup?${lookup.toString()}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.ok) {
@@ -171,7 +176,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         !err && <p style={{ opacity: 0.7 }}>Loading invitation…</p>
       ) : (
         <>
-          <h1 style={{ fontSize: '1.4rem' }}>You&rsquo;re invited to join <b>{invite.orgName}</b></h1>
+          <h1 style={{ fontSize: '1.4rem' }}>{inviteHeadline(invite.orgName, invite.appName)}</h1>
           {phase === 'restoring' ? (
             <p style={{ opacity: 0.7 }}>Checking who is signed in…</p>
           ) : emailInviteNeedsSignOut(agentAddress, invite.invitedAgent) ? (
@@ -185,16 +190,16 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                 Sign out to accept this invitation
               </BusyButton>
               <p style={{ fontSize: '.75rem', opacity: 0.55, marginTop: '.6rem' }}>
-                After you sign out, this link sets up the invited home and joins {invite.orgName}.
+                After you sign out, this link sets up the invited home
+                {invite.appName ? ` and takes you to ${invite.appName}` : ` and joins ${invite.orgName}`}.
               </p>
             </>
           ) : session && agentAddress ? (
             <>
-              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
-                Accepting publishes a listing you sign — you become a member (you can leave anytime). Your keys
-                stay yours; the org gets no custody.{invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
-              </p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>Public name in {invite.orgName} (also your handle)</label>
+              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>{inviteLead(invite.orgName, invite.appName)}</p>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>
+                How you are known in {invite.appName ? `${invite.appName} · ${invite.orgName}` : invite.orgName}
+              </label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
@@ -202,7 +207,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                 style={{ width: '100%', padding: '.55rem .7rem', margin: '.6rem 0', borderRadius: 8, border: '1px solid #d1d5db' }}
               />
               <BusyButton busy={busy} busyLabel="Signing…" onClick={() => void accept()}>
-                Accept &amp; join {invite.orgName}
+                {inviteAcceptLabel(invite.orgName, invite.appName)}
               </BusyButton>
               {(() => {
                 const via = resolveVia(profile?.credential, session.via);
@@ -218,12 +223,10 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
             </>
           ) : (
             <>
-              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
-                You were invited by email — that&rsquo;s all we need. Accept and we&rsquo;ll set up your home
-                automatically, no app to install. Your keys stay yours; the org gets no custody.
-                {invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
-              </p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>Public name in {invite.orgName} (also your handle)</label>
+              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>{inviteLead(invite.orgName, invite.appName)}</p>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>
+                How you are known in {invite.appName ? `${invite.appName} · ${invite.orgName}` : invite.orgName}
+              </label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
@@ -235,7 +238,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                   {/* One-click: the emailed link is the email-validation proof (magic link) → the server
                       bootstraps a KMS home bound to the invited email and this handler joins the org. */}
                   <BusyButton busy={busy} busyLabel="Setting up your home…" onClick={() => void redeemWithLink()}>
-                    Accept &amp; join {invite.orgName}
+                    {inviteAcceptLabel(invite.orgName, invite.appName)}
                   </BusyButton>
                   <a className="btn-ghost" href={`/?invite=${encodeURIComponent(token)}`} style={{ display: 'block', marginTop: '.7rem' }}>
                     Already have a home? Use a passkey, wallet, or Google

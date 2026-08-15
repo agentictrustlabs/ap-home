@@ -9,6 +9,7 @@ import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import { orgVault } from '../lib/org-vault';
 import { invitedAgentFromGrant } from '../../src/lib/email-invite-home';
+import { resolveClient } from '../_lib/oidc-registry';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
 const json = (b: unknown, s = 200): Response =>
@@ -30,6 +31,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
         status?: string;
         returnUrl?: string;
         appName?: string;
+        app?: string;
         memberAccessDelegation?: { delegate?: string };
       } | null)
     : null;
@@ -42,13 +44,30 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // The grant's delegate is who this link admits. The redeem page compares it to the restored
   // session so a different signed-in home is told to sign out — not offered Accept as them.
   const invitedAgent = invitedAgentFromGrant(rec.memberAccessDelegation);
-  // `returnUrl`/`appName` (when the invite was raised from a relying app) tell the redeem page where
-  // the invitee continues after joining — the URL was origin-checked against that app at invite time.
+  // App identity: vault first, then `?app=` on the link (the join URL carries the client_id
+  // so a record that lost returnUrl still names Commons). Name and return come from the
+  // registry — never from an unregistered query string.
+  const appId = (typeof rec.app === 'string' && rec.app) || url.searchParams.get('app') || '';
+  const client = appId ? await resolveClient(env, appId) : null;
+  const appName = rec.appName ?? client?.name ?? null;
+  let returnUrl = rec.returnUrl ?? null;
+  if (!returnUrl && client) {
+    const https = client.redirect_uris.find((u) => {
+      try { return new URL(u).protocol === 'https:'; } catch { return false; }
+    });
+    const base = https ?? client.redirect_uris[0];
+    if (base) {
+      const dest = new URL(base);
+      dest.searchParams.set('org', org);
+      returnUrl = dest.toString();
+    }
+  }
   return json({
     ok: true,
     org,
     orgName: orgName ?? org,
     ...(invitedAgent ? { invitedAgent } : {}),
-    ...(rec.returnUrl ? { returnUrl: rec.returnUrl, appName: rec.appName ?? null } : {}),
+    ...(appName ? { appName } : {}),
+    ...(returnUrl ? { returnUrl } : {}),
   });
 };
