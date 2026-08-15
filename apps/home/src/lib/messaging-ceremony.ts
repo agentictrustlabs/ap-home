@@ -17,7 +17,7 @@
 // narrower mint would silently break sending to everyone already approved.
 
 import type { Address } from '@agenticprimitives/types';
-import { signHashFor, type Via } from '../home/onboarding';
+import { activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../home/onboarding';
 import { toWire } from './delegation';
 import { issueMessagingTransportGrant, issueMessagingWire } from './messaging-wire';
 import { approveMessagingRecipient } from './messaging-send';
@@ -33,7 +33,9 @@ export interface MessagingCeremonyInput {
    */
   person: Address;
   /** The counterparty being approved. */
-  recipient: Address;
+  recipient?: Address;
+  /** Several counterparties in one signature (join / enroll). */
+  recipients?: readonly Address[];
   /** The org's stewardship delegation. Required when `person` is an organization. */
   stewardship?: unknown;
   /** The person's credential route — passkey / wallet / KMS (`resolveVia(profile.credential, via)`). */
@@ -42,17 +44,26 @@ export interface MessagingCeremonyInput {
   token?: string | null;
 }
 
-/**
- * Run the ceremony: read what the current wire covers, mint one covering that plus `recipient`, have
- * the PERSON sign it, install it.
- *
- * Fail-closed at every step, and deliberately not wrapped in a retry: a person who declines the
- * prompt has declined, and asking again is how a signature request becomes noise.
- */
+/** Addresses this community currently lists. The wire names people, not the org. */
+export async function communityMemberAddresses(org: string, token: string): Promise<Address[]> {
+  const r = await fetch(`/connect/directory?communityId=${encodeURIComponent(org.toLowerCase())}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const d = (await r.json().catch(() => ({}))) as { listings?: Array<{ listing?: { subject?: string }; subject?: string }> };
+  const out: Address[] = [];
+  for (const row of d.listings ?? []) {
+    const subject = String(row.listing?.subject ?? row.subject ?? '');
+    const addr = subject.match(/0x[0-9a-fA-F]{40}/)?.[0];
+    if (addr) out.push(addr.toLowerCase() as Address);
+  }
+  return [...new Set(out)];
+}
+
 export async function approveMessagingContact(input: MessagingCeremonyInput): Promise<void> {
   await approveMessagingRecipient({
     person: input.person,
-    newRecipient: input.recipient,
+    ...(input.recipient ? { newRecipient: input.recipient } : {}),
+    ...(input.recipients?.length ? { newRecipients: input.recipients } : {}),
     ...(input.stewardship ? { stewardship: input.stewardship } : {}),
     mintWire: async ({ person, sessionKey, recipients }) => {
       // The credential-routed signer. `signHashFor` is what decides whether this opens a passkey
@@ -71,5 +82,33 @@ export async function approveMessagingContact(input: MessagingCeremonyInput): Pr
       const transport = toWire(await issueMessagingTransportGrant({ personSA: person, recipients, signHash }));
       return { wire, transport };
     },
+  });
+}
+
+/**
+ * Storage, delivery, and a wire covering this community — signed once at join / enroll
+ * so the first send from a relying app is not a second ceremony.
+ */
+export async function provisionCommunityMessaging(input: {
+  person: Address;
+  org?: string;
+  extra?: readonly Address[];
+  via: Via;
+  token: string;
+}): Promise<void> {
+  const auth = { token: input.token };
+  await activateInteractionsIfNeeded(input.person, input.via, auth);
+  await activateInboxDeliveryIfNeeded(input.person, input.via, auth);
+  const members = input.org
+    ? await communityMemberAddresses(input.org, input.token).catch(() => [])
+    : [];
+  const self = input.person.toLowerCase();
+  const recipients = [...members, ...(input.extra ?? [])].filter((a) => a.toLowerCase() !== self);
+  if (recipients.length === 0) return;
+  await approveMessagingContact({
+    person: input.person,
+    recipients,
+    via: input.via,
+    token: input.token,
   });
 }

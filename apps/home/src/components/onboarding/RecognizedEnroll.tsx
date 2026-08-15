@@ -27,6 +27,7 @@ import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '..
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
+import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
 import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
@@ -335,6 +336,23 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Same reason: the vault-key ceremony signs, so a wallet-credential demo home needs the token.
       try { await activateVaultIfNeeded(home.address, viaLower, token ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
+      // Same consent as connect: storage, delivery, and a wire covering communities they
+      // already belong to — so the first send from the app is not a second ceremony.
+      if (token && (enroll.template === 'site-login' || enroll.aud === 'commons-app')) {
+        try {
+          const orgs = await listManagedAgents(token);
+          for (const o of orgs.filter((a) => a.kind === 'org')) {
+            await provisionCommunityMessaging({
+              person: home.address,
+              org: o.agent,
+              via: viaLower,
+              token,
+            });
+          }
+        } catch (e) {
+          console.warn('[connect] community messaging provision failed (non-fatal):', e);
+        }
+      }
       // spec 280 carve-out — self-heal the published connection KIND on every successful social connect
       // (idempotent, gasless, kind-only) so a named social home stops being EOA-ambiguous at re-entry.
       if (isKmsVia(viaLower)) void publishSocialConnectionKindIfNeeded(home.address, home.name, viaLower, { token });

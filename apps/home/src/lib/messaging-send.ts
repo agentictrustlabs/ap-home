@@ -178,7 +178,9 @@ export async function readMessagingWire(person: Address, stewardship?: unknown):
  */
 export async function approveMessagingRecipient(args: {
   person: Address;
-  newRecipient: Address;
+  newRecipient?: Address;
+  /** Several counterparties in one signature — join / enroll covers a community at once. */
+  newRecipients?: readonly Address[];
   /** Required when `person` is an organization — see `SendMessageInput.stewardship`. */
   stewardship?: unknown;
   /** Mints + signs the delegation. Injected so this module stays free of the credential-routing
@@ -189,7 +191,12 @@ export async function approveMessagingRecipient(args: {
   if (!current.sessionKey) {
     throw new Error('this deployment has no interactions session key — messaging cannot be enabled');
   }
-  const recipients = [...new Set([...current.recipients.map((r) => r.toLowerCase() as Address), args.newRecipient.toLowerCase() as Address])];
+  const added = [
+    ...(args.newRecipient ? [args.newRecipient] : []),
+    ...(args.newRecipients ?? []),
+  ].map((a) => a.toLowerCase() as Address);
+  if (added.length === 0) throw new Error('name at least one recipient');
+  const recipients = [...new Set([...current.recipients.map((r) => r.toLowerCase() as Address), ...added])];
   const minted = await args.mintWire({ person: args.person, sessionKey: current.sessionKey, recipients });
   await putMessagingWire(args.person, minted.wire, minted.transport, args.stewardship);
 }
