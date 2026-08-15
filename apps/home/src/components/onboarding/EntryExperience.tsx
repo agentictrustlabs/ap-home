@@ -4,14 +4,14 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
+import { openHome, createOrganization, givePermission, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { passkeyLogin, fetchProfile, siweLogin, claimName } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { initRemoteSigner } from '../../lib/remote-signer';
 import { whitelabel } from '../../whitelabel/config';
 import { knownRelyingClient } from '../../lib/relying-clients';
-import { useSession } from '../../context/session';
+import { hasSessionHandoff, useSession } from '../../context/session';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
@@ -176,7 +176,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // grant on the fresh home session and returns the code (same machinery the owner-op resume uses).
   useEffect(() => {
     if (mode !== 'enroll' || !api.enroll || !session) return;
-    if (view.k !== 'enroll-entry') return;
+    if (view.k !== 'enroll-entry' && view.k !== 'checking') return;
     void (async () => {
       markEnrollChooserDone(api.enroll);
       if (requiresNamedAgent) {
@@ -232,10 +232,12 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
         // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
         // null here — recognition reads the cookie directly, the same recovery org-create already does.)
-        // OWNER-operation templates (content-signer / subscription-collect) need a genuine home session
-        // too — with no cookie they fall to the entry and resume into the recognized ceremony after a
-        // sign-in (Step 3, see the enroll-entry onSession below).
-        setView({ k: readSsoCookie() ? 'enroll-recognized' : 'enroll-entry' });
+        // A `#session=` handoff (invite return) is still being consumed — wait, don't flash the chooser.
+        if (hasSessionHandoff() || readSsoCookie()) {
+          setView({ k: readSsoCookie() ? 'enroll-recognized' : 'checking' });
+          return;
+        }
+        setView({ k: 'enroll-entry' });
         return;
       }
       // A PINNED connect from an ALREADY-authenticated member one-taps: route to the recognized
@@ -1117,6 +1119,21 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       // SEC-001: registry-derived delegate FROM the server-minted grant (the URL's
       // `api.enroll.delegate` is treated as untrusted hint — the server's binding wins).
       const { grant_id, delegate } = await api.beginGrant(api.enroll.name);
+      const asSteward = existingOrg ? (api.enroll.existingOrg ? true : !!choice?.asSteward) : true;
+      if (existingOrg && !asSteward) {
+        const granted = await givePermission({ address: personAgent, name: api.enroll.name }, delegate, via, auth, api.enroll.sessionKey);
+        if (!granted.ok) { setErr(granted.error); setPhase('error'); return; }
+        const code = await api.submitGrant(grant_id, granted.grant, {
+          orgAgent: existingOrg,
+          orgName: orgBase,
+          person: personAgent,
+          purpose: api.enroll.purpose,
+          requestedBy: api.enroll.aud,
+        }, granted.sessionDelegation);
+        setPhase('connected');
+        setTimeout(() => api.deliverCode(code), 1100);
+        return;
+      }
       const created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate, via, auth, {
         purpose: api.enroll.purpose,
         requestedBy: api.enroll.aud,
@@ -1139,6 +1156,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <OrgChooser
           token={cred?.token}
           appHost={api.host}
+          purpose={api.enroll?.purpose}
           onChoose={(c) => { setChoice(c); setPhase('consent'); }}
           onDecline={api.denyEnroll}
         />

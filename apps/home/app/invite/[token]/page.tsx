@@ -89,12 +89,20 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
   /** Where the invitee continues once they've joined: back into the app the invitation was raised
    *  from (origin-checked against that app when the invite was created) carrying the name they just
    *  chose and the person agent they joined as — otherwise the org's own space at this Home. */
-  const goOn = (org: string, member: string, name: string) => {
+  const goOn = (org: string, member: string, name: string, homeSession?: string) => {
     if (!invite?.returnUrl) { window.location.assign(orgHref(org, 'discussions')); return; }
     const u = new URL(invite.returnUrl);
     if (!u.searchParams.get('org')) u.searchParams.set('org', org);
     u.searchParams.set('n', name);
     u.searchParams.set('sa', member);
+    // Fragment, not a query: Commons attaches this to the authorize URL so Home
+    // plants the email home instead of showing the generic sign-in chooser.
+    if (homeSession) {
+      const frag = new URLSearchParams();
+      frag.set('session', homeSession);
+      frag.set('via', 'email');
+      u.hash = frag.toString();
+    }
     window.location.assign(u.toString());
   };
 
@@ -123,7 +131,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!res.ok || !body.ok) throw new Error(asMsg(body.error, `join failed (${res.status})`));
       await recordOrgMembership(agentAddress as Address, invite.org.toLowerCase(), sign, session.token, null, name);
-      goOn(invite.org.toLowerCase(), agentAddress, name);
+      goOn(invite.org.toLowerCase(), agentAddress, name, session.token);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 
@@ -165,7 +173,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
       await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
       await openSession(d.token, 'email', false);
-      goOn(invite.org.toLowerCase(), res.home.address, name);
+      goOn(invite.org.toLowerCase(), res.home.address, name, d.token);
     } catch (e) { setErr(asMsg(e, 'could not join')); } finally { setBusy(false); }
   };
 

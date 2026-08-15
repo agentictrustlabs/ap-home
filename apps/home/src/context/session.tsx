@@ -89,7 +89,7 @@ function hasGoogleReturn(): boolean {
 
 /** Relying-app `#session=` handoff (demo personas / SIWE) — treat like restore so pages that require
  *  a Home session (e.g. /enable-messaging) wait instead of flashing "Sign in first". */
-function hasSessionHandoff(): boolean {
+export function hasSessionHandoff(): boolean {
   try {
     return !!new URLSearchParams(window.location.hash.replace(/^#/, '')).get('session');
   } catch {
@@ -162,11 +162,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (handoff) {
         window.history.replaceState({}, '', url.pathname + url.search);
         try {
-          await openSession(handoff, 'Wallet', true);
-          // `return` rides in the fragment with the session. A query `return` is lost on a
-          // www↔apex hop; the fragment is not. Origin-gated either way.
+          const via = hashParams.get('via') || 'Wallet';
+          await openSession(handoff, via, true);
+          // An enroll (`client_id` / `delegate`) must stay here so RecognizedEnroll can
+          // authorize that app as this home. Bouncing to `return` would drop the grant.
+          const enrolling = url.searchParams.has('client_id') || url.searchParams.has('delegate');
           const ret = hashParams.get('return') ?? url.searchParams.get('return');
-          if (ret && isAllowedRelyingOrigin(ret)) {
+          if (!enrolling && ret && isAllowedRelyingOrigin(ret)) {
             window.location.replace(ret);
             return;
           }
