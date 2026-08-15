@@ -175,7 +175,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
               try { sessionStorage.setItem(`ap_chooser:${chooserKey}`, '1'); } catch { /* blocked */ }
             }
           }
-          const ret = hashParams.get('return') ?? url.searchParams.get('return');
+          // Bounce ONLY on a `return` the HANDOFF itself carried (in the fragment, next to the
+          // session). A `?return=` search param belongs to the PAGE — ceremony pages like
+          // /approve-messaging carry one so THEY can send the person back after signing, and
+          // bouncing on it here unloads the ceremony before it ever runs.
+          const ret = hashParams.get('return');
           if (!enrolling && ret && isAllowedRelyingOrigin(ret)) {
             window.location.replace(ret);
             return;
