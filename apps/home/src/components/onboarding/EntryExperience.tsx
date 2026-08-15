@@ -234,6 +234,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         // null here — recognition reads the cookie directly, the same recovery org-create already does.)
         // A `#session=` handoff (invite return) is still being consumed — wait, don't flash the chooser.
         if (hasSessionHandoff() || readSsoCookie()) {
+          // Invite / relying-app `#session=` already named the home. Mark the chooser
+          // done or RecognizedEnroll treats nameless site-login as "pick an account",
+          // clears `ap_sso`, and dumps them on the generic credential screen.
+          markEnrollChooserDone(api.enroll);
           setView({ k: readSsoCookie() ? 'enroll-recognized' : 'checking' });
           return;
         }

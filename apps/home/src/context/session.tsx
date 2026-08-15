@@ -167,6 +167,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           // An enroll (`client_id` / `delegate`) must stay here so RecognizedEnroll can
           // authorize that app as this home. Bouncing to `return` would drop the grant.
           const enrolling = url.searchParams.has('client_id') || url.searchParams.has('delegate');
+          if (enrolling) {
+            // Same key RecognizedEnroll uses. Without it, nameless site-login
+            // force-chooses and wipes the session we just planted.
+            const chooserKey = url.searchParams.get('state') || url.searchParams.get('code_challenge') || '';
+            if (chooserKey) {
+              try { sessionStorage.setItem(`ap_chooser:${chooserKey}`, '1'); } catch { /* blocked */ }
+            }
+          }
           const ret = hashParams.get('return') ?? url.searchParams.get('return');
           if (!enrolling && ret && isAllowedRelyingOrigin(ret)) {
             window.location.replace(ret);
