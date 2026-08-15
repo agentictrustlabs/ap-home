@@ -9,6 +9,7 @@ import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
+import { isAllowedRelyingOrigin } from '../lib/oidc-clients';
 
 export interface Session {
   token: string;
@@ -161,6 +162,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         window.history.replaceState({}, '', url.pathname + url.search);
         try {
           await openSession(handoff, 'Wallet', true);
+          // A relying app that signed someone in server-side (demo personas) sends them here
+          // to plant the Home cookie, then wants them back. `return` is origin-gated.
+          const ret = url.searchParams.get('return');
+          if (ret && isAllowedRelyingOrigin(ret)) {
+            window.location.replace(ret);
+            return;
+          }
         } catch {
           setPhase('anon');
         }
