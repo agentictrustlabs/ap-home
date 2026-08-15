@@ -11,7 +11,11 @@ import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 import { recordOrgMembership } from '../../../src/lib/org-membership';
+import { emailInviteNeedsSignOut } from '../../../src/lib/email-invite-home';
+import { claimName } from '../../../src/connect-client';
+import { nameLabel } from '../../../src/lib/domain';
 import { BusyButton } from '../../../src/components/shared/BusyButton';
+import type { Hex } from '@agenticprimitives/types';
 
 // Coerce ANY thrown shape to a readable string — Error, a string, or a plain object with a `.message`
 // (MetaMask/RPC rejections are objects like `{ code: 4001, message: 'User rejected …' }`, NOT Error
@@ -26,10 +30,34 @@ const asMsg = (x: unknown, fallback: string): string => {
   return fallback;
 };
 
+/** Listings are name-addressed. Email redeem deploys a nameless home; claim the typed handle first. */
+function joinLabel(displayName: string): string {
+  const raw = nameLabel(displayName)
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
+  return raw || 'member';
+}
+
+async function claimJoinName(
+  agent: Address,
+  sign: (h: Hex) => Promise<Hex>,
+  displayName: string,
+): Promise<void> {
+  const claimed = await claimName(agent, sign, joinLabel(displayName));
+  if (!claimed.ok) throw new Error(claimed.error);
+}
+
 export default function InviteRedeemPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
-  const { session, profile, agentAddress, agentName, openSession } = useSession();
-  const [invite, setInvite] = useState<{ org: string; orgName: string; returnUrl?: string; appName?: string | null } | null>(null);
+  const { session, profile, agentAddress, agentName, openSession, signOut, phase } = useSession();
+  const [invite, setInvite] = useState<{
+    org: string;
+    orgName: string;
+    returnUrl?: string;
+    appName?: string | null;
+    invitedAgent?: string | null;
+  } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState('');
@@ -39,7 +67,17 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     const org = new URLSearchParams(window.location.search).get('o') ?? '';
     void fetch(`/connect/org-invite/lookup?token=${encodeURIComponent(token)}&o=${encodeURIComponent(org)}`)
       .then((r) => r.json())
-      .then((d) => { if (d.ok) setInvite({ org: d.org, orgName: d.orgName, returnUrl: d.returnUrl, appName: d.appName ?? null }); else setErr(d.error ?? 'invalid invitation'); })
+      .then((d) => {
+        if (d.ok) {
+          setInvite({
+            org: d.org,
+            orgName: d.orgName,
+            returnUrl: d.returnUrl,
+            appName: d.appName ?? null,
+            invitedAgent: typeof d.invitedAgent === 'string' ? d.invitedAgent : null,
+          });
+        } else setErr(d.error ?? 'invalid invitation');
+      })
       .catch(() => setErr('could not load this invitation'));
   }, [token]);
 
@@ -56,6 +94,10 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
 
   const accept = async () => {
     if (!session || !agentAddress || !invite) return;
+    if (emailInviteNeedsSignOut(agentAddress, invite.invitedAgent)) {
+      setErr('Sign out first — this invitation is for a different home.');
+      return;
+    }
     setBusy(true); setErr(null);
     try {
       // Route by the home's ACTUAL on-chain credential, not the cookie `via` — a Google/KMS home has no
@@ -63,6 +105,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       const via = resolveVia(profile?.credential, session.via);
       const sign = await signHashFor(via, agentAddress as Address, { token: session.token });
       const name = displayName.trim() || (agentName ? agentName.split('.')[0]! : 'Member');
+      await claimJoinName(agentAddress as Address, sign, name);
       const listing = await issueDirectoryListing(agentAddress as Address, sign, {
         communityId: invite.org.toLowerCase(),
         displayName: name,
@@ -99,6 +142,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       // Fresh email-bootstrapped home → KMS via; signs server-side with the session token (no device prompt).
       const sign = await signHashFor('email', res.home.address, { token: d.token });
       const name = displayName.trim() || 'Member';
+      await claimJoinName(res.home.address, sign, name);
       const listing = await issueDirectoryListing(res.home.address, sign, {
         communityId: invite.org.toLowerCase(),
         displayName: name,
@@ -127,13 +171,29 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       ) : (
         <>
           <h1 style={{ fontSize: '1.4rem' }}>You&rsquo;re invited to join <b>{invite.orgName}</b></h1>
-          {session && agentAddress ? (
+          {phase === 'restoring' ? (
+            <p style={{ opacity: 0.7 }}>Checking who is signed in…</p>
+          ) : emailInviteNeedsSignOut(agentAddress, invite.invitedAgent) ? (
+            <>
+              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
+                You&rsquo;re signed in as <b>{agentName ?? agentAddress}</b>. This invitation is for a
+                different home — the one bound to the invited email. Accepting here would join the
+                wrong person.
+              </p>
+              <BusyButton busy={false} busyLabel="Signing out…" onClick={() => signOut()}>
+                Sign out to accept this invitation
+              </BusyButton>
+              <p style={{ fontSize: '.75rem', opacity: 0.55, marginTop: '.6rem' }}>
+                After you sign out, this link sets up the invited home and joins {invite.orgName}.
+              </p>
+            </>
+          ) : session && agentAddress ? (
             <>
               <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
                 Accepting publishes a listing you sign — you become a member (you can leave anytime). Your keys
                 stay yours; the org gets no custody.{invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
               </p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>The name your team sees in {invite.orgName}</label>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>Public name in {invite.orgName} (also your handle)</label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
@@ -162,7 +222,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
                 automatically, no app to install. Your keys stay yours; the org gets no custody.
                 {invite.appName ? ` Then you'll continue in ${invite.appName}.` : ''}
               </p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>The name your team sees in {invite.orgName}</label>
+              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>Public name in {invite.orgName} (also your handle)</label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}

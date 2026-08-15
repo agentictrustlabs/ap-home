@@ -8,6 +8,7 @@ import type { FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { nameLabel } from '../../src/lib/domain';
 import { orgVault } from '../lib/org-vault';
+import { invitedAgentFromGrant } from '../../src/lib/email-invite-home';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
 const json = (b: unknown, s = 200): Response =>
@@ -23,14 +24,31 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!/^0x[0-9a-f]{40}$/.test(org)) return json({ error: 'invite link missing its organization' }, 400);
   // Validate against the org vault (delegation-gated read of the org's own tracking record).
   const vault = await orgVault(env, org);
-  const rec = vault ? ((await vault.get(`org.invite:${token}`)) as { expiresAt?: number; status?: string; returnUrl?: string; appName?: string } | null) : null;
+  const rec = vault
+    ? ((await vault.get(`org.invite:${token}`)) as {
+        expiresAt?: number;
+        status?: string;
+        returnUrl?: string;
+        appName?: string;
+        memberAccessDelegation?: { delegate?: string };
+      } | null)
+    : null;
   if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
   if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
   const orgName = await new AgentNamingClient({
     rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
   }).reverseResolve(org as Address).then((n) => (n ? nameLabel(n) : null)).catch(() => null);
+  // The grant's delegate is who this link admits. The redeem page compares it to the restored
+  // session so a different signed-in home is told to sign out — not offered Accept as them.
+  const invitedAgent = invitedAgentFromGrant(rec.memberAccessDelegation);
   // `returnUrl`/`appName` (when the invite was raised from a relying app) tell the redeem page where
   // the invitee continues after joining — the URL was origin-checked against that app at invite time.
-  return json({ ok: true, org, orgName: orgName ?? org, ...(rec.returnUrl ? { returnUrl: rec.returnUrl, appName: rec.appName ?? null } : {}) });
+  return json({
+    ok: true,
+    org,
+    orgName: orgName ?? org,
+    ...(invitedAgent ? { invitedAgent } : {}),
+    ...(rec.returnUrl ? { returnUrl: rec.returnUrl, appName: rec.appName ?? null } : {}),
+  });
 };
