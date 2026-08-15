@@ -61,6 +61,8 @@ export function readSsoCookie(): { token: string; via: string; deploymentEpoch?:
 export function clearSsoCookie(): void {
   if (!onImpactHost()) return;
   try {
+    // Must match the attributes `setSsoCookie` wrote. A Lax clear does not remove a None cookie.
+    document.cookie = `${NAME}=; Domain=${PARENT}; Path=/; Max-Age=0; Secure; SameSite=None`;
     document.cookie = `${NAME}=; Domain=${PARENT}; Path=/; Max-Age=0; Secure; SameSite=Lax`;
   } catch {
     /* ignore */

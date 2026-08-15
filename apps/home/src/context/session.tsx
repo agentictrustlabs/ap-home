@@ -9,7 +9,6 @@ import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
-import { disconnectWallet } from '../lib/wallet';
 
 export interface Session {
   token: string;
@@ -135,20 +134,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(() => {
-    setSession(null);
-    setProfile(null);
-    setNotice(null);
-    try {
-      localStorage.removeItem(SESSION_KEY);
-    } catch {
-      /* ignore */
-    }
-    clearSsoCookie(); // sign out across *.impact-agent.me
-    setFedcmLoginStatus('logged-out'); // FedCM shows the login_url affordance instead of erroring
-    // Also drop the dApp from MetaMask's "Connected sites" (EIP-2255). Best-effort + silent —
-    // no-ops without a prompt for non-wallet (Google/passkey) sessions that have no permission to revoke.
-    void disconnectWallet();
-    setPhase('anon');
+    // Full SSO teardown is `/logout`: it clears this origin AND front-channel-notifies
+    // registered relying apps (Commons keeps its own cookie). In-place clear left those
+    // apps signed in.
+    const here = window.location.href;
+    window.location.assign(`/logout?return=${encodeURIComponent(here)}`);
   }, []);
 
   const refreshProfile = useCallback(async () => {

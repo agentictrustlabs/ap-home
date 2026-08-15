@@ -6,12 +6,31 @@
 //
 // A TOP-LEVEL navigation (not a hidden iframe) is deliberate: `navigator.login.setStatus` and the cookie
 // clear must apply to the IdP origin itself, and Chrome restricts `setStatus` from cross-site iframes.
-// The relying app redirects here on Disconnect; this page is the only place the SSO session is torn down.
+// Same reason we notify Commons with a top-level GET: its session cookie is SameSite=Lax, so a
+// hidden iframe from this origin would not send it. Front-channel logout is a navigation.
 import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
 import { setFedcmLoginStatus, SESSION_KEY } from '../../src/context/session';
-import { isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
+import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
 import { disconnectWallet } from '../../src/lib/wallet';
+
+/** Commons keeps its own cookie. Tell it the Home session ended — https from prod, loopback from local. */
+function commonsFrontChannelLogout(): string | null {
+  const client = getClient('commons-app');
+  if (!client) return null;
+  const hereHttps = window.location.protocol === 'https:';
+  for (const uri of client.redirect_uris) {
+    try {
+      const u = new URL(uri);
+      if (hereHttps && u.protocol !== 'https:') continue;
+      if (!hereHttps && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') continue;
+      return new URL('/sso-logout', u.origin).toString();
+    } catch {
+      /* skip a malformed registered URI */
+    }
+  }
+  return null;
+}
 
 export default function LogoutPage() {
   useEffect(() => {
@@ -26,13 +45,24 @@ export default function LogoutPage() {
     // from MetaMask's "Connected sites" here (EIP-2255). Best-effort + silent; no-op for non-wallet.
     void disconnectWallet();
 
-    // Anti open-redirect: only bounce back to a REGISTERED relying-app origin; otherwise the apex.
-    let dest = '/';
+    // Anti open-redirect: registered relying-app origin, or this Home origin, otherwise the apex.
+    let dest = `${window.location.origin}/`;
     try {
       const ret = new URL(window.location.href).searchParams.get('return');
-      if (ret && isAllowedRelyingOrigin(ret)) dest = ret;
+      if (ret) {
+        const u = new URL(ret, window.location.origin);
+        if (u.origin === window.location.origin || isAllowedRelyingOrigin(ret)) dest = u.toString();
+      }
     } catch {
-      /* malformed return — fall back to apex */
+      /* malformed return — stay on this Home */
+    }
+
+    const notify = commonsFrontChannelLogout();
+    if (notify) {
+      const next = new URL(notify);
+      next.searchParams.set('return', dest);
+      window.location.replace(next.toString());
+      return;
     }
     window.location.replace(dest);
   }, []);
