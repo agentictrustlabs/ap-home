@@ -11,6 +11,7 @@ import { approveMessagingContact } from '../../../src/lib/messaging-ceremony';
 import { resolveVia } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 import { CONTRACTS } from '../../../src/lib/chain';
+import { listManagedAgents } from '../../../src/connect-client';
 
 const ADDR = /^0x[0-9a-f]{40}$/;
 
@@ -45,16 +46,23 @@ export default function ApproveMessagingPage() {
     let cancelled = false;
     void (async () => {
       try {
-        // A NAMED person's re-mint carries the named-to-named scope alongside the approved contact
-        // (spec 341 §5.1c) — wires minted before scope classes existed hold only exact addresses,
-        // and without this the ceremony would repeat for every named counterparty forever. The gate
-        // re-verifies BOTH names on-chain at send time, so an entry minted here for a person whose
-        // name later lapses covers nobody (fail-closed).
+        // The re-mint carries the person's SCOPE CLASSES alongside the approved contact (spec 341
+        // §5.1c) — wires minted before scope classes existed hold only exact addresses, and without
+        // this the ceremony would repeat for every named counterparty and every co-member forever:
+        //   · named → the name-registry entry ("any validly named agent"; the gate re-verifies BOTH
+        //     names on-chain at send time, so this covers nobody once a name lapses);
+        //   · their communities → each org they custody ("current members"; resolved live by the
+        //     gate, so a kick severs reach instantly and a new joiner is reachable at once).
+        // Org lookup is best-effort: a directory hiccup narrows the mint, never blocks the approval.
+        const orgs = await listManagedAgents(session.token)
+          .then((all) => all.filter((a) => a.kind === 'org').map((a) => a.agent.toLowerCase() as Address))
+          .catch(() => [] as Address[]);
         await approveMessagingContact({
           person: agentAddress as Address,
           recipients: [
             to as Address,
             ...(agentName?.trim() ? [CONTRACTS.agentNameRegistry.toLowerCase() as Address] : []),
+            ...orgs,
           ],
           via: resolveVia(profile?.credential, session.via),
           token: session.token,
