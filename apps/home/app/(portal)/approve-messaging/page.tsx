@@ -10,11 +10,12 @@ import { useSession } from '../../../src/context/session';
 import { approveMessagingContact } from '../../../src/lib/messaging-ceremony';
 import { resolveVia } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { CONTRACTS } from '../../../src/lib/chain';
 
 const ADDR = /^0x[0-9a-f]{40}$/;
 
 export default function ApproveMessagingPage() {
-  const { session, agentAddress, profile, phase } = useSession();
+  const { session, agentAddress, agentName, profile, phase } = useSession();
   const [state, setState] = useState<'working' | 'done' | 'error'>('working');
   const [msg, setMsg] = useState('Approving…');
   const [ret, setRet] = useState('');
@@ -44,9 +45,17 @@ export default function ApproveMessagingPage() {
     let cancelled = false;
     void (async () => {
       try {
+        // A NAMED person's re-mint carries the named-to-named scope alongside the approved contact
+        // (spec 341 §5.1c) — wires minted before scope classes existed hold only exact addresses,
+        // and without this the ceremony would repeat for every named counterparty forever. The gate
+        // re-verifies BOTH names on-chain at send time, so an entry minted here for a person whose
+        // name later lapses covers nobody (fail-closed).
         await approveMessagingContact({
           person: agentAddress as Address,
-          recipient: to as Address,
+          recipients: [
+            to as Address,
+            ...(agentName?.trim() ? [CONTRACTS.agentNameRegistry.toLowerCase() as Address] : []),
+          ],
           via: resolveVia(profile?.credential, session.via),
           token: session.token,
         });
@@ -61,7 +70,7 @@ export default function ApproveMessagingPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [phase, session, agentAddress, profile?.credential]);
+  }, [phase, session, agentAddress, agentName, profile?.credential]);
 
   return (
     <div style={{ maxWidth: 460, margin: '10vh auto', padding: '0 20px', textAlign: 'center' }}>

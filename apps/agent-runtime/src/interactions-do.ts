@@ -1061,6 +1061,35 @@ export class InteractionsDO {
     return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   }
 
+  /** Live public names for member addresses, cached briefly per instance. The stored publish-time
+   *  `label` is NOT reused for this: it froze whatever the subject was called then, and since
+   *  nameless members joined it may be an org-local slug — presenting either as a naming-service
+   *  name would be a lie the reader cannot detect. A resolver failure yields null (fail-closed:
+   *  the roster renders without a public name, never with a guessed one). */
+  private publicNameCache = new Map<string, { name: string | null; at: number }>();
+  private async resolvePublicNames(addrs: readonly string[]): Promise<Record<string, string | null>> {
+    const out: Record<string, string | null> = {};
+    if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return out;
+    const naming = new AgentNamingClient({
+      rpcUrl: this.env.RPC_URL,
+      chainId: Number(this.env.CHAIN_ID ?? 84532),
+      registry: this.env.AGENT_NAME_REGISTRY as Address,
+      universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+    });
+    const now = Date.now();
+    const TTL = 5 * 60_000;
+    await Promise.all(
+      [...new Set(addrs.map((a) => a.toLowerCase()))].filter((a) => /^0x[0-9a-f]{40}$/.test(a)).slice(0, 64).map(async (a) => {
+        const hit = this.publicNameCache.get(a);
+        if (hit && now - hit.at < TTL) { out[a] = hit.name; return; }
+        const name = await naming.reverseResolve(a as Address).catch(() => null);
+        this.publicNameCache.set(a, { name, at: now });
+        out[a] = name;
+      }),
+    );
+    return out;
+  }
+
   /** An org-scoped facet — never an address. The address stays the identity. */
   private normalizeLocalName(raw: unknown): string | null {
     const s = String(raw ?? '').trim().replace(/\s+/g, ' ');
@@ -2529,13 +2558,22 @@ export class InteractionsDO {
         const now = new Date().toISOString();
         const rows = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => isListingCurrent(l.listing, now));
         const localNames = await this.readLocalNames(grant);
+        // The member's CURRENT naming-service name rides each listing (live reverse resolution,
+        // null for the nameless) — so a roster can show who a member is to the world as well as
+        // who they are here, without every consumer re-running the same chain reads.
+        const publicNames = await this.resolvePublicNames(
+          rows.map((r) => String((r.listing as { subject?: string } | undefined)?.subject ?? '').match(/0x[0-9a-fA-F]{40}/)?.[0] ?? ''),
+        );
         const listings = rows.map((r) => {
           const subject = String((r.listing as { subject?: string } | undefined)?.subject ?? '');
           const addr = (subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase();
           const localName = addr ? localNames[addr] : undefined;
-          return localName && r.listing
-            ? { ...r, listing: { ...r.listing, localName } }
-            : r;
+          const publicName = addr ? (publicNames[addr] ?? null) : null;
+          if (!r.listing) return r;
+          return {
+            ...r,
+            listing: { ...r.listing, ...(localName ? { localName } : {}), ...(publicName ? { publicName } : {}) },
+          };
         });
         return json({ ok: true, listings, you: presence.you ?? '' });
       }
