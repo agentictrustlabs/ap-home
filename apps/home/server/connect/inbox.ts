@@ -26,7 +26,7 @@ import { readInboxView, readMessagesByContext, applyMessageAction, applyCaseTran
 import { makeBodyStoreFactory } from './message-body-store';
 // spec 341 §1 — the org's stewardship delegation is what lets a steward reach its inbox without a secret.
 import { stewardWireFor } from './channels';
-import { makeInboxKv, type InboxKV } from '../lib/inbox-store';
+import { InboxReadError, makeInboxKv, type InboxKV } from '../lib/inbox-store';
 import { mandateDigest } from '../../src/home/mandate';
 import { appendControlEvent } from './control-events';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -170,11 +170,16 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const inboxKv = await makeInboxKv(env, owner, bearer, stewardWire ?? undefined);
   const contextKind = url.searchParams.get('contextKind');
   if (contextKind) {
-    const items = await readMessagesByContext(inboxKv, owner, {
-      kind: contextKind,
-      id: url.searchParams.get('contextId') ?? undefined,
-    });
-    return jsonCors({ items }, request);
+    try {
+      const items = await readMessagesByContext(inboxKv, owner, {
+        kind: contextKind,
+        id: url.searchParams.get('contextId') ?? undefined,
+      });
+      return jsonCors({ items }, request);
+    } catch (e) {
+      if (e instanceof InboxReadError) return jsonCors({ error: e.message, code: e.code }, request, e.status);
+      throw e;
+    }
   }
   // VL-W4 — metadata-first: the list/poll resolves NO bodies (zero KMS decrypts → sub-second first paint);
   // a thread hydrate (?conversationId=…) resolves ONLY that conversation's bodies. The rail renders from
@@ -185,7 +190,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const wantConversationId = url.searchParams.get('conversationId') ?? undefined;
   const wantPreview = url.searchParams.get('preview') === '1';
   const bodyStore = wantConversationId || wantPreview ? await makeBodyStoreFactory(env, bearer, stewardWire ?? undefined)(owner) : undefined;
-  const view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
+  let view;
+  try {
+    view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
+  } catch (e) {
+    if (e instanceof InboxReadError) return jsonCors({ error: e.message, code: e.code }, request, e.status);
+    throw e;
+  }
   // Counterparty display names: every sender + every conversation participant.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {
@@ -363,6 +374,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     }
     return jsonCors({ error: 'unknown action' }, request, 400);
   } catch (e) {
+    if (e instanceof InboxReadError) return jsonCors({ error: e.message, code: e.code }, request, e.status);
     return jsonCors({ error: e instanceof Error ? e.message : String(e) }, request, 409);
   }
 };

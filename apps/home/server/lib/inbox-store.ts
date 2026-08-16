@@ -21,6 +21,18 @@ export interface InboxKV {
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 
+/** An inbox.doc read that failed for a reason the caller must not render as "empty". */
+export class InboxReadError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'InboxReadError';
+  }
+}
+
 interface InboxStoreEnv extends InteractionsBridgeEnv {
   AUTH_CODES: InboxKV;
 }
@@ -96,10 +108,10 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: s
    * Fail-closed: no session ⇒ no read. That is the correct answer, because without one there is
    * nothing to check except possession of a secret, which is what this removes.
    */
-  const doOp = async <T>(op: 'inbox.get' | 'inbox.put', payload: Record<string, unknown>): Promise<{ ok: boolean; body: T & { error?: string } } | null> => {
-    if (!session) return null;
-    const r = await callInteractions(env as never, owner, op, { ...payload, session, ...(stewardship ? { stewardship } : {}) }).catch(() => null);
-    return r ? { ok: r.status < 400 && r.body.ok !== false, body: r.body as T & { error?: string } } : null;
+  const doOp = async <T>(op: 'inbox.get' | 'inbox.put', payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; body: T & { error?: string; code?: string } }> => {
+    if (!session) throw new InboxReadError('home session required', 401);
+    const r = await callInteractions(env as never, owner, op, { ...payload, session, ...(stewardship ? { stewardship } : {}) });
+    return { ok: r.status < 400 && r.body.ok !== false, status: r.status, body: r.body as T & { error?: string; code?: string } };
   };
 
   const ownerKey = owner.toLowerCase();
@@ -120,13 +132,18 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: s
   return {
     async get(key) {
       if (key !== docKey) return real.get(key);
-      // Empty is an answer (ADR-0013): an owner who hasn't enabled interactions (DO 409) or a
-      // not-yet-written doc reads as an EMPTY inbox — never a second mechanism. The WRITE path
-      // below still fails closed with the DO's actual error.
+      // A not-yet-written doc is empty. A refused read is not — it throws. The two used to be
+      // collapsed, and every relying app without a read grant rendered an empty mailbox over mail
+      // that was sitting in the vault.
       // Present the cursor we hold; the DO answers `unchanged` when the document still digests to it.
       const cached = cacheGet(ownerKey);
       const r = await doOp<{ doc?: unknown; unchanged?: boolean; revision?: string }>('inbox.get', cached ? { sinceRev: cached.revision } : {});
-      if (!r?.ok) return null;
+      // A refusal is a ceremony, not an empty mailbox. Swallowing `read_grant_absent` (or a
+      // missing interactions grant) as `null` made every relying app render "Nothing here yet"
+      // over mail that was sitting in the vault.
+      if (!r.ok) {
+        throw new InboxReadError(r.body.error ?? 'inbox read refused', r.status, r.body.code);
+      }
       if (r.body.unchanged === true) {
         if (cached) return cached.json;
         // `unchanged` with nothing cached is a contradiction — we only ever send `sinceRev` when we
@@ -136,7 +153,8 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: s
         // so the DO has nothing to match and must return the document (ADR-0013 — one mechanism, and
         // an impossible state is refused rather than interpreted).
         const full = await doOp<{ doc?: unknown; revision?: string }>('inbox.get', {});
-        if (!full?.ok || full.body.doc == null) return null;
+        if (!full.ok) throw new InboxReadError(full.body.error ?? 'inbox read refused', full.status, full.body.code);
+        if (full.body.doc == null) return null;
         const fullJson = JSON.stringify(full.body.doc);
         if (typeof full.body.revision === 'string') cacheSet(ownerKey, full.body.revision, fullJson);
         return fullJson;
@@ -152,7 +170,7 @@ export async function makeInboxKv(env: InboxStoreEnv, owner: string, session?: s
       const r = await doOp('inbox.put', { doc: JSON.parse(value) });
       // `null` is a transport failure, `ok:false` an authorization one. Both must THROW: a swallowed
       // write reads as a successful save and loses the person's mail silently (ADR-0013).
-      if (!r?.ok) throw new Error(r?.body.error ?? 'inbox write via InteractionsDO failed');
+      if (!r.ok) throw new InboxReadError(r.body.error ?? 'inbox write via InteractionsDO failed', r.status, r.body.code);
     },
   };
 }
