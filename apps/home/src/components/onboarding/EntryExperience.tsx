@@ -29,6 +29,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { HomeResolvedView } from './HomeResolvedView';
 import { RequiredNameGate } from './RequiredNameGate';
+import { displayAppDomain, displayAppName } from './org-chooser-label';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
@@ -164,9 +165,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
        knownRelyingClient(api.enroll.aud) ??
        undefined)
     : undefined;
-  const appName = clientCfg?.name ?? (api.enroll ? (() => {
-    try { return new URL(api.enroll!.redirectUri).host; } catch { return api.enroll!.redirectUri; }
-  })() : whitelabel.brand.name);
+  const appHost = api.enroll
+    ? (() => { try { return new URL(api.enroll!.redirectUri).host; } catch { return api.enroll!.redirectUri; } })()
+    : '';
+  const appName = api.enroll ? displayAppName(clientCfg?.name, appHost) : whitelabel.brand.name;
   const requiresNamedAgent = !!(api.enroll?.requireNamedAgent || clientCfg?.requireNamedAgent);
 
   // spec 321 — OTP continuation for relying-app enrolls: the email/phone cards open the session
@@ -1088,6 +1090,11 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   const [err, setErr] = useState('');
   const { session } = useSession();
   const tpl = whitelabel.delegationTemplates['org-create'] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
+  const orgClient = api.enroll
+    ? (whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) ?? knownRelyingClient(api.enroll.aud))
+    : undefined;
+  const orgAppName = displayAppName(orgClient?.name, api.host);
+  const orgAppDomain = displayAppDomain(api.host);
   const orgBase = api.enroll?.orgBase ?? choice?.orgName ?? '';
   const existingOrg = api.enroll?.existingOrg ?? choice?.existingOrg;
   // spec 256 — the org inherits the member's ACTUAL custody. A Google member's org is deployed by
@@ -1170,9 +1177,9 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <p className="securing-wait">You can revoke {api.host}&apos;s access at any time from your Impact home.</p>
       </div>
       <ConsentSheet
-        title={existingOrg ? `Connect ${orgBase} to ${api.host}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
-        appName={api.host}
-        appDomain={api.host}
+        title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
+        appName={orgAppName}
+        appDomain={orgAppDomain}
         template={tpl}
         authorizeLabel="Approve & connect"
         onAuthorize={authorize}

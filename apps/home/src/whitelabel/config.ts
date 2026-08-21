@@ -147,6 +147,21 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       operational_delegate: '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
     },
+    // gather-app — Gather27 (agentictrustlabs/engage apps/gather27-*). Find a group near you;
+    // invite-driven host onboarding; events live in the host org vault. Login-grade connect via
+    // the Personal Home. Workspace listing is a Home concept (Gather27) of member organizations.
+    {
+      client_id: 'gather-app',
+      name: 'Gather27',
+      redirect_uris: [
+        'https://gather27-web.richardpedersen3.workers.dev/',
+        'http://localhost:5175/',
+        'http://127.0.0.1:5175/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
       client_id: 'skills-corpus',
@@ -454,9 +469,9 @@ const faithImpact: WhiteLabelConfig = {
     communityStepValue: 'Your name in the missional community — so the community and its apps can find you.',
     communityStepReceipt: "You're registered as {name} — the missional community can find you",
     // ③ Give an app permission to your resources.
-    authorizeStepTitle: 'Give {app} permission',
+    authorizeStepTitle: 'Allow {app}?',
     authorizeStepValue: 'A specific, revocable permission for {app} to act for you. You decide what it can touch — and can take it back anytime.',
-    authorizeStepCta: 'Give {app} permission',
+    authorizeStepCta: 'Allow {app}',
     authorizeStepBusy: 'Granting permission to {app}…',
     authorizeStepReceipt: 'Permission granted — {app} can do only what you allowed',
     // Your home (signed in).

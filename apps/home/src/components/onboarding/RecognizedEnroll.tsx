@@ -34,6 +34,8 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
+import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { knownRelyingClient } from '../../lib/relying-clients';
 
 type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
@@ -72,9 +74,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const [orgSel, setOrgSel] = useState<OrgChoice | null>(null);
 
   const enroll = api.enroll;
-  const relyingApp = enroll ? whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) : undefined;
+  const relyingApp = enroll
+    ? (whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) ?? knownRelyingClient(enroll.aud) ?? undefined)
+    : undefined;
   const appHost = enroll ? hostOf(enroll.redirectUri) : '';
-  const appName = relyingApp?.name ?? appHost;
+  const appName = displayAppName(relyingApp?.name, appHost);
+  const appDomain = displayAppDomain(appHost);
+  const signedInAs =
+    home?.name?.trim() ||
+    (home?.address ? `${home.address.slice(0, 6)}…${home.address.slice(-4)}` : '');
 
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong');
@@ -456,7 +464,6 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">
-        <p className="onboarding-sub">Signed in as <strong>{home?.name || 'your home'}</strong>.</p>
         {enroll.template === 'org-create' && (enroll.orgBase ?? orgSel?.orgName) && (
           <p className="onboarding-sub">
             Organization: <strong>{enroll.orgBase ?? orgSel?.orgName}</strong>
@@ -465,8 +472,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         )}
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}
+          signedInAs={signedInAs}
           appName={appName}
-          appDomain={appHost}
+          appDomain={appDomain}
           appLogo={relyingApp?.logo}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
@@ -474,7 +482,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           onDecline={onDecline}
         />
         <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
-          Not {home?.name || 'you'}? Use a different custodian
+          Not {home?.name?.trim() || 'you'}? Use a different custodian
         </button>
       </div>
     </div>

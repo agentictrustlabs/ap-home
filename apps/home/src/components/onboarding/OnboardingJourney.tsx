@@ -34,6 +34,7 @@ import { ValueStepList, type ValueStep } from '../shared/ValueStepList';
 import { OnboardingProgress } from '../shared/OnboardingProgress';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
+import { displayAppDomain, displayAppName } from './org-chooser-label';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
@@ -59,7 +60,8 @@ export function OnboardingJourney({
   const community = whitelabel.brand.community;
   const appHost = api?.host ?? '';
   const relyingApp = api?.enroll ? whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) : undefined;
-  const appName = relyingApp?.name ?? appHost; // friendly name (anti-spoof: from registered config)
+  const appName = displayAppName(relyingApp?.name, appHost);
+  const appDomain = displayAppDomain(appHost);
   const hasApp = variant !== 'self-serve';
   const base = homeLabel(name);
   // Spec 255 — "the prompt will say impact-agent.me" only makes sense on the real central host (the
@@ -590,8 +592,9 @@ export function OnboardingJourney({
         <OnboardingProgress total={3} current={3} label="Give permission" />
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}
+          signedInAs={name?.trim() || undefined}
           appName={appName}
-          appDomain={appHost}
+          appDomain={appDomain}
           appLogo={relyingApp?.logo}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}

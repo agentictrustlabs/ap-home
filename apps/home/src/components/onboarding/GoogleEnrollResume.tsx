@@ -21,6 +21,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { RequiredNameGate } from './RequiredNameGate';
+import { displayAppDomain, displayAppName } from './org-chooser-label';
 
 const STASH_KEY = 'pendingEnroll';
 
@@ -75,7 +76,8 @@ export function GoogleEnrollResume() {
   const enroll = pending?.enroll;
   const relyingApp = enroll ? whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) : undefined;
   const appHost = enroll ? hostOf(enroll.redirectUri) : '';
-  const appName = relyingApp?.name ?? appHost;
+  const appName = displayAppName(relyingApp?.name, appHost);
+  const appDomain = displayAppDomain(appHost);
   const requiresNamedAgent = !!(enroll?.requireNamedAgent || relyingApp?.requireNamedAgent);
   const token = session?.token ?? '';
 
@@ -307,8 +309,9 @@ export function GoogleEnrollResume() {
       <div className="onboarding-card wide">
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}
+          signedInAs={home?.name?.trim() || (home?.address ? `${home.address.slice(0, 6)}…${home.address.slice(-4)}` : '')}
           appName={appName}
-          appDomain={appHost}
+          appDomain={appDomain}
           appLogo={relyingApp?.logo}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
