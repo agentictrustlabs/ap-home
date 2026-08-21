@@ -39,6 +39,8 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Vercel project settings ask for `dist` (Vite leftover). Keep `.next` locally.
+  distDir: process.env.VERCEL ? 'dist' : '.next',
   // Workspace packages are symlinked from the monorepo; transpile them so Next
   // bundles their (ESM) source/dist consistently across server + client.
   // EXT-004: the list grows with every consumed package; a future cleanup wave
