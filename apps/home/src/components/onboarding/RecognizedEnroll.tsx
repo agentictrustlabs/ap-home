@@ -19,7 +19,7 @@
 // fallback, never a silent second mechanism).
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, collectDueSubscriptions, authorizeContentSigningForOwner,
+import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -278,7 +278,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
         );
         if (!created.ok) return fail(created.error);
-        code = await submitEnrollGrant(grant_id, created.grant, created.org, undefined);
+        const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);
+        if (!proved.ok) return fail(proved.error);
+        code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
       } else {
         // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
         // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so

@@ -673,6 +673,31 @@ export async function createOrganization(
 }
 
 /**
+ * `/oidc/grant` proves the PERSON authorized the app (ERC-1271 + unrevoked person→delegate).
+ * Org-create used to POST the org's 0x03 site grant as that proof. A freshly deployed org
+ * grant then failed closed as "delegation is revoked" (invite / Gather host onboard).
+ * Create the org first, then mint the same person grant site-login uses; the org wire
+ * rides in the payload.
+ */
+export async function personGrantForOrgCreate(
+  home: Home,
+  delegate: Address,
+  via: Via,
+  auth: Auth | undefined,
+  created: { org: Record<string, unknown>; grant: unknown },
+  sessionKey?: Address,
+): Promise<Result<{ grant: unknown; org: Record<string, unknown>; sessionDelegation?: DelegationWire }>> {
+  const permitted = await givePermission(home, delegate, via, auth, sessionKey);
+  if (!permitted.ok) return permitted;
+  return {
+    ok: true,
+    grant: permitted.grant,
+    org: { ...created.org, siteDelegation: created.grant },
+    sessionDelegation: permitted.sessionDelegation,
+  };
+}
+
+/**
  * ③ — Give a missional-community app permission to act for you, on your terms (scoped,
  * revocable). The delegation is signed by YOUR custodian (passkey or the wallet EOA), so the
  * signer is chosen by `via`. Returns the signed grant to hand to the app.

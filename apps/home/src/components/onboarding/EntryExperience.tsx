@@ -4,7 +4,7 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
+import { openHome, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { passkeyLogin, fetchProfile, siweLogin, claimName } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
@@ -1133,7 +1133,9 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         existingOrg, // select-existing: grant from an existing org (URL-preselected or chosen here) instead of deploying
       });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
-      const code = await api.submitGrant(grant_id, created.grant, created.org);
+      const proved = await personGrantForOrgCreate({ address: personAgent, name: api.enroll.name }, delegate, via, auth, created);
+      if (!proved.ok) { setErr(proved.error); setPhase('error'); return; }
+      const code = await api.submitGrant(grant_id, proved.grant, proved.org);
       setPhase('connected');
       setTimeout(() => api.deliverCode(code), 1100);
     } catch (e) {
