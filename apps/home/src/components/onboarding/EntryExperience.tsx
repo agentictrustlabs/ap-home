@@ -230,13 +230,12 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
       // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
-        // An ALREADY-authenticated member (restored Home session or `ap_sso` cookie) is
-        // RECOGNIZED → one-tap authorize (RecognizedEnroll). `#session=` is still being
-        // consumed — wait, don't flash the chooser. org-create now restores despite
-        // `?delegate`; site-login still skips restore and reads the cookie only.
-        if (hasSessionHandoff() || readSsoCookie() || session || phase === 'restoring') {
+        // Cookie / `#session=` → recognized (or wait while the handoff is consumed).
+        // Do NOT re-run this when `session`/`phase` later updates — that remounts
+        // RecognizedEnroll and restarts Gather/demo connect in a loop.
+        if (hasSessionHandoff() || readSsoCookie()) {
           markEnrollChooserDone(api.enroll);
-          setView({ k: (readSsoCookie() || session) ? 'enroll-recognized' : 'checking' });
+          setView({ k: readSsoCookie() ? 'enroll-recognized' : 'checking' });
           return;
         }
         setView({ k: 'enroll-entry' });
@@ -297,7 +296,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       }
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
-  }, [mode, api.enroll, api.allowed, api.resolvingClient, session, phase]);
+  }, [mode, api.enroll, api.allowed, api.resolvingClient]);
 
   if (view.k === 'checking') {
     return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">One moment…</p></div></Shell>;
