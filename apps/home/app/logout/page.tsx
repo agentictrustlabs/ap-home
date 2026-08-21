@@ -46,9 +46,10 @@ export default function LogoutPage() {
     void disconnectWallet();
 
     // Anti open-redirect: registered relying-app origin, or this Home origin, otherwise the apex.
+    const params = new URL(window.location.href).searchParams;
     let dest = `${window.location.origin}/`;
     try {
-      const ret = new URL(window.location.href).searchParams.get('return');
+      const ret = params.get('return');
       if (ret) {
         const u = new URL(ret, window.location.origin);
         if (u.origin === window.location.origin || isAllowedRelyingOrigin(ret)) dest = u.toString();
@@ -57,10 +58,18 @@ export default function LogoutPage() {
       /* malformed return — stay on this Home */
     }
 
-    const notify = commonsFrontChannelLogout();
+    // Commons' /sso-logout return allowlist trusts only itself and this Home — a relying-app
+    // origin (Gather, Field, …) is rejected and the person is stranded on Commons' door. So the
+    // notify bounces back HERE (`fc=1` marks the pass; teardown above is idempotent), and this
+    // Home forwards to the relying app itself.
+    const notify = params.get('fc') === '1' ? null : commonsFrontChannelLogout();
     if (notify) {
+      const back = new URL('/logout', window.location.origin);
+      back.searchParams.set('fc', '1');
+      const ret = params.get('return');
+      if (ret) back.searchParams.set('return', ret);
       const next = new URL(notify);
-      next.searchParams.set('return', dest);
+      next.searchParams.set('return', back.toString());
       window.location.replace(next.toString());
       return;
     }
