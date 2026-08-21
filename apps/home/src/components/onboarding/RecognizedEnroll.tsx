@@ -422,6 +422,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         <OrgChooser
           token={token}
           appHost={appHost}
+          purpose={enroll?.purpose}
           onChoose={(c) => { setOrgSel(c); setPhase('consent'); }}
           onDecline={onDecline}
         />

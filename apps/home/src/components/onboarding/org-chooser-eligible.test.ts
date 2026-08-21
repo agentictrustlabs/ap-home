@@ -14,7 +14,7 @@ describe('eligibleConnectOrgs', () => {
     { kind: 'person-treasury' as const, name: 'treasury', relationship: 'steward' as const },
   ];
 
-  it('with a purpose, lists members plus stewards of that purpose — not every custodied org', () => {
+  it('with a purpose, lists only orgs of that purpose — not Field workspaces or other-app members', () => {
     const names = eligibleConnectOrgs(rows, { purpose: 'commons:community' }).map((o) => o.name);
     expect(names).toEqual(['colorado-outreach.impact', 'commons-circle']);
   });

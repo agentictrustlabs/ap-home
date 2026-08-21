@@ -1150,6 +1150,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <OrgChooser
           token={cred?.token}
           appHost={api.host}
+          purpose={api.enroll?.purpose}
           onChoose={(c) => { setChoice(c); setPhase('consent'); }}
           onDecline={api.denyEnroll}
         />

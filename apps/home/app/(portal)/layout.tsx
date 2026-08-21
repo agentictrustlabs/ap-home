@@ -107,6 +107,7 @@ function Gate({ children }: { children: ReactNode }) {
     !!agentName && !enroll && !pendingEnroll && !welcomedBack && !bootstrapReward;
 
   const connectPopup = mounted && isConnectPopup();
+  const resumedEnroll = useRef(false);
 
   let content: ReactNode;
   if (!mounted) content = <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)
@@ -120,7 +121,8 @@ function Gate({ children }: { children: ReactNode }) {
   // back on the URL so RecognizedEnroll asks for Gather27 — do not dump the first-party portal.
   else if (connectPopup && pendingEnroll && phase === 'authed') {
     const pending = readPendingEnroll();
-    if (pending) {
+    if (pending && !resumedEnroll.current) {
+      resumedEnroll.current = true;
       window.location.replace(enrollResumeHref(pending));
       content = <FullBleedSpinner />;
     } else content = <EntryExperience mode="enroll" />;

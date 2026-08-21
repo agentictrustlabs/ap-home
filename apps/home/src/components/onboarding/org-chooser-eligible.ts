@@ -1,8 +1,8 @@
 /** Which of the person's related orgs may appear on an org-create connect chooser.
  *
- *  The person connects to an organization they belong to — they are a member, or they
- *  steward one created for THIS request's purpose. Stewardship of an unrelated org
- *  (another app, a test SA) is not a reason to offer it here.
+ *  The person connects to an organization created for THIS request's purpose.
+ *  Stewardship or membership of an unrelated org (Field, another app) is not
+ *  a reason to offer it here — signing as those SAs is what produced AA24.
  *
  *  `relationship` is a projection label (sticky once `member`). A leftover stewardship
  *  wire still lets them grant as the org; eligibility to *appear* is membership or
@@ -29,7 +29,6 @@ export function eligibleConnectOrgs<T extends ConnectOrgRow>(
   return agents
     .filter((a) => a.kind === 'org' && a.name)
     .filter((a) => {
-      if (a.relationship === 'member') return true;
       if (!want) return true;
       return (a.purpose ?? '').trim().toLowerCase() === want;
     })
