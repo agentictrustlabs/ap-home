@@ -43,6 +43,7 @@ interface SessionCtx {
 // person's OLD-factory SA after a full-reset redeploy; dropping it forces a re-onboard onto the
 // correct new-factory identity. `undefined` current epoch does NOT gate (only invalidate when knowable).
 import { DEPLOYMENT_EPOCH } from '../lib/chain';
+import { shouldRestoreFromUrl } from './session-restore';
 function epochStale(stored: string | undefined): boolean {
   if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
   return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
@@ -63,16 +64,13 @@ export function setFedcmLoginStatus(status: 'logged-in' | 'logged-out'): void {
   }
 }
 
-/** Restore a persisted session on load only if one exists AND we're not mid Google-redirect
- *  (?code/connect_status) or central-auth enrollment (?delegate) — those mint their own. */
 function shouldRestore(): boolean {
   try {
-    const u = new URL(window.location.href);
-    if (u.searchParams.has('code') || u.searchParams.has('connect_status') || u.searchParams.has('delegate')) {
-      return false;
-    }
-    // A per-origin session OR the parent-domain SSO cookie (cross-subdomain) means "restore".
-    return !!localStorage.getItem(SESSION_KEY) || !!readSsoCookie();
+    return shouldRestoreFromUrl(
+      window.location.href,
+      !!localStorage.getItem(SESSION_KEY),
+      !!readSsoCookie(),
+    );
   } catch {
     return false;
   }

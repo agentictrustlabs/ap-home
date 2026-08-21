@@ -138,7 +138,7 @@ type View =
 
 export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   const api = useEnrollReq();
-  const { openSession, session } = useSession();
+  const { openSession, session, phase } = useSession();
 
   const [view, setView] = useState<View>(() => {
     if (mode === 'enroll') return { k: 'checking' };
@@ -230,17 +230,13 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // (resumed post-redirect in GoogleEnrollResume); passkey/"use my name" fall to the named
       // journey (a new passkey home is subdomain-bound, so it needs a name). Don't call nameInfo('').
       if (!api.enroll!.name) {
-        // An ALREADY-authenticated member (cross-subdomain `ap_sso` cookie) is RECOGNIZED → one-tap
-        // authorize as themselves (RecognizedEnroll, custody-routed; ADR-0032). No cookie → the
-        // credential-first entry. (`?delegate` makes `shouldRestore` skip restore, so `useSession()` is
-        // null here — recognition reads the cookie directly, the same recovery org-create already does.)
-        // A `#session=` handoff (invite return) is still being consumed — wait, don't flash the chooser.
-        if (hasSessionHandoff() || readSsoCookie()) {
-          // Invite / relying-app `#session=` already named the home. Mark the chooser
-          // done or RecognizedEnroll treats nameless site-login as "pick an account",
-          // clears `ap_sso`, and dumps them on the generic credential screen.
+        // An ALREADY-authenticated member (restored Home session or `ap_sso` cookie) is
+        // RECOGNIZED → one-tap authorize (RecognizedEnroll). `#session=` is still being
+        // consumed — wait, don't flash the chooser. org-create now restores despite
+        // `?delegate`; site-login still skips restore and reads the cookie only.
+        if (hasSessionHandoff() || readSsoCookie() || session || phase === 'restoring') {
           markEnrollChooserDone(api.enroll);
-          setView({ k: readSsoCookie() ? 'enroll-recognized' : 'checking' });
+          setView({ k: (readSsoCookie() || session) ? 'enroll-recognized' : 'checking' });
           return;
         }
         setView({ k: 'enroll-entry' });
@@ -301,7 +297,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       }
       else setView({ k: 'journey', variant: 'enroll-new', name: api.enroll!.name });
     })();
-  }, [mode, api.enroll, api.allowed, api.resolvingClient]);
+  }, [mode, api.enroll, api.allowed, api.resolvingClient, session, phase]);
 
   if (view.k === 'checking') {
     return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">One moment…</p></div></Shell>;
