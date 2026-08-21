@@ -86,13 +86,25 @@ export async function verifyDelegation(
     allowedMethods: CONTRACTS.allowedMethodsEnforcer as Address,
   };
 
+  // Revocation read with a BOUNDED retry of the same call (ADR-0013). Still fail-closed, but a
+  // public-RPC hiccup must not masquerade as an on-chain revocation: a fresh random-salt grant
+  // cannot be revoked, yet an unreadable chain used to surface as "delegation is revoked" —
+  // a false claim the person cannot act on. Persistent failure now says what actually happened.
+  let revokedRead: boolean | null = null;
+  for (let attempt = 0; attempt < 3 && revokedRead === null; attempt++) {
+    revokedRead = await isRevokedOnChain(env, digest);
+    if (revokedRead === null && attempt < 2) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (revokedRead === null) return { ok: false, reason: 'revocation check unavailable (chain read failed) — please retry' };
+
+  const revoked = revokedRead;
   const live = await verifyLiveDelegation({
     delegation,
     enforcers,
     now: Math.floor(Date.now() / 1000),
     checks: {
       delegationDigest: () => digest,
-      isRevoked: async () => isRevokedOnChain(env, digest),
+      isRevoked: async () => revoked,
       // The ERC-1271 call needs the app's deploy/approved-hash retry budget, so it happens below
       // rather than here. Reporting `true` is not a bypass — the call still gates the return.
       verifySignature: async () => true,
@@ -131,8 +143,9 @@ export async function verifyDelegation(
 }
 
 
-/** `DelegationManager.isRevoked(digest)`. Fail-CLOSED: an unreadable chain has not said "live". */
-async function isRevokedOnChain(env: { RPC_URL?: string }, digest: Hex): Promise<boolean> {
+/** `DelegationManager.isRevoked(digest)`. Returns `null` when the chain could not be read —
+ *  the caller stays fail-closed but reports the read failure truthfully instead of "revoked". */
+async function isRevokedOnChain(env: { RPC_URL?: string }, digest: Hex): Promise<boolean | null> {
   const { createPublicClient, http } = await import('viem');
   try {
     const client = createPublicClient({ transport: http(env.RPC_URL ?? DEFAULT_RPC_URL) });
@@ -151,6 +164,6 @@ async function isRevokedOnChain(env: { RPC_URL?: string }, digest: Hex): Promise
       args: [digest],
     })) as boolean;
   } catch {
-    return true;
+    return null;
   }
 }
