@@ -15,51 +15,21 @@ import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { setSsoCookie } from '../../lib/sso-cookie';
 import { setFedcmLoginStatus } from '../../context/session';
-import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, type EnrollReq, isCeremonyTemplate } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, isCeremonyTemplate } from './useEnrollReq';
 import { listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { RequiredNameGate } from './RequiredNameGate';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
+import {
+  clearPendingEnroll,
+  enrollReqToQuery,
+  readPendingEnroll,
+  type PendingEnroll,
+} from './pending-enroll';
 
-const STASH_KEY = 'pendingEnroll';
-
-interface PendingEnroll {
-  enroll: EnrollReq;
-  popupMode: boolean;
-  name: string;
-}
-
-export function readPendingEnroll(): PendingEnroll | null {
-  try {
-    const raw = sessionStorage.getItem(STASH_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as PendingEnroll;
-    return p?.enroll?.aud && p.enroll.redirectUri && p.enroll.delegate ? p : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Rebuild the enroll request as a query string (the raw URL was lost across the Google redirect). Used
- *  ONLY to re-enter an OWNER-OP ceremony on the freshly-established home session (Step 3) — never to run a
- *  grant. parseEnrollReq() fail-closes (→ blocked) if any mandatory field is missing, so this can't widen
- *  authority. */
-function enrollReqToQuery(e: EnrollReq): string {
-  const p = new URLSearchParams();
-  p.set('client_id', e.aud);
-  p.set('redirect_uri', e.redirectUri);
-  p.set('delegate', e.delegate);
-  p.set('code_challenge', e.codeChallenge);
-  p.set('delegation_template', e.template);
-  p.set('agent_name', e.name ?? '');
-  if (e.state) p.set('state', e.state);
-  if (e.nonce) p.set('nonce', e.nonce);
-  if (e.collectToken) p.set('collect_token', e.collectToken);
-  if (e.contentSignerTarget) p.set('content_signer_target', e.contentSignerTarget);
-  return p.toString();
-}
+export { readPendingEnroll } from './pending-enroll';
 
 type Phase = 'securing' | 'mismatch' | 'name' | 'consent' | 'granting' | 'connected' | 'error';
 
@@ -85,13 +55,7 @@ export function GoogleEnrollResume() {
     setError(e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong');
     setPhase('error');
   };
-  const clearStash = () => {
-    try {
-      sessionStorage.removeItem(STASH_KEY);
-    } catch {
-      /* ignore */
-    }
-  };
+  const clearStash = () => clearPendingEnroll();
 
   // Secure the home if it's brand new (Google custody → no gesture), else use the existing one.
   useEffect(() => {

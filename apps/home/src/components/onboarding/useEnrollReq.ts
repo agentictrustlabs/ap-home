@@ -11,6 +11,7 @@ import type { Address } from '@agenticprimitives/types';
 // Curated clients resolve synchronously from the bundle; MEMBER-REGISTERED ones are looked up
 // once via /connect/client-info and then answer synchronously too (src/lib/relying-clients.ts).
 import { knownRelyingClient, primeRelyingClient, relyingOriginAllowed } from '../../lib/relying-clients';
+import { writePendingEnroll } from './pending-enroll';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -262,6 +263,13 @@ export function useEnrollReq(): EnrollApi {
     // still falls back to the same-origin relay (`ac_relay`) when postMessage can't reach the opener.
     return !!enroll && new URL(window.location.href).searchParams.get('mode') === 'popup';
   });
+
+  // Stash as soon as authorize is parsed — not only when they click Google. A new home that
+  // lands on `/` after email/Google must still find this request and finish consent.
+  useEffect(() => {
+    if (!enroll) return;
+    writePendingEnroll({ enroll, popupMode, name: enroll.name ?? '' });
+  }, [enroll, popupMode]);
 
   // RESOLVE BEFORE DECIDING. A member-registered client is not in this bundle, so `allowed`
   // cannot be answered until `/connect/client-info` has replied. `resolvingClient` is true for

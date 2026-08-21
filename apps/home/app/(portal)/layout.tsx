@@ -13,6 +13,7 @@ import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHo
 import { GoogleEnrollResume, readPendingEnroll } from '../../src/components/onboarding/GoogleEnrollResume';
 import { HomeResolvedView } from '../../src/components/onboarding/HomeResolvedView';
 import { parseEnrollReq } from '../../src/components/onboarding/useEnrollReq';
+import { enrollResumeHref, isConnectPopup } from '../../src/components/onboarding/pending-enroll';
 
 function FullBleedSpinner() {
   return (
@@ -41,7 +42,7 @@ function Gate({ children }: { children: ReactNode }) {
     setEnroll(hasEnrollParams());
     setPendingEnroll(!!readPendingEnroll());
     setMounted(true);
-  }, []);
+  }, [phase]);
 
   // A brand-new Google home already showed its own "You're in." reward in GoogleSecureHome (which
   // sets this flag just before refreshing in) — suppress the gate's returning-member beat so it
@@ -105,6 +106,8 @@ function Gate({ children }: { children: ReactNode }) {
     mounted && phase === 'authed' && isOidcHome && session?.fresh &&
     !!agentName && !enroll && !pendingEnroll && !welcomedBack && !bootstrapReward;
 
+  const connectPopup = mounted && isConnectPopup();
+
   let content: ReactNode;
   if (!mounted) content = <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)
   else if (enroll) content = <EntryExperience mode="enroll" />;
@@ -112,7 +115,16 @@ function Gate({ children }: { children: ReactNode }) {
   else if (phase === 'anon') content = <EntryExperience mode="entry" />;
   // A Google member returned mid relying-app enrollment — finish securing + granting + deliver the
   // code back to the app (the enroll request was stashed before the Google redirect; spec 235).
-  else if (isOidcHome && pendingEnroll) content = <GoogleEnrollResume />;
+  else if (isOidcHome && pendingEnroll && (connectPopup || session?.fresh)) content = <GoogleEnrollResume />;
+  // Email/passkey in the Gather popup landed on `/` after creating the home. Put authorize
+  // back on the URL so RecognizedEnroll asks for Gather27 — do not dump the first-party portal.
+  else if (connectPopup && pendingEnroll && phase === 'authed') {
+    const pending = readPendingEnroll();
+    if (pending) {
+      window.location.replace(enrollResumeHref(pending));
+      content = <FullBleedSpinner />;
+    } else content = <EntryExperience mode="enroll" />;
+  }
   // A Google member returns ALREADY in a custody session but with no home DEPLOYED yet (their
   // `sub` is a counterfactual SA) — secure it before entering the portal (spec 235 P2.4). spec 257
   // Phase 1.5: gate on DEPLOYMENT, not name — a deployed-but-nameless home (true name-deferral)
@@ -127,6 +139,17 @@ function Gate({ children }: { children: ReactNode }) {
         address={agentAddress}
         token={session?.token ?? null}
         onContinue={() => setWelcomedBack(true)}
+      />
+    );
+  } else if (connectPopup && phase === 'authed') {
+    content = (
+      <HomeResolvedView
+        fresh={!!session?.fresh}
+        knownName={agentName}
+        address={agentAddress}
+        token={session?.token ?? null}
+        appName="the app"
+        onContinue={() => window.close()}
       />
     );
   } else content = <PortalShell>{children}</PortalShell>;

@@ -24,6 +24,7 @@ import { useSession } from '../../context/session';
 import { nameLabel, toAgentName } from '../../lib/domain';
 import { BrandShield } from '../shared/BrandShield';
 import { HomeResolvedView } from './HomeResolvedView';
+import { enrollResumeHref, readPendingEnroll } from './pending-enroll';
 
 export function GoogleSecureHome() {
   const { session, refreshProfile } = useSession();
@@ -156,6 +157,11 @@ export function GoogleSecureHome() {
         autoAdvanceMs={0}
         onContinue={() => {
           try { sessionStorage.setItem('homeWelcomeShown', '1'); } catch { /* ignore */ }
+          const pending = readPendingEnroll();
+          if (pending) {
+            window.location.assign(enrollResumeHref(pending));
+            return;
+          }
           void refreshProfile();
         }}
       />

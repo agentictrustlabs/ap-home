@@ -32,6 +32,7 @@ import {
 } from '../connect-client';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
+import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
 import { nameLabel } from '../lib/domain';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
@@ -127,8 +128,7 @@ export function continueWithGoogle(preferredName?: string, enrollStashJson?: str
     if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
     // Relying-app enrollment stashes its request here so the post-redirect resume can finish +
     // return the code; self-serve CLEARS any stale stash so it doesn't hijack a plain sign-in.
-    if (enrollStashJson) sessionStorage.setItem('pendingEnroll', enrollStashJson);
-    else sessionStorage.removeItem('pendingEnroll');
+    writePendingEnrollJson(enrollStashJson);
   } catch {
     /* storage blocked — the secure-home step will just ask for a name */
   }
@@ -141,8 +141,7 @@ export function continueWithGoogle(preferredName?: string, enrollStashJson?: str
 export function continueWithYouVersion(preferredName?: string, enrollStashJson?: string): void {
   try {
     if (preferredName) sessionStorage.setItem('pendingHomeName', preferredName);
-    if (enrollStashJson) sessionStorage.setItem('pendingEnroll', enrollStashJson);
-    else sessionStorage.removeItem('pendingEnroll');
+    writePendingEnrollJson(enrollStashJson);
   } catch {
     /* storage blocked — the secure-home step will just ask for a name */
   }
