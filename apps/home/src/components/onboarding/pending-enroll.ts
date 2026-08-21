@@ -136,6 +136,10 @@ export function enrollReqToQuery(e: EnrollReq): string {
   p.set('agent_name', e.name ?? '');
   if (e.state) p.set('state', e.state);
   if (e.nonce) p.set('nonce', e.nonce);
+  if (e.orgBase) p.set('org_base', e.orgBase);
+  if (e.purpose) p.set('org_purpose', e.purpose);
+  if (e.existingOrg) p.set('existing_org', e.existingOrg);
+  if (e.grantOrg) p.set('grant_org', e.grantOrg);
   if (e.collectToken) p.set('collect_token', e.collectToken);
   if (e.contentSignerTarget) p.set('content_signer_target', e.contentSignerTarget);
   return p.toString();

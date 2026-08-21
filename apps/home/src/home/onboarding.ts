@@ -510,7 +510,7 @@ export async function createOrganization(
   delegate: Address,
   via: Via = 'passkey',
   auth?: Auth,
-  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address; existingOrg?: Address } = {},
+  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address; existingOrg?: Address; signAsOrg?: boolean } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
   // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback), but
   // isKmsVia/signHashFor/createChildAgentForSite match lowercase. Without this, a SOCIAL home's org-create
@@ -526,6 +526,22 @@ export async function createOrganization(
   // writes the related-org link (credential/proofHash are optional there). Reuses the B4 approved-hash batch.
   if (opts.existingOrg) {
     const org = opts.existingOrg;
+    // A member (or a steward whose current credential is not the org's on-chain owner)
+    // connects as themselves with this org as context. Signing a UserOp as that org is
+    // what produced AA24 on Field/Engage workspaces offered to Gather.
+    if (opts.signAsOrg === false) {
+      return {
+        ok: true,
+        org: {
+          orgAgent: org,
+          orgName: base,
+          person: home.address,
+          purpose: opts.purpose,
+          requestedBy: opts.requestedBy,
+        },
+        grant: undefined,
+      };
+    }
     try {
       const signHash = await signHashFor(via, org, auth);
       const siteApp = buildApprovedSiteDelegation(org, delegate);        // org → relying app's delegate
@@ -548,7 +564,17 @@ export async function createOrganization(
         digests.push(brokerApp.digest);
       }
       const approve = await approveGrantHashes(org, signHash, digests);
-      if (!approve.ok) return { ok: false, error: `grant approval failed: ${approve.error}` };
+      if (!approve.ok) {
+        const raw = approve.error;
+        if (/AA24|signature error/i.test(raw)) {
+          return {
+            ok: false,
+            error:
+              'This organization isn’t signed by your current sign-in. Create a new host organization, or pick one you custody with this method.',
+          };
+        }
+        return { ok: false, error: `grant approval failed: ${raw}` };
+      }
       // The org already exists ⇒ its vault / channels / membership are already set up; nothing to seed.
       // uupg interop: still project the steward relationship (+ the fresh stewardship wire) into the
       // person's impact-relationships vault record — a select-existing may be this org's FIRST exposure

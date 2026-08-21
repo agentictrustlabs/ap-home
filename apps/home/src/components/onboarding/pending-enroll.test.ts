@@ -70,4 +70,18 @@ describe('pending enroll stash', () => {
     expect(href).toContain('mode=popup');
     expect(href).toContain('code_challenge=challenge');
   });
+
+  it('carries org-create purpose and existing org across the hop', () => {
+    const href = enrollResumeHref({
+      ...pending(),
+      enroll: {
+        ...pending().enroll,
+        template: 'org-create',
+        purpose: 'gather:host',
+        existingOrg: '0x1111111111111111111111111111111111111111',
+      },
+    });
+    expect(href).toContain('org_purpose=gather%3Ahost');
+    expect(href).toContain('existing_org=0x1111111111111111111111111111111111111111');
+  });
 });

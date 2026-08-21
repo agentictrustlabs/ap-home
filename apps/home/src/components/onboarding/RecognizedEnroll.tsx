@@ -275,7 +275,13 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           delegate,
           viaLower,
           auth,
-          { purpose: enroll.purpose, requestedBy: enroll.aud, grantOrg: enroll.grantOrg, existingOrg },
+          {
+            purpose: enroll.purpose,
+            requestedBy: enroll.aud,
+            grantOrg: enroll.grantOrg,
+            existingOrg,
+            signAsOrg: orgSel?.asSteward,
+          },
         );
         if (!created.ok) return fail(created.error);
         const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);

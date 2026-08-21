@@ -138,7 +138,7 @@ type View =
 
 export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   const api = useEnrollReq();
-  const { openSession, session, phase } = useSession();
+  const { openSession, session } = useSession();
 
   const [view, setView] = useState<View>(() => {
     if (mode === 'enroll') return { k: 'checking' };
@@ -1129,7 +1129,8 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         purpose: api.enroll.purpose,
         requestedBy: api.enroll.aud,
         grantOrg: api.enroll.grantOrg,
-        existingOrg, // select-existing: grant from an existing org (URL-preselected or chosen here) instead of deploying
+        existingOrg,
+        signAsOrg: choice?.asSteward,
       });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
       const proved = await personGrantForOrgCreate({ address: personAgent, name: api.enroll.name }, delegate, via, auth, created);
