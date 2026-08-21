@@ -47,7 +47,10 @@ export function OrgInvitePanel({ org }: { org: string }) {
 
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<AgentSearchHit[] | null>(null);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('email')?.trim() ?? '';
+  });
   const [busy, setBusy] = useState(false);
   const [busyFor, setBusyFor] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);

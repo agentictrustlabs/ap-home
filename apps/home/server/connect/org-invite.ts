@@ -34,11 +34,11 @@ const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 /** The authenticated caller: the person SA, plus the relying client_id when the ingress was an
  *  app id_token (null for a first-party Home session). The client_id is what scopes an app's
  *  `returnUrl` below — never a grant of authority (stewardship is still re-verified on-chain). */
-type InviteCaller = { person: string; clientId: string | null };
+export type InviteCaller = { person: string; clientId: string | null };
 
 /** Resolve the caller person SA from a Home session OR a registered relying-app id_token
  *  (same ingress as /connect/inbox — e.g. hotspot-tracker / uupg-tracker). */
-async function callerFromInviteAuth(env: FnContext['env'], request: Request): Promise<InviteCaller | null> {
+export async function callerFromInviteAuth(env: FnContext['env'], request: Request): Promise<InviteCaller | null> {
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;

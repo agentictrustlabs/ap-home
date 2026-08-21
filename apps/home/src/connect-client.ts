@@ -1265,6 +1265,8 @@ export interface ManagedAgent {
   /** spec 318: 'steward' = custodial control (default); 'member' = authority-only (channels +
    *  switcher visibility, never inbox/data/treasury control). */
   relationship?: 'steward' | 'member';
+  /** App-level purpose tag written when the person↔org link was created (e.g. `commons:community`). */
+  purpose?: string;
   /**
    * The org→person stewardship delegation, when this person stewards it (spec 341 §5.1c).
    *
@@ -1634,7 +1636,7 @@ export async function listManagedAgents(sessionToken: string, surface: OrgSurfac
   const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
   if (!r.ok) return [];
   const b = (await r.json().catch(() => ({}))) as {
-    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string }>;
+    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }>;
   };
   const rows = (b.orgs ?? []).map((o) => ({
     agent: o.orgAgent,
@@ -1644,6 +1646,7 @@ export async function listManagedAgents(sessionToken: string, surface: OrgSurfac
     createdAt: o.createdAt,
     proofHash: o.proofHash,
     relationship: (o.relationship === 'member' ? 'member' : 'steward') as 'steward' | 'member',
+    ...(o.purpose ? { purpose: o.purpose } : {}),
     ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
     ...(o.status ? { status: o.status as OrgLifecycleStatus } : {}),
   }));

@@ -141,6 +141,8 @@ export function buildNav(
   // Alliances (uupg interop, ported from the GC impact home): orgs you steward that HOST a coalition —
   // an org-with-purpose fact, so it lives beside the other stewarded things, not in whitelabel agents.
   yourAgents.push({ id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' });
+  // App Workspaces (Gather27 first): invite/register listings of membership organizations.
+  yourAgents.push({ id: 'workspaces', label: 'Workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' });
 
   // Discovery: how you and your agents are found + described.
   const discovery: NavItem[] = [

@@ -233,8 +233,9 @@ export function DeveloperApps() {
               }
             />
             <span>
-              <strong>org-create</strong> — additionally let a person pick an organization they steward, or
-              name a new one their own credential custodies, and hand your app its stewardship delegation.
+              <strong>org-create</strong> — additionally let a person pick an organization they belong to, or
+              name a new one their own credential custodies. A steward may hand your app a scoped org grant;
+              a member connects as themselves with that organization as context.
             </span>
           </label>
           <p className="settings-field__help">
