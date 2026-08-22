@@ -13,7 +13,7 @@
 // whose `ap_sso` cookie is gone) we say so explicitly and offer create-new only — a
 // visible degradation, never a silent empty list (ADR-0013: the missing session is
 // surfaced, not swallowed).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listManagedAgents } from '../../connect-client';
 import { shortAppHost, toOrgLabel } from './org-chooser-label';
@@ -52,6 +52,7 @@ export function OrgChooser({
   token,
   appHost,
   purpose,
+  defaultName,
   onChoose,
   onDecline,
 }: {
@@ -60,15 +61,21 @@ export function OrgChooser({
   appHost: string;
   /** `org_purpose` from the enroll. When set, stewarded orgs for other purposes are hidden. */
   purpose?: string;
+  /** `org_base` from the enroll — the name the person typed AT THE APP. With no eligible
+   *  existing org, the chooser never renders: it auto-creates under this name (the seamless
+   *  first-host path). With eligible orgs it prefills create-new, so picking the existing
+   *  org — instead of silently minting a duplicate — is one visible tap. */
+  defaultName?: string;
   onChoose: (choice: OrgChoice) => void;
   onDecline: () => void;
 }) {
   // null = loading; [] = none (or no session to list with).
   const [orgs, setOrgs] = useState<Array<{ agent: Address; name: string; asSteward: boolean }> | null>(token ? null : []);
   const [selected, setSelected] = useState<'new' | Address>('new');
-  const [name, setName] = useState('');
+  const [name, setName] = useState(defaultName ?? '');
   const [query, setQuery] = useState('');
   const [err, setErr] = useState('');
+  const autoRan = useRef(false);
 
   useEffect(() => {
     if (!token) return;
@@ -90,6 +97,17 @@ export function OrgChooser({
     return () => { cancelled = true; };
   }, [token, purpose]);
 
+  // The app already named the org and the person has no eligible existing one — nothing to
+  // choose. Create under that name without rendering a screen (one Home window, no extra step).
+  useEffect(() => {
+    if (autoRan.current || orgs === null || orgs.length > 0) return;
+    const slugged = toOrgLabel(defaultName ?? '');
+    if (slugged.length < 3) return;
+    autoRan.current = true;
+    onChoose({ orgName: slugged });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgs, defaultName]);
+
   const filtered = useMemo(() => {
     const list = orgs ?? [];
     const q = query.trim().toLowerCase();
@@ -97,7 +115,9 @@ export function OrgChooser({
     return list.filter((o) => o.name.toLowerCase().includes(q) || o.agent.toLowerCase().includes(q));
   }, [orgs, query]);
 
-  if (orgs === null) {
+  // Keep the spinner up while the auto-create path decides — never flash a chooser that is
+  // about to answer itself.
+  if (orgs === null || (orgs.length === 0 && toOrgLabel(defaultName ?? '').length >= 3)) {
     return (
       <div className="onboarding-busy">
         <span className="spinner spinner-lg" role="status" aria-label="Loading your organizations" />

@@ -16,7 +16,7 @@
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
@@ -309,6 +309,45 @@ export function OnboardingJourney({
       // signer: recover the home-session token from the cross-subdomain SSO cookie. Without it,
       // signHashFor fails closed ('granting with an OIDC home needs a custody session').
       const kmsAuth = isKmsVia(via) ? (() => { const sso = readSsoCookie(); return sso?.token ? { token: sso.token } : undefined; })() : undefined;
+      // ORG-CREATE reached through the journey (passkey / wallet / named path): this used to run the
+      // bare site-login pipeline and deliver a code with NO org — the relying app then errored "no
+      // organization returned from your home" and asked the member to connect AGAIN. Deploy (or
+      // connect) the org and submit the grant WITH the org payload, exactly like RecognizedEnroll.
+      if (api.enroll.template === 'org-create') {
+        const orgBase = api.enroll.orgBase;
+        const existingOrg = api.enroll.existingOrg;
+        if (!orgBase && !existingOrg) {
+          return fail(
+            'This connect needs an organization. Start again from the app and name your organization there.',
+            'grant',
+          );
+        }
+        const created = await createOrganization(home, orgBase ?? '', delegate, via, kmsAuth, {
+          purpose: api.enroll.purpose,
+          requestedBy: api.enroll.aud,
+          grantOrg: api.enroll.grantOrg,
+          existingOrg,
+        });
+        if (!created.ok) return fail(created.error, 'grant');
+        const proved = await personGrantForOrgCreate(home, delegate, via, kmsAuth, created, api.enroll.sessionKey);
+        if (!proved.ok) return fail(proved.error, 'grant');
+        const orgCode = await api.submitGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
+        const orgTpl = whitelabel.delegationTemplates[api.enroll.template];
+        recordConnectedApp(home.address, {
+          clientId: api.enroll.aud,
+          appName,
+          appDomain: appHost,
+          logo: relyingApp?.logo,
+          canDo: orgTpl?.canDo ?? [],
+          cannotDo: orgTpl?.cannotDo ?? [],
+          grantedAt: Date.now(),
+          expiresAt: orgTpl?.expiryDays ? Date.now() + orgTpl.expiryDays * 86_400_000 : undefined,
+        });
+        setBusy(null);
+        setScreen('connected');
+        setTimeout(() => api.deliverCode(orgCode), 400);
+        return;
+      }
       let granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
       // spec 278 — also turn on the member's encrypted vault while enrolling (skipped if already

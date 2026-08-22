@@ -1076,10 +1076,10 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
 
 // ── Org-create consent (existing member creates an org via a relying app) ──────
 function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnType<typeof useEnrollReq> }) {
-  // A request with a preselected org (org_base / existing_org) goes straight to consent; a
-  // CHOOSER-MODE request (neither present) first asks WHICH org — an existing stewarded one
-  // (grant-only, no deploy) or a new name to deploy (OrgChooser).
-  const preselected = !!(api.enroll?.orgBase || api.enroll?.existingOrg);
+  // Only a pinned `existing_org` skips the chooser. An `org_base` request still routes through
+  // it: with no eligible existing org the chooser auto-creates under that name (no screen);
+  // with eligible orgs it offers them — never a silent duplicate of one the person stewards.
+  const preselected = !!api.enroll?.existingOrg;
   const [phase, setPhase] = useState<'choose' | 'consent' | 'busy' | 'connected' | 'error'>(preselected ? 'consent' : 'choose');
   const [choice, setChoice] = useState<OrgChoice | null>(null);
   const [err, setErr] = useState('');
@@ -1090,8 +1090,9 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     : undefined;
   const orgAppName = displayAppName(orgClient?.name, api.host);
   const orgAppDomain = displayAppDomain(api.host);
-  const orgBase = api.enroll?.orgBase ?? choice?.orgName ?? '';
-  const existingOrg = api.enroll?.existingOrg ?? choice?.existingOrg;
+  // The person's chooser pick wins over the URL's suggestion.
+  const orgBase = choice?.orgName ?? api.enroll?.orgBase ?? '';
+  const existingOrg = choice?.existingOrg ?? api.enroll?.existingOrg;
   // spec 256 — the org inherits the member's ACTUAL custody. A Google member's org is deployed by
   // their KMS C_sub server-side (zero device prompts); passkey/wallet members sign on device. The
   // credential is the one they're signed in with (via is 'passkey' | 'wallet' | 'Google').
@@ -1113,6 +1114,10 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   const via: Via =
     credVia === 'google' ? 'google'
     : credVia === 'youversion' ? 'youversion'
+    // Email/phone are KMS-family (server-side C_sub signing with the session token) — treating
+    // them as passkey errored "your central-auth passkey isn't on this device" mid-org-create.
+    : credVia === 'email' ? 'email'
+    : credVia === 'phone' ? 'phone'
     : credVia === 'wallet' ? 'wallet'
     : (!loadPasskey() && hasWallet()) ? 'wallet'
     : 'passkey';
@@ -1137,7 +1142,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       if (!proved.ok) { setErr(proved.error); setPhase('error'); return; }
       const code = await api.submitGrant(grant_id, proved.grant, proved.org);
       setPhase('connected');
-      setTimeout(() => api.deliverCode(code), 1100);
+      setTimeout(() => api.deliverCode(code), 400);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'org creation failed');
       setPhase('error');
@@ -1151,6 +1156,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
           token={cred?.token}
           appHost={api.host}
           purpose={api.enroll?.purpose}
+          defaultName={api.enroll?.orgBase}
           onChoose={(c) => { setChoice(c); setPhase('consent'); }}
           onDecline={api.denyEnroll}
         />

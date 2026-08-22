@@ -252,13 +252,14 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <input
             type="email"
+            data-testid="email-auth-input"
             placeholder="you@example.org"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && email.trim()) void start(); }}
             style={{ flex: 1, minWidth: 200, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8 }}
           />
-          <button className="btn" disabled={busy || !email.trim()} onClick={() => void start()}>
+          <button className="btn" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()}>
             {busy ? '…' : session ? 'Add email' : 'Continue'}
           </button>
         </div>
@@ -266,6 +267,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <input
             inputMode="numeric"
+            data-testid="email-auth-code"
             placeholder="6-digit code"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -273,14 +275,14 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
             autoFocus
             style={{ width: 130, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8, letterSpacing: '2px' }}
           />
-          <button className="btn" disabled={busy || otp.length !== 6} onClick={() => void verify()}>
+          <button className="btn" data-testid="email-auth-verify" disabled={busy || otp.length !== 6} onClick={() => void verify()}>
             {busy ? '…' : 'Verify'}
           </button>
           <button className="btn-ghost" onClick={() => { setStep('email'); setOtp(''); setErr(null); }}>Back</button>
         </div>
       )}
-      {note && <p style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
-      {err && <p style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
+      {note && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
+      {err && <p data-testid="email-auth-error" style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
     </div>
   );
 }

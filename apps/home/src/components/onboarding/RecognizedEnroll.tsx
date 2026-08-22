@@ -173,8 +173,11 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       setHome({ address: addr, name: profile.name ?? '' });
       setViaLower(v);
       setToken(sso.token);
-      // Chooser-mode org-create → ask WHICH org first; everything else goes straight to consent.
-      setPhase(enroll.template === 'org-create' && !enroll.orgBase && !enroll.existingOrg ? 'choose-org' : 'consent');
+      // Org-create without a pinned `existing_org` → the chooser decides. With `org_base` and
+      // no eligible existing org it auto-creates under that name (no screen); with eligible
+      // orgs it offers them — the app naming a new org must not silently mint a duplicate of
+      // one the person already stewards. Everything else goes straight to consent.
+      setPhase(enroll.template === 'org-create' && !enroll.existingOrg ? 'choose-org' : 'consent');
     })();
   }, [enroll, onUnrecognized]);
 
@@ -272,8 +275,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // and submit the grant WITH the org payload (KMS → bootstrap-org; the descriptor build is
         // non-fatal per #295). One mechanism, no fallback (ADR-0013). Gated by TEMPLATE, not org_base:
         // a chooser-mode request carries no org_base — the choose-org step above resolved `orgSel`.
-        const orgBase = enroll.orgBase ?? orgSel?.orgName;
-        const existingOrg = enroll.existingOrg ?? orgSel?.existingOrg;
+        // The person's chooser pick wins over the URL: choosing an EXISTING org while the app
+        // suggested a new name must grant from that org, not deploy the suggestion anyway.
+        const orgBase = orgSel?.orgName ?? enroll.orgBase;
+        const existingOrg = orgSel?.existingOrg ?? enroll.existingOrg;
         // SELECT-EXISTING CARRIES NO NAME. `existing_org` names the organization by ADDRESS and
         // deploys nothing — there is no name to claim, which is the whole point — so requiring
         // `orgBase` refused every select-existing request from the recognized path with "No
@@ -447,6 +452,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           token={token}
           appHost={appHost}
           purpose={enroll?.purpose}
+          defaultName={enroll?.orgBase}
           onChoose={(c) => { setOrgSel(c); setPhase('consent'); }}
           onDecline={onDecline}
         />

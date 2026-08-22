@@ -25,7 +25,7 @@ import { RequiredNameGate } from './RequiredNameGate';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import {
   clearPendingEnroll,
-  enrollReqToQuery,
+  enrollResumeHref,
   readPendingEnroll,
   type PendingEnroll,
 } from './pending-enroll';
@@ -67,11 +67,21 @@ export function GoogleEnrollResume() {
       // WRONG for these (it would deliver a bare ?code). The Google sign-in just established a home
       // session — persist it cross-subdomain and RE-ENTER the enroll, so the recognized ceremony runs on
       // this session (Step 3, uniform with wallet/passkey). Fail-closed: never fall through to a grant.
-      if (enroll && isCeremonyTemplate(enroll.template)) {
+      //
+      // ORG-CREATE takes the same re-entry: this resume used to run the bare site-login pipeline and
+      // deliver a code with NO org, so the relying app errored "no organization returned from your
+      // home". The recognized ceremony owns org selection/creation (chooser, deploy, person grant).
+      // A brand-new member's SA is deployed first so re-entry recognizes them.
+      if (enroll && (isCeremonyTemplate(enroll.template) || enroll.template === 'org-create')) {
+        if (enroll.template === 'org-create' && !(agentDeployed && agentAddress)) {
+          const res = await secureHomeNoName({ token });
+          if (!res.ok) return fail(res.error);
+        }
         setSsoCookie(token, 'Google');
         setFedcmLoginStatus('logged-in');
         clearStash();
-        window.location.href = '/?' + enrollReqToQuery(enroll);
+        // Preserve popup mode: the relying app opened a popup and expects the relay delivery.
+        window.location.href = enrollResumeHref(pending);
         return;
       }
       // spec 257 §11: gate on DEPLOYMENT, not name — a RETURNING NAMELESS member has a deployed

@@ -74,13 +74,14 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <input
             type="tel"
+            data-testid="phone-auth-input"
             placeholder="+1 303 555 1234"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && phone.trim()) void start(); }}
             style={{ flex: 1, minWidth: 200, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8 }}
           />
-          <button className="btn" disabled={busy || !phone.trim()} onClick={() => void start()}>
+          <button className="btn" data-testid="phone-auth-continue" disabled={busy || !phone.trim()} onClick={() => void start()}>
             {busy ? '…' : session ? 'Add phone' : 'Continue'}
           </button>
         </div>
@@ -88,6 +89,7 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <input
             inputMode="numeric"
+            data-testid="phone-auth-code"
             placeholder="6-digit code"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 10))}
@@ -95,14 +97,14 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
             autoFocus
             style={{ width: 130, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8, letterSpacing: '2px' }}
           />
-          <button className="btn" disabled={busy || otp.length < 4} onClick={() => void verify()}>
+          <button className="btn" data-testid="phone-auth-verify" disabled={busy || otp.length < 4} onClick={() => void verify()}>
             {busy ? '…' : 'Verify'}
           </button>
           <button className="btn-ghost" onClick={() => { setStep('phone'); setOtp(''); setErr(null); }}>Back</button>
         </div>
       )}
-      {note && <p style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
-      {err && <p style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
+      {note && <p data-testid="phone-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
+      {err && <p data-testid="phone-auth-error" style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
     </div>
   );
 }
