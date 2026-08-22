@@ -40,6 +40,7 @@ import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
 import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
+import { saveStandingGrant, loadStandingGrant } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
@@ -765,8 +766,17 @@ export async function givePermission(
      *  vault. (Unattended redemption needs the provider's signer — left to an owner-online step.) */
     subscription?: { periodSeconds: number; periods?: number };
   },
-): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex }>> {
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex; reused?: boolean }>> {
   try {
+    // REUSE the standing grant when this browser already minted one for (person, delegate) and the
+    // ceremony carries nothing else (no session leaf, no payment): its digest approval is already
+    // on-chain, so re-approving an identical-scope duplicate costs a whole userOp for nothing.
+    // /oidc/grant re-verifies revocation + ERC-1271 per use; the caller clears the cache and mints
+    // fresh if the reused grant is refused (one explicit fallback, ADR-0013).
+    if (!sessionKeyAddress && !payment) {
+      const standing = loadStandingGrant(home.address, delegate);
+      if (standing) return { ok: true, grant: standing, reused: true };
+    }
     const signHash = await signHashFor(via, home.address, auth);
     // B4 — batch the person-SA grants (site + the DEL-001 session leaf) via APPROVED-HASH: build both as
     // `0x03` leaves and pre-approve their digests in ONE userOp on the person SA (one credential prompt),
@@ -830,7 +840,13 @@ export async function givePermission(
         windowSeconds: payment.subscription.periodSeconds,
       });
     }
-    return { ok: true, grant: toWire(delegation), sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
+    const wire = toWire(delegation);
+    // The plain site-login grant is reusable next connect (skips the approval userOp). Ceremonies
+    // carrying a session leaf or payment are per-connect by construction — never cached.
+    if (!sessionKeyAddress && !payment) {
+      saveStandingGrant(home.address, delegate, wire, Date.now() + 365 * 86_400_000);
+    }
+    return { ok: true, grant: wire, sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
   } catch (e) {
     // Surface the REAL failure. Wallet providers (EIP-1193) and some libs throw plain objects/strings
     // that fail `instanceof Error`, which used to collapse into an unactionable 'could not grant

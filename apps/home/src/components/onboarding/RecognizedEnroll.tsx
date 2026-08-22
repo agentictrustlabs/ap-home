@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
+import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
 import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
@@ -251,6 +252,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       */
       const auth: Auth | undefined = token ? { token } : undefined;
 
+      // ONE managed-agents projection read serves both the treasury resolution (payment apps only)
+      // and the messaging leg after the grant — it used to be fetched twice, serially, at ~1.5–3s
+      // a call. Started here so it overlaps the grant ceremony instead of extending it.
+      const managedPromise: Promise<Awaited<ReturnType<typeof listManagedAgents>>> = token
+        ? listManagedAgents(token).catch((e) => {
+            console.warn('[connect] listManagedAgents failed (projection unavailable):', e);
+            return [] as Awaited<ReturnType<typeof listManagedAgents>>;
+          })
+        : Promise.resolve([] as Awaited<ReturnType<typeof listManagedAgents>>);
+
       let code: string;
       if (enroll.template === 'org-create') {
         // ORG-CREATE for a RECOGNIZED member (e.g. a facilitator org for demo-jp). This component is
@@ -296,21 +307,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string; subscription?: { periodSeconds: number; periods?: number } }
           | undefined;
         const pc = relyingApp?.paymentConfig;
-        // Resolve the member's PRE-CREATED person-treasury ONCE for any connect (a recognized member has
-        // a home session `token` in hand). Surfaced to the relying app as `treasury` so it can gate ALL
-        // financial ops up front — a member with no treasury is told to create one, not shown a Buy-access
-        // flow that silently no-ops. A social member with no treasury yet resolves to null here.
+        // Resolve the member's PRE-CREATED person-treasury only for apps that declare financial ops
+        // (a paymentConfig). Surfaced to the relying app as `treasury` so it can gate them up front —
+        // a member with no treasury is told to create one, not shown a Buy-access flow that silently
+        // no-ops. Apps with no paymentConfig have no financial ops, so the connect skips the lookup.
         let treasuryAddr: Address | null = null;
-        try {
-          treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null;
-        } catch (e) {
-          console.warn('[connect] listManagedAgents failed (treasury projection unavailable):', e);
-          treasuryAddr = null;
-        }
-        // Projection miss → reconcile from the authoritative naming registry (`<label>-treasury.<tld>`).
-        if (!treasuryAddr) {
-          treasuryAddr = await resolveTreasuryByConvention(home.name);
-          if (treasuryAddr) console.warn('[connect] person-treasury reconciled from ANS (projection was stale):', treasuryAddr);
+        if (pc) {
+          treasuryAddr = ((await managedPromise).find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null;
+          // Projection miss → reconcile from the authoritative naming registry (`<label>-treasury.<tld>`).
+          if (!treasuryAddr) {
+            treasuryAddr = await resolveTreasuryByConvention(home.name);
+            if (treasuryAddr) console.warn('[connect] person-treasury reconciled from ANS (projection was stale):', treasuryAddr);
+          }
         }
         // ALL custodians (wallet / passkey / social-KMS) — the charge is signed via signHashFor, which
         // handles every credential. With no treasury we connect without payment and the app surfaces
@@ -338,9 +346,20 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
         }
-        const granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
+        let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        try {
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        } catch (e) {
+          // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
+          // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
+          if (!granted.reused) throw e;
+          console.warn('[connect] standing grant refused — clearing cache and minting fresh:', e);
+          clearStandingGrant(home.address, delegate);
+          granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
+          if (!granted.ok) return fail(granted.error);
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        }
       }
       // spec 278 — bind the member's per-person vault key during connect, for EVERY custody type. A
       // relying-app-first member (connects here, never runs the full journey / the /vault-key portal) would
@@ -358,7 +377,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       if (token && (enroll.template === 'site-login' || enroll.aud === 'commons-app')) {
         try {
           const named = !!home.name?.trim();
-          const orgs = (await listManagedAgents(token)).filter((a) => a.kind === 'org');
+          // Site-login reuses the projection read started before the grant leg — one fetch, not two.
+          // An org-create just deployed a NEW org, so it must re-read the projection instead.
+          const managed = enroll.template === 'site-login' ? await managedPromise : await listManagedAgents(token);
+          const orgs = managed.filter((a) => a.kind === 'org');
           if (orgs.length === 0) {
             await provisionCommunityMessaging({ person: home.address, named, via: viaLower, token });
           }
@@ -393,7 +415,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         expiresAt: tpl?.expiryDays ? Date.now() + tpl.expiryDays * 86_400_000 : undefined,
       });
       setPhase('connected');
-      setTimeout(() => deliverEnrollCode(enroll, api.popupMode, code), 1100);
+      // Long enough for the "connected" receipt to paint; the popup lingering is dead time the
+      // member reads as a hang, so keep it short.
+      setTimeout(() => deliverEnrollCode(enroll, api.popupMode, code), 400);
     } catch (e) {
       fail(e);
     }

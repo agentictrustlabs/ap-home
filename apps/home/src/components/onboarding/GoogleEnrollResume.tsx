@@ -13,6 +13,7 @@ import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
+import { clearStandingGrant } from '../../lib/grant-cache';
 import { setSsoCookie } from '../../lib/sso-cookie';
 import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, isCeremonyTemplate } from './useEnrollReq';
@@ -133,7 +134,7 @@ export function GoogleEnrollResume() {
         }
       }
       // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
-      const granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
+      let granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
       if (!granted.ok) return fail(granted.error);
       // spec 278 — turn on the member's encrypted vault during enroll (Google signs via KMS, no
       // gesture; skipped if already bound). Best-effort — must not block the connect.
@@ -143,7 +144,19 @@ export function GoogleEnrollResume() {
       // on-chain (C_sub looks like an EOA) and re-entry shows the credential chooser instead of
       // routing straight through the provider.
       void publishSocialConnectionKindIfNeeded(home.address, home.name, 'google', { token });
-      const code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      let code: string;
+      try {
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      } catch (e) {
+        // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
+        // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
+        if (!granted.reused) throw e;
+        console.warn('[google-resume] standing grant refused — clearing cache and minting fresh:', e);
+        clearStandingGrant(home.address, delegate);
+        granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
+        if (!granted.ok) return fail(granted.error);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      }
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
       // means a follow-on home operation — e.g. org-create at `<handle>.impact-agent.me`, which arrives
@@ -165,7 +178,7 @@ export function GoogleEnrollResume() {
       });
       setPhase('connected');
       clearStash();
-      setTimeout(() => deliverEnrollCode(enroll, pending!.popupMode, code), 1100);
+      setTimeout(() => deliverEnrollCode(enroll, pending!.popupMode, code), 400);
     } catch (e) {
       fail(e);
     }

@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { createHomeKey, secureHome, openHome, givePermission, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { clearStandingGrant } from '../../lib/grant-cache';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
@@ -308,7 +309,7 @@ export function OnboardingJourney({
       // signer: recover the home-session token from the cross-subdomain SSO cookie. Without it,
       // signHashFor fails closed ('granting with an OIDC home needs a custody session').
       const kmsAuth = isKmsVia(via) ? (() => { const sso = readSsoCookie(); return sso?.token ? { token: sso.token } : undefined; })() : undefined;
-      const granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
+      let granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
       if (!granted.ok) return fail(granted.error, 'grant');
       // spec 278 — also turn on the member's encrypted vault while enrolling (skipped if already
       // bound, so returning members aren't re-prompted). Best-effort: a vault hiccup must NOT block
@@ -316,7 +317,19 @@ export function OnboardingJourney({
       setBusy('Activating your private vault…');
       try { await activateVaultIfNeeded(home.address, via); } catch { /* non-fatal */ }
       setBusy(fmt(c.authorizeStepBusy, { app: appName }));
-      const code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      let code: string;
+      try {
+        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      } catch (e) {
+        // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
+        // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
+        if (!granted.reused) throw e;
+        console.warn('[journey] standing grant refused — clearing cache and minting fresh:', e);
+        clearStandingGrant(home.address, delegate);
+        granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
+        if (!granted.ok) return fail(granted.error, 'grant');
+        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+      }
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {
         clientId: api.enroll.aud,
@@ -330,7 +343,7 @@ export function OnboardingJourney({
       });
       setBusy(null);
       setScreen('connected');
-      setTimeout(() => api.deliverCode(code), 1100);
+      setTimeout(() => api.deliverCode(code), 400);
     } catch (e) {
       fail(e, 'grant');
     }
