@@ -149,7 +149,13 @@ const faithImpact: WhiteLabelConfig = {
     },
     // gather-app — Gather27 (agentictrustlabs/engage apps/gather27-*). Find a group near you;
     // invite-driven host onboarding; events live in the host org vault. Login-grade connect via
-    // the Personal Home. Workspace listing is a Home concept (Gather27) of member organizations.
+    // the Personal Home.
+    //
+    // `service-agent-wire` — the Gather27 WORKSPACE is a service-class agent (kind 'workspace',
+    // ADR-0046: a service ROLE that mirrors treasury, never extends it). Its vault holds the roster
+    // of member organizations; the ceremony authorizes gather27-a2a's KMS key as the workspace's
+    // DELEGATE, and that wire is the ONLY delegation the roster read path presents. The workspace is
+    // custodied by the Gather org's custodian, who runs the ceremony from Home against a2aBase.
     {
       client_id: 'gather-app',
       name: 'Gather27',
@@ -159,8 +165,10 @@ const faithImpact: WhiteLabelConfig = {
         'http://127.0.0.1:5175/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // Where the service-agent-wire ceremony talks to gather27-a2a.
+      serviceAgentConfig: { a2aBase: 'https://gather27-a2a-production.richardpedersen3.workers.dev' },
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

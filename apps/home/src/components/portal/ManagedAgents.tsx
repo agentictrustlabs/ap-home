@@ -34,6 +34,7 @@ const KIND_LABEL: Record<AgentKind, string> = {
   'person-treasury': 'Personal treasury',
   org: 'Organization',
   'org-treasury': 'Org treasury',
+  workspace: 'App workspace',
 };
 
 /** Cross-component refresh signal: EVERY `useManagedAgents` instance (topbar switcher, org lists,

@@ -1252,7 +1252,13 @@ export async function createChildAgentForSite(
 // name, custodied by the SAME ROOT passkey, created in ONE gasless prompt. The links between
 // them are PRIVATE vault credentials (ADR-0025), indexed under the person for the tree view.
 
-export type AgentKind = 'person-treasury' | 'org' | 'org-treasury';
+// 'workspace' (ADR-0046) — an APP WORKSPACE agent: a service-class SA that holds an application's
+// shared roster/state in its own vault (first user: Gather27's workspace of member organizations).
+// It MIRRORS the treasury pattern rather than extending it — another service ROLE under the closed
+// Person/Org/Service class set, never a subclass of treasury. Typically org-parented: the app's
+// governing org custodies it and its custodian runs the service-agent-wire ceremony against the
+// app's a2a Worker.
+export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace';
 
 export interface ManagedAgent {
   agent: Address;
