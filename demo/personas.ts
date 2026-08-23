@@ -36,7 +36,8 @@ export interface DemoPersona {
   /** Their Smart Agent on base-sepolia. */
   sa: string;
   /**
-   * Organizations they CUSTODY.
+   * Organizations they CUSTODY. Each `sa` MUST differ from the person's `sa` (ADR-0046 —
+   * `pnpm check:demo-person-org-distinct`). "His own SA" as the org is not an organization.
    *
    * Custody is not stewardship: it is credential-level control of the org's Smart Agent. Home's
    * vault gate requires a stewardship delegation as well, and these personas do not have one — so

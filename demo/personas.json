@@ -35,13 +35,23 @@
   "dave": {
     "name": "Dave Silva",
     "sa": "0x2431c1f1fe7d9fea1ad6ce755d18ed75164336cb",
-    "custodies": [],
+    "custodies": [
+      {
+        "sa": "0x42B75CCF13a9FF1eFA8cC72a9dB76769BA25220c",
+        "name": "Dave's table"
+      }
+    ],
     "eoaPrivateKey": "0x987a67b11653f031cb5e4cb9dc82254ab2f7a73cdaacde4c7f8264e2c94f9756"
   },
   "elena": {
     "name": "Elena Voss",
     "sa": "0xbc7266764d87110b8b3507ffa376225f3a105956",
-    "custodies": [],
+    "custodies": [
+      {
+        "sa": "0x03bc6c98eC8BE8764ABE96655c50D13609f22643",
+        "name": "Elena's porch"
+      }
+    ],
     "eoaPrivateKey": "0xa5136bca54c77fc2328471ee6befbe38b64ce8502ac4954ac65144ed42e85d0d"
   },
   "nathan": {
@@ -51,6 +61,10 @@
       {
         "sa": "0x2B9D3356cB34851882E5Ca10Fa7d9d21D2a191F9",
         "name": "Accelerate"
+      },
+      {
+        "sa": "0xee5263363e8505fB15aCE75D1A3026761C0f02e3",
+        "name": "Fort Collins table"
       }
     ],
     "eoaPrivateKey": "0x75c1022e5e3debfef80f44a8c7f10a1c6412acc6cae98c092ec4edb324a68f05",
@@ -63,13 +77,17 @@
       {
         "sa": "0x2B9D3356cB34851882E5Ca10Fa7d9d21D2a191F9",
         "name": "Accelerate"
+      },
+      {
+        "sa": "0x2d0732B581D9a583BEf83FDaebF47B8b5dFc2B40",
+        "name": "Gather"
       }
     ],
     "eoaPrivateKey": "0x3613f979d1beee81c76bff527332af4a004a68d68fc4a3637613537c5df7d406",
     "eoaAddress": "0x4d71C7248A565ACA98d608E1c6C561d457D2f080"
   },
   "jpreg": {
-    "name": "Jordan Pike \u2014 Joshua Project",
+    "name": "Jordan Pike — Joshua Project",
     "sa": "0xdc94ef1f5c3dd1027859502d8b77665291cdaa95",
     "custodies": [
       {
@@ -80,7 +98,7 @@
     "eoaPrivateKey": "0xfa6583d164259c0de9373fef4ceea6f4d30db4d8876d875a7922daf0dfd31e35"
   },
   "imbreg": {
-    "name": "Imani Bell \u2014 PeopleGroups.org (IMB)",
+    "name": "Imani Bell — PeopleGroups.org (IMB)",
     "sa": "0x263a0e2fb14b17873307e5913cc25a9429ebb39d",
     "custodies": [
       {
