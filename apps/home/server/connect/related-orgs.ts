@@ -116,6 +116,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
       siteDelegation: unknown; proofHash: string | null; createdAt?: number;
       membershipDelegation?: unknown; stewardshipDelegation?: unknown; memberAccessDelegation?: unknown; operationalDelegation?: unknown;
+      readGrantDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
     const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string };
@@ -148,6 +149,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // only moment it is MINTED, and a credential that cannot be read back afterwards is one the
       // agent it was granted to can never present.
       operationalDelegation: link.operationalDelegation ?? null,
+      // The org → app-workspace READ grant (whitelabel org_read_grant) — returned for the same
+      // reason: the ceremony is the only moment it is minted, and a grant the workspace cannot
+      // read back is one it can never present.
+      readGrantDelegation: link.readGrantDelegation ?? null,
       // spec 321 W2 — member-access = org→member (the member reads the org's shareable info).
       memberAccessDelegation: link.memberAccessDelegation ?? null,
       // spec 275: the agent kind + its parent in the member's agent tree. Legacy org

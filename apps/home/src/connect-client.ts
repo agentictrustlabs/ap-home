@@ -40,7 +40,8 @@ import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterPr
 import { recordOrgMembership } from './lib/org-membership';
 import { filterByLifecycle, filterMyOrgsByLifecycle, type OrgLifecycleStatus, type OrgSurface } from './lib/org-lifecycle';
 import { buildApprovedSiteDelegation,
-  buildApprovedOperationalIntentDelegation, toWire, type DelegationWire } from './lib/delegation';
+  buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation,
+  toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 
@@ -1047,6 +1048,8 @@ export interface CreatedAgent {
   brokerDelegation?: DelegationWire;
   /** The org → app-service-agent Operational Intent grant, when the app declares a service SA. */
   operationalDelegation?: DelegationWire;
+  /** The org → app-workspace READ grant (whitelabel `org_read_grant`), when the app declares one. */
+  readGrantDelegation?: DelegationWire;
   /** spec 246 — person↔org scoped read delegations, both signed by the ROOT (custodian
    *  of BOTH SAs). membership = person→org (the created ORG can read the MEMBER person's
    *  data); stewardship = org→person (the PERSON can read / oversee the org's data).
@@ -1152,6 +1155,15 @@ export async function createChildAgentForSite(
     approveCalls.push(buildApproveHashCall(operationalGrant.digest));
   }
 
+  // The ORG READ grant (org → the app's workspace agent), same batch, same reasoning — and the same
+  // refusal to grant to the shared registry delegate. See buildApprovedOrgReadDelegation.
+  const orgReadCfg = getClient(cOpts.requestedBy ?? '')?.org_read_grant;
+  let orgReadGrant: ReturnType<typeof buildApprovedOrgReadDelegation> | undefined;
+  if (orgReadCfg && orgReadCfg.delegate.toLowerCase() !== delegateSA.toLowerCase()) {
+    orgReadGrant = buildApprovedOrgReadDelegation(childAgent, orgReadCfg.delegate as Address, orgReadCfg);
+    approveCalls.push(buildApproveHashCall(orgReadGrant.digest));
+  }
+
   // spec 321 W0 — credential mirror: the contract FORBIDS an SA as custodian (custody is
   // credential-shaped; agent→agent authority is delegation), so "the person stewards the org" must
   // hold at the CREDENTIAL level. The KMS org path already deploys C_sub-custodied orgs; this path
@@ -1241,6 +1253,10 @@ export async function createChildAgentForSite(
       delegation: toWire(delegation),
       person: personAgent, purpose, requestedBy, credential, proofHash, brokerDelegation,
       membershipDelegation, stewardshipDelegation,
+      // Approved in the deploy batch above; RETURNED because the ceremony is the only moment either
+      // exists — the salt is random, so a body that isn't handed back can never be presented.
+      operationalDelegation: operationalGrant ? toWire(operationalGrant.delegation) : undefined,
+      readGrantDelegation: orgReadGrant ? toWire(orgReadGrant.delegation) : undefined,
     },
   };
 }
@@ -1757,6 +1773,21 @@ export async function createOrganizationWithGoogle(
   });
   const proofHash = relatedAgentProofHash(credential);
 
+  // The ORG READ grant (whitelabel org_read_grant) — the passkey/wallet path folds this into the
+  // deploy batch; here the org deployed server-side, so the KMS C_sub signs it directly (still zero
+  // prompts). Best-effort like the naming write: a failed mint is re-run at the next select-existing.
+  let readGrantDelegation: DelegationWire | undefined;
+  const orgReadCfg = getClient(requestedBy)?.org_read_grant;
+  if (orgReadCfg && orgReadCfg.delegate.toLowerCase() !== delegate.toLowerCase()) {
+    try {
+      readGrantDelegation = toWire(
+        await issueOrgReadDelegation(childAgent, orgReadCfg.delegate as Address, orgReadCfg, googleSignHash(childAgent, sessionToken)),
+      );
+    } catch (e) {
+      console.warn('[org-create] org read grant not minted:', e);
+    }
+  }
+
   return {
     ok: true,
     result: {
@@ -1766,6 +1797,7 @@ export async function createOrganizationWithGoogle(
       brokerDelegation: b.brokerDelegation,
       membershipDelegation: undefined, // deferred (person→org), same as the passkey path
       stewardshipDelegation: b.stewardshipDelegation,
+      readGrantDelegation,
     },
   };
 }

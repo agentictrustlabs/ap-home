@@ -19,6 +19,19 @@ export interface RelyingApp {
    *  directly instead of proxying through Home. MUST NOT be `delegate`: that address is shared by
    *  several registry entries, and operational authority granted to it is granted to all of them. */
   operational_delegate?: string;
+  /** OPTIONAL — a scoped `org → app workspace agent` VAULT READ grant, minted at the org-connect
+   *  ceremony (create AND select-existing) alongside the operational-intent grant. For apps whose
+   *  workspace agent reads ONE record family from each member org's vault in place (a grant, never
+   *  a copy — e.g. Gather27's `vault:gather27:listing`). Minted at the ceremony because that is the
+   *  only moment every custody family (KMS / passkey / wallet / demo) can sign as the org — a
+   *  relying app never holds the org's key, and persona-sign covers demo accounts only.
+   *  `delegate` MUST be the app's dedicated workspace/service SA, never the shared registry
+   *  `delegate` (same reasoning as `operational_delegate`). */
+  org_read_grant?: {
+    delegate: `0x${string}`;
+    server: string;
+    resources: string[];
+  };
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;

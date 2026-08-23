@@ -137,6 +137,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     orgAgent?: string; orgName?: string; person?: string; purpose?: string;
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
     membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
+    readGrantDelegation?: unknown;
   } | null;
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
@@ -156,6 +157,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // Persisted here because the ceremony is the only moment it exists: minted into the deploy
       // batch, handed back once, and otherwise lost.
       operationalDelegation: orgPayload.operationalDelegation ?? null,
+      // The org → app-workspace READ grant (whitelabel org_read_grant) — persisted for the same
+      // reason: minted only at the ceremony, and its random salt makes an unreturned body unusable.
+      readGrantDelegation: orgPayload.readGrantDelegation ?? null,
       proofHash: orgPayload.proofHash ?? null,
       credential: orgPayload.credential ?? null,
       createdAt: Date.now(),

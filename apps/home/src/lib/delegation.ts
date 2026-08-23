@@ -872,6 +872,58 @@ export function buildApprovedOperationalIntentDelegation(
   return { delegation: d, digest };
 }
 
+/** One year — structural rather than operational: the workspace agent HOLDS this grant and reads the
+ *  org's record in place; the org's exit is the on-chain revoke, not expiry. */
+export const ORG_READ_GRANT_VALIDITY_SECONDS = 365 * 24 * 60 * 60;
+
+/**
+ * The ORG READ grant `org → app workspace agent` (whitelabel `org_read_grant`) — a vault-record-scope,
+ * READ-ONLY delegation over ONE record family (e.g. `vault:gather27:listing`), so an app whose
+ * workspace lists member organizations reads each org's record IN PLACE instead of keeping a copy.
+ *
+ * Minted at the org-connect ceremony because that is the only moment the org's custody is in the loop
+ * for every credential family alike — KMS (Google/email), passkey, wallet, and demo custody all sign
+ * here. A relying app cannot mint it later: persona-sign covers demo accounts only, and the app never
+ * holds the org's key (which is the point).
+ *
+ * Same refusals as the per-app person read grant (read-grants.ts): explicit resources (the caveat
+ * builder refuses `vault:*`), ops read-only, timestamp-bounded, value 0, on-chain revocable.
+ */
+export function buildApprovedOrgReadDelegation(
+  orgSA: Address,
+  delegate: Address,
+  scope: { server: string; resources: readonly string[] },
+  validitySeconds = ORG_READ_GRANT_VALIDITY_SECONDS,
+): { delegation: Delegation; digest: Hex } {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+    buildVaultRecordScopeCaveat([{ server: scope.server, resources: [...scope.resources], ops: ['read'] }]),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = APPROVED_HASH_SENTINEL;
+  return { delegation: d, digest };
+}
+
+/** The direct-signature variant, for the KMS org path: bootstrap-org deploys server-side, so there is
+ *  no deploy batch to fold the digest into — the C_sub key signs right after, still zero prompts. */
+export async function issueOrgReadDelegation(
+  orgSA: Address,
+  delegate: Address,
+  scope: { server: string; resources: readonly string[] },
+  signHash: SignHash,
+  validitySeconds = ORG_READ_GRANT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const { delegation, digest } = buildApprovedOrgReadDelegation(orgSA, delegate, scope, validitySeconds);
+  delegation.signature = await signHash(digest);
+  return delegation;
+}
+
 /**
  * spec 329 §3.1 — the ORG consult wire `org → interactions-session key`, signed by the ORG's
  * custody (the steward's credential) at the ROUTING-ENABLE ceremony. Resolves the caller-signature

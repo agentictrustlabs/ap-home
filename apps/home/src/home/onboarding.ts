@@ -38,7 +38,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -559,6 +559,15 @@ export async function createOrganization(
         opGrant = buildApprovedOperationalIntentDelegation(org, opSA);
         digests.push(opGrant.digest);
       }
+      // THE RE-MINT PATH for the org→workspace READ grant too (whitelabel org_read_grant) — same
+      // reasoning as the Operational Intent grant above: only a ceremony the org's own custody signs
+      // can create it, and select-existing is where every pre-existing org picks it up.
+      const orgReadCfg = getClient(opts.requestedBy ?? '')?.org_read_grant;
+      let orgReadGrant: ReturnType<typeof buildApprovedOrgReadDelegation> | undefined;
+      if (orgReadCfg && orgReadCfg.delegate.toLowerCase() !== delegate.toLowerCase()) {
+        orgReadGrant = buildApprovedOrgReadDelegation(org, orgReadCfg.delegate as Address, orgReadCfg);
+        digests.push(orgReadGrant.digest);
+      }
       let brokerApp: ReturnType<typeof buildApprovedSiteDelegation> | undefined;
       if (opts.grantOrg && opts.grantOrg.toLowerCase() !== delegate.toLowerCase()) {
         brokerApp = buildApprovedSiteDelegation(org, opts.grantOrg);     // org → broker (Switchboard)
@@ -592,6 +601,7 @@ export async function createOrganization(
           brokerDelegation: brokerApp ? toWire(brokerApp.delegation) : null,
           stewardshipDelegation: toWire(stewardApp.delegation),
           operationalDelegation: opGrant ? toWire(opGrant.delegation) : undefined,
+          readGrantDelegation: orgReadGrant ? toWire(orgReadGrant.delegation) : undefined,
         },
         grant: toWire(siteApp.delegation),
       };
@@ -694,6 +704,7 @@ export async function createOrganization(
       membershipDelegation: x.membershipDelegation,   // person→org (org reads member)
       stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
       operationalDelegation: x.operationalDelegation,  // org→app service agent (submit intents)
+      readGrantDelegation: x.readGrantDelegation,      // org→app workspace (read one record family)
     },
     grant: x.delegation,
   };

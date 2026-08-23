@@ -169,6 +169,13 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // Where the service-agent-wire ceremony talks to gather27-a2a.
       serviceAgentConfig: { a2aBase: 'https://gather27-a2a-production.richardpedersen3.workers.dev' },
+      // Each host org grants the WORKSPACE a read of its own listing record at connect time: the
+      // workspace roster reads listings in place, never copies them (org_read_grant — see schema).
+      org_read_grant: {
+        delegate: '0xcE7bb378e132Cd373B366746B5F43533f9777Da7', // gather27-workspace.impact
+        server: 'demo-mcp',
+        resources: ['vault:gather27:listing'],
+      },
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {
