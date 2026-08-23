@@ -26,7 +26,7 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
   const role = svc ? serviceRoleOf(svc.kind) : null;
   const you = agentName ? nameLabel(agentName) : 'you';
   const lineage = svc
-    ? [...authorityLineage(svc, agents, you).map((n) => (n === you || n === 'unnamed' ? n : nameLabel(n))), role].join(' → ')
+    ? [...authorityLineage(svc, agents, you, agentAddress).map((n) => (n === you || n === 'unnamed' ? n : nameLabel(n))), role].join(' → ')
     : '';
   const parentOrg = svc?.kind === 'org-treasury' ? agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(svc.parent)) : undefined;
   const sublabel = svc?.kind === 'person-treasury' ? 'Personal treasury' : parentOrg?.name ? `${nameLabel(parentOrg.name)} treasury` : 'Org treasury';
@@ -62,7 +62,12 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
                 <span className="manage-card-badge live">{role}</span>
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
-              <p className="manage-card-blurb">Custodied by you. Role-specific actions land here as this service role gets its panel.</p>
+              <p className="manage-card-blurb">
+                Custodied by you.
+                {role === 'workspace'
+                  ? ' The member-organization roster lives in this agent’s vault — open Records to read it.'
+                  : ' Role-specific actions land here as this service role gets its panel.'}
+              </p>
             </div>
           )}
         </>

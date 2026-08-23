@@ -26,7 +26,8 @@ export function orgHref(org: string, page: string): string {
   return `/org/${encodeURIComponent(org)}/${page}`;
 }
 
-/** A service-class agent's workspace landing page (role-agnostic — ADR-0046). */
-export function serviceHref(agent: string): string {
-  return `/service/${encodeURIComponent(agent)}`;
+/** A service-class agent's workspace page (role-agnostic — ADR-0046). */
+export function serviceHref(agent: string, page?: string): string {
+  const base = `/service/${encodeURIComponent(agent)}`;
+  return page ? `${base}/${page}` : base;
 }

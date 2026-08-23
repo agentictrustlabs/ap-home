@@ -369,6 +369,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     return (
       <CredentialFirstStart
         enrollApi={api}
+        appName={appName}
         onUseName={(reason) => setView({ k: 'enroll-name', reason })}
         onSession={async (t, via) => {
           await openSession(t, via, false);
@@ -445,8 +446,12 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   }} />;
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="onboarding-screen"><div className="onboarding-card">{children}</div></div>;
+function Shell({ children, compact }: { children: React.ReactNode; compact?: boolean }) {
+  return (
+    <div className="onboarding-screen">
+      <div className={compact ? 'onboarding-card enroll-compact' : 'onboarding-card'}>{children}</div>
+    </div>
+  );
 }
 
 /** Selected state for the email/phone method toggles — the open card's button reads as CHOSEN
@@ -600,13 +605,14 @@ function SocialConnect({ onGoogle, onYouVersion, primary }: { onGoogle: () => vo
 // resolves the home server-side with NO name (spec 235); passkeys are subdomain-isolated (RP =
 // <label>.impact-agent.me) so a discoverable assertion here only succeeds for a home reachable
 // from this origin — otherwise we route to the name path (which hops to the right subdomain).
-function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
+function CredentialFirstStart({ onUseName, onSession, enrollApi, appName }: {
   onUseName: (reason?: 'passkey' | 'wallet') => void;
   onSession: (token: string, via: string) => Promise<void>;
   // spec 257 §11 — when set, this is a NAME-DEFERRED relying-app enroll: Google stashes the enroll
   // (resumed in GoogleEnrollResume → nameless SA + grant), and passkey routes to the name path
   // (a new passkey home is subdomain-bound, so it needs a name) rather than a discoverable login.
   enrollApi?: EnrollApi;
+  appName?: string;
 }) {
   const [busy, setBusy] = useState<'passkey' | 'wallet' | null>(null);
   const [err, setErr] = useState('');
@@ -727,25 +733,19 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
     );
   }
 
+  const enroll = Boolean(enrollApi);
   return (
-    <Shell>
-      <BrandShield size={56} />
-      <h1 className="onboarding-h1">{whitelabel.copy.arrivalTitle}</h1>
+    <Shell compact={enroll}>
+      <BrandShield size={enroll ? 40 : 56} />
+      <h1 className="onboarding-h1">{enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
       <p className="onboarding-sub">
-        Sign in or get started. Your {whitelabel.brand.name} name is how others find your agent —
-        not something you need to remember to get back in.
+        {enroll
+          ? 'Sign in, then you’ll return.'
+          : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
       </p>
       <SocialConnect onGoogle={onGoogle} onYouVersion={onYouVersion} primary />
       {enrollApi ? (
         <>
-          {/* Relying-app enroll still needs the full front door. Social/email/phone can resolve a nameless
-              home directly; passkey/wallet/Impact-name collect the public handle first. */}
-          <button
-            className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-            onClick={() => onUseName('passkey')}
-          >
-            Continue with a passkey or wallet
-          </button>
           <button
             className="btn-ghost onboarding-secondary"
             style={showEmail ? SELECTED_METHOD_STY : undefined}
@@ -774,8 +774,13 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi }: {
               <PhoneAuthCard />
             </div>
           )}
-          <div className="method-or">or</div>
-          <button className="btn-ghost onboarding-secondary" onClick={() => onUseName()}>
+          <button
+            className="btn-ghost onboarding-secondary"
+            onClick={() => onUseName('passkey')}
+          >
+            Continue with a passkey or wallet
+          </button>
+          <button className="btn-ghost onboarding-secondary enroll-name-link" onClick={() => onUseName()}>
             Use my {whitelabel.brand.name} name
           </button>
         </>

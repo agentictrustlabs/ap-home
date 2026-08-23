@@ -40,7 +40,7 @@ export function AgentSwitcher() {
 
   const personLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
   const lineageFor = (a: (typeof agents)[number]) =>
-    [...authorityLineage(a, agents, 'you').map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n))), serviceRoleOf(a.kind)].join(' → ');
+    [...authorityLineage(a, agents, 'you', agentAddress ?? undefined).map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n))), serviceRoleOf(a.kind)].join(' → ');
 
   const activeOrg = active.kind === 'org' ? allOrgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
   const activeService = active.kind === 'service' ? services.find((t) => lc(t.agent) === lc(active.agent)) : undefined;

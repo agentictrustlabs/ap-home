@@ -20,13 +20,15 @@ export function serviceRoleOf(kind: AgentKind): string {
  * the agent's name in the workspace switcher so a person's treasury and an org's treasury read
  * differently: "you → treasury" vs "you → acme → treasury".
  */
-export function authorityLineage(agent: ManagedAgent, all: ManagedAgent[], youLabel: string): string[] {
+export function authorityLineage(agent: ManagedAgent, all: ManagedAgent[], youLabel: string, personSa?: string): string[] {
   const lc = (s: string) => s.toLowerCase();
+  const you = personSa ? lc(personSa) : '';
   const chain: string[] = [];
   let parent = agent.parent;
   for (let hop = 0; hop < 4; hop += 1) {
+    if (!parent || (you && lc(parent) === you)) break; // person SA — even if also listed as an org
     const p = all.find((a) => lc(a.agent) === lc(parent));
-    if (!p) break; // parent is the person SA (not in the managed list) — chain ends at "you"
+    if (!p) break;
     chain.unshift(p.name || 'unnamed');
     parent = p.parent;
   }

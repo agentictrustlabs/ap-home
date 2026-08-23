@@ -102,14 +102,24 @@ export function buildNav(
       backHome,
     ];
   }
-  // SERVICE workspace (ADR-0046): one custodial service-class agent. Role-agnostic.
+  // SERVICE workspace (ADR-0046): one custodial service-class agent. Same mental model as
+  // org — live surfaces, then Manage — so a workspace (Gather27 roster, treasury, …) is
+  // something you can actually work in, not a dead overview card.
   if (active.kind === 'service') {
+    const a = active.agent;
     return [
       {
         heading: workspaceName ?? 'Service',
         items: [
-          { id: 'service-overview', label: 'Overview', href: serviceHref(active.agent), Icon: LandmarkIcon, status: 'live' },
-          { id: 'service-messages', label: 'Messages', href: `${serviceHref(active.agent)}/messages`, Icon: ChatIcon, status: 'live' },
+          { id: 'service-overview', label: 'Overview', href: serviceHref(a), Icon: LandmarkIcon, status: 'live' },
+          { id: 'service-messages', label: 'Messages', href: serviceHref(a, 'messages'), Icon: ChatIcon, status: 'live' },
+        ],
+      },
+      {
+        heading: 'Manage',
+        items: [
+          { id: 'service-records', label: 'Records', href: serviceHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
+          { id: 'service-access', label: 'Access', href: serviceHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
         ],
       },
       backHome,
