@@ -1160,6 +1160,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <OrgChooser
           token={cred?.token}
           appHost={api.host}
+          appName={orgAppName}
           purpose={api.enroll?.purpose}
           defaultName={api.enroll?.orgBase}
           onChoose={(c) => { setChoice(c); setPhase('consent'); }}
@@ -1170,7 +1171,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   }
   if (phase === 'busy') return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{existingOrg ? 'Connecting your organization…' : 'Creating your organization…'}</p></div></Shell>;
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${api.host} can now read what it posts — the organization stays custodied by you.` : `Its home is started, its name is claimed, and ${api.host} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {api.host}…</p></Shell>;
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;
   return (
     <Shell>
@@ -1181,10 +1182,10 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <div className="securing-explainer-title">One tap — approve {existingOrg ? `connecting ${orgBase}` : `creating ${orgBase}`}</div>
         <p>
           {existingOrg
-            ? `This single approval gives ${api.host} scoped read access to what ${orgBase} posts. Nothing beyond that — no new org is created.`
-            : `This single approval starts the org, claims its name, and gives ${api.host} scoped read access to its posted needs. Nothing beyond that.`}
+            ? `This single approval lets ${orgAppName} read what ${orgBase} posts. Nothing beyond that — no new organization is created.`
+            : `This single approval starts the organization, claims its name, and lets ${orgAppName} read what it posts. Nothing beyond that.`}
         </p>
-        <p className="securing-wait">You can revoke {api.host}&apos;s access at any time from your Impact home.</p>
+        <p className="securing-wait">You can disconnect {orgAppName} at any time from your Impact home.</p>
       </div>
       <ConsentSheet
         title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}

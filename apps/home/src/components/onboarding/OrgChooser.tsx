@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listManagedAgents } from '../../connect-client';
-import { shortAppHost, toOrgLabel } from './org-chooser-label';
+import { humanizeOrgName, shortAppHost, toOrgLabel } from './org-chooser-label';
 import { canGrantAsOrg, eligibleConnectOrgs } from './org-chooser-eligible';
 
 export { shortAppHost, toOrgLabel } from './org-chooser-label';
@@ -51,6 +51,7 @@ function OrgAvatar({ name, plus }: { name: string; plus?: boolean }) {
 export function OrgChooser({
   token,
   appHost,
+  appName,
   purpose,
   defaultName,
   onChoose,
@@ -59,6 +60,9 @@ export function OrgChooser({
   /** Home-session bearer (aud = home). Absent → create-new only, with the reason shown. */
   token?: string;
   appHost: string;
+  /** The app's REGISTERED friendly name (e.g. "Gather27"). Without it the heading falls back to
+   *  the hostname's first label ("gather27-web") — a deployment slug no member recognizes. */
+  appName?: string;
   /** `org_purpose` from the enroll. When set, stewarded orgs for other purposes are hidden. */
   purpose?: string;
   /** `org_base` from the enroll — the name the person typed AT THE APP. With no eligible
@@ -128,7 +132,15 @@ export function OrgChooser({
 
   const chosen = selected !== 'new' ? orgs.find((o) => o.agent.toLowerCase() === selected.toLowerCase()) : undefined;
   const slug = toOrgLabel(name);
-  const host = shortAppHost(appHost);
+  const host = appName ?? shortAppHost(appHost);
+  // The name the person typed AT THE APP may already be an org they belong to — showing a
+  // prefilled "create" AND the same org in the list, with nothing saying which to pick, is how
+  // duplicates get minted. Surface the likely match instead.
+  const wantedSlug = toOrgLabel(defaultName ?? '');
+  const likelyMatch =
+    wantedSlug.length >= 3
+      ? orgs.find((o) => toOrgLabel(o.name.replace(/\.impact$/i, '')) === wantedSlug)
+      : undefined;
 
   const go = () => {
     if (chosen) return onChoose({ existingOrg: chosen.agent, orgName: chosen.name, asSteward: chosen.asSteward });
@@ -141,15 +153,19 @@ export function OrgChooser({
 
   return (
     <div className="org-chooser">
-      <h1 className="onboarding-h1">Connect an organization to {host}</h1>
+      <p className="onboarding-hint">
+        Almost there — {host} sent you here to pick the organization it will work with.
+      </p>
+      <h1 className="onboarding-h1">Choose your organization</h1>
       <p className="onboarding-sub">
-        Create a new one, or pick an organization you belong to. {host} only receives a scoped,
-        revocable grant — never custody of the organization.
+        {host} will only be able to read what this organization shares with it. It can&apos;t make
+        changes, reach your other organizations, or act on your behalf — and you can disconnect it
+        any time from your Impact home.
       </p>
       {!token && (
         <p className="onboarding-hint">
-          You&apos;re not signed in at your home right now, so organizations you belong to can&apos;t be
-          listed — you can still create a new one.
+          We couldn&apos;t load the organizations you belong to right now — you can still create a
+          new one below.
         </p>
       )}
 
@@ -158,7 +174,7 @@ export function OrgChooser({
         <OrgAvatar name="+" plus />
         <span className="org-chooser-copy">
           <span className="org-chooser-name">Create a new organization</span>
-          <span className="org-chooser-meta">Deploys a new Smart Agent, custodied by you</span>
+          <span className="org-chooser-meta">You&apos;ll be its first admin — you keep full control</span>
         </span>
         {selected === 'new' && <span aria-hidden className="org-chooser-check">✓</span>}
       </label>
@@ -172,8 +188,15 @@ export function OrgChooser({
           onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
         />
       )}
+      {selected === 'new' && likelyMatch && (
+        <p className="onboarding-hint">
+          It looks like you may already have this organization —{' '}
+          <strong>{humanizeOrgName(likelyMatch.name)}</strong> is in your list below. If that&apos;s
+          it, select it there instead of creating it again.
+        </p>
+      )}
       {selected === 'new' && slug && slug !== name.trim() && (
-        <p className="onboarding-hint">Registered as <strong>{slug}</strong> — spaces &amp; capitals become a web-safe handle.</p>
+        <p className="onboarding-hint">Its web address will be <strong>{slug}.impact</strong>.</p>
       )}
 
       {orgs.length > 0 && (
@@ -203,11 +226,9 @@ export function OrgChooser({
                   <input type="radio" name="org-choice" className="org-chooser-sr" checked={on} onChange={() => pickOrg(o.agent)} />
                   <OrgAvatar name={o.name} />
                   <span className="org-chooser-copy">
-                    <span className="org-chooser-name">{o.name}</span>
+                    <span className="org-chooser-name">{humanizeOrgName(o.name)}</span>
                     <span className="org-chooser-meta">
-                      {o.asSteward ? 'You steward this organization' : 'You’re a member'}
-                      {' · '}
-                      {o.agent.slice(0, 8)}…{o.agent.slice(-4)}
+                      {o.asSteward ? 'You manage this organization' : 'You’re a member'}
                     </span>
                   </span>
                   {on && <span aria-hidden className="org-chooser-check">✓</span>}
@@ -220,9 +241,13 @@ export function OrgChooser({
 
       {err && <p className="onboarding-hint taken">{err}</p>}
       <button className="btn-primary" onClick={go}>
-        {chosen ? `Continue with ${chosen.name}` : 'Create organization'}
+        {chosen
+          ? `Continue with ${humanizeOrgName(chosen.name)}`
+          : name.trim()
+            ? `Create ${name.trim()}`
+            : 'Create organization'}
       </button>
-      <button className="btn-ghost onboarding-secondary" onClick={onDecline}>Cancel</button>
+      <button className="btn-ghost onboarding-secondary" onClick={onDecline}>Go back to {host}</button>
     </div>
   );
 }

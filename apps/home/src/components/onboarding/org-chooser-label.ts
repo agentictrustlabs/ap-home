@@ -16,6 +16,20 @@ export function shortAppHost(host: string): string {
   return h.split('.')[0] || h;
 }
 
+/** A machine handle rendered for a person — `church-8008-windsor.impact` → `Church 8008 Windsor`.
+ *  Display-only: the handle stays the identifier everywhere else. A non-technical member cannot
+ *  recognize their own organization from a slug. */
+export function humanizeOrgName(name: string): string {
+  const bare = name.replace(/\.impact$/i, '');
+  return (
+    bare
+      .split('-')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ') || name
+  );
+}
+
 function looksLikeHost(value: string): boolean {
   const h = value.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
   if (!h) return false;
