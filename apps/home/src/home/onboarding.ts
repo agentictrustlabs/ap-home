@@ -555,7 +555,7 @@ export async function createOrganization(
         step: 1,
         total: 3,
         label: 'Connecting the organization…',
-        hint: 'One approval on-chain — Gather27 never holds its keys.',
+        hint: 'One approval — Gather27 never holds its keys.',
       });
       const signHash = await signHashFor(via, org, auth);
       const siteApp = buildApprovedSiteDelegation(org, delegate);        // org → relying app's delegate
@@ -631,19 +631,19 @@ export async function createOrganization(
     step: 1,
     total: 5,
     label: 'Finding a name…',
-    hint: 'This step waits on the network — the organization is started on-chain.',
+    hint: 'This can take a moment — we’re setting the organization up.',
   });
   const r = isKmsVia(via)
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via, (s) =>
-            say?.({ step: 2, total: 5, label: s, hint: 'Waiting for the network to confirm. This is the slow step.' }),
+            say?.({ step: 2, total: 5, label: s, hint: 'This is the longer step — hang tight.' }),
           )
         : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
     : await createChildAgentForSite(
         home.address,
         base,
         delegate,
-        (s) => say?.({ step: 2, total: 5, label: s, hint: 'Waiting for the network to confirm. This is the slow step.' }),
+        (s) => say?.({ step: 2, total: 5, label: s, hint: 'This is the longer step — hang tight.' }),
         undefined,
         opts,
         via,

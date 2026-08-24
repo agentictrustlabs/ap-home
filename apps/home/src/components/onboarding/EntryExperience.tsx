@@ -1187,7 +1187,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       <Shell>
         <CeremonyProgress
           label={grantProgress.label}
-          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : 'This step waits on the network — the organization is started on-chain.')}
+          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : 'This can take a moment — we’re setting the organization up.')}
           step={grantProgress.step}
           total={grantProgress.total}
         />

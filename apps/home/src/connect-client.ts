@@ -1193,7 +1193,7 @@ export async function createChildAgentForSite(
   // receipt), but a replica can lag a few seconds — the per-grant passkey prompts used to mask
   // this, and one-prompt removed them. Poll briefly so the org is visible before the ceremony
   // hands the grant off. Bounded (ADR-0013): the SAME getCode call, capped at ~15s.
-  onStep?.('Confirming your organization on the network…');
+  onStep?.('Confirming your organization…');
   {
     const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
     for (let i = 0; i < 15; i++) {
@@ -1733,7 +1733,7 @@ export async function createOrganizationWithGoogle(
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
 
   await ensureCsrfToken();
-  onStep?.('Starting the organization on-chain…');
+  onStep?.('Starting the organization…');
   const res = await fetch('/a2a/custody/oidc/bootstrap-org', {
     method: 'POST',
     credentials: 'include',
