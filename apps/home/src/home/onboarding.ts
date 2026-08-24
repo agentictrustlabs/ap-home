@@ -778,7 +778,11 @@ export async function personGrantForOrgCreate(
   return {
     ok: true,
     grant: permitted.grant,
-    org: { ...created.org, siteDelegation: created.grant },
+    org: {
+      ...created.org,
+      siteDelegation: created.grant,
+      stewardshipDelegation: created.org.stewardshipDelegation ?? created.grant,
+    },
     sessionDelegation: permitted.sessionDelegation,
   };
 }

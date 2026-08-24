@@ -135,6 +135,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The relying app later reads it back via /connect/related-orgs (person-session-auth).
   const orgPayload = body.org as {
     orgAgent?: string; orgName?: string; person?: string; purpose?: string;
+    kind?: string; parent?: string;
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
     membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
     readGrantDelegation?: unknown;
@@ -142,27 +143,32 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
     const org = orgPayload.orgAgent.toLowerCase();
+    const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
     const link = {
+      ...existing,
       orgAgent: orgPayload.orgAgent,
-      orgName: orgPayload.orgName ?? '',
-      purpose: orgPayload.purpose ?? 'related-org',
+      orgName: orgPayload.orgName || existing.orgName || '',
+      purpose: orgPayload.purpose ?? existing.purpose ?? 'related-org',
       requestedBy: grant.client_id,
-      siteDelegation: body.delegation,
-      brokerDelegation: orgPayload.brokerDelegation ?? null,
+      siteDelegation: body.delegation ?? existing.siteDelegation ?? null,
+      brokerDelegation: orgPayload.brokerDelegation ?? existing.brokerDelegation ?? null,
       // spec 246 — person↔org read delegations: membership (person→org, org reads its
       // member) + stewardship (org→person, person reads/oversees the org).
-      membershipDelegation: orgPayload.membershipDelegation ?? null,
-      stewardshipDelegation: orgPayload.stewardshipDelegation ?? null,
+      // MERGE: a workspace-create already wrote the stewardship wire; do not null it.
+      membershipDelegation: orgPayload.membershipDelegation ?? existing.membershipDelegation ?? null,
+      stewardshipDelegation: orgPayload.stewardshipDelegation ?? existing.stewardshipDelegation ?? null,
       // The org → app-service-agent Operational Intent grant, when the app declared a service SA.
       // Persisted here because the ceremony is the only moment it exists: minted into the deploy
       // batch, handed back once, and otherwise lost.
-      operationalDelegation: orgPayload.operationalDelegation ?? null,
+      operationalDelegation: orgPayload.operationalDelegation ?? existing.operationalDelegation ?? null,
       // The org → app-workspace READ grant (whitelabel org_read_grant) — persisted for the same
       // reason: minted only at the ceremony, and its random salt makes an unreturned body unusable.
-      readGrantDelegation: orgPayload.readGrantDelegation ?? null,
-      proofHash: orgPayload.proofHash ?? null,
-      credential: orgPayload.credential ?? null,
-      createdAt: Date.now(),
+      readGrantDelegation: orgPayload.readGrantDelegation ?? existing.readGrantDelegation ?? null,
+      proofHash: orgPayload.proofHash ?? existing.proofHash ?? null,
+      credential: orgPayload.credential ?? existing.credential ?? null,
+      kind: orgPayload.kind ?? existing.kind ?? (orgPayload.purpose === 'field-workspace' ? 'workspace' : 'org'),
+      parent: orgPayload.parent ?? existing.parent ?? person,
+      createdAt: existing.createdAt ?? Date.now(),
     };
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
     const idxKey = `related-idx:${person}`;
