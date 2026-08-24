@@ -25,6 +25,7 @@ export interface EnrollReq {
   orgBase?: string; // org_create: the org name to create
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
+  member?: Address; // workspace-member-invite: the person SA being granted into the workspace (P4)
   existingOrg?: Address; // org_create: reuse an EXISTING org the person stewards — grant from it instead of deploying a new one
   sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
@@ -75,6 +76,7 @@ export function parseEnrollReq(): EnrollReq | null {
       orgBase: p.get('org_base') ?? undefined,
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
+      member: (p.get('member') as Address) ?? undefined,
       existingOrg: (p.get('existing_org') as Address) ?? undefined,
       sessionKey: (p.get('session_key') as Address) ?? undefined,
       payAmount: /^\d+$/.test(p.get('pay_amount') ?? '') ? (p.get('pay_amount') as string) : undefined,

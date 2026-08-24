@@ -143,7 +143,16 @@ const faithImpact: WhiteLabelConfig = {
         'http://127.0.0.1:5174/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create', 'workspace-create', 'service-agent-wire'],
+      allowed_delegation_templates: [
+        'site-login',
+        'org-create',
+        'workspace-create',
+        // P4 — workspace membership, two ceremonies around one stash (/connect/workspace-invite):
+        // the custodian signs the member's access in; the member claims it into their own tree.
+        'workspace-member-invite',
+        'workspace-join',
+        'service-agent-wire',
+      ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       operational_delegate: '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
       serviceAgentConfig: { a2aBase: 'https://field-a2a-production.richardpedersen3.workers.dev' },
@@ -395,6 +404,30 @@ const faithImpact: WhiteLabelConfig = {
         'Take custody of the workspace agent away from you',
         'Move funds, or touch your sign-in methods or recovery',
         'Copy field records out of steward vaults',
+      ],
+      expiryDays: 365,
+    },
+    'workspace-member-invite': {
+      canDo: [
+        'Let the person you named read this workspace, revocably',
+        'Hold that access for them until they join',
+      ],
+      cannotDo: [
+        'Make them a steward, or change who governs the workspace',
+        'Touch their home, their vault, or their sign-in',
+        'Move funds',
+      ],
+      expiryDays: 365,
+    },
+    'workspace-join': {
+      canDo: [
+        'Add this workspace to the places you can work',
+        'Accept the access its steward set aside for you',
+      ],
+      cannotDo: [
+        'Give the workspace anything from your own vault',
+        'Make you a steward of it',
+        'Move funds, or touch your sign-in methods or recovery',
       ],
       expiryDays: 365,
     },

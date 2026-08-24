@@ -21,7 +21,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
-  isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
+  isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
+import { issueSiteDelegation, toWire } from '../../lib/delegation';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -277,6 +278,75 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             return [] as Awaited<ReturnType<typeof listManagedAgents>>;
           })
         : Promise.resolve([] as Awaited<ReturnType<typeof listManagedAgents>>);
+
+      /*
+        P4 — WORKSPACE MEMBERSHIP, two ceremonies around one stash (/connect/workspace-invite).
+        Each is a side-effect on the way into an ORDINARY site-login: the relying app still gets
+        its session code back, which is how it learns the ceremony finished.
+
+        invite: the CUSTODIAN signs `workspace → member` with the same root credential that owns
+        the workspace agent, and stashes it for the named member. Granting is the custodian's act;
+        nothing here touches the member's own agent tree.
+        join:   the MEMBER claims their stash (single use) and writes their OWN related-agent link
+        carrying the grant — the only party the link endpoint permits. The workspace roster still
+        gates every relying-app call; this link is reach, not authority.
+      */
+      if (enroll.template === 'workspace-member-invite') {
+        if (!enroll.grantOrg || !enroll.member) return fail('This invitation names no workspace or member.');
+        if (!token) return fail('Your Home session is needed to invite into a workspace.');
+        setGrantProgress({ step: 1, total: 2, label: 'Signing the member’s access…' });
+        const signHash = await signHashFor(viaLower as Via, home.address, auth);
+        const grant = await issueSiteDelegation(enroll.grantOrg, enroll.member, signHash);
+        const res = await fetch('/connect/workspace-invite', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            workspace: enroll.grantOrg,
+            member: enroll.member,
+            delegation: toWire(grant),
+            workspaceName: enroll.orgBase ?? '',
+          }),
+        });
+        const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !out.ok) return fail(out.error ?? `the invitation could not be stored (HTTP ${res.status})`);
+      }
+      if (enroll.template === 'workspace-join') {
+        if (!enroll.grantOrg) return fail('This join names no workspace.');
+        if (!token) return fail('Your Home session is needed to join a workspace.');
+        setGrantProgress({ step: 1, total: 2, label: 'Claiming your invitation…' });
+        const res = await fetch('/connect/workspace-invite', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ workspace: enroll.grantOrg, claim: true }),
+        });
+        const out = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          invite?: { delegation?: unknown; workspaceName?: string };
+        };
+        if (!res.ok || !out.ok || !out.invite?.delegation) {
+          return fail(out.error ?? 'No invitation was found for you at this workspace — ask its steward to invite you.');
+        }
+        const linked = await fetch('/connect/related-orgs', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            person: home.address,
+            orgAgent: enroll.grantOrg,
+            orgName: out.invite.workspaceName || enroll.orgBase || 'Field Workspace',
+            purpose: 'field-workspace',
+            requestedBy: enroll.aud,
+            kind: 'workspace',
+            parent: home.address,
+            relationship: 'member',
+            stewardshipDelegation: out.invite.delegation,
+          }),
+        });
+        const link = (await linked.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!linked.ok || link.ok === false) {
+          return fail(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
+        }
+      }
 
       let code: string;
       if (enroll.template === 'workspace-create') {
