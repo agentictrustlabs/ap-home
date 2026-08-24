@@ -20,7 +20,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
-  authorizeServiceAgentWire, activateVaultIfNeeded, isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
+  authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
+  isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, type Via, type Auth } from '../../home/onboarding';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -288,6 +289,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           (s) => setGrantProgress({ step: 1, total: 2, label: s }),
         );
         if (!created.ok) return fail(created.error);
+        // The realm is USABLE from the first approval or it is not created: the same storage
+        // trio org-create runs (ManagedAgents) — vault binding is REQUIRED (every ws-* write
+        // gates on it), delivery + interactions grants are best-effort like everywhere else.
+        setGrantProgress({ step: 2, total: 2, label: 'Enabling workspace storage…' });
+        const bound = await activateVaultIfNeeded(created.result.agent, viaLower as Via, auth);
+        if (!bound.ok) return fail(bound.error);
+        const delivery = await activateInboxDeliveryIfNeeded(created.result.agent, viaLower as Via, auth);
+        if (!delivery.ok) console.warn('[workspace-create] delivery grant not provisioned:', delivery.error);
+        const ix = await activateInteractionsIfNeeded(created.result.agent, viaLower as Via, auth);
+        if (!ix.ok) console.warn('[workspace-create] interactions grant not provisioned:', ix.error);
         const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, {
           org: {
             orgAgent: created.result.agent,
