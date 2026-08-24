@@ -166,7 +166,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       readGrantDelegation: orgPayload.readGrantDelegation ?? existing.readGrantDelegation ?? null,
       proofHash: orgPayload.proofHash ?? existing.proofHash ?? null,
       credential: orgPayload.credential ?? existing.credential ?? null,
-      kind: orgPayload.kind ?? existing.kind ?? (orgPayload.purpose === 'field-workspace' ? 'workspace' : 'org'),
+      kind:
+        orgPayload.kind ??
+        existing.kind ??
+        (orgPayload.purpose === 'field-workspace' ? 'workspace' : orgPayload.purpose === 'field-team' ? 'team' : 'org'),
       parent: orgPayload.parent ?? existing.parent ?? person,
       createdAt: existing.createdAt ?? Date.now(),
     };

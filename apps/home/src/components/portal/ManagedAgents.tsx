@@ -33,6 +33,7 @@ const lc = (s: string) => s.toLowerCase();
 const KIND_LABEL: Record<AgentKind, string> = {
   'person-treasury': 'Personal treasury',
   org: 'Organization',
+  team: 'Team',
   'org-treasury': 'Org treasury',
   workspace: 'App workspace',
 };

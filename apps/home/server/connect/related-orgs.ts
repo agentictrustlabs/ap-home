@@ -157,7 +157,11 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       memberAccessDelegation: link.memberAccessDelegation ?? null,
       // spec 275: the agent kind + its parent in the member's agent tree. Legacy org
       // links (no kind) default to a person-parented 'org' so the tree still renders.
-      kind: l.kind ?? 'org',
+      // Legacy links predate kind persistence — the purpose tag names what they are. Healed at
+      // the read so every consumer (switcher, projections, relying apps) agrees at once.
+      kind:
+        l.kind ??
+        (l.purpose === 'field-workspace' ? 'workspace' : l.purpose === 'field-team' ? 'team' : 'org'),
       parent: l.parent ?? person,
       // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
       // records default to 'steward' — the pre-membership control semantics, preserved.

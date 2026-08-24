@@ -1275,7 +1275,7 @@ export async function createChildAgentForSite(
 // Person/Org/Service class set, never a subclass of treasury. Typically org-parented: the app's
 // governing org custodies it and its custodian runs the service-agent-wire ceremony against the
 // app's a2a Worker.
-export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace';
+export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team';
 
 export interface ManagedAgent {
   agent: Address;
@@ -1401,7 +1401,7 @@ export async function createManagedAgent(
   let name = '';
   if (wantName) {
     const claim = await buildClaimCallData(input.label!, child, onStep, true, {
-      agentKind: input.kind === 'org' ? 'org' : 'service',
+      agentKind: input.kind === 'org' || input.kind === 'team' ? 'org' : 'service',
       displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.impact`,
     });
     if (!claim.ok) return { ok: false, error: claim.error };
@@ -1476,7 +1476,7 @@ export async function createManagedAgent(
   requestReindex([child]); // auto-index: the new managed agent (treasury/org) appears in discovery now
   // spec 321/246 — the creator is the org's FIRST MEMBER: mint their membership delegation now
   // ("deferred to first need" — this is it). Best-effort inside recordOrgMembership.
-  if (input.kind === 'org') {
+  if (input.kind === 'org' || input.kind === 'team') {
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, signHash, sessionToken);
   }

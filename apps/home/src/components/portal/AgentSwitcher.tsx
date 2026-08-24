@@ -13,7 +13,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
-import { agentClassOf, serviceRoleOf, authorityLineage } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf, serviceRoleOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
 import { Popover } from '../shared/ui';
@@ -40,7 +40,11 @@ export function AgentSwitcher() {
 
   const personLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
   const lineageFor = (a: (typeof agents)[number]) =>
-    [...authorityLineage(a, agents, 'you', agentAddress ?? undefined).map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n))), serviceRoleOf(a.kind)].join(' → ');
+    // The KIND WORD leads (workspace · you → …): every row answers "what class of agent is this"
+    // in place, the same way org rows lead with organization/team.
+    `${serviceRoleOf(a.kind)} · ${authorityLineage(a, agents, 'you', agentAddress ?? undefined)
+      .map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n)))
+      .join(' → ')}`;
 
   const activeOrg = active.kind === 'org' ? allOrgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
   const activeService = active.kind === 'service' ? services.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
@@ -128,7 +132,7 @@ export function AgentSwitcher() {
             key={o.agent}
             icon={<BuildingIcon size={17} />}
             title={o.name ? nameLabel(o.name) : short(o.agent)}
-            sub={`organization · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
+            sub={`${orgKindWordOf(o.kind)} · you → ${o.name ? nameLabel(o.name) : 'unnamed'}`}
             activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
             onClick={() => go(orgHref(o.agent, 'overview'))}
           />
@@ -140,7 +144,7 @@ export function AgentSwitcher() {
             key={o.agent}
             icon={<BuildingIcon size={17} />}
             title={o.name ? nameLabel(o.name) : short(o.agent)}
-            sub="organization · member (no custody)"
+            sub={`${orgKindWordOf(o.kind)} · member (no custody)`}
             activeRow={active.kind === 'org' && lc(active.org) === lc(o.agent)}
             onClick={() => go(orgHref(o.agent, 'discussions'))}
           />
