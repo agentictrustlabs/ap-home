@@ -8,6 +8,7 @@ import {
   useManagedAgents, TreasuryCard, CreateAgentForm, NameAgentForm,
 } from '../../../../../src/components/portal/ManagedAgents';
 import { nameLabel } from '../../../../../src/lib/domain';
+import { agentClassOf } from '../../../../../src/lib/agent-class';
 
 const lc = (s: string) => s.toLowerCase();
 
@@ -19,7 +20,7 @@ export default function OrgTreasuryPage({ params }: { params: Promise<{ org: str
 
   if (!session || !agentAddress) return <SectionShell title="Treasury"><p>Not signed in.</p></SectionShell>;
 
-  const orgAgent = agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(org));
+  const orgAgent = agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(org));
   const treasury = agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
 
   return (

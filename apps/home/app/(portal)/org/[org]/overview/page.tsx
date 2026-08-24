@@ -12,6 +12,7 @@ import {
 import { AddressChip } from '../../../../../src/components/shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../../../../../src/components/shared/Icons';
 import { nameLabel } from '../../../../../src/lib/domain';
+import { agentClassOf, orgKindWordOf } from '../../../../../src/lib/agent-class';
 
 const EXPLORER = 'https://sepolia.basescan.org/address/';
 const lc = (s: string) => s.toLowerCase();
@@ -24,7 +25,8 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
 
   if (!session || !agentAddress) return <SectionShell title="Organization"><p>Not signed in.</p></SectionShell>;
 
-  const orgAgent = agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(org));
+  // Class, not kind: a team IS an organization (ADR-0046) and its workspace lives here too.
+  const orgAgent = agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(org));
   const treasury = agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
   const title = orgAgent?.name ? nameLabel(orgAgent.name) : 'Organization';
 
@@ -41,7 +43,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
           <div className="manage-card">
             <div className="manage-card-head">
               <span className="manage-card-label"><BuildingIcon size={16} /> {orgAgent.name || 'Unnamed organization'}</span>
-              <span className="manage-card-badge live">Organization</span>
+              <span className="manage-card-badge live" style={{ textTransform: 'capitalize' }}>{orgKindWordOf(orgAgent.kind)}</span>
             </div>
             <div style={{ margin: '.45rem 0' }}><AddressChip address={orgAgent.agent as `0x${string}`} size="sm" /></div>
             <p className="manage-card-blurb">

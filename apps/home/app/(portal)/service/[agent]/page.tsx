@@ -28,7 +28,7 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
   const lineage = svc
     ? [...authorityLineage(svc, agents, you, agentAddress).map((n) => (n === you || n === 'unnamed' ? n : nameLabel(n))), role].join(' → ')
     : '';
-  const parentOrg = svc?.kind === 'org-treasury' ? agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(svc.parent)) : undefined;
+  const parentOrg = svc?.kind === 'org-treasury' ? agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(svc.parent)) : undefined;
   const sublabel = svc?.kind === 'person-treasury' ? 'Personal treasury' : parentOrg?.name ? `${nameLabel(parentOrg.name)} treasury` : 'Org treasury';
 
   return (

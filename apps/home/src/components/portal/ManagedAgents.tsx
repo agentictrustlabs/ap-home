@@ -22,6 +22,7 @@ import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
+import { agentClassOf } from '../../lib/agent-class';
 
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -442,7 +443,7 @@ export function OrganizationsManager({
   // 'roster' (spec 342): this list shows deactivated orgs — it is the route back to activating them.
   const { agents, loaded, version, reload } = useManagedAgents(token, 'roster');
   if (!token || !person) return null;
-  const orgs = agents.filter((a) => a.kind === 'org');
+  const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
 
   return (
@@ -509,7 +510,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
   if (!token || !person) return null;
   const personal = agents.find((a) => a.kind === 'person-treasury');
   const orgTreasuries = agents.filter((a) => a.kind === 'org-treasury');
-  const orgName = (orgAgent: string) => agents.find((a) => a.kind === 'org' && lc(a.agent) === lc(orgAgent))?.name ?? 'organization';
+  const orgName = (orgAgent: string) => agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(orgAgent))?.name ?? 'organization';
 
   return (
     <div className="dash-section">

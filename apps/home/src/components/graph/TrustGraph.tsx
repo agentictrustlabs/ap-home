@@ -24,6 +24,7 @@ import {
 import { useSession } from '../../context/session';
 import { useManagedAgents } from '../portal/ManagedAgents';
 import { nameLabel } from '../../lib/domain';
+import { agentClassOf } from '../../lib/agent-class';
 import {
   buildPersonGraphLive,
   CUSTODIAN_ID,
@@ -50,7 +51,7 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
       agentName: agentName ?? shortAddr(agentAddress),
       personSA: agentAddress,
       orgs: agents
-        .filter((a) => a.kind === 'org')
+        .filter((a) => agentClassOf(a.kind) === 'org')
         .map((o) => ({ agent: o.agent, name: o.name ? nameLabel(o.name) : null, relationship: o.relationship })),
     };
   }, [phase, agentAddress, agentName, agents]);
