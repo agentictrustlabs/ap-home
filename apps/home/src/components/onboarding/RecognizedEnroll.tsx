@@ -34,6 +34,7 @@ import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, del
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
+import { CeremonyProgress } from './CeremonyProgress';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
@@ -66,6 +67,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const c = whitelabel.copy;
   const ran = useRef(false);
   const [phase, setPhase] = useState<Phase>('resolving');
+  const [grantProgress, setGrantProgress] = useState<{
+    step: number;
+    total: number;
+    label: string;
+    hint?: string;
+  }>({
+    step: 1,
+    total: 5,
+    label: 'Starting…',
+    hint: 'The first time takes a bit — the organization is started on-chain.',
+  });
   const [home, setHome] = useState<Home | null>(null);
   const [viaLower, setViaLower] = useState<Via>('passkey');
   const [token, setToken] = useState('');
@@ -297,6 +309,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             grantOrg: enroll.grantOrg,
             existingOrg,
             signAsOrg: orgSel?.asSteward,
+            onProgress: setGrantProgress,
           },
         );
         if (!created.ok) return fail(created.error);
@@ -463,10 +476,12 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   if (phase === 'granting') {
     return (
       <Shell>
-        <div className="onboarding-busy">
-          <span className="spinner spinner-lg" role="status" aria-label="Granting permission" />
-          <p className="onboarding-busy-msg">{fmt(c.authorizeStepBusy, { app: appName })}</p>
-        </div>
+        <CeremonyProgress
+          label={grantProgress.label}
+          hint={grantProgress.hint ?? `This is how ${appName} gets a scoped, revocable grant — never custody.`}
+          step={grantProgress.step}
+          total={grantProgress.total}
+        />
       </Shell>
     );
   }

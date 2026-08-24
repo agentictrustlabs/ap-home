@@ -23,6 +23,7 @@ const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet')
 import { useEnrollReq, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { RecognizedEnroll } from './RecognizedEnroll';
+import { CeremonyProgress } from './CeremonyProgress';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -1088,6 +1089,17 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
   const [phase, setPhase] = useState<'choose' | 'consent' | 'busy' | 'connected' | 'error'>(preselected ? 'consent' : 'choose');
   const [choice, setChoice] = useState<OrgChoice | null>(null);
   const [err, setErr] = useState('');
+  const [grantProgress, setGrantProgress] = useState<{
+    step: number;
+    total: number;
+    label: string;
+    hint?: string;
+  }>({
+    step: 1,
+    total: 5,
+    label: 'Starting…',
+    hint: 'The first time takes a bit — the organization is started on-chain.',
+  });
   const { session } = useSession();
   const tpl = whitelabel.delegationTemplates['org-create'] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
   const orgClient = api.enroll
@@ -1141,6 +1153,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         grantOrg: api.enroll.grantOrg,
         existingOrg,
         signAsOrg: choice?.asSteward,
+        onProgress: setGrantProgress,
       });
       if (!created.ok) { setErr(created.error); setPhase('error'); return; }
       const proved = await personGrantForOrgCreate({ address: personAgent, name: api.enroll.name }, delegate, via, auth, created);
@@ -1169,7 +1182,18 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       </Shell>
     );
   }
-  if (phase === 'busy') return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{existingOrg ? 'Connecting your organization…' : 'Creating your organization…'}</p></div></Shell>;
+  if (phase === 'busy') {
+    return (
+      <Shell>
+        <CeremonyProgress
+          label={grantProgress.label}
+          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : 'The first time takes a bit — the organization is started on-chain.')}
+          step={grantProgress.step}
+          total={grantProgress.total}
+        />
+      </Shell>
+    );
+  }
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
   if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;

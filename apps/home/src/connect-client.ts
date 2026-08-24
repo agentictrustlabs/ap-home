@@ -1723,14 +1723,17 @@ export async function createOrganizationWithGoogle(
   delegate: Address,
   cOpts: CreateChildOpts = {},
   _via: string = 'google',
+  onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
   // Resolve a free org name (label + node), like secureHomeWithGoogle does.
+  onStep?.('Finding a unique name…');
   const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
     label?: string; name?: string; node?: Hex; error?: string;
   };
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
 
   await ensureCsrfToken();
+  onStep?.('Starting the organization on-chain…');
   const res = await fetch('/a2a/custody/oidc/bootstrap-org', {
     method: 'POST',
     credentials: 'include',

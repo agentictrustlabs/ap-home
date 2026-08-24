@@ -511,7 +511,14 @@ export async function createOrganization(
   delegate: Address,
   via: Via = 'passkey',
   auth?: Auth,
-  opts: { purpose?: string; requestedBy?: string; grantOrg?: Address; existingOrg?: Address; signAsOrg?: boolean } = {},
+  opts: {
+    purpose?: string;
+    requestedBy?: string;
+    grantOrg?: Address;
+    existingOrg?: Address;
+    signAsOrg?: boolean;
+    onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
+  } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
   // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback), but
   // isKmsVia/signHashFor/createChildAgentForSite match lowercase. Without this, a SOCIAL home's org-create
@@ -544,6 +551,12 @@ export async function createOrganization(
       };
     }
     try {
+      opts.onProgress?.({
+        step: 1,
+        total: 3,
+        label: 'Connecting the organization…',
+        hint: 'One approval on-chain — Gather27 never holds its keys.',
+      });
       const signHash = await signHashFor(via, org, auth);
       const siteApp = buildApprovedSiteDelegation(org, delegate);        // org → relying app's delegate
       const stewardApp = buildApprovedSiteDelegation(org, home.address); // org → person (stewardship)
@@ -589,7 +602,9 @@ export async function createOrganization(
       // uupg interop: still project the steward relationship (+ the fresh stewardship wire) into the
       // person's impact-relationships vault record — a select-existing may be this org's FIRST exposure
       // to a vault-reading relying app.
+      opts.onProgress?.({ step: 2, total: 3, label: 'Recording the connection…' });
       await projectStewardRelationshipToVault(home.address, via, auth, { agent: org, name: base || null, purpose: opts.purpose, stewardship: toWire(stewardApp.delegation) });
+      opts.onProgress?.({ step: 3, total: 3, label: 'Handing access to the app…' });
       return {
         ok: true,
         org: {
@@ -611,47 +626,63 @@ export async function createOrganization(
   }
   // spec 256 — route by credential, like secureHome: a Google member's org is custodied by their
   // KMS C_sub and deployed server-side (ZERO device prompts); passkey/wallet sign on device.
+  const say = opts.onProgress;
+  say?.({
+    step: 1,
+    total: 5,
+    label: 'Finding a name…',
+    hint: 'The first time takes longer — the organization is started on-chain.',
+  });
   const r = isKmsVia(via)
     ? (auth?.token
-        ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via)
+        ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via, (s) =>
+            say?.({ step: 2, total: 5, label: s, hint: 'Waiting for the network to confirm. This is the slow step.' }),
+          )
         : ({ ok: false, error: 'creating an org with an OIDC home needs a custody session' } as const))
-    : await createChildAgentForSite(home.address, base, delegate, undefined, undefined, opts, via);
+    : await createChildAgentForSite(
+        home.address,
+        base,
+        delegate,
+        (s) => say?.({ step: 2, total: 5, label: s, hint: 'Waiting for the network to confirm. This is the slow step.' }),
+        undefined,
+        opts,
+        via,
+      );
   if (!r.ok) return r;
   const x = r.result;
   // spec 321 — enable channel storage AT CREATE (vault-key bind + standing delivery grant, signed as
   // the org): zero prompts on the KMS family; best-effort — the steward-gated Enable button on the
   // channels page remains the recovery path.
   try {
+    say?.({ step: 3, total: 5, label: 'Opening its private records…', hint: 'The listing will live here — Gather27 only gets a read grant.' });
     const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
     if (!bound.ok) throw new Error(bound.error);
-    const grant = await activateInboxDeliveryIfNeeded(x.childAgent, via, auth);
-    if (!grant.ok) throw new Error(grant.error);
-    // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
-    const ix = await activateInteractionsIfNeeded(x.childAgent, via, auth);
-    if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
-    // spec 321 items 1+3 — seed the org profile record + a default channel (same as the
-    // Organizations-page create), so relying-flow orgs are usable without steward follow-up.
-    if (x.stewardshipDelegation) {
-      await vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: x.childName }).catch((e: unknown) => console.warn('[org-create] org profile seed failed:', e));
-    }
+    // After the vault is bound, the rest is independent — run it together instead of a long queue.
+    await Promise.all([
+      activateInboxDeliveryIfNeeded(x.childAgent, via, auth).then((g) => {
+        if (!g.ok) throw new Error(g.error);
+      }),
+      activateInteractionsIfNeeded(x.childAgent, via, auth).then((ix) => {
+        if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
+      }),
+      x.stewardshipDelegation
+        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: x.childName }).catch((e: unknown) =>
+            console.warn('[org-create] org profile seed failed:', e),
+          )
+        : Promise.resolve(),
+    ]);
     const bearer = homeBearerToken(auth);
     if (bearer) {
-      await fetch('/connect/channels', {
+      say?.({ step: 4, total: 5, label: 'Recording that you oversee it…' });
+      const ixp = activateInteractionsIfNeeded(home.address, via, auth).then((r) => {
+        if (!r.ok) console.warn('[org-create] creator interactions plane not enabled:', r.error);
+      });
+      const channel = fetch('/connect/channels', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
         body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
       }).catch((e) => console.warn('[org-create] default channel failed:', e));
-      // spec 323 W1 — the STEWARD entry in the creator's authoritative relationships doc (person
-      // DO, self-gated), carrying the stewardship wire: a second Home discovers "orgs you steward"
-      // from the person's vault, never from this app's KV (which stays a projection/cache). The
-      // creator needs their own interactions plane — enable it first (zero-prompt on KMS; this
-      // whole block is best-effort like the rest of the ceremony).
-      const ixp = await activateInteractionsIfNeeded(home.address, via, auth);
-      if (!ixp.ok) console.warn('[org-create] creator interactions plane not enabled:', ixp.error);
-      // spec 324 W3 — the creator is BOTH a member AND a steward (ADR-0048 #3/#10: distinct facts). Record the
-      // AUTHORITATIVE OrganizationMembership (Situation + credential) so the "Members · 0 / add yourself" state
-      // is unrepresentable, then stamp its provenance onto the steward projection. Membership ≠ stewardship:
-      // the stewardship delegation is separate administration authority, not the membership itself.
+      await ixp;
       const founderMembership = await writeOrganizationMembership({
         member: home.address,
         org: x.childAgent as Address,
@@ -660,33 +691,50 @@ export async function createOrganization(
         organizationDecisionRef: `org-create-decision:${x.childAgent.toLowerCase()}`,
         bearer,
       });
-      await fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          session: bearer,
-          entry: {
-            org: x.childAgent.toLowerCase(),
-            relationship: 'steward',
-            orgName: x.childName,
-            ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
-            ...(founderMembership ? { membershipId: founderMembership.membershipId, membershipSituationHash: founderMembership.membershipSituationHash, enrollmentDecisionRef: founderMembership.enrollmentDecisionRef } : {}),
-          },
+      await Promise.all([
+        channel,
+        fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: bearer,
+            entry: {
+              org: x.childAgent.toLowerCase(),
+              relationship: 'steward',
+              orgName: x.childName,
+              ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
+              ...(founderMembership
+                ? {
+                    membershipId: founderMembership.membershipId,
+                    membershipSituationHash: founderMembership.membershipSituationHash,
+                    enrollmentDecisionRef: founderMembership.enrollmentDecisionRef,
+                  }
+                : {}),
+            },
+          }),
+        }).catch((e) => console.warn('[org-create] steward relationship write failed:', e)),
+        projectStewardRelationshipToVault(home.address, via, auth, {
+          agent: x.childAgent as Address,
+          name: (x.childName as string | null) ?? null,
+          purpose: opts.purpose,
+          stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
+          membership: (x.membershipDelegation as DelegationWire | null) ?? null,
         }),
-      }).catch((e) => console.warn('[org-create] steward relationship write failed:', e));
+      ]);
     }
   } catch (e) {
     console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
   }
-  // uupg interop — project the steward relationship into the person's impact-relationships vault record
-  // (see projectStewardRelationshipToVault). Best-effort, after the org's own seeding.
-  await projectStewardRelationshipToVault(home.address, via, auth, {
-    agent: x.childAgent as Address,
-    name: (x.childName as string | null) ?? null,
-    purpose: opts.purpose,
-    stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
-    membership: (x.membershipDelegation as DelegationWire | null) ?? null,
-  });
+  if (!homeBearerToken(auth)) {
+    await projectStewardRelationshipToVault(home.address, via, auth, {
+      agent: x.childAgent as Address,
+      name: (x.childName as string | null) ?? null,
+      purpose: opts.purpose,
+      stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
+      membership: (x.membershipDelegation as DelegationWire | null) ?? null,
+    });
+  }
+  say?.({ step: 5, total: 5, label: 'Handing access to the app…' });
   // ADR-0025: the `org` payload carries the private credential + the person SA so the
   // server's /oidc/grant step can write the vault; the relying app receives only the org
   // metadata + proofHash + (optional) brokerDelegation back via /token.
