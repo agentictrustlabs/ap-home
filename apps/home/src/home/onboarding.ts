@@ -631,7 +631,7 @@ export async function createOrganization(
     step: 1,
     total: 5,
     label: 'Finding a name…',
-    hint: 'The first time takes longer — the organization is started on-chain.',
+    hint: 'This step waits on the network — the organization is started on-chain.',
   });
   const r = isKmsVia(via)
     ? (auth?.token

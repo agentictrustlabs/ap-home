@@ -76,7 +76,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     step: 1,
     total: 5,
     label: 'Starting…',
-    hint: 'The first time takes a bit — the organization is started on-chain.',
+    hint: 'This can take a moment.',
   });
   const [home, setHome] = useState<Home | null>(null);
   const [viaLower, setViaLower] = useState<Via>('passkey');

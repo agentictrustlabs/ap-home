@@ -1098,7 +1098,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     step: 1,
     total: 5,
     label: 'Starting…',
-    hint: 'The first time takes a bit — the organization is started on-chain.',
+    hint: 'This can take a moment.',
   });
   const { session } = useSession();
   const tpl = whitelabel.delegationTemplates['org-create'] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
@@ -1187,7 +1187,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       <Shell>
         <CeremonyProgress
           label={grantProgress.label}
-          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : 'The first time takes a bit — the organization is started on-chain.')}
+          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : 'This step waits on the network — the organization is started on-chain.')}
           step={grantProgress.step}
           total={grantProgress.total}
         />
