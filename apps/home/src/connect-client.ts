@@ -44,6 +44,7 @@ import { buildApprovedSiteDelegation,
   toWire, type DelegationWire } from './lib/delegation';
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
+import { demoCustodySignHash, isDemoCustodyHome } from './lib/persona-custody';
 
 /** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
 export type SignHash = (hash: Hex) => Promise<Hex>;
@@ -1312,6 +1313,18 @@ export interface CreateManagedAgentResult {
   stewardshipDelegation?: DelegationWire;
 }
 
+/** Public demo roster names the custodian EOA. Used only after isDemoCustodyHome. */
+async function demoCustodianFor(person: Address): Promise<Address | null> {
+  try {
+    const r = await fetch('/connect/demo-personas');
+    const b = (await r.json()) as { personas?: Array<{ sa?: string; custodian?: string }> };
+    const row = (b.personas ?? []).find((p) => (p.sa ?? '').toLowerCase() === person.toLowerCase());
+    return row?.custodian && /^0x[0-9a-fA-F]{40}$/.test(row.custodian) ? (row.custodian as Address) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Deploy + claim the EXACT name (MAM-D4) + pre-approve the parent stewardship grant — ALL in
  *  ONE gasless passkey userOp (MAM-D5) — then record the PRIVATE link under the person's home
  *  vault (MAM-D7). Custodied by the member's ROOT passkey (MAM-D2). Throws "name taken" rather
@@ -1349,9 +1362,16 @@ export async function createManagedAgent(
   let signHash: SignHash;
   let deployBody: Record<string, unknown>;
   if (viaLc === 'wallet') {
-    const owner = await connectWallet();
+    // Demo people (Ivan Petrov…) are wallet-credential homes whose EOA is held by
+    // this Home, not by the browser. connectWallet() would open MetaMask as the wrong
+    // person. Same zero-prompt path signHashFor already uses for grants.
+    const demoOwner =
+      sessionToken && (await isDemoCustodyHome(sessionToken))
+        ? await demoCustodianFor(input.person)
+        : null;
+    const owner = demoOwner ?? (await connectWallet());
     child = await deriveEoaSa(owner, salt);
-    signHash = (h) => personalSign(owner, h);
+    signHash = demoOwner && sessionToken ? demoCustodySignHash(sessionToken) : (h) => personalSign(owner, h);
     deployBody = { initMethod: 'eoa', owner, salt: salt.toString() };
   } else {
     const pk = loadPasskey();
