@@ -645,7 +645,7 @@ export async function createOrganization(
         delegate,
         (s) => say?.({ step: 2, total: 5, label: s, hint: 'This is the longer step — hang tight.' }),
         undefined,
-        opts,
+        { ...opts, sessionToken: auth?.token },
         via,
       );
   if (!r.ok) return r;

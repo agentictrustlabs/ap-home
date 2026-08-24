@@ -1067,6 +1067,8 @@ export interface CreateChildOpts {
   requestedBy?: string;
   /** A broker org SA to also grant scoped read access to (org → broker delegation). */
   grantOrg?: Address;
+  /** Home session, for the demo-custody wallet branch (keys live at the Home, not the browser). */
+  sessionToken?: string;
 }
 
 /** Deploy a child SA (org / service agent) custodied by the ROOT passkey, claim `<base>.demo.agent`,
@@ -1096,9 +1098,16 @@ export async function createChildAgentForSite(
   let signHash: SignHash;
   let deployBody: Record<string, unknown>;
   if (via === 'wallet') {
-    const owner = await connectWallet();
+    // DEMO ACCOUNTS FIRST — the same branch createManagedAgent grew for workspace deploys: a demo
+    // person's custodian key lives AT THE HOME, and connectWallet() here surfaced as "No Ethereum
+    // wallet found" (or signed as the wrong person) on every org/team create.
+    const demoOwner =
+      cOpts.sessionToken && (await isDemoCustodyHome(cOpts.sessionToken))
+        ? await demoCustodianFor(personAgent)
+        : null;
+    const owner = demoOwner ?? (await connectWallet());
     childAgent = await deriveEoaSa(owner, salt);
-    signHash = (h) => personalSign(owner, h);
+    signHash = demoOwner && cOpts.sessionToken ? demoCustodySignHash(cOpts.sessionToken) : (h) => personalSign(owner, h);
     deployBody = { initMethod: 'eoa', owner, salt: salt.toString() };
   } else {
     const pk = loadPasskey();
