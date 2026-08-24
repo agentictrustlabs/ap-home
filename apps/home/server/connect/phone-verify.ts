@@ -46,7 +46,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const body = (await request.json().catch(() => null)) as { phone?: string; otp?: string } | null;
   const phone = normalizeE164(body?.phone ?? '');
   const otp = (body?.otp ?? '').trim();
-  if (!phone || !/^\d{4,10}$/.test(otp)) return json({ error: 'phone (E.164) + code required' }, 400);
+  if (!phone || !/^\d{4,10}$/.test(otp)) return json({ error: 'that phone number or code didn’t look right — check both and try again' }, 400);
 
   const hash = await phoneHash(phone);
   const key = `phoneverify:${hash}`;

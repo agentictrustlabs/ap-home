@@ -126,8 +126,22 @@ export async function sendSms(env: TwilioEnv, to: string, body: string): Promise
 }
 
 /** Normalize a user-entered phone number to E.164 (`+<country><number>`, 8–15 digits). Identity is ALWAYS
- *  keyed on this canonical form, never the display format. Returns null when it isn't a plausible E.164. */
+ *  keyed on this canonical form, never the display format. FLEXIBLE on input — people type what their
+ *  keypad shows: `(303) 555-1234`, `303.555.1234`, `1 303 555 1234`, `011 44 20…`, `0044 20…` — all of
+ *  which have exactly one E.164 reading. Only a NUMBER we cannot interpret returns null.
+ *  Interpretation rules, in order:
+ *    `+…`            → already international; validate.
+ *    `00…` / `011…`  → international dialing prefix (world / NANP) → `+` + rest.
+ *    11 digits, `1…` → NANP with country code typed → `+1…`.
+ *    10 digits, `2-9…`→ bare US/Canada national number → `+1` + digits.
+ *  A default region beyond NANP would be a guess, not an interpretation — those still need `+`. */
 export function normalizeE164(raw: string): string | null {
   const s = (raw ?? '').trim().replace(/[^\d+]/g, '');
-  return /^\+\d{8,15}$/.test(s) ? s : null;
+  const ok = (v: string) => (/^\+[1-9]\d{7,14}$/.test(v) ? v : null);
+  if (s.startsWith('+')) return ok(`+${s.slice(1).replace(/\D/g, '')}`);
+  if (s.startsWith('00')) return ok(`+${s.slice(2)}`);
+  if (s.startsWith('011')) return ok(`+${s.slice(3)}`);
+  if (/^1[2-9]\d{9}$/.test(s)) return ok(`+${s}`);
+  if (/^[2-9]\d{9}$/.test(s)) return ok(`+1${s}`);
+  return null;
 }

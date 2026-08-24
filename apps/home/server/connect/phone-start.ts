@@ -23,7 +23,12 @@ function devOtp(): string {
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as { phone?: string; aud?: string } | null;
   const phone = normalizeE164(body?.phone ?? '');
-  if (!phone) return json({ error: 'a valid phone number (E.164, e.g. +13035551234) is required' }, 400);
+  if (!phone) {
+    return json(
+      { error: 'we couldn’t read that phone number — a US number like 303 555 1234 works, or start with + and your country code' },
+      400,
+    );
+  }
 
   const aud = body?.aud ?? env.DEMO_SSO_AUD ?? 'demo-sso';
   const key = `phoneverify:${await phoneHash(phone)}`;
