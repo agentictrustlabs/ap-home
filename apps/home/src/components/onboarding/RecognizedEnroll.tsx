@@ -416,6 +416,22 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           },
         );
         if (!created.ok) return fail(created.error);
+        // A TEAM is usable from the first approval or it is not created — the same storage trio
+        // workspace-create runs (a team's own roster lives in its own vault). Scoped to field-team
+        // and to a FRESH deploy: associating an existing org changes nothing about its storage.
+        const freshTeamAgent =
+          enroll.purpose === 'field-team' && !enroll.existingOrg && !orgSel?.existingOrg
+            ? ((created.org as { orgAgent?: string }).orgAgent as Address | undefined)
+            : undefined;
+        if (freshTeamAgent) {
+          setGrantProgress({ step: 2, total: 2, label: 'Enabling the team’s storage…' });
+          const bound = await activateVaultIfNeeded(freshTeamAgent, viaLower as Via, auth);
+          if (!bound.ok) return fail(bound.error);
+          const delivery = await activateInboxDeliveryIfNeeded(freshTeamAgent, viaLower as Via, auth);
+          if (!delivery.ok) console.warn('[team-create] delivery grant not provisioned:', delivery.error);
+          const ix = await activateInteractionsIfNeeded(freshTeamAgent, viaLower as Via, auth);
+          if (!ix.ok) console.warn('[team-create] interactions grant not provisioned:', ix.error);
+        }
         const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);
         if (!proved.ok) return fail(proved.error);
         code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
