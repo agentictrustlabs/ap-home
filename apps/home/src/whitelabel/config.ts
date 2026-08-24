@@ -143,9 +143,10 @@ const faithImpact: WhiteLabelConfig = {
         'http://127.0.0.1:5174/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'workspace-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       operational_delegate: '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
+      serviceAgentConfig: { a2aBase: 'https://field-a2a-production.richardpedersen3.workers.dev' },
     },
     // gather-app — Gather27 (agentictrustlabs/engage apps/gather27-*). Find a group near you;
     // invite-driven host onboarding; events live in the host org vault. Login-grade connect via
@@ -382,6 +383,19 @@ const faithImpact: WhiteLabelConfig = {
     'org-create': {
       canDo: ['Set up an organization under your name', 'View approved org records for this session'],
       cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
+      expiryDays: 365,
+    },
+    'workspace-create': {
+      canDo: [
+        'Create a Field Workspace under your name',
+        'Hold its shared roster and associations in its own vault',
+        'Authorize Field to act as that workspace, revocably',
+      ],
+      cannotDo: [
+        'Take custody of the workspace agent away from you',
+        'Move funds, or touch your sign-in methods or recovery',
+        'Copy field records out of steward vaults',
+      ],
       expiryDays: 365,
     },
     // spec 272/243 — pay-per-access for licensed content. Your personal treasury authorizes capped,

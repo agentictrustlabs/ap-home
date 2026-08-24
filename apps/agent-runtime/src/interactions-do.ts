@@ -1124,7 +1124,13 @@ export class InteractionsDO {
     const names = await this.readLocalNames(grant);
     const local = names[sessionSa.toLowerCase()];
     const localName = typeof local === 'string' && local.trim() ? local.trim() : null;
-    const you = localName ?? listingName ?? (steward ? 'Steward' : null);
+    let publicName: string | null = null;
+    if (!localName && !listingName && !steward) {
+      const resolved = await this.resolvePublicNames([sessionSa]);
+      const hit = resolved[sessionSa.toLowerCase()];
+      publicName = typeof hit === 'string' && hit.trim() ? hit.trim() : null;
+    }
+    const you = localName ?? listingName ?? publicName ?? (steward ? 'Steward' : null);
     return { admitted: true, steward, listed: !!listingName, you };
   }
 
@@ -2587,11 +2593,16 @@ export class InteractionsDO {
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
+        const pendingInvites = (await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []))
+          .filter((i) => i.invitedAgent.toLowerCase() === sessionSa.toLowerCase() && i.status === 'invited')
+          .map((i) => i.topicId);
+        const invited = new Set(pendingInvites);
         // Topic participation: a viewer (an org MEMBER — the gate above) sees every OPEN topic plus only the
-        // RESTRICTED topics they PARTICIPATE in (steward/custodian sees all). Legacy `visibility` records are
-        // mapped to participationPolicy on read (public→open, private→restricted) — lazy, no data migration.
+        // RESTRICTED topics they PARTICIPATE in (steward/custodian sees all). A pending invitee sees that
+        // topic so they can accept — otherwise the invite exists and the room looks empty. Legacy
+        // `visibility` records are mapped to participationPolicy on read (public→open, private→restricted).
         let wire = index
-          .filter((c) => canSeeChannel(c, sessionSa, steward))
+          .filter((c) => canSeeChannel(c, sessionSa, steward) || invited.has(c.descriptor.id))
           // spec 340 W12 — a topic IS an Interaction, so it is served as one. The view is a PROJECTION
           // over what the board already stores (the id derives from `descriptor.id`, the mode from
           // `participationPolicy`), so this adds a field to the wire and nothing to the vault: no
@@ -2610,7 +2621,7 @@ export class InteractionsDO {
           // O(board size) per-poll amplification behind the 2026-07-18 "auth failed" regression).
           Object.assign(bodies, await this.readTopicBodies(grant, messages.map((m) => m.envelope)));
         }
-        return json({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward });
+        return json({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites });
       }
 
       if (op === 'channels.create') {
@@ -3425,18 +3436,27 @@ export class InteractionsDO {
 
       // ── Topic participation ops (restricted topics; tbox/messaging.ttl §Topic participation) ──
       if (op === 'channels.participants' || op === 'channels.invite' || op === 'channels.acceptInvite' || op === 'channels.revokeParticipant') {
-        const name = await this.memberName(grant, principal, sessionCaip);
-        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!name && !steward) return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        const name = presence.you;
+        const steward = presence.steward;
         const channelId = String(body.channelId ?? '');
         if (!channelId) return json({ error: 'channelId required' }, 400);
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const entry = index.find((c) => c.descriptor.id === channelId);
         if (!entry) return json({ error: 'unknown channel' }, 404);
         const policy = channelParticipationPolicy(entry);
+        const topicInvites = (await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []))
+          .filter((i) => i.topicId === channelId && i.status === 'invited');
+        const invitedHere = topicInvites.some((i) => i.invitedAgent.toLowerCase() === sessionSa.toLowerCase());
+        // Accept / roster for an invitee is authorized by the invitation. Member-access (no listing)
+        // is enough to see who is in a room they can already read — the listing gate made grant-holders
+        // look like the room was empty and hid their own join banner.
+        if (!presence.admitted && !invitedHere) {
+          return json({ error: 'join this community first — publish a directory listing to enter its channels' }, 403);
+        }
 
         if (op === 'channels.participants') {
-          if (!canSeeChannel(entry, sessionSa, steward)) return json({ error: 'not a participant of this restricted topic' }, 403);
+          if (!canSeeChannel(entry, sessionSa, steward) && !invitedHere) return json({ error: 'not a participant of this restricted topic' }, 403);
           if (policy === 'open') {
             // OPEN ⇒ participation is DERIVED from org membership — render the org directory, never a
             // stored per-topic list (the aporg:memberOf doctrine).
@@ -3481,11 +3501,13 @@ export class InteractionsDO {
         if (op === 'channels.invite') {
           const invitedAgent = String(body.personSA ?? '').toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(invitedAgent)) return json({ error: 'personSA (0x address) required' }, 400);
-          // Topic invitations select among EXISTING organization members only (a current directory
-          // listing). Bringing a NEW person in is MEMBERSHIP enrollment (spec 324 §12) — never a topic act.
+          // Topic invitations select among EXISTING organization members (a current directory
+          // listing). Bringing a stranger in is MEMBERSHIP enrollment (spec 324 §12) — never a topic act.
+          // A STEWARD may also invite someone the org already granted (inbound wire / role) whose
+          // listing is missing or stale — they are not a new member; accept is still required.
           const nowInv = new Date().toISOString();
           const roster = (await this.readDoc<IndexedListing[]>(grant, DIRECTORY_RESOURCE, [])).filter((l) => isListingCurrent(l.listing, nowInv));
-          if (!roster.some((l) => l.listing.subject.toLowerCase().endsWith(invitedAgent))) {
+          if (!roster.some((l) => l.listing.subject.toLowerCase().endsWith(invitedAgent)) && !steward) {
             return json({ error: 'topic invitations are for existing organization members only — invite them to the organization first (membership enrollment)' }, 403);
           }
           const role: 'facilitator' | 'contributor' = body.role === 'facilitator' ? 'facilitator' : 'contributor';

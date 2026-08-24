@@ -24,13 +24,13 @@ import { givePermission, createOrganization, personGrantForOrgCreate, collectDue
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
-import { fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
+import { createManagedAgent, fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
 import { setFedcmLoginStatus } from '../../context/session';
-import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
+import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi, isCeremonyTemplate, isDeployTemplate } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
@@ -120,7 +120,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       //     nameless connect shape uses) forces the chooser, drops out to `onUnrecognized`, and the request
       //     completes down the ordinary site-login pipeline — one signature, a bare `?code`, and the
       //     ceremony's own branch below never runs. That is what happened to service-agent-wire.
-      const ownerOp = enroll.template === 'org-create' || isCeremonyTemplate(enroll.template);
+      const ownerOp = isDeployTemplate(enroll.template) || isCeremonyTemplate(enroll.template);
       const forceChooser =
         enroll.prompt === 'select_account' || enroll.prompt === 'login' || (!enroll.name && !ownerOp);
       if (forceChooser) {
@@ -278,7 +278,29 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         : Promise.resolve([] as Awaited<ReturnType<typeof listManagedAgents>>);
 
       let code: string;
-      if (enroll.template === 'org-create') {
+      if (enroll.template === 'workspace-create') {
+        const name = (enroll.orgBase ?? orgSel?.orgName ?? '').trim();
+        if (name.length < 3) return fail('Name this field workspace — at least 3 characters.');
+        if (!token) return fail('Your Home session is needed to create a workspace.');
+        const created = await createManagedAgent(
+          { kind: 'workspace', label: name, parent: home.address, person: home.address, via: viaLower },
+          token,
+          (s) => setGrantProgress({ step: 1, total: 2, label: s }),
+        );
+        if (!created.ok) return fail(created.error);
+        const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, {
+          org: {
+            orgAgent: created.result.agent,
+            orgName: created.result.name,
+            kind: 'workspace',
+            purpose: enroll.purpose ?? 'field-workspace',
+            person: home.address,
+          },
+          grant: created.result.stewardshipDelegation,
+        }, enroll.sessionKey);
+        if (!proved.ok) return fail(proved.error);
+        code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
+      } else if (enroll.template === 'org-create') {
         // ORG-CREATE for a RECOGNIZED member (e.g. a facilitator org for demo-jp). This component is
         // reached for a NAMELESS enroll (spec 257 §11) — including org-create — but previously ran ONLY
         // the site-login pipeline below, submitting `org=undefined`. The relying app's /token then

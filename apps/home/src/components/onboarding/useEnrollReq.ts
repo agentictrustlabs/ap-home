@@ -379,6 +379,11 @@ export function useEnrollReq(): EnrollApi {
  */
 export const CEREMONY_TEMPLATES = ['content-signer', 'subscription-collect', 'service-agent-wire'] as const;
 
+/** Templates that deploy a new agent (org or workspace) rather than minting a site-login grant. */
+export function isDeployTemplate(template: string | undefined | null): boolean {
+  return template === 'org-create' || template === 'workspace-create';
+}
+
 export function isCeremonyTemplate(template: string | undefined | null): boolean {
   return !!template && (CEREMONY_TEMPLATES as readonly string[]).includes(template);
 }
