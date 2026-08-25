@@ -7,12 +7,12 @@ import type { AgentKind, ManagedAgent } from '../connect-client';
 /** Classify an app-level managed-agent kind into the closed Person/Org/Service set. */
 export function agentClassOf(kind: AgentKind): AgentType {
   // A team IS an organization (at:Team ⊑ at:Organization) — org-class with a distinct kind word.
-  return kind === 'org' || kind === 'team' ? 'org' : 'service';
+  return kind === 'org' || kind === 'team' || kind === 'circle' || kind === 'church' ? 'org' : 'service';
 }
 
 /** The KIND WORD a row shows for an org-class agent — the subclass, not the class. */
 export function orgKindWordOf(kind: AgentKind): string {
-  return kind === 'team' ? 'team' : 'organization';
+  return kind === 'team' || kind === 'circle' || kind === 'church' ? kind : 'organization';
 }
 
 /** The service ROLE an app-level kind carries (open set; label-only, never branched as a class). */

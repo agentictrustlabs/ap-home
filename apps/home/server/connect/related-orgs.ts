@@ -161,7 +161,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // the read so every consumer (switcher, projections, relying apps) agrees at once.
       kind:
         l.kind ??
-        (l.purpose === 'field-workspace' ? 'workspace' : l.purpose === 'field-team' ? 'team' : 'org'),
+        (l.purpose === 'field-workspace' ? 'workspace' : l.purpose === 'field-team' ? 'team' : l.purpose === 'field-circle' ? 'circle' : l.purpose === 'field-church' ? 'church' : 'org'),
       parent: l.parent ?? person,
       // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
       // records default to 'steward' — the pre-membership control semantics, preserved.

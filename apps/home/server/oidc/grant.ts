@@ -169,7 +169,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       kind:
         orgPayload.kind ??
         existing.kind ??
-        (orgPayload.purpose === 'field-workspace' ? 'workspace' : orgPayload.purpose === 'field-team' ? 'team' : 'org'),
+        (orgPayload.purpose === 'field-workspace' ? 'workspace' : orgPayload.purpose === 'field-team' ? 'team' : orgPayload.purpose === 'field-circle' ? 'circle' : orgPayload.purpose === 'field-church' ? 'church' : 'org'),
       parent: orgPayload.parent ?? existing.parent ?? person,
       createdAt: existing.createdAt ?? Date.now(),
     };

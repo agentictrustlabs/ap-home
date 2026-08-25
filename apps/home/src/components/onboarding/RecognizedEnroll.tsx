@@ -421,7 +421,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // workspace-create runs (a team's own roster lives in its own vault). Scoped to field-team
         // and to a FRESH deploy: associating an existing org changes nothing about its storage.
         const freshTeamAgent =
-          enroll.purpose === 'field-team' && !enroll.existingOrg && !orgSel?.existingOrg
+          (enroll.purpose === 'field-team' || enroll.purpose === 'field-circle' || enroll.purpose === 'field-church') && !enroll.existingOrg && !orgSel?.existingOrg
             ? ((created.org as { orgAgent?: string }).orgAgent as Address | undefined)
             : undefined;
         if (freshTeamAgent) {
