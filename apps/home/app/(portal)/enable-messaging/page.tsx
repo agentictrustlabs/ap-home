@@ -53,18 +53,35 @@ export default function EnableMessagingPage() {
       if (/^0x[0-9a-f]{40}$/.test(orgHint) && !principals.some((p) => p.toLowerCase() === orgHint)) {
         principals.push(orgHint as Address);
       }
+      // A steward RELATIONSHIP is not custody: a stewardship wire lets the person act as the org,
+      // but only the org's custodian credential can sign its activation grants. The row carries no
+      // custody flag (legacy links even default parent to the person), so the server's signature
+      // verification IS the custody test — that specific refusal means "not yours to enable", and
+      // it must not block the principals that are.
+      const NOT_CUSTODIAN = /signature failed verification against the delegator/i;
       const failures: string[] = [];
+      let enabledOrgs = 0;
+      let skippedOrgs = 0;
       for (const p of principals) {
         const a = await activateInteractionsIfNeeded(p, via, auth, true);
         const b = await activateInboxDeliveryIfNeeded(p, via, auth, true);
+        const errs = [a, b].filter((r) => !r.ok);
+        const isPerson = p.toLowerCase() === (agentAddress as string).toLowerCase();
+        if (errs.length && !isPerson && errs.every((r) => NOT_CUSTODIAN.test(r.error ?? ''))) {
+          skippedOrgs += 1;
+          continue;
+        }
         if (!a.ok) failures.push(`${p.slice(0, 10)}… interactions: ${a.error}`);
         if (!b.ok) failures.push(`${p.slice(0, 10)}… delivery: ${b.error}`);
+        if (!errs.length && !isPerson) enabledOrgs += 1;
       }
       if (cancelled) return;
       if (failures.length) { setState('error'); setMsg(failures.join(' · ')); return; }
       setState('done');
-      const orgCount = principals.length - 1;
-      setMsg(`Messaging is on for you${orgCount > 0 ? ` and ${orgCount} organization${orgCount === 1 ? '' : 's'}` : ''}.`);
+      setMsg(
+        `Messaging is on for you${enabledOrgs > 0 ? ` and ${enabledOrgs} organization${enabledOrgs === 1 ? '' : 's'}` : ''}.` +
+        (skippedOrgs > 0 ? ` ${skippedOrgs} stewarded org${skippedOrgs === 1 ? '' : 's'} skipped — its custodian enables its own messaging.` : ''),
+      );
       if (r && isAllowedRelyingOrigin(r)) setTimeout(() => { window.location.href = r; }, 1200);
     })();
     return () => { cancelled = true; };
