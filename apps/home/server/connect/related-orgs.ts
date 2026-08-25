@@ -158,10 +158,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // spec 275: the agent kind + its parent in the member's agent tree. Legacy org
       // links (no kind) default to a person-parented 'org' so the tree still renders.
       // Legacy links predate kind persistence — the purpose tag names what they are. Healed at
-      // the read so every consumer (switcher, projections, relying apps) agrees at once.
+      // the read so every consumer (switcher, projections, relying apps) agrees at once. A stored
+      // GENERIC 'org' with a specific field purpose is the same legacy artifact as a missing kind:
+      // the link was minted before Home's kind union carried the purpose's kind, so the purpose
+      // wins over the stale generic — never over a specific stored kind.
       kind:
-        l.kind ??
-        (l.purpose === 'field-workspace' ? 'workspace' : l.purpose === 'field-team' ? 'team' : l.purpose === 'field-circle' ? 'circle' : l.purpose === 'field-church' ? 'church' : 'org'),
+        (l.kind && l.kind !== 'org' ? l.kind : undefined) ??
+        (l.purpose === 'field-workspace' ? 'workspace' : l.purpose === 'field-team' ? 'team' : l.purpose === 'field-circle' ? 'circle' : l.purpose === 'field-church' ? 'church' : (l.kind ?? 'org')),
       parent: l.parent ?? person,
       // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
       // records default to 'steward' — the pre-membership control semantics, preserved.
