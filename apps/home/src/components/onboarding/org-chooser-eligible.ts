@@ -27,7 +27,8 @@ export function eligibleConnectOrgs<T extends ConnectOrgRow>(
 ): T[] {
   const want = opts.purpose?.trim().toLowerCase();
   return agents
-    .filter((a) => a.kind === 'org' && a.name)
+    // Org-CLASS (ADR-0046): a named team is choosable wherever its purpose matches.
+    .filter((a) => (a.kind === 'org' || a.kind === 'team') && a.name)
     .filter((a) => {
       if (!want) return true;
       return (a.purpose ?? '').trim().toLowerCase() === want;

@@ -24,6 +24,12 @@ describe('eligibleConnectOrgs', () => {
     expect(names).toEqual(['colorado-outreach.impact', 'commons-circle', 'faith.impact']);
   });
 
+  it('a named TEAM is org-class and choosable where its purpose matches (ADR-0046)', () => {
+    const withTeam = [...rows, { kind: 'team' as const, name: 'somali-corridor-team.impact', relationship: 'steward' as const, purpose: 'field-team' }];
+    expect(eligibleConnectOrgs(withTeam, { purpose: 'field-team' }).map((o) => o.name)).toEqual(['somali-corridor-team.impact']);
+    expect(eligibleConnectOrgs(withTeam).map((o) => o.name)).toContain('somali-corridor-team.impact');
+  });
+
   it('drops unnamed rows and non-orgs', () => {
     expect(eligibleConnectOrgs([
       { kind: 'org', name: '', relationship: 'member' },

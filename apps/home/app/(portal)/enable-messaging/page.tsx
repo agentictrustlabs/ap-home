@@ -14,6 +14,7 @@ import { useSession } from '../../../src/context/session';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
 import { activateInteractionsIfNeeded, activateInboxDeliveryIfNeeded, type Via } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
+import { agentClassOf } from '../../../src/lib/agent-class';
 
 export default function EnableMessagingPage() {
   const { session, agentAddress, phase } = useSession();
@@ -46,7 +47,8 @@ export default function EnableMessagingPage() {
       // Principals to refresh: the person + every ORG they STEWARD (custodial control — a 'member' link is
       // authority-only and its owner enables its own planes). The person's credential custodies these orgs
       // (org-create deploys them under the same custodian), so it can sign their grants.
-      const orgs = agents.filter((a) => a.kind === 'org' && a.relationship !== 'member').map((a) => a.agent as Address);
+      // Class, not kind (ADR-0046): a stewarded TEAM is an org whose planes turn on here too.
+      const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org' && a.relationship !== 'member').map((a) => a.agent as Address);
       const principals: Address[] = [agentAddress as Address, ...orgs];
       if (/^0x[0-9a-f]{40}$/.test(orgHint) && !principals.some((p) => p.toLowerCase() === orgHint)) {
         principals.push(orgHint as Address);

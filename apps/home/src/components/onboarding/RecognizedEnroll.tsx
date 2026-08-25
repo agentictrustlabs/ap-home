@@ -40,6 +40,7 @@ import { CeremonyProgress } from './CeremonyProgress';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
+import { agentClassOf } from '../../lib/agent-class';
 
 type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
@@ -517,7 +518,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           // Site-login reuses the projection read started before the grant leg — one fetch, not two.
           // An org-create just deployed a NEW org, so it must re-read the projection instead.
           const managed = enroll.template === 'site-login' ? await managedPromise : await listManagedAgents(token);
-          const orgs = managed.filter((a) => a.kind === 'org');
+          const orgs = managed.filter((a) => agentClassOf(a.kind) === 'org');
           if (orgs.length === 0) {
             await provisionCommunityMessaging({ person: home.address, named, via: viaLower, token });
           }

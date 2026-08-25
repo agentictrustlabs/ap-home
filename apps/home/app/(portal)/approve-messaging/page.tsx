@@ -12,6 +12,7 @@ import { resolveVia } from '../../../src/home/onboarding';
 import { isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 import { CONTRACTS } from '../../../src/lib/chain';
 import { listManagedAgents } from '../../../src/connect-client';
+import { agentClassOf } from '../../../src/lib/agent-class';
 
 const ADDR = /^0x[0-9a-f]{40}$/;
 
@@ -55,7 +56,7 @@ export default function ApproveMessagingPage() {
         //     gate, so a kick severs reach instantly and a new joiner is reachable at once).
         // Org lookup is best-effort: a directory hiccup narrows the mint, never blocks the approval.
         const orgs = await listManagedAgents(session.token)
-          .then((all) => all.filter((a) => a.kind === 'org').map((a) => a.agent.toLowerCase() as Address))
+          .then((all) => all.filter((a) => agentClassOf(a.kind) === 'org').map((a) => a.agent.toLowerCase() as Address))
           .catch(() => [] as Address[]);
         await approveMessagingContact({
           person: agentAddress as Address,

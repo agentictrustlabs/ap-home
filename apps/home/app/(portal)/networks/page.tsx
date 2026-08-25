@@ -15,6 +15,7 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
 import { issueDirectoryListing } from '../../../src/home/directory';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
+import { agentClassOf } from '../../../src/lib/agent-class';
 
 const NETWORKS_INDEX = 'networks';
 
@@ -25,7 +26,7 @@ export default function NetworksPage() {
   // spec 341 §5.1b — a send the person can unblock with one signature, kept apart from real errors.
   const [wireNeeded, setWireNeeded] = useState<MessagingWireRequiredError | null>(null);
   const { agents } = useManagedAgents(session?.token ?? null);
-  const orgs = agents.filter((a) => a.kind === 'org' && a.name);
+  const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org' && a.name);
 
   const [listings, setListings] = useState<Listing[]>([]);
   const [selectedOrg, setSelectedOrg] = useState<string>('');

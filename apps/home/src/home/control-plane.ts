@@ -62,6 +62,7 @@ export function toConnectedAppGrant(scope: string, wire: DelegationWire, revoked
 
 const AGENT_TYPE: Record<string, ManagedAgentEntryV1['agentType']> = {
   org: 'organization',
+  team: 'organization',
   'person-treasury': 'treasury',
   'org-treasury': 'treasury',
 };
@@ -73,7 +74,7 @@ export function toManagedAgentEntry(a: { agent: string; kind: string; parent: st
   return {
     agent: homeCaip10(a.agent as Address),
     agentType: self ? 'person' : (AGENT_TYPE[a.kind] ?? 'service'),
-    relationship: self ? 'self' : a.kind === 'org' ? 'administered_by_subject' : 'owned_by_subject',
+    relationship: self ? 'self' : AGENT_TYPE[a.kind] === 'organization' ? 'administered_by_subject' : 'owned_by_subject',
     // The member's ROOT credential custodies every agent in the spec 275 tree.
     controlGrade: 'custody',
     status: 'active',
