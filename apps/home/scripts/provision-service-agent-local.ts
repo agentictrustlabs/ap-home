@@ -78,8 +78,12 @@ if (custodian.address.toLowerCase() === DELEGATE.toLowerCase()) {
 }
 const accounts = new AgentAccountClient({ rpcUrl: RPC_URL, chainId, entryPoint: d.entryPoint, factory: d.agentAccountFactory });
 
-// 1. Deploy the service SA.
-const spec = { mode: 0, custodians: [custodian.address] as const, salt: 0n };
+// 1. Deploy the service SA. The salt MUST vary per handle: with one shared dev custodian, a fixed
+//    salt makes every service identity the same CREATE2 address — and the permissionless
+//    subregistry's one-claim-per-caller rule then blocks every name after the first. `SALT`
+//    overrides for identities that already exist at a specific address.
+const salt = process.env.SALT !== undefined ? BigInt(process.env.SALT) : BigInt(keccak256(toBytes(`service-agent/${HANDLE}/v1`)));
+const spec = { mode: 0, custodians: [custodian.address] as const, salt };
 const sa = await accounts.getAddressForAgentAccount(spec);
 const deployed = await accounts.isDeployed(sa);
 if (!deployed) await accounts.createAgentAccountFromAccount(spec, payer);
