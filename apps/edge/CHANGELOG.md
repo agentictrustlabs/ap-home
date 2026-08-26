@@ -1,5 +1,13 @@
 # @agenticprimitives-demo/edge
 
+## 0.0.1-alpha.4
+
+### Patch Changes
+
+- @agenticprimitives/admission@0.0.0-alpha.3
+- @agenticprimitives/edge-runtime@0.0.0-alpha.4
+- @agenticprimitives/edge-cloudflare@0.0.0-alpha.4
+
 ## 0.0.1-alpha.3
 
 ### Patch Changes
