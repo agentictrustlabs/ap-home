@@ -1,49 +1,99 @@
-// Base Sepolia (chain 84532) config for the REAL Connect directory (spec 227).
-// R7.3: addresses come from the @agenticprimitives/contracts package's
-// generated deployments module so a contracts redeploy auto-propagates here
-// without any per-app sync (this used to require touching three chain.ts
-// files in lockstep — see 2026-06-01 deploy session for the bug class).
+// The chain + contract table this Home build targets. Base Sepolia (84532) by default —
+// the deployed configuration — but selectable per build so the SAME app runs against a
+// local chain (anvil, or a private QBFT chain such as faithnet) for development and e2e.
+//
+// Selection (all build-time; NEXT_PUBLIC_* is inlined into the client bundle):
+//   NEXT_PUBLIC_CHAIN_ID        chain id (default 84532)
+//   NEXT_PUBLIC_RPC_URL         browser-side RPC default (server code still prefers env.RPC_URL)
+//   NEXT_PUBLIC_CONTRACTS_JSON  a `deployments-<network>.json` document as ONE JSON string. Local
+//                               deployments are machine-specific and gitignored, so they are injected
+//                               here rather than imported — `scripts/gen-dev-vars.ts` writes it.
+//
+// R7.3: the Base Sepolia addresses come from the @agenticprimitives/contracts package's generated
+// deployments module so a contracts redeploy auto-propagates here without any per-app sync (this
+// used to require touching three chain.ts files in lockstep — see 2026-06-01 deploy session).
 
+import { defineChain, type Chain } from 'viem';
+import { baseSepolia } from 'viem/chains';
 import type { Address } from '@agenticprimitives/types';
-import { CONTRACTS as DEPLOYED } from '@agenticprimitives/contracts/deployments/base-sepolia';
+import { CONTRACTS as BASE_SEPOLIA } from '@agenticprimitives/contracts/deployments/base-sepolia';
 
-export const CHAIN_ID = 84532;
+type DeploymentsDoc = Record<string, string | number | undefined> & { chainId?: number; deploymentEpoch?: string };
 
-/** Public Base Sepolia RPC. Override with RPC_URL (server) / VITE_RPC_URL (browser). */
-export const DEFAULT_RPC_URL = 'https://sepolia.base.org';
+function parseInjected(raw: string | undefined): DeploymentsDoc | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as DeploymentsDoc;
+    return d && typeof d === 'object' ? d : null;
+  } catch {
+    throw new Error('NEXT_PUBLIC_CONTRACTS_JSON is not valid JSON');
+  }
+}
 
-/** Deployed Base Sepolia contracts. Single source of truth:
- *  `packages/contracts/deployments-base-sepolia.json`, surfaced here via
- *  the `@agenticprimitives/contracts/deployments/base-sepolia` subpath. */
+const INJECTED = parseInjected(process.env.NEXT_PUBLIC_CONTRACTS_JSON);
+
+export const CHAIN_ID: number = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? INJECTED?.chainId ?? baseSepolia.id);
+if (!Number.isInteger(CHAIN_ID) || CHAIN_ID <= 0) throw new Error(`NEXT_PUBLIC_CHAIN_ID is not a positive integer`);
+
+/** RPC default. Public Base Sepolia on the deployed chain; a local node otherwise. Override with
+ *  RPC_URL (server) / NEXT_PUBLIC_RPC_URL (browser). */
+export const DEFAULT_RPC_URL: string =
+  process.env.NEXT_PUBLIC_RPC_URL ?? (CHAIN_ID === baseSepolia.id ? 'https://sepolia.base.org' : 'http://127.0.0.1:8545');
+
+/** The viem Chain object every client in this app should be built with (never `baseSepolia` directly:
+ *  a client whose chain id differs from the node's signs transactions the node rejects). */
+export const CHAIN: Chain =
+  CHAIN_ID === baseSepolia.id
+    ? baseSepolia
+    : defineChain({
+        id: CHAIN_ID,
+        name: `chain-${CHAIN_ID}`,
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: { default: { http: [DEFAULT_RPC_URL] } },
+      });
+
+/** CAIP-2 network id for this chain (`eip155:<id>`). */
+export const CAIP2_NETWORK = `eip155:${CHAIN_ID}` as const;
+
+const DEPLOYED: DeploymentsDoc = INJECTED ?? (BASE_SEPOLIA as unknown as DeploymentsDoc);
+if (INJECTED && INJECTED.chainId != null && Number(INJECTED.chainId) !== CHAIN_ID) {
+  throw new Error(`NEXT_PUBLIC_CONTRACTS_JSON is for chain ${INJECTED.chainId}, but CHAIN_ID is ${CHAIN_ID}`);
+}
+
 /** Spec 311 — authority deployment epoch of the contracts this build targets. */
-export const DEPLOYMENT_EPOCH: string | undefined = (DEPLOYED as { deploymentEpoch?: string }).deploymentEpoch;
+export const DEPLOYMENT_EPOCH: string | undefined = DEPLOYED.deploymentEpoch;
 
+const addr = (k: string): Address => (DEPLOYED[k] ?? '0x0000000000000000000000000000000000000000') as Address;
+
+/** Deployed contracts for CHAIN_ID. Single source of truth: `packages/contracts/deployments-<network>.json`
+ *  (Base Sepolia via the `@agenticprimitives/contracts/deployments/base-sepolia` subpath; anything else via
+ *  NEXT_PUBLIC_CONTRACTS_JSON). Keys absent from a local deployment resolve to the zero address. */
 export const CONTRACTS = {
-  entryPoint: DEPLOYED.entryPoint as Address,
-  agentAccountFactory: DEPLOYED.agentAccountFactory as Address,
-  agentAccountImplementation: DEPLOYED.agentAccountImplementation as Address,
-  agentNameRegistry: DEPLOYED.agentNameRegistry as Address,
-  agentNameUniversalResolver: DEPLOYED.agentNameUniversalResolver as Address,
-  agentNameResolver: DEPLOYED.agentNameResolver as Address,
-  agentProfileResolver: DEPLOYED.agentProfileResolver as Address,
-  custodyPolicy: DEPLOYED.custodyPolicy as Address,
-  permissionlessSubregistry: DEPLOYED.permissionlessSubregistry as Address,
-  agentRelationship: DEPLOYED.agentRelationship as Address,
+  entryPoint: addr('entryPoint'),
+  agentAccountFactory: addr('agentAccountFactory'),
+  agentAccountImplementation: addr('agentAccountImplementation'),
+  agentNameRegistry: addr('agentNameRegistry'),
+  agentNameUniversalResolver: addr('agentNameUniversalResolver'),
+  agentNameResolver: addr('agentNameResolver'),
+  agentProfileResolver: addr('agentProfileResolver'),
+  custodyPolicy: addr('custodyPolicy'),
+  permissionlessSubregistry: addr('permissionlessSubregistry'),
+  agentRelationship: addr('agentRelationship'),
   // ERC-7710 delegation (ADR-0019: relying site = scoped delegate of the person SA).
-  delegationManager: DEPLOYED.delegationManager as Address,
-  timestampEnforcer: DEPLOYED.timestampEnforcer as Address,
-  allowedTargetsEnforcer: DEPLOYED.allowedTargetsEnforcer as Address,
-  allowedMethodsEnforcer: DEPLOYED.allowedMethodsEnforcer as Address,
-  valueEnforcer: DEPLOYED.valueEnforcer as Address,
+  delegationManager: addr('delegationManager'),
+  timestampEnforcer: addr('timestampEnforcer'),
+  allowedTargetsEnforcer: addr('allowedTargetsEnforcer'),
+  allowedMethodsEnforcer: addr('allowedMethodsEnforcer'),
+  valueEnforcer: addr('valueEnforcer'),
   // spec 272/243 — PaymentEnforcer gates an x402 payment delegation (treasury → treasury):
   // per-charge + aggregate caps, transfer-only, single-use nonce, payee-bound.
-  paymentEnforcer: DEPLOYED.paymentEnforcer as Address,
+  paymentEnforcer: addr('paymentEnforcer'),
   // spec 253 — the org-create ceremony batches approveHash(digest) for its outbound
   // grants into the deploy userOp; the SA's isValidSignature 0x03 branch consults this.
-  approvedHashRegistry: DEPLOYED.approvedHashRegistry as Address,
+  approvedHashRegistry: addr('approvedHashRegistry'),
   // Demo USDC (spec 272/243) — the treasury views read its balanceOf for each treasury SA.
-  mockUsdc: DEPLOYED.mockUsdc as Address,
+  mockUsdc: addr('mockUsdc'),
   // spec 279 — AgentRegistryBase: the SA-anchored discovery registry the Registry tab reads
   // (registry entries per named agent) + registers named agents into.
-  agentRegistryBase: DEPLOYED.agentRegistryBase as Address,
+  agentRegistryBase: addr('agentRegistryBase'),
 } as const satisfies Record<string, Address>;

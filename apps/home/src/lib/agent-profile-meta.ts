@@ -3,10 +3,9 @@
 // (authOrigin at onboarding, declared capabilities by the spec-282 ceremony), and the home deliberately ships no
 // editor for it. One mechanism: direct readContract of the `atl:` predicates (ADR-0012-safe views).
 import { createPublicClient, http, keccak256, toBytes } from 'viem';
-import { baseSepolia } from 'viem/chains';
 import { agentProfileResolverAbi } from '@agenticprimitives/agent-profile';
 import type { Address } from '@agenticprimitives/types';
-import { CONTRACTS, DEFAULT_RPC_URL } from './chain';
+import { CONTRACTS, DEFAULT_RPC_URL, CHAIN } from './chain';
 
 export const SA_PROFILE_KEYS = [
   { key: 'displayName', label: 'Display name' },
@@ -20,7 +19,7 @@ export const SA_PROFILE_KEYS = [
 export type SaProfileMeta = Partial<Record<(typeof SA_PROFILE_KEYS)[number]['key'], string>>;
 
 export async function readSaProfileMeta(sa: Address): Promise<SaProfileMeta> {
-  const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+  const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
   const out: SaProfileMeta = {};
   for (const { key } of SA_PROFILE_KEYS) {
     const v = (await pc

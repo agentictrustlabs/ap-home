@@ -16,7 +16,7 @@ import { buildTreasuryScope, TREASURY_PROFILES, type TreasuryProfileId } from '@
 import { executeCalls, setSkills } from '../../connect-client';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { issueScopedDelegation } from '../../lib/delegation';
-import { CONTRACTS } from '../../lib/chain';
+import { CONTRACTS, CAIP2_NETWORK } from '../../lib/chain';
 import { A2A_DOMAIN, nameLabel } from '../../lib/domain';
 import { connectTreasuryCeremony, type ConnectTreasuryResult } from '../../lib/connect-treasury';
 import { AddressChip } from '../shared/AddressChip';
@@ -81,7 +81,7 @@ export function ConnectTreasuryModal({
       const scope = buildTreasuryScope({
         allowedSkillIds: TREASURY_PROFILES[profile].skillIds,
         allowedTargets: [hostDelegate as Address],
-        networks: ['eip155:84532'],
+        networks: [CAIP2_NETWORK],
         notBefore: now,
         notAfter: now + YEAR,
       });

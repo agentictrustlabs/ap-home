@@ -37,7 +37,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { localKekEnabled, localKekRef, resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
@@ -445,6 +445,9 @@ export interface Env {
    *  Default us-east1 / vault-keks. project_id + runtime SA are read from GCP_SERVICE_ACCOUNT_JSON. */
   GCP_KEK_LOCATION?: string;
   GCP_KEK_KEYRING?: string;
+  /** DEV ONLY (refused in production): derive per-person KEKs locally instead of GCP Cloud KMS so the
+   *  vault ceremony + reads/writes work on a local stack. See vault-key.ts `localKekEnabled`. */
+  DEMO_VAULT_LOCAL_KEK_SECRET?: string;
   /** Gates POST /custody/vault-key/provision (on-demand KEK creation — wields the admin credential).
    *  Fail-closed: the route 404s unless this is 'true'. The demo sets it; production leaves it unset
    *  and provisions out of band. */
@@ -1877,6 +1880,8 @@ app.get('/custody/vault-key/server-info', (c) => {
       const keyRing = (c.env.GCP_KEK_KEYRING ?? '').trim() || 'vault-keks';
       if (sa.project_id) kmsKeyRef = `projects/${sa.project_id}/locations/${location}/keyRings/${keyRing}/cryptoKeys/${sanitizeKeyId(owner)}`;
     } catch { /* GCP env absent/unparseable → null; client signs the bind the old way */ }
+    // Dev-only local KEK (no GCP): same deterministic-ref contract, derived per owner.
+    if (!kmsKeyRef && localKekEnabled(c.env)) kmsKeyRef = localKekRef(owner);
   }
   return c.json({
     serverId: VAULT_SERVER_ID,
@@ -1907,7 +1912,10 @@ app.get('/custody/vault-key/server-info', (c) => {
 // (operator-side `provision-vault-kek.ts`, ideally with a least-privilege/separate admin credential).
 app.post('/custody/vault-key/provision', async (c) => {
   if (c.env.DEMO_VAULT_PROVISION_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
-  if (!c.env.GCP_SERVICE_ACCOUNT_JSON) {
+  // Dev-only local KEKs (vault-key.ts): nothing to mint — the ref is derived — but the owner-control
+  // proof below is still enforced so the route contract is identical.
+  const useLocalKek = !c.env.GCP_SERVICE_ACCOUNT_JSON && localKekEnabled(c.env);
+  if (!c.env.GCP_SERVICE_ACCOUNT_JSON && !useLocalKek) {
     return c.json({ error: 'unsupported', error_description: 'GCP_SERVICE_ACCOUNT_JSON unset (provisioning unavailable)' }, 501);
   }
   let body: Record<string, unknown> = {};
@@ -1940,9 +1948,12 @@ app.post('/custody/vault-key/provision', async (c) => {
     );
     if (!proof.ok) return c.json({ error: 'unauthorized', error_description: proof.reason }, 401);
   }
+  if (useLocalKek) {
+    return c.json({ ok: true, owner: owner.toLowerCase(), kmsKeyRef: localKekRef(owner), alreadyExisted: true });
+  }
   let sa: { project_id?: string; client_email?: string };
   try {
-    const raw = c.env.GCP_SERVICE_ACCOUNT_JSON.trim();
+    const raw = c.env.GCP_SERVICE_ACCOUNT_JSON!.trim();
     sa = JSON.parse(raw.startsWith('{') ? raw : atob(raw)) as { project_id?: string; client_email?: string };
   } catch {
     return c.json({ error: 'misconfigured', error_description: 'GCP_SERVICE_ACCOUNT_JSON not parseable' }, 500);
@@ -1955,7 +1966,7 @@ app.post('/custody/vault-key/provision', async (c) => {
   try {
     const result = await executeGcpProvision(
       { project: sa.project_id, location, keyRing, identities: [owner], runtimeServiceAccount: sa.client_email, purpose: 'encrypt-decrypt' },
-      createGcpRestStepExecutor({ serviceAccountJson: c.env.GCP_SERVICE_ACCOUNT_JSON }),
+      createGcpRestStepExecutor({ serviceAccountJson: c.env.GCP_SERVICE_ACCOUNT_JSON! }),
     );
     const kmsKeyRef = result.keyMap[owner];
     if (!kmsKeyRef) return c.json({ ok: false, error: 'provision_failed', error_description: 'no key in provisioning result' }, 500);

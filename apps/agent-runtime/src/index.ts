@@ -44,7 +44,7 @@ import {
   parseUint256Decimal,
   parseUint48,
 } from './validate';
-import { baseSepolia } from 'viem/chains';
+import { chainFor } from './chain';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -393,6 +393,9 @@ export interface Env {
    *  signed by it (callMcpToolBound) instead of server-mint. When set, the DO prefers the bound path; when
    *  unset, the DO falls back to server-mint (DEMO_ALLOW_SERVER_MINT). Read directly from env (not process.env). */
   GCP_KMS_INTERACTIONS_KEY_NAME?: string;
+  /** DEV ONLY — the interactions-session signer as a local secp256k1 key (a workstation has no Cloud
+   *  KMS). Used only when GCP_KMS_INTERACTIONS_KEY_NAME is unset; key-custody refuses it in production. */
+  A2A_INTERACTIONS_SESSION_PRIVATE_KEY?: string;
   /** Service-account JSON (set as wrangler secret). Same SA as the
    *  signing key; needs roles/cloudkms.cryptoKeyEncrypterDecrypter on
    *  GCP_KMS_ENCRYPT_KEY_NAME. */
@@ -1229,7 +1232,7 @@ app.get('/agent/identity', async (c) => {
 // and signs a sessionDelegation leaf binding it to the principal, so the DO can CLIENT-MINT bound vault
 // tokens (no server-mint). 404 when the interactions-session KMS key isn't configured (bound-mint disabled).
 app.get('/agent/interactions-session-key', async (c) => {
-  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+  if (!interactionsSessionKeyConfigured(c.env)) {
     return c.json({ ok: false, error: 'interactions_session_key_unconfigured' }, 404);
   }
   try {
@@ -1269,7 +1272,7 @@ app.post('/peer-attest', async (c) => {
     'access-control-allow-headers': 'content-type',
     'cache-control': 'no-store',
   };
-  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+  if (!interactionsSessionKeyConfigured(c.env)) {
     return c.json({ ok: false, error: 'attestation_unconfigured' }, 404, cors);
   }
 
@@ -2174,8 +2177,8 @@ app.post('/session/direct-deploy', async (c) => {
     // R5.12d: KMS-backed relayer for funded direct-deploy ops.
     // Replaces privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY).
     const deployer = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
 
     const predicted = (await pub.readContract({
       address: c.env.AGENT_ACCOUNT_FACTORY as Address,
@@ -2441,7 +2444,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
     }
 
     // Idempotent: if already deployed, the atomic deploy+claim already ran.
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
       return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
@@ -2555,7 +2558,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
     }
 
     // Idempotent: if already deployed (named or nameless), the home exists.
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
       return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
@@ -3676,8 +3679,8 @@ app.post('/session/custody-schedule', async (c) => {
       return badInputResponse(c, e) as Response;
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
       address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
@@ -3713,8 +3716,8 @@ app.post('/session/custody-apply', async (c) => {
       return badInputResponse(c, e) as Response;
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
       address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
@@ -3874,7 +3877,7 @@ async function verifyDelegation(
     }
   }
   // ERC-1271 verify against the delegator smart account.
-  const pub = createPublicClient({ chain: baseSepolia, transport: http(env.RPC_URL) });
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
   // Use the CANONICAL delegation hash (packages/delegation hashDelegation) — it matches the
   // on-chain DelegationManager CAVEAT_TYPEHASH, which EXCLUDES `args` from the signed hash
   // (audit F-1). The previous inline hashTypedData here wrongly included `args` in the Caveat
@@ -4157,20 +4160,39 @@ let _interactionsSessionAccount: Awaited<ReturnType<typeof createKmsViemAccount>
 export async function interactionsSessionAccount(env: Env): Promise<Awaited<ReturnType<typeof createKmsViemAccount>>> {
   if (_interactionsSessionAccount) return _interactionsSessionAccount;
   const keyName = (env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim();
-  if (!keyName) {
+  const localKey = (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim();
+  if (!keyName && !localKey) {
     throw new Error('GCP_KMS_INTERACTIONS_KEY_NAME unset — the InteractionsDO bound-mint (NEW-C1) needs the interactions-session KMS key');
   }
-  const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
-  if (!serviceAccountJson) {
-    throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
+  let backend;
+  if (keyName) {
+    const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
+    if (!serviceAccountJson) {
+      throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
+    }
+    backend = buildSignerBackend({
+      backend: 'gcp-kms',
+      config: { cryptoKeyVersionName: keyName, serviceAccountJson },
+      auditSink: buildAuditSink(env),
+    });
+  } else {
+    // DEV ONLY — a local stack has no Cloud KMS. Same shape as the relayer's `local-aes` path
+    // (LocalSecp256k1Signer keeps key-custody's production guard: refused unless NODE_ENV≠production or
+    // A2A_ALLOW_LOCAL_MASTER_KEY). The Home still binds THIS key's address to the principal with a
+    // principal-signed leaf, so the token contract is unchanged; only where the key lives differs.
+    backend = buildSignerBackend({
+      backend: 'local-aes',
+      config: { privateKeyHex: localKey },
+      auditSink: buildAuditSink(env),
+    });
   }
-  const backend = buildSignerBackend({
-    backend: 'gcp-kms',
-    config: { cryptoKeyVersionName: keyName, serviceAccountJson },
-    auditSink: buildAuditSink(env),
-  });
   _interactionsSessionAccount = await createKmsViemAccount(backend);
   return _interactionsSessionAccount;
+}
+
+/** Is an interactions-session signer configured (KMS in production, a local dev key on a workstation)? */
+function interactionsSessionKeyConfigured(env: Env): boolean {
+  return !!((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim() || (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim());
 }
 
 function toDelegationStruct(w: IncomingDelegation): Delegation {
@@ -4726,7 +4748,7 @@ app.post('/admin/topup-paymaster', async (c) => {
       );
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
 
     let depositBefore: bigint;
     try {
@@ -4792,7 +4814,7 @@ app.post('/admin/topup-paymaster', async (c) => {
 
     let hash: `0x${string}`;
     try {
-      const wallet = createWalletClient({ account: deployerAcct, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+      const wallet = createWalletClient({ account: deployerAcct, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
       hash = await wallet.writeContract({
         address: c.env.PAYMASTER as Address,
         abi: TOPUP_PAYMASTER_ABI,
@@ -4879,7 +4901,7 @@ app.post('/session/package', async (c) => {
   // (eventual consistency across replicas), so a naive single verify can spuriously fail right after
   // /session/deploy. Bounded-retry the SAME ERC-1271 read until the SA has code + verifies (ADR-0013: a
   // bounded retry of one mechanism, NOT a fallback to a weaker one). Accept on the first valid result.
-  const pubForPkg = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+  const pubForPkg = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let isValid = false;
   let lastCodeLen = 0;

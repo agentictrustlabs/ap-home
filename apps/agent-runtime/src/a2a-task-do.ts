@@ -12,7 +12,7 @@
 // follow-up; this leg is poll-based (`tasks/get`), so the worker holds no agent key (SC-8 honored).
 /// <reference types="@cloudflare/workers-types" />
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
-import { baseSepolia } from 'viem/chains';
+import { chainFor } from './chain';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import { checkSessionWireShape } from './session-wire.js';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
@@ -596,7 +596,7 @@ export class A2aTaskDO {
 
   private build(agentSA: Address): A2aAgent {
     if (this.agent) return this.agent;
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(this.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(this.env), transport: http(this.env.RPC_URL) });
     const chainId = Number(this.env.CHAIN_ID ?? 84532);
     const dm = this.env.DELEGATION_MANAGER as Address;
     // Inline ERC-1271 (direct SA isValidSignature) — the fallback when the resilient reader can't be built.

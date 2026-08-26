@@ -6,9 +6,8 @@
 // work. Endpoints are read on-chain (the canonical source) from the AgentNameResolver, keyed by namehash.
 import { useEffect, useState, type CSSProperties } from 'react';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
-import { baseSepolia } from 'viem/chains';
 import { namehash } from '@agenticprimitives/agent-naming';
-import { CONTRACTS } from '../../lib/chain';
+import { CONTRACTS, CHAIN } from '../../lib/chain';
 
 const NAME_RESOLVER_ABI = [
   { type: 'function', name: 'getString', stateMutability: 'view', inputs: [{ name: 'subject', type: 'bytes32' }, { name: 'predicate', type: 'bytes32' }], outputs: [{ type: 'string' }] },
@@ -21,7 +20,7 @@ function useHostBindings(name: string): { a2a: string; mcp: string; loaded: bool
   useEffect(() => {
     if (!name) { setState({ a2a: '', mcp: '', loaded: true }); return; }
     let cancelled = false;
-    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
     const node = namehash(name) as Hex;
     const read = (key: string) => pub.readContract({ address: CONTRACTS.agentNameResolver as Address, abi: NAME_RESOLVER_ABI, functionName: 'getString', args: [node, pred(key)] }).catch(() => '') as Promise<string>;
     Promise.all([read('a2aEndpoint'), read('mcpEndpoint')])

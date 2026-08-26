@@ -16,10 +16,10 @@ import { issueDiscoveryGrant, revokeDiscoveryGrant } from '../../../home/resolut
 import { parseDiscoveryAuthorityBundle } from '../../../home/discovery-authority';
 import { Card, Row, Stack } from '../../shared/ui';
 import { BusyButton } from '../../shared/BusyButton';
+import { CHAIN_ID } from '../../../lib/chain';
 
 /** Where the demo resolver lives. A grant is bound to this exact audience. */
 const RESOLVER_AUDIENCE = 'https://demo-resolver.richardpedersen3.workers.dev/v1/private';
-const CHAIN_ID = 84532;
 
 interface Issued {
   grantId: string;
