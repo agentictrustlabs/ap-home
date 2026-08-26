@@ -16,7 +16,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import type { Hex } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
-import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
+import { demoPersonaFor, signDigestAsDemoPersona, signTypedDataAsDemoPersona } from '../_lib/demo-custody';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -43,7 +43,24 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const persona = demoPersonaFor(env, person);
   if (!persona) return json({ ok: true, persona: false });
 
-  const body = (await request.json().catch(() => null)) as { digest?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { digest?: string; typedData?: { domain?: unknown; types?: unknown; primaryType?: string; message?: unknown } }
+    | null;
+
+  // EIP-712 typed-data path (demo-web-pro's custody quorum slots sign structured data, not a raw digest).
+  if (body?.typedData) {
+    const td = body.typedData;
+    if (!td.types || !td.primaryType || !td.message) {
+      return json({ error: 'typedData requires types, primaryType, message' }, 400);
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return json({ ok: true, persona: true, signature: await signTypedDataAsDemoPersona(persona, td as any) });
+    } catch (e) {
+      return json({ error: `could not sign typed data: ${e instanceof Error ? e.message : String(e)}` }, 500);
+    }
+  }
+
   const digest = (body?.digest ?? '').trim();
   if (!digest) return json({ ok: true, persona: true, handle: persona.handle });
   if (!/^0x[0-9a-fA-F]{64}$/.test(digest)) return json({ error: 'digest must be a 32-byte hex string' }, 400);

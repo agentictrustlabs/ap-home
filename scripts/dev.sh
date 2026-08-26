@@ -5,7 +5,7 @@
 #   2. forge script Deploy.s.sol → deployments-anvil.json
 #   3. gen-dev-vars.ts → .dev.vars for demo-a2a + demo-mcp
 #   4. wrangler d1 migrations apply demo-mcp --local
-#   5. wrangler dev for demo-a2a (:8787) + demo-mcp (:8788) + vite dev for demo-web (:5173)
+#   5. wrangler dev for demo-a2a (:8787) + demo-mcp (:8788) + demo-edge (:8789) + vite dev for demo-web (:5173)
 #
 # Ctrl-C cleans everything up.
 
@@ -22,22 +22,33 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-if ! command -v anvil >/dev/null 2>&1; then
-  echo "ERROR: anvil not found. Install Foundry: https://book.getfoundry.sh/getting-started/installation"
+if ! command -v anvil >/dev/null 2>&1 && ! curl -sf -m 2 "http://127.0.0.1:${ANVIL_PORT:-8545}" >/dev/null 2>&1; then
+  echo "ERROR: no local chain on :${ANVIL_PORT:-8545} and anvil not found. Start faithnet (faithchain repo) or install Foundry."
   exit 1
 fi
 
 ANVIL_PORT=${ANVIL_PORT:-8545}
 
-# 1. Anvil
-echo "[1/5] Starting Anvil on :$ANVIL_PORT…"
-anvil --port "$ANVIL_PORT" --silent &
-ANVIL_PID=$!
-sleep 1
+# 1. Local chain: reuse one that is already serving :$ANVIL_PORT (e.g. the faithchain/faithnet
+#    docker stack — a drop-in for anvil: same port, chain id 31337, the 10 dev accounts); otherwise start Anvil.
+if curl -sf -m 2 -X POST "http://127.0.0.1:$ANVIL_PORT" -H 'content-type: application/json' \
+     --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' >/dev/null; then
+  echo "[1/5] Using the local chain already serving :$ANVIL_PORT (faithnet or anvil)."
+  EXISTING_CHAIN=1
+else
+  echo "[1/5] Starting Anvil on :$ANVIL_PORT…"
+  anvil --port "$ANVIL_PORT" --silent &
+  ANVIL_PID=$!
+  sleep 1
+  EXISTING_CHAIN=0
+fi
 
-# 2. Deploy contracts
-if [ -d packages/contracts/lib ] && [ "$(ls -A packages/contracts/src 2>/dev/null)" ]; then
-  echo "[2/5] Deploying contracts to Anvil…"
+# 2. Deploy contracts (a fresh anvil needs them every run; a persistent chain keeps the last deployment —
+#    set FORCE_DEPLOY=1 to redeploy there).
+if [ "$EXISTING_CHAIN" = "1" ] && [ -f packages/contracts/deployments-anvil.json ] && [ "${FORCE_DEPLOY:-0}" != "1" ]; then
+  echo "[2/5] Reusing packages/contracts/deployments-anvil.json on the existing chain (FORCE_DEPLOY=1 to redeploy)."
+elif [ -d packages/contracts/lib ] && [ "$(ls -A packages/contracts/src 2>/dev/null)" ]; then
+  echo "[2/5] Deploying contracts to :$ANVIL_PORT…"
   (cd packages/contracts && pnpm deploy:anvil)
 else
   echo "[2/5] Contracts not built. Run: cd packages/contracts && bash setup.sh && pnpm build"
@@ -53,9 +64,10 @@ echo "[4/5] Applying D1 migrations to local demo-mcp database…"
 (cd apps/demo-mcp && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
 
 # 5. Start workers + web
-echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-web (:5173) + demo-web-pro (:5273) + demo-web-recovery (:5373)…"
+echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-edge (:8789) + demo-web (:5173) + demo-web-pro (:5273) + demo-web-recovery (:5373)…"
 pnpm --filter @agenticprimitives-demo/a2a dev &
 pnpm --filter @agenticprimitives-demo/mcp dev &
+pnpm --filter @agenticprimitives-demo/edge dev &
 pnpm --filter @agenticprimitives-demo/web dev &
 pnpm --filter @agenticprimitives-demo/web-pro dev &
 pnpm --filter @agenticprimitives-demo/web-recovery dev &
@@ -68,7 +80,8 @@ demo-web-pro       http://127.0.0.1:5273
 demo-web-recovery  http://127.0.0.1:5373
 demo-a2a           http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
 demo-mcp           http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
-anvil              http://127.0.0.1:$ANVIL_PORT
+demo-edge          http://127.0.0.1:8789/.well-known/agentic-authorization  (admission gateway; Service Bindings → demo-a2a/demo-mcp)
+local chain        http://127.0.0.1:$ANVIL_PORT  (faithnet or anvil)
 ────────────────────────────────────────────────────────────
 
 Press Ctrl-C to stop everything.

@@ -15,6 +15,40 @@ main = "src/index.ts"
 compatibility_date = "2026-05-19"
 compatibility_flags = ["nodejs_compat"]
 
+# ──────────────────────────────────────────────────────────────────────────
+# Local development (top-level = the default env used by `wrangler dev`).
+#
+# `scripts/dev.sh` runs demo-a2a (:8787), demo-mcp (:8788) and this edge (:8789) as sibling
+# `wrangler dev` sessions; the Service Bindings below resolve through wrangler's local dev registry
+# to the Workers NAMED demo-mcp / demo-a2a (their top-level `name`). Non-secret local values
+# (chain, contracts, origins) come from apps/demo-edge/.dev.vars written by scripts/gen-dev-vars.ts.
+# Production keeps its own block under [env.production] — nothing here is inherited by it.
+# ──────────────────────────────────────────────────────────────────────────
+[[services]]
+binding = "MCP"
+service = "demo-mcp"
+
+[[services]]
+binding = "A2A"
+service = "demo-a2a"
+
+[[durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "2881"
+simple = { limit = 120, period = 60 }
+
+[dev]
+port = 8789
+local_protocol = "http"
+
 [env.production]
 # Give the edge a public workers.dev URL for the smoke test (wrangler defaults workers_dev=false).
 workers_dev = true

@@ -8,6 +8,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { type FnContext } from '../_lib/server-broker';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
+import { DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 const ERC1271_ABI = [
@@ -37,7 +38,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   // Verify the caller controls `delegate` (ERC-1271 over the fixed per-delegate challenge).
   const challenge = keccak256(toBytes(`delegated-orgs:${delegate}`));
-  const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
+  const client = createPublicClient({ transport: http(env.RPC_URL ?? DEFAULT_RPC_URL) });
   let valid = false;
   try {
     const r = (await client.readContract({

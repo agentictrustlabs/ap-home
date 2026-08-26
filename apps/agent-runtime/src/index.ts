@@ -44,7 +44,7 @@ import {
   parseUint256Decimal,
   parseUint48,
 } from './validate';
-import { baseSepolia } from 'viem/chains';
+import { chainFor } from './chain';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -83,6 +83,7 @@ import {
   type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
+import { isAgenticKms, agenticKmsConfig } from './akcs';
 import type { BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import {
   composeSinks,
@@ -393,6 +394,9 @@ export interface Env {
    *  signed by it (callMcpToolBound) instead of server-mint. When set, the DO prefers the bound path; when
    *  unset, the DO falls back to server-mint (DEMO_ALLOW_SERVER_MINT). Read directly from env (not process.env). */
   GCP_KMS_INTERACTIONS_KEY_NAME?: string;
+  /** DEV ONLY — the interactions-session signer as a local secp256k1 key (a workstation has no Cloud
+   *  KMS). Used only when GCP_KMS_INTERACTIONS_KEY_NAME is unset; key-custody refuses it in production. */
+  A2A_INTERACTIONS_SESSION_PRIVATE_KEY?: string;
   /** Service-account JSON (set as wrangler secret). Same SA as the
    *  signing key; needs roles/cloudkms.cryptoKeyEncrypterDecrypter on
    *  GCP_KMS_ENCRYPT_KEY_NAME. */
@@ -1209,14 +1213,12 @@ app.post('/account/derive-address', async (c) => {
 // that actually hits the master key, so it's the canonical smoke test for
 // KMS migrations.
 app.get('/agent/identity', async (c) => {
-  const backend = (((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes')) as KmsBackend;
+  const backend = (((process.env.A2A_RELAYER_KMS_BACKEND as KmsBackend | undefined) || (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes')) as KmsBackend;
   try {
-    // getSignerAddress doesn't sign, so no audit row emits here — pass the
-    // sink anyway so this endpoint stays a faithful smoke test for the
-    // production wiring.
-    const signer = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const address = await signer.getSignerAddress();
-    return c.json({ backend, address });
+    // Read the relayer's address through the same helper the signing paths use, so this smoke test
+    // reflects the real relayer backend (AKCS relay key on agentic-kms, LocalSecp256k1Signer on local-aes).
+    const account = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
+    return c.json({ backend, address: account.address });
   } catch (err) {
     return c.json(
       { backend, error: err instanceof Error ? err.message : String(err) },
@@ -1229,7 +1231,7 @@ app.get('/agent/identity', async (c) => {
 // and signs a sessionDelegation leaf binding it to the principal, so the DO can CLIENT-MINT bound vault
 // tokens (no server-mint). 404 when the interactions-session KMS key isn't configured (bound-mint disabled).
 app.get('/agent/interactions-session-key', async (c) => {
-  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+  if (!interactionsSessionKeyConfigured(c.env)) {
     return c.json({ ok: false, error: 'interactions_session_key_unconfigured' }, 404);
   }
   try {
@@ -1269,7 +1271,7 @@ app.post('/peer-attest', async (c) => {
     'access-control-allow-headers': 'content-type',
     'cache-control': 'no-store',
   };
-  if (!(c.env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+  if (!interactionsSessionKeyConfigured(c.env)) {
     return c.json({ ok: false, error: 'attestation_unconfigured' }, 404, cors);
   }
 
@@ -1698,9 +1700,7 @@ app.post('/session/deploy', async (c) => {
       | { signFn: (hash: Hex) => Promise<Hex> }
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = {
         signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
       };
@@ -1770,9 +1770,7 @@ app.post('/session/deploy/submit', async (c) => {
   };
 
   try {
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp(
       signedUserOp,
       relayerAccount,
@@ -1893,9 +1891,7 @@ app.post('/account/build-call-userop', async (c) => {
       | { signFn: (hash: Hex) => Promise<Hex> }
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = {
         signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
       };
@@ -1942,9 +1938,7 @@ app.post('/account/submit-call-userop', async (c) => {
   };
 
   try {
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
 
     // **Bounded retry on AA20 (replica lag).** When the SA was just deployed
     // moments ago, the bundler's eth_call to `handleOps` may run against a
@@ -2174,8 +2168,8 @@ app.post('/session/direct-deploy', async (c) => {
     // R5.12d: KMS-backed relayer for funded direct-deploy ops.
     // Replaces privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY).
     const deployer = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
 
     const predicted = (await pub.readContract({
       address: c.env.AGENT_ACCOUNT_FACTORY as Address,
@@ -2441,7 +2435,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
     }
 
     // Idempotent: if already deployed, the atomic deploy+claim already ran.
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
       return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
@@ -2457,8 +2451,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2474,8 +2467,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
 
     // C_sub signs the userOpHash (65-byte ECDSA — AgentAccount._verifyEcdsa accepts it).
     const signature = await sign(userOpHash);
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     // DEPLOY-RACE RECOVERY (see /custody/oidc/bootstrap): a stale getBytecode pre-check or a concurrent
     // deploy of this deterministic SA makes the userOp revert AA25/AA10 even though the deploy+claim
     // effectively already ran. Re-read the code and treat an existing account as success.
@@ -2555,7 +2547,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
     }
 
     // Idempotent: if already deployed (named or nameless), the home exists.
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
       return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), alreadyDeployed: true });
@@ -2563,8 +2555,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2579,8 +2570,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
     }
 
     const signature = await sign(userOpHash);
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     // DEPLOY-RACE RECOVERY: the getBytecode pre-check can read a stale '0x' (lagging RPC), or a
     // concurrent/double-submitted bootstrap can deploy this deterministic SA first. Either way the
     // account then EXISTS, so this deploy userOp reverts with AA25 (nonce mismatch) / AA10 (already
@@ -2834,8 +2824,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2850,8 +2839,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     }
 
     const signature = await sign(userOpHash); // C_sub signs (65-byte ECDSA)
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
@@ -2968,8 +2956,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2984,8 +2971,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     }
 
     const signature = await sign(userOpHash); // C_sub signs
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
@@ -3063,8 +3049,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -3072,8 +3057,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
       sender: body.agent, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster,
     });
     const signature = await sign(userOpHash); // C_sub signs (it custodies the agent)
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { receipt } = await accountClient(c.env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: body.agent as `0x${string}` });
     if (!inner.ok) {
@@ -3676,8 +3660,8 @@ app.post('/session/custody-schedule', async (c) => {
       return badInputResponse(c, e) as Response;
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
       address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
@@ -3713,8 +3697,8 @@ app.post('/session/custody-apply', async (c) => {
       return badInputResponse(c, e) as Response;
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
-    const wallet = createWalletClient({ account: deployer, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+    const wallet = createWalletClient({ account: deployer, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const hash = await wallet.writeContract({
       address: custodyPolicy,
       abi: CUSTODY_POLICY_ABI_REL,
@@ -3874,7 +3858,7 @@ async function verifyDelegation(
     }
   }
   // ERC-1271 verify against the delegator smart account.
-  const pub = createPublicClient({ chain: baseSepolia, transport: http(env.RPC_URL) });
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
   // Use the CANONICAL delegation hash (packages/delegation hashDelegation) — it matches the
   // on-chain DelegationManager CAVEAT_TYPEHASH, which EXCLUDES `args` from the signed hash
   // (audit F-1). The previous inline hashTypedData here wrongly included `args` in the Caveat
@@ -4093,11 +4077,11 @@ async function forwardMcpToken(args: {
     ...(args.enforceBinding ? { enforceBinding: true } : {}),
     ...(args.invocationProof ? { invocationProof: args.invocationProof } : {}),
   });
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
-    auditSink: args.auditSink,
-  });
+  // The A2A→MCP service MAC key must resolve identically on both ends: AKCS (ap-mac-v1, derived per
+  // tenant+audience) when agentic-kms is on — mirrors demo-mcp's verify side — else the shared A2A_MAC_SECRET.
+  const macProvider = isAgenticKms(args.env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(args.env), auditSink: args.auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' }, auditSink: args.auditSink });
   const macHeaders = await generateServiceMac({
     ctx: {
       audience: MCP_AUDIENCE,
@@ -4157,20 +4141,39 @@ let _interactionsSessionAccount: Awaited<ReturnType<typeof createKmsViemAccount>
 export async function interactionsSessionAccount(env: Env): Promise<Awaited<ReturnType<typeof createKmsViemAccount>>> {
   if (_interactionsSessionAccount) return _interactionsSessionAccount;
   const keyName = (env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim();
-  if (!keyName) {
+  const localKey = (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim();
+  if (!keyName && !localKey) {
     throw new Error('GCP_KMS_INTERACTIONS_KEY_NAME unset — the InteractionsDO bound-mint (NEW-C1) needs the interactions-session KMS key');
   }
-  const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
-  if (!serviceAccountJson) {
-    throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
+  let backend;
+  if (keyName) {
+    const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
+    if (!serviceAccountJson) {
+      throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
+    }
+    backend = buildSignerBackend({
+      backend: 'gcp-kms',
+      config: { cryptoKeyVersionName: keyName, serviceAccountJson },
+      auditSink: buildAuditSink(env),
+    });
+  } else {
+    // DEV ONLY — a local stack has no Cloud KMS. Same shape as the relayer's `local-aes` path
+    // (LocalSecp256k1Signer keeps key-custody's production guard: refused unless NODE_ENV≠production or
+    // A2A_ALLOW_LOCAL_MASTER_KEY). The Home still binds THIS key's address to the principal with a
+    // principal-signed leaf, so the token contract is unchanged; only where the key lives differs.
+    backend = buildSignerBackend({
+      backend: 'local-aes',
+      config: { privateKeyHex: localKey },
+      auditSink: buildAuditSink(env),
+    });
   }
-  const backend = buildSignerBackend({
-    backend: 'gcp-kms',
-    config: { cryptoKeyVersionName: keyName, serviceAccountJson },
-    auditSink: buildAuditSink(env),
-  });
   _interactionsSessionAccount = await createKmsViemAccount(backend);
   return _interactionsSessionAccount;
+}
+
+/** Is an interactions-session signer configured (KMS in production, a local dev key on a workstation)? */
+function interactionsSessionKeyConfigured(env: Env): boolean {
+  return !!((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim() || (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim());
 }
 
 function toDelegationStruct(w: IncomingDelegation): Delegation {
@@ -4372,11 +4375,9 @@ async function forwardMcpServiceMac(
   auditSink: ReturnType<typeof buildAuditSink>,
 ): Promise<Response> {
   const requestBody = JSON.stringify({ args: toolArgs });
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: env.A2A_MAC_SECRET ?? '' },
-    auditSink,
-  });
+  const macProvider = isAgenticKms(env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(env), auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: env.A2A_MAC_SECRET ?? '' }, auditSink });
   const macHeaders = await generateServiceMac({
     ctx: { audience: MCP_AUDIENCE, service: 'a2a-to-mcp', route: toolName, bodyDigest: bodyDigestHex(requestBody) },
     provider: macProvider,
@@ -4726,7 +4727,7 @@ app.post('/admin/topup-paymaster', async (c) => {
       );
     }
 
-    const pub = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+    const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
 
     let depositBefore: bigint;
     try {
@@ -4792,7 +4793,7 @@ app.post('/admin/topup-paymaster', async (c) => {
 
     let hash: `0x${string}`;
     try {
-      const wallet = createWalletClient({ account: deployerAcct, chain: baseSepolia, transport: http(c.env.RPC_URL) });
+      const wallet = createWalletClient({ account: deployerAcct, chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
       hash = await wallet.writeContract({
         address: c.env.PAYMASTER as Address,
         abi: TOPUP_PAYMASTER_ABI,
@@ -4879,7 +4880,7 @@ app.post('/session/package', async (c) => {
   // (eventual consistency across replicas), so a naive single verify can spuriously fail right after
   // /session/deploy. Bounded-retry the SAME ERC-1271 read until the SA has code + verifies (ADR-0013: a
   // bounded retry of one mechanism, NOT a fallback to a weaker one). Accept on the first valid result.
-  const pubForPkg = createPublicClient({ chain: baseSepolia, transport: http(c.env.RPC_URL) });
+  const pubForPkg = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let isValid = false;
   let lastCodeLen = 0;
@@ -4992,11 +4993,9 @@ app.post('/tools/:name', async (c) => {
   // requests without a valid MAC are 401'd before any business logic.
   // Production deploys swap the local-aes MAC provider for a GCP KMS
   // HMAC key via the same `buildMacProvider` factory; no app changes.
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: c.env.A2A_MAC_SECRET ?? '' },
-    auditSink,
-  });
+  const macProvider = isAgenticKms(c.env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(c.env), auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: c.env.A2A_MAC_SECRET ?? '' }, auditSink });
   const macHeaders = await generateServiceMac({
     ctx: {
       audience: MCP_AUDIENCE,

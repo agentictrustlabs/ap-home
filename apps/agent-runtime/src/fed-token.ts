@@ -5,6 +5,7 @@
 // the data. AAD binds each record to its (sa, provider) so a ciphertext can't be moved to another person.
 import { buildKeyProvider, type A2AKeyProvider, type KmsBackend } from '@agenticprimitives/key-custody';
 import type { Address } from '@agenticprimitives/types';
+import { agenticKmsConfig, type AkcsEnv } from './akcs.js';
 
 export interface FederatedTokens {
   access: string;
@@ -31,8 +32,17 @@ interface FedEnv { FED_TOKENS?: KVNamespace }
 
 /** The envelope-encryption provider, selected by env exactly like `sessionManagerFor` — GCP KMS in
  *  production, local-aes in dev (which fail-closes under NODE_ENV=production per its own guard). */
-function envelopeProvider(env: { GCP_KMS_ENCRYPT_KEY_NAME?: string; GCP_SERVICE_ACCOUNT_JSON?: string }): A2AKeyProvider {
-  const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+type EnvelopeEnv = AkcsEnv & { GCP_KMS_ENCRYPT_KEY_NAME?: string; GCP_SERVICE_ACCOUNT_JSON?: string };
+
+/** AKCS ENVELOPE key purpose for federated tokens (an ACTIVE envelope key with this purpose must exist). */
+export const FED_TOKEN_ENVELOPE_PURPOSE = 'fed-token';
+
+function envelopeProvider(env: EnvelopeEnv): A2AKeyProvider {
+  const backend = (env.A2A_KMS_BACKEND as KmsBackend | undefined) || ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+  if (backend === 'agentic-kms') {
+    // Envelope data keys wrapped inside AKCS; no fallback if it is unreachable (ADR-0013).
+    return buildKeyProvider({ backend: 'agentic-kms', agenticKms: agenticKmsConfig(env, { envelopePurpose: FED_TOKEN_ENVELOPE_PURPOSE }) });
+  }
   return backend === 'gcp-kms' && env.GCP_KMS_ENCRYPT_KEY_NAME && env.GCP_SERVICE_ACCOUNT_JSON
     ? buildKeyProvider({ backend: 'gcp-kms', config: { cryptoKeyName: env.GCP_KMS_ENCRYPT_KEY_NAME, serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON } })
     : buildKeyProvider({ backend: 'local-aes' });
@@ -47,7 +57,7 @@ const key = (sa: Address): string => `youversion:${sa.toLowerCase()}`;
 /** Envelope-encrypt + store a person's YouVersion tokens, keyed by their SA. `expiresInSec` from the
  *  provider's `expires_in`; we stamp an absolute expiry. */
 export async function storeFederatedToken(
-  env: FedEnv & { GCP_KMS_ENCRYPT_KEY_NAME?: string; GCP_SERVICE_ACCOUNT_JSON?: string },
+  env: FedEnv & EnvelopeEnv,
   sa: Address,
   tokens: FederatedTokens,
   expiresInSec: number | null,
@@ -69,7 +79,7 @@ export async function storeFederatedToken(
 /** Load + decrypt a person's tokens, or null when none stored. `exp` is the access-token expiry so the
  *  caller can decide to refresh. */
 export async function loadFederatedToken(
-  env: FedEnv & { GCP_KMS_ENCRYPT_KEY_NAME?: string; GCP_SERVICE_ACCOUNT_JSON?: string },
+  env: FedEnv & EnvelopeEnv,
   sa: Address,
 ): Promise<{ tokens: FederatedTokens; exp: number; scope: string | null; appKey: string } | null> {
   if (!env.FED_TOKENS) return null;

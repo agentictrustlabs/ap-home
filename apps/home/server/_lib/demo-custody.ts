@@ -98,3 +98,38 @@ export async function signDigestAsDemoPersona(persona: DemoPersona, digest: Hex)
 export function demoCustodianAddress(persona: DemoPersona): string {
   return privateKeyToAccount(persona.privateKey).address;
 }
+
+/** EIP-712 typed-data signature by the demo persona's custodian EOA. Used by relying apps whose
+ *  ceremonies sign structured data rather than a raw digest (e.g. demo-web-pro's custody schedule/apply
+ *  quorum slots). Same custodian, same on-chain authority; the key just lives here instead of a wallet. */
+// Integer-typed EIP-712 fields (uint*/int*) arrive as decimal STRINGS over JSON (BigInt isn't
+// JSON-serializable); viem's signTypedData wants BigInt. Walk the `types` graph and coerce them back.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function coerceEip712Value(value: any, type: string, types: Record<string, { name: string; type: string }[]>): any {
+  if (type.endsWith(']')) {
+    const base = type.slice(0, type.lastIndexOf('['));
+    return Array.isArray(value) ? value.map((v) => coerceEip712Value(v, base, types)) : value;
+  }
+  if (types[type]) {
+    const out: Record<string, unknown> = {};
+    for (const f of types[type]) out[f.name] = coerceEip712Value(value?.[f.name], f.type, types);
+    return out;
+  }
+  if (/^u?int\d*$/.test(type) && (typeof value === 'string' || typeof value === 'number')) {
+    return BigInt(value);
+  }
+  return value;
+}
+
+export async function signTypedDataAsDemoPersona(
+  persona: DemoPersona,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  typedData: { domain: any; types: any; primaryType: string; message: any },
+): Promise<Hex> {
+  const types = typedData.types as Record<string, { name: string; type: string }[]>;
+  const message = coerceEip712Value(typedData.message, typedData.primaryType, types) as Record<string, unknown>;
+  // Drop EIP712Domain from `types` (viem derives it) and coerce a stringified chainId back to a number.
+  const domain = { ...typedData.domain };
+  if (typeof domain.chainId === 'string') domain.chainId = Number(domain.chainId);
+  return privateKeyToAccount(persona.privateKey).signTypedData({ domain, types, primaryType: typedData.primaryType, message });
+}
