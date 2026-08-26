@@ -264,6 +264,9 @@ const webProVars: Record<string, string> = {
   // client guards its stored sessions with. Both were only set by deploy-cloudflare.ts before.
   VITE_DEMO_EDGE_URL: EDGE_URL,
   ...(d.deploymentEpoch ? { VITE_DEPLOYMENT_EPOCH: d.deploymentEpoch } : {}),
+  // The Home origin (demo-sso-next) — demo-web-pro offers its demo people (Alice, Bob) as quick-connect
+  // seats when this is set. Locally the Home is at HOME_ORIGIN; unset in prod builds without a Home.
+  ...(LOCAL ? { VITE_BROKER_ORIGIN: HOME_ORIGIN } : {}),
   ...(d.custodyPolicy   ? { VITE_CUSTODY_POLICY:    d.custodyPolicy   } : {}),
   ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
   ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
