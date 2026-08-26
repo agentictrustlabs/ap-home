@@ -211,6 +211,18 @@ const faithImpact: WhiteLabelConfig = {
       socialCustody: true,
     },
     {
+      // demo-web-pro (Treasury service-agent story). Uses quick-connect / demo personas locally:
+      // Alice + Bob ARE Home demo people, so their Person Smart Agents and custodian signatures come
+      // from the Home. The site delegation is unused (web-pro signs userOps + custody typed-data
+      // directly via the persona's custodian), but a registered client_id is required by /connect/demo-signin.
+      client_id: 'demo-web-pro',
+      name: 'agenticprimitives treasury demo',
+      redirect_uris: ['https://agenticprimitives-demo-pro.pages.dev/', 'http://localhost:5273/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
+    {
       client_id: 'demo-org',
       name: 'Impact',
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],

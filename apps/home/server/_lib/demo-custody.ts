@@ -98,3 +98,19 @@ export async function signDigestAsDemoPersona(persona: DemoPersona, digest: Hex)
 export function demoCustodianAddress(persona: DemoPersona): string {
   return privateKeyToAccount(persona.privateKey).address;
 }
+
+/** EIP-712 typed-data signature by the demo persona's custodian EOA. Used by relying apps whose
+ *  ceremonies sign structured data rather than a raw digest (e.g. demo-web-pro's custody schedule/apply
+ *  quorum slots). Same custodian, same on-chain authority; the key just lives here instead of a wallet. */
+export async function signTypedDataAsDemoPersona(
+  persona: DemoPersona,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  typedData: { domain: any; types: any; primaryType: string; message: any },
+): Promise<Hex> {
+  return privateKeyToAccount(persona.privateKey).signTypedData({
+    domain: typedData.domain,
+    types: typedData.types,
+    primaryType: typedData.primaryType,
+    message: typedData.message,
+  });
+}
