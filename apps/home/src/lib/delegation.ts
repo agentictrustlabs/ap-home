@@ -924,6 +924,72 @@ export async function issueOrgReadDelegation(
   return delegation;
 }
 
+// ─── spec 345 — the SELF VAULT GRANT (delegator = delegate = personSA) ────────────────────────
+
+/** The scope a relying app's whitelabel entry may declare for its self-vault grant — fixed
+ *  server-side, never client-request-supplied (mirrors `org_read_grant`'s scope shape). */
+export interface SelfVaultGrantConfig {
+  readonly server: string;
+  readonly resources: readonly string[];
+  readonly ops: readonly ('read' | 'write')[];
+}
+
+/** One year — same structural reasoning as ORG_READ_GRANT_VALIDITY_SECONDS: the app holds this
+ *  grant and reads/writes the person's own record in place; the person's exit is the on-chain
+ *  revoke, not expiry. */
+export const SELF_VAULT_GRANT_VALIDITY_SECONDS = 365 * 24 * 60 * 60;
+
+/**
+ * The SELF VAULT grant `personSA → personSA` (whitelabel `self_vault_grant`) — a vault-record-
+ * scope delegation over ONE record family, so a person can publish/edit content under their OWN
+ * identity with no organization, team, or stewardship relationship involved at all.
+ *
+ * Minted in the SAME plain sign-in ceremony every relying app already runs (`givePermission`,
+ * template `site-login`) — no separate ceremony trip, works for every custody family (KMS /
+ * passkey / wallet / demo) the same way `org_read_grant` does at org-connect. Read+write is
+ * allowed (unlike `org_read_grant`'s read-only) because the delegate IS the delegator: the person
+ * is granting themselves access to their own record, never exposing it to a third party.
+ *
+ * THE RULE THIS EXISTS TO ENFORCE: this function and its caller MUST NEVER call
+ * `projectStewardRelationshipToVault` or write anything to `impact-relationships`. A person
+ * granting themselves access to their own vault is not "stewarding an org" — conflating the two
+ * is exactly the incident this spec (345) was written to close (a person's own address showing up
+ * in their own org list because a self-referential stewardship entry got written for them).
+ */
+export function buildApprovedSelfVaultGrant(
+  personSA: Address,
+  scope: SelfVaultGrantConfig,
+  validitySeconds = SELF_VAULT_GRANT_VALIDITY_SECONDS,
+): { delegation: Delegation; digest: Hex } {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+    buildVaultRecordScopeCaveat([{ server: scope.server, resources: [...scope.resources], ops: [...scope.ops] }]),
+  ];
+  const d: Delegation = { delegator: personSA, delegate: personSA, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = APPROVED_HASH_SENTINEL;
+  return { delegation: d, digest };
+}
+
+/** The direct-signature variant, for a person who already exists (the common case — gather27's
+ *  individual host is signing in, not being freshly deployed): no deploy batch to fold the digest
+ *  into, so `signHash` signs it directly, same as `issueOrgReadDelegation`'s KMS-path sibling. */
+export async function issueSelfVaultGrant(
+  personSA: Address,
+  scope: SelfVaultGrantConfig,
+  signHash: SignHash,
+  validitySeconds = SELF_VAULT_GRANT_VALIDITY_SECONDS,
+): Promise<Delegation> {
+  const { delegation, digest } = buildApprovedSelfVaultGrant(personSA, scope, validitySeconds);
+  delegation.signature = await signHash(digest);
+  return delegation;
+}
+
 /**
  * spec 329 §3.1 — the ORG consult wire `org → interactions-session key`, signed by the ORG's
  * custody (the steward's credential) at the ROUTING-ENABLE ceremony. Resolves the caller-signature

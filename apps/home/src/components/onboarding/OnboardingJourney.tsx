@@ -348,7 +348,9 @@ export function OnboardingJourney({
         setTimeout(() => api.deliverCode(orgCode), 400);
         return;
       }
-      let granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
+      // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
+      const selfVaultScope = relyingApp?.self_vault_grant;
+      let granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment, selfVaultScope);
       if (!granted.ok) return fail(granted.error, 'grant');
       // spec 278 — also turn on the member's encrypted vault while enrolling (skipped if already
       // bound, so returning members aren't re-prompted). Best-effort: a vault hiccup must NOT block
@@ -358,16 +360,16 @@ export function OnboardingJourney({
       setBusy(fmt(c.authorizeStepBusy, { app: appName }));
       let code: string;
       try {
-        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
       } catch (e) {
         // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
         // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
         if (!granted.reused) throw e;
         console.warn('[journey] standing grant refused — clearing cache and minting fresh:', e);
         clearStandingGrant(home.address, delegate);
-        granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment);
+        granted = await givePermission(home, delegate, via, kmsAuth, api.enroll?.sessionKey, payment, selfVaultScope);
         if (!granted.ok) return fail(granted.error, 'grant');
-        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        code = await api.submitGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
       }
       const tpl = whitelabel.delegationTemplates[api.enroll.template];
       recordConnectedApp(home.address, {

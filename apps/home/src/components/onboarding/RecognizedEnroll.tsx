@@ -484,19 +484,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
         }
-        let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
+        // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
+        const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
+        let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope);
         if (!granted.ok) return fail(granted.error);
         try {
-          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
         } catch (e) {
           // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
           // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
           if (!granted.reused) throw e;
           console.warn('[connect] standing grant refused — clearing cache and minting fresh:', e);
           clearStandingGrant(home.address, delegate);
-          granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment);
+          granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope);
           if (!granted.ok) return fail(granted.error);
-          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
         }
       }
       // spec 278 — bind the member's per-person vault key during connect, for EVERY custody type. A

@@ -38,7 +38,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -829,14 +829,21 @@ export async function givePermission(
      *  vault. (Unattended redemption needs the provider's signer — left to an owner-online step.) */
     subscription?: { periodSeconds: number; periods?: number };
   },
-): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex; reused?: boolean }>> {
+  /** spec 345 — when the requesting client's whitelabel entry declares `self_vault_grant`, mint
+   *  it in THIS SAME ceremony: delegator = delegate = home.address, no org, no relationship
+   *  write. Lets a person publish under their own identity without becoming a fake "org". */
+  selfVaultScope?: SelfVaultGrantConfig,
+): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex; selfVaultGrant?: DelegationWire; reused?: boolean }>> {
   try {
     // REUSE the standing grant when this browser already minted one for (person, delegate) and the
-    // ceremony carries nothing else (no session leaf, no payment): its digest approval is already
-    // on-chain, so re-approving an identical-scope duplicate costs a whole userOp for nothing.
+    // ceremony carries nothing else (no session leaf, no payment, no self-vault grant): its digest
+    // approval is already on-chain, so re-approving an identical-scope duplicate costs a whole
+    // userOp for nothing. A self-vault grant request disqualifies the cache hit for the same reason
+    // a session leaf or payment does — a cached site delegation predates the vault scope and would
+    // silently return no selfVaultGrant on every repeat connect otherwise.
     // /oidc/grant re-verifies revocation + ERC-1271 per use; the caller clears the cache and mints
     // fresh if the reused grant is refused (one explicit fallback, ADR-0013).
-    if (!sessionKeyAddress && !payment) {
+    if (!sessionKeyAddress && !payment && !selfVaultScope) {
       const standing = loadStandingGrant(home.address, delegate);
       if (standing) return { ok: true, grant: standing, reused: true };
     }
@@ -849,10 +856,13 @@ export async function givePermission(
     // the org-create outbound grants, and to a signed leaf for the binding checks. (spec 253 + 270 v4 W2.)
     const siteApp = buildApprovedSiteDelegation(home.address, delegate);
     const sessionApp = sessionKeyAddress ? buildApprovedSessionDelegation(home.address, sessionKeyAddress) : undefined;
+    // spec 345 — the self-vault grant folds into the SAME batch: delegator = delegate = home.address,
+    // never touching org/stewardship machinery. NEVER call projectStewardRelationshipToVault for this.
+    const selfVaultApp = selfVaultScope ? buildApprovedSelfVaultGrant(home.address, selfVaultScope) : undefined;
     const approve = await approveGrantHashes(
       home.address,
       signHash,
-      sessionApp ? [siteApp.digest, sessionApp.digest] : [siteApp.digest],
+      [siteApp.digest, sessionApp?.digest, selfVaultApp?.digest].filter((d): d is Hex => Boolean(d)),
     );
     if (!approve.ok) return { ok: false, error: `grant approval failed: ${approve.error}` };
     const delegation = siteApp.delegation;
@@ -905,11 +915,20 @@ export async function givePermission(
     }
     const wire = toWire(delegation);
     // The plain site-login grant is reusable next connect (skips the approval userOp). Ceremonies
-    // carrying a session leaf or payment are per-connect by construction — never cached.
-    if (!sessionKeyAddress && !payment) {
+    // carrying a session leaf, payment, or self-vault grant are per-connect by construction —
+    // never cached (see the matching read-side condition above).
+    if (!sessionKeyAddress && !payment && !selfVaultScope) {
       saveStandingGrant(home.address, delegate, wire, Date.now() + 365 * 86_400_000);
     }
-    return { ok: true, grant: wire, sessionDelegation, paymentDelegation: payDeleg ? toWire(payDeleg) : undefined, pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined, settlementHash };
+    return {
+      ok: true,
+      grant: wire,
+      sessionDelegation,
+      paymentDelegation: payDeleg ? toWire(payDeleg) : undefined,
+      pullDelegation: pullDeleg ? toWire(pullDeleg) : undefined,
+      settlementHash,
+      selfVaultGrant: selfVaultApp ? toWire(selfVaultApp.delegation) : undefined,
+    };
   } catch (e) {
     // Surface the REAL failure. Wallet providers (EIP-1193) and some libs throw plain objects/strings
     // that fail `instanceof Error`, which used to collapse into an unactionable 'could not grant

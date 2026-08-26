@@ -53,6 +53,10 @@ interface GrantBody {
    *  the home's managed-agent tree and carried to the relying app so it can gate ALL financial ops up
    *  front — a member with no treasury is told to create one rather than shown a no-op Buy-access flow. */
   treasury?: string | null;
+  /** spec 345 — the self-vault grant (delegator = delegate = the person), when the client's
+   *  whitelabel entry declared `self_vault_grant`. Independently ERC-1271-verified below, reusing
+   *  the SAME delegator already proven for the main site delegation. */
+  selfVaultGrant?: IncomingDelegation;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -102,6 +106,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body.pullDelegation) {
     const pv = await verifyDelegation(env, body.pullDelegation);
     if (!pv.ok) return json({ error: `pull delegation proof failed: ${pv.reason}` }, 401);
+  }
+  // spec 345 — the self-vault grant is delegator = delegate = the SAME person; verify it
+  // independently (ERC-1271 + window) rather than trusting it because the site delegation checked
+  // out. It is NOT delegate-matched to the client (its delegate is the person, not client.delegate).
+  if (body.selfVaultGrant) {
+    if (body.selfVaultGrant.delegator.toLowerCase() !== body.delegation.delegator.toLowerCase()) {
+      return json({ error: 'self-vault grant delegator does not match the connecting person' }, 401);
+    }
+    const sv = await verifyDelegation(env, body.selfVaultGrant);
+    if (!sv.ok) return json({ error: `self-vault grant proof failed: ${sv.reason}` }, 401);
   }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
@@ -200,6 +214,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       pullDelegation: body.pullDelegation ?? null,
       settlementHash: body.settlementHash ?? null,
       treasury: body.treasury ?? null,
+      selfVaultGrant: body.selfVaultGrant ?? null,
       org: body.org ?? null,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,

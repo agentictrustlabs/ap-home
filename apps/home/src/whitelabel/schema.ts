@@ -32,6 +32,16 @@ export interface RelyingApp {
     server: string;
     resources: string[];
   };
+  /** OPTIONAL — spec 345. A `delegator = delegate = personSA` grant scoped to the person's OWN
+   *  vault record family, minted in the SAME plain sign-in ceremony every relying app already
+   *  runs (`givePermission` / template `site-login`) — no org, no team, no stewardship, no
+   *  `impact-relationships` write. The resources/ops here are the ONLY scope a self-vault grant
+   *  for this client can ever carry; a relying app names its `client_id`, never the scope itself. */
+  self_vault_grant?: {
+    server: string;
+    resources: string[];
+    ops: ('read' | 'write')[];
+  };
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;

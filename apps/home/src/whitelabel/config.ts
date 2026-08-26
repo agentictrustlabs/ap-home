@@ -186,6 +186,15 @@ const faithImpact: WhiteLabelConfig = {
         server: 'demo-mcp',
         resources: ['vault:gather27:listing'],
       },
+      // spec 345 — round-2 D3 individual custody: a person publishing under their own name (no
+      // org) needs read+write on their OWN vault's listing record, minted on plain sign-in. Fixes
+      // the self-as-org incident (existingOrg pointed at the person's own address wrote a bogus
+      // kind:'org' impact-relationships entry) by never touching org machinery at all.
+      self_vault_grant: {
+        server: 'demo-mcp',
+        resources: ['vault:gather27:listing'],
+        ops: ['read', 'write'],
+      },
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

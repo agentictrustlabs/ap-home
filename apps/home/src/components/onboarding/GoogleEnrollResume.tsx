@@ -143,8 +143,10 @@ export function GoogleEnrollResume() {
           };
         }
       }
+      // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
+      const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
       // spec 270 v4 W2 — sign + carry the DEL-001 leaf for the relying app's session key.
-      let granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
+      let granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment, selfVaultScope);
       if (!granted.ok) return fail(granted.error);
       // spec 278 — turn on the member's encrypted vault during enroll (Google signs via KMS, no
       // gesture; skipped if already bound). Best-effort — must not block the connect.
@@ -156,16 +158,16 @@ export function GoogleEnrollResume() {
       void publishSocialConnectionKindIfNeeded(home.address, home.name, 'google', { token });
       let code: string;
       try {
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
       } catch (e) {
         // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
         // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
         if (!granted.reused) throw e;
         console.warn('[google-resume] standing grant refused — clearing cache and minting fresh:', e);
         clearStandingGrant(home.address, delegate);
-        granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment);
+        granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment, selfVaultScope);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
       }
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)

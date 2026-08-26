@@ -124,6 +124,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       pullDelegation?: unknown;
       settlementHash?: string;
       treasury?: string | null;
+      selfVaultGrant?: unknown;
       org: unknown;
       code_challenge: string;
       client_id: string;
@@ -144,6 +145,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
         pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
+        selfVaultGrant: grant.selfVaultGrant ?? undefined, // spec 345 — the person's own scoped vault grant
         // PRIVACY: the person-treasury ADDRESS is intentionally NOT returned to the relying app. The home
         // owns the treasury question during a purchase; the app gates on access/subscription, not the wallet.
         ...(grant.org ? { org: grant.org } : {}),
