@@ -83,6 +83,7 @@ import {
   type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
+import { isAgenticKms, agenticKmsConfig } from './akcs';
 import type { BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import {
   composeSinks,
@@ -1212,14 +1213,12 @@ app.post('/account/derive-address', async (c) => {
 // that actually hits the master key, so it's the canonical smoke test for
 // KMS migrations.
 app.get('/agent/identity', async (c) => {
-  const backend = (((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes')) as KmsBackend;
+  const backend = (((process.env.A2A_RELAYER_KMS_BACKEND as KmsBackend | undefined) || (process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes')) as KmsBackend;
   try {
-    // getSignerAddress doesn't sign, so no audit row emits here — pass the
-    // sink anyway so this endpoint stays a faithful smoke test for the
-    // production wiring.
-    const signer = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const address = await signer.getSignerAddress();
-    return c.json({ backend, address });
+    // Read the relayer's address through the same helper the signing paths use, so this smoke test
+    // reflects the real relayer backend (AKCS relay key on agentic-kms, LocalSecp256k1Signer on local-aes).
+    const account = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
+    return c.json({ backend, address: account.address });
   } catch (err) {
     return c.json(
       { backend, error: err instanceof Error ? err.message : String(err) },
@@ -1701,9 +1700,7 @@ app.post('/session/deploy', async (c) => {
       | { signFn: (hash: Hex) => Promise<Hex> }
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = {
         signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
       };
@@ -1773,9 +1770,7 @@ app.post('/session/deploy/submit', async (c) => {
   };
 
   try {
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp(
       signedUserOp,
       relayerAccount,
@@ -1896,9 +1891,7 @@ app.post('/account/build-call-userop', async (c) => {
       | { signFn: (hash: Hex) => Promise<Hex> }
       | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-      const kmsAccount = await createKmsViemAccount(kmsBackend);
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = {
         signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex,
       };
@@ -1945,9 +1938,7 @@ app.post('/account/submit-call-userop', async (c) => {
   };
 
   try {
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const kmsBackend = buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) });
-    const relayerAccount = await createKmsViemAccount(kmsBackend);
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
 
     // **Bounded retry on AA20 (replica lag).** When the SA was just deployed
     // moments ago, the bundler's eth_call to `handleOps` may run against a
@@ -2460,8 +2451,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2477,8 +2467,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
 
     // C_sub signs the userOpHash (65-byte ECDSA — AgentAccount._verifyEcdsa accepts it).
     const signature = await sign(userOpHash);
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     // DEPLOY-RACE RECOVERY (see /custody/oidc/bootstrap): a stale getBytecode pre-check or a concurrent
     // deploy of this deterministic SA makes the userOp revert AA25/AA10 even though the deploy+claim
     // effectively already ran. Re-read the code and treat an existing account as success.
@@ -2566,8 +2555,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2582,8 +2570,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
     }
 
     const signature = await sign(userOpHash);
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     // DEPLOY-RACE RECOVERY: the getBytecode pre-check can read a stale '0x' (lagging RPC), or a
     // concurrent/double-submitted bootstrap can deploy this deterministic SA first. Either way the
     // account then EXISTS, so this deploy userOp reverts with AA25 (nonce mismatch) / AA10 (already
@@ -2837,8 +2824,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2853,8 +2839,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     }
 
     const signature = await sign(userOpHash); // C_sub signs (65-byte ECDSA)
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
@@ -2971,8 +2956,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -2987,8 +2971,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     }
 
     const signature = await sign(userOpHash); // C_sub signs
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
@@ -3066,8 +3049,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-      const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-      const kmsAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+      const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
@@ -3075,8 +3057,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
       sender: body.agent, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster,
     });
     const signature = await sign(userOpHash); // C_sub signs (it custodies the agent)
-    const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-    const relayerAccount = await createKmsViemAccount(buildSignerBackend({ backend, auditSink: buildAuditSink(c.env) }));
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { receipt } = await accountClient(c.env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: body.agent as `0x${string}` });
     if (!inner.ok) {
@@ -4096,11 +4077,11 @@ async function forwardMcpToken(args: {
     ...(args.enforceBinding ? { enforceBinding: true } : {}),
     ...(args.invocationProof ? { invocationProof: args.invocationProof } : {}),
   });
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' },
-    auditSink: args.auditSink,
-  });
+  // The A2A→MCP service MAC key must resolve identically on both ends: AKCS (ap-mac-v1, derived per
+  // tenant+audience) when agentic-kms is on — mirrors demo-mcp's verify side — else the shared A2A_MAC_SECRET.
+  const macProvider = isAgenticKms(args.env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(args.env), auditSink: args.auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: args.env.A2A_MAC_SECRET ?? '' }, auditSink: args.auditSink });
   const macHeaders = await generateServiceMac({
     ctx: {
       audience: MCP_AUDIENCE,
@@ -4394,11 +4375,9 @@ async function forwardMcpServiceMac(
   auditSink: ReturnType<typeof buildAuditSink>,
 ): Promise<Response> {
   const requestBody = JSON.stringify({ args: toolArgs });
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: env.A2A_MAC_SECRET ?? '' },
-    auditSink,
-  });
+  const macProvider = isAgenticKms(env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(env), auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: env.A2A_MAC_SECRET ?? '' }, auditSink });
   const macHeaders = await generateServiceMac({
     ctx: { audience: MCP_AUDIENCE, service: 'a2a-to-mcp', route: toolName, bodyDigest: bodyDigestHex(requestBody) },
     provider: macProvider,
@@ -5014,11 +4993,9 @@ app.post('/tools/:name', async (c) => {
   // requests without a valid MAC are 401'd before any business logic.
   // Production deploys swap the local-aes MAC provider for a GCP KMS
   // HMAC key via the same `buildMacProvider` factory; no app changes.
-  const macProvider = buildMacProvider(MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: c.env.A2A_MAC_SECRET ?? '' },
-    auditSink,
-  });
+  const macProvider = isAgenticKms(c.env)
+    ? buildMacProvider(MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(c.env), auditSink })
+    : buildMacProvider(MCP_AUDIENCE, { backend: 'local-aes', config: { sessionSecretHex: c.env.A2A_MAC_SECRET ?? '' }, auditSink });
   const macHeaders = await generateServiceMac({
     ctx: {
       audience: MCP_AUDIENCE,
