@@ -4,7 +4,7 @@
 //   { exists: false, name } | { exists: true, name, agent, hasEoa, hasPasskey }
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import { json, type FnContext } from '../_lib/server-broker';
+import { jsonCors, preflight, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 
 function fullName(name: string): string {
@@ -14,7 +14,7 @@ function fullName(name: string): string {
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const raw = new URL(request.url).searchParams.get('name');
-  if (!raw || !raw.trim()) return json({ error: 'name required' }, 400);
+  if (!raw || !raw.trim()) return jsonCors({ error: 'name required' }, request, 400);
   const name = fullName(raw);
   const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
 
@@ -25,7 +25,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     universalResolver: CONTRACTS.agentNameUniversalResolver,
   });
   const agent = await naming.resolveName(name);
-  if (!agent) return json({ exists: false, name });
+  if (!agent) return jsonCors({ exists: false, name }, request);
 
   const accounts = new AgentAccountClient({
     rpcUrl,
@@ -57,7 +57,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     naming.getConnectionInfo(name).catch(() => null),
   ]);
   const eoaCount = custodianCount - pkCount;
-  return json({
+  // CORS (registered relying origins): the connect UIs of relying apps (gather27-web's org-handle
+  // availability, field/engage connect screens) call this cross-origin; it is public chain state.
+  return jsonCors({
     exists: true,
     name,
     agent,
@@ -67,5 +69,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // spec 280 — published connection bootstrap (kind + optional pre-select address). Null if unset.
     connectionKind: connection?.kind ?? null,
     connectionAddress: connection?.address ?? null,
-  });
+  }, request);
 };
+
+export const onRequestOptions = async ({ request }: { request: Request }): Promise<Response> => preflight(request);

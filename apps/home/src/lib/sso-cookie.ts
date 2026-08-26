@@ -34,9 +34,19 @@ function onImpactHost(): boolean {
 const SSO_MAX_AGE_SEC = 60 * 60 * 24 * 30;
 
 export function setSsoCookie(token: string, via: string, maxAgeSec = SSO_MAX_AGE_SEC): void {
-  if (!onImpactHost()) return;
   try {
     const value = encodeURIComponent(JSON.stringify({ t: token, v: via, e: DEPLOYMENT_EPOCH }));
+    if (!onImpactHost()) {
+      // Dev / local-stack hosts (e.g. localhost:5373): the parent-domain cookie can't stick (wrong
+      // Domain, and `Secure` never sets over http) — but recognition still READS this cookie
+      // (RecognizedEnroll, the one-tap authorize, isSocialCustody checks). Skipping the write here,
+      // as this used to, made a `#session=` handoff on localhost ping-pong enroll-entry ⇄
+      // enroll-recognized forever: the React session context said signed-in while readSsoCookie()
+      // said not. Keep a HOST-ONLY, Lax variant instead; FedCM's credentialed cross-site fetches
+      // (the reason for SameSite=None below) don't apply on a dev host anyway.
+      document.cookie = `${NAME}=${value}; Path=/; Max-Age=${maxAgeSec}; SameSite=Lax`;
+      return;
+    }
     // SameSite=None (with Secure) so the cookie rides on FedCM's credentialed cross-site fetches
     // (`/fedcm/accounts` + `/fedcm/assertion`), which are initiated for the relying app and therefore
     // cross-site — a Lax cookie would NOT be sent → the IdP couldn't see the session (401). The token is
@@ -59,8 +69,12 @@ export function readSsoCookie(): { token: string; via: string; deploymentEpoch?:
 }
 
 export function clearSsoCookie(): void {
-  if (!onImpactHost()) return;
   try {
+    if (!onImpactHost()) {
+      // The dev-host host-only variant setSsoCookie wrote.
+      document.cookie = `${NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
+      return;
+    }
     // Must match the attributes `setSsoCookie` wrote. A Lax clear does not remove a None cookie.
     document.cookie = `${NAME}=; Domain=${PARENT}; Path=/; Max-Age=0; Secure; SameSite=None`;
     document.cookie = `${NAME}=; Domain=${PARENT}; Path=/; Max-Age=0; Secure; SameSite=Lax`;
