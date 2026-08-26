@@ -101,6 +101,8 @@ const faithImpact: WhiteLabelConfig = {
       redirect_uris: [
         'https://engage-web-7um.pages.dev/',
         'http://localhost:5173/',
+        // Local-stack dev: engage-web moves off 5173 (demo-web holds it there) to 5177.
+        'http://localhost:5177/',
         // Field Workspace still sends `engage-app` today (field-a2a accepts that audience until
         // field-app tokens exist). Without this exact URI, Home fail-closes the enroll as
         // "Request blocked / Only start setup from a site you trust." Comes off this list once
