@@ -10,7 +10,8 @@
  *   1. derive each persona's SA from the local factory ({ mode 0, custodians [eoa], salt 0 } — the
  *      exact spec the Home's SIWE bootstrap uses, so "sign in with that wallet" lands on the same SA)
  *   2. deploy it (gas paid by anvil[0]) when it has no code yet
- *   3. register `<handle>.impact` for it in the permissionless `.impact` subregistry (best effort)
+ *   3. claim `<handle>.impact` FROM the SA (register + setPrimaryName in one paymaster-sponsored
+ *      userOp, custodian-signed — the Home's own name-claim shape) so reverse resolution shows the name
  *   4. run the spec-278 vault-key ceremony at demo-mcp (provision + bind), signed by the custodian —
  *      what onboarding does for a real member; without it every vault read is vault_key_unauthorized
  *   5. write `demo/personas.local.json` (gitignored) — the roster shape with local SAs — which
@@ -27,8 +28,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPublicClient, createWalletClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import { buildSubregistryRegisterCall } from '@agenticprimitives/agent-naming';
+import { AgentAccountClient, buildExecuteBatchCallData, type ContractCall } from '@agenticprimitives/agent-account';
+import { agentNameRegistryAbi, buildSetPrimaryNameCall, buildSubregistryRegisterCall, namehash } from '@agenticprimitives/agent-naming';
 
 const APP_ROOT = join(import.meta.dirname ?? __dirname, '..');
 const REPO_ROOT = join(APP_ROOT, '..', '..');
@@ -48,7 +49,10 @@ if (!existsSync(DEPLOYMENTS)) throw new Error(`${DEPLOYMENTS} not found — depl
 const roster = JSON.parse(readFileSync(ROSTER, 'utf8')) as Record<string, RosterEntry>;
 const d = JSON.parse(readFileSync(DEPLOYMENTS, 'utf8')) as {
   chainId: number; entryPoint: Address; agentAccountFactory: Address; permissionlessSubregistry?: Address;
+  agentNameRegistry?: Address; smartAgentPaymaster?: Address;
 };
+/** The TLD names are claimed under (src/lib/domain.ts AGENT_NAME_PARENT — the `.impact` subregistry). */
+const NAME_PARENT = 'impact';
 
 // src/lib/chain.ts (which the delegation builders read) takes the chain + contracts from NEXT_PUBLIC_*;
 // Next loads .env.local for the app, tsx does not — so load it here, before the dynamic import.
@@ -109,6 +113,37 @@ async function activateVault(sa: Address, pk: Hex): Promise<string> {
   return bind.ok ? 'vault ACTIVATED' : `vault bind failed: ${bind.reason ?? bind.error ?? 'unknown'}`;
 }
 
+/** Claim `<handle>.impact` FROM THE SMART AGENT and make it the primary (reverse) name — one batched
+ *  userOp sponsored by the dev-mode paymaster, signed by the custodian, exactly as the Home's name
+ *  claim runs. The permissionless subregistry allows ONE claim per caller, so registering from a
+ *  shared payer EOA works once and then reverts AlreadyClaimed; the SA must be the caller. Reverse
+ *  resolution (`reverseResolveString`) is what the relying apps display, so setPrimaryName matters. */
+async function claimName(handle: string, sa: Address, pk: Hex): Promise<string> {
+  if (!d.permissionlessSubregistry || !d.agentNameRegistry || !d.smartAgentPaymaster) return 'name: n/a (no naming/paymaster deployment)';
+  const name = `${handle}.${NAME_PARENT}`;
+  const node = namehash(name) as Hex;
+  const read = <T>(fn: 'owner' | 'primaryName', args: readonly unknown[]) =>
+    pub.readContract({ address: d.agentNameRegistry!, abi: agentNameRegistryAbi, functionName: fn, args } as never).catch(() => null) as Promise<T | null>;
+  const owner = ((await read<Address>('owner', [node])) ?? '0x0000000000000000000000000000000000000000').toLowerCase();
+  const primary = ((await read<Hex>('primaryName', [sa])) ?? '0x').toLowerCase();
+  if (primary === node.toLowerCase()) return `${name} (primary)`;
+  const calls: ContractCall[] = [];
+  if (owner === '0x0000000000000000000000000000000000000000') {
+    calls.push(buildSubregistryRegisterCall({ subregistry: d.permissionlessSubregistry, label: handle, newOwner: sa }));
+  } else if (owner !== sa.toLowerCase()) {
+    return `name: ${name} is owned by ${owner.slice(0, 10)}… — not claimed`;
+  }
+  calls.push(buildSetPrimaryNameCall({ registry: d.agentNameRegistry, node }));
+  const custodian = privateKeyToAccount(pk);
+  const { userOp, userOpHash } = await accounts.buildCallUserOp({
+    sender: sa, callData: buildExecuteBatchCallData(calls), paymaster: d.smartAgentPaymaster,
+  });
+  userOp.signature = await custodian.signMessage({ message: { raw: userOpHash } }); // the wallet rail: EIP-191 over the hash
+  await accounts.submitCallUserOp(userOp, payer);
+  const after = ((await read<Hex>('primaryName', [sa])) ?? '0x').toLowerCase();
+  return after === node.toLowerCase() ? `${name} CLAIMED (primary set)` : `name: userOp landed but primaryName not set (${after.slice(0, 10)}…)`;
+}
+
 const out: Record<string, { name: string; blurb?: string; sa: string; eoaPrivateKey: Hex; eoaAddress: Address }> = {};
 for (const [handle, p] of Object.entries(roster)) {
   const pk = (p.eoaPrivateKey ?? p.privateKey ?? '') as Hex;
@@ -119,17 +154,7 @@ for (const [handle, p] of Object.entries(roster)) {
   const deployed = await accounts.isDeployed(sa);
   if (!deployed) await accounts.createAgentAccountFromAccount(spec, payer);
 
-  let named = 'n/a';
-  if (d.permissionlessSubregistry) {
-    try {
-      const call = buildSubregistryRegisterCall({ subregistry: d.permissionlessSubregistry, label: handle, newOwner: sa });
-      const hash = await wallet.sendTransaction({ to: call.to, data: call.data, value: call.value, chain: null });
-      const rcpt = await pub.waitForTransactionReceipt({ hash });
-      named = rcpt.status === 'success' ? `${handle}.impact registered` : 'name: register reverted';
-    } catch (e) {
-      named = /revert|reverted|already|claimed/i.test(String(e)) ? 'name: already registered' : `name: ${String(e).split('\n')[0].slice(0, 80)}`;
-    }
-  }
+  const named = await claimName(handle, sa, pk).catch((e) => `name error: ${String(e).split('\n')[0].slice(0, 100)}`);
   const vault = mcpUp ? await activateVault(sa, pk).catch((e) => `vault error: ${e instanceof Error ? e.message : String(e)}`) : 'vault skipped';
   out[handle] = { name: p.name ?? handle, ...(p.blurb ? { blurb: p.blurb } : {}), sa: sa.toLowerCase(), eoaPrivateKey: pk, eoaAddress: eoa };
   console.log(`  ${handle.padEnd(8)} ${sa}  ${deployed ? 'exists' : 'DEPLOYED'}  ${named}  ${vault}`);
