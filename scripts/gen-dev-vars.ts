@@ -40,7 +40,11 @@ const A2A_URL = LOCAL ? 'http://127.0.0.1:8787' : 'https://demo-a2a-production.r
 const MCP_URL = LOCAL ? 'http://127.0.0.1:8788' : 'https://demo-mcp-production.richardpedersen3.workers.dev';
 const EDGE_URL = LOCAL ? 'http://127.0.0.1:8789' : 'https://demo-edge-production.richardpedersen3.workers.dev';
 /** Browser origins of the local apps that call the workers directly or via proxies. */
-const LOCAL_ORIGINS = ['http://127.0.0.1:5173', 'http://localhost:5173', HOME_ORIGIN, HOME_ORIGIN.replace('localhost', '127.0.0.1')];
+const LOCAL_ORIGINS = [
+  'http://127.0.0.1:5173', 'http://localhost:5173', // demo-web
+  'http://127.0.0.1:5273', 'http://localhost:5273', // demo-web-pro (calls the workers cross-origin)
+  HOME_ORIGIN, HOME_ORIGIN.replace('localhost', '127.0.0.1'),
+];
 
 if (!existsSync(DEPLOYMENTS_PATH)) {
   console.error(`gen-dev-vars: ${DEPLOYMENTS_PATH} not found.`);
@@ -236,6 +240,10 @@ const webProVars: Record<string, string> = {
   VITE_DEMO_MCP_URL: NETWORK === 'anvil'
     ? 'http://127.0.0.1:8788'
     : 'https://demo-mcp-production.richardpedersen3.workers.dev',
+  // spec 288 — the native MCP panel routes through the Agentic Edge; spec 311 — the authority epoch the
+  // client guards its stored sessions with. Both were only set by deploy-cloudflare.ts before.
+  VITE_DEMO_EDGE_URL: EDGE_URL,
+  ...(d.deploymentEpoch ? { VITE_DEPLOYMENT_EPOCH: d.deploymentEpoch } : {}),
   ...(d.custodyPolicy   ? { VITE_CUSTODY_POLICY:    d.custodyPolicy   } : {}),
   ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
   ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
