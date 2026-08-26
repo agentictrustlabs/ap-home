@@ -45,8 +45,10 @@ import {
   buildSignerBackend,
   createRelayerAccount,
   createSpendCappedAccount,
+  type BuildOpts,
   type KmsBackend,
 } from '@agenticprimitives/key-custody';
+import { agenticKmsConfig, type AkcsEnv } from './akcs.js';
 import type { AuditSink } from '@agenticprimitives/audit';
 import type { LocalAccount } from 'viem';
 
@@ -58,8 +60,16 @@ export type RelayerRole =
   | 'paymaster-topup';
 
 /** Minimal env shape this module needs — keeps it decoupled from index.ts. */
-export interface RelayerEnv {
+export interface RelayerEnv extends AkcsEnv {
   A2A_KMS_BACKEND?: string;
+  /**
+   * Optional EXPLICIT override for the funded relayer signer only. The local stack sets
+   * `A2A_KMS_BACKEND=agentic-kms` (custody derivation + envelopes through AKCS) while keeping
+   * `A2A_RELAYER_KMS_BACKEND=local-aes` so the pre-funded dev relayer address is unchanged. Unset ⇒
+   * the relayer follows A2A_KMS_BACKEND. This is configuration, never a fallback: an unavailable
+   * backend still fails the operation.
+   */
+  A2A_RELAYER_KMS_BACKEND?: string;
   PAYMASTER_TOPUP_CAP_WEI?: string;
 }
 
@@ -79,9 +89,28 @@ function resolveBackend(env: RelayerEnv): KmsBackend | undefined {
   // owns the production-vs-dev decision — no silent fallback at this
   // layer (ADR-0013 / feedback_no_silent_fallbacks). The wrangler.toml
   // EXPLICIT default for testnet is `A2A_KMS_BACKEND = "local-aes"`.
-  const raw = env.A2A_KMS_BACKEND;
+  const raw = env.A2A_RELAYER_KMS_BACKEND?.trim() || env.A2A_KMS_BACKEND;
   if (!raw) return undefined;
   return raw as KmsBackend;
+}
+
+/**
+ * Build opts for the relayer signer. `agentic-kms` needs the typed AKCS config plus the SIGNING key id;
+ * the relayer signs raw transaction / EIP-712 digests, so its signing purpose is RAW_32_BYTE_DIGEST —
+ * the AKCS caller binding must allowlist it explicitly.
+ */
+function relayerSignerOpts(env: RelayerEnv, auditSink: AuditSink): BuildOpts {
+  const backend = resolveBackend(env);
+  if (backend === 'agentic-kms') {
+    if (!env.AKCS_RELAY_KEY_ID) throw new Error('[demo-a2a] relayer on agentic-kms requires AKCS_RELAY_KEY_ID (no fallback)');
+    return {
+      backend,
+      auditSink,
+      agenticKms: agenticKmsConfig(env, { signingPurpose: 'RAW_32_BYTE_DIGEST' }),
+      config: { agenticKeyId: env.AKCS_RELAY_KEY_ID },
+    };
+  }
+  return { backend, auditSink };
 }
 
 /**
@@ -96,10 +125,7 @@ export async function getRelayerAccount(
   role: Exclude<RelayerRole, 'paymaster-topup'>,
   auditSink: AuditSink,
 ): Promise<LocalAccount> {
-  const backend = buildSignerBackend({
-    backend: resolveBackend(env),
-    auditSink,
-  });
+  const backend = buildSignerBackend(relayerSignerOpts(env, auditSink));
   return createRelayerAccount(backend, { role, auditSink });
 }
 
@@ -119,10 +145,7 @@ export async function getPaymasterTopupAccount(
   const capWei = env.PAYMASTER_TOPUP_CAP_WEI
     ? BigInt(env.PAYMASTER_TOPUP_CAP_WEI)
     : DEFAULT_PAYMASTER_TOPUP_CAP_WEI;
-  const backend = buildSignerBackend({
-    backend: resolveBackend(env),
-    auditSink,
-  });
+  const backend = buildSignerBackend(relayerSignerOpts(env, auditSink));
   const inner = await createRelayerAccount(backend, {
     role: 'paymaster-topup',
     auditSink,

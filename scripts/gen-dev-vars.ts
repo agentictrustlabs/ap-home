@@ -13,6 +13,7 @@
  * Generated files:
  *   apps/demo-a2a/.dev.vars
  *   apps/demo-mcp/.dev.vars
+ *   apps/demo-edge/.dev.vars       (admission gateway: chain/contracts/origins + the dev gateway-assertion secret)
  *   apps/demo-web-pro/.env.local, apps/demo-web-recovery/.env.local
  *   apps/demo-sso-next/.env.local   (the local Home — broker key, chain, KV, custody bridge)
  *   apps/demo-web/.env.local        (points the relying app at the local Home)
@@ -129,6 +130,10 @@ const DEV_SECRETS = {
   // SEC-010: the Home → demo-a2a custody bridge secret (/custody/oidc/resolve). Same value in
   // demo-a2a's .dev.vars and the Home's .env.local.
   A2A_CUSTODY_BRIDGE_SECRET: '0x' + 'ff'.repeat(32),
+  // spec 288 §4: the edge-minted GatewayAssertion HMAC secret — same value on demo-edge (signer) and
+  // demo-a2a / demo-mcp (verifiers). Locally the origins do not REQUIRE the assertion; setting it lets
+  // the edge path be exercised end-to-end.
+  GATEWAY_ASSERTION_SECRET: '0x' + 'ab'.repeat(32),
 };
 
 /** The Home's own client_id — the `aud` of custody-grade sessions demo-a2a's broker gate pins. */
@@ -224,8 +229,23 @@ const mcpVars: Record<string, string> = {
   ...(LOCAL ? { DEMO_VAULT_LOCAL_KEK_SECRET: '0x' + '99'.repeat(32) } : {}),
 };
 
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars);
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-mcp', '.dev.vars'), mcpVars);
+// preserveExtra: the AKCS backend lines (A2A_KMS_BACKEND / AKCS_*) are written by the sibling
+// faithkms repo (`just demo-stack-init`) and must survive a regen.
+writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars, { preserveExtra: true });
+writeDotEnv(join(REPO_ROOT, 'apps', 'demo-mcp', '.dev.vars'), { ...mcpVars, GATEWAY_ASSERTION_SECRET: DEV_SECRETS.GATEWAY_ASSERTION_SECRET }, { preserveExtra: true });
+
+// The Agentic Edge (spec 288 §6): public-config discovery doc + admission in front of demo-a2a/demo-mcp.
+// Its wrangler.toml top-level (dev) block binds MCP/A2A to the sibling `wrangler dev` sessions.
+const edgeVars: Record<string, string> = {
+  CHAIN_ID: String(d.chainId),
+  ENTRY_POINT: d.entryPoint,
+  DELEGATION_MANAGER: d.delegationManager,
+  ...(d.universalSignatureValidator ? { UNIVERSAL_SIGNATURE_VALIDATOR: d.universalSignatureValidator } : {}),
+  SA_BUDGET_LIMIT_UNITS: '50000',
+  EDGE_ALLOWED_ORIGINS: LOCAL_ORIGINS.join(','),
+  GATEWAY_ASSERTION_SECRET: DEV_SECRETS.GATEWAY_ASSERTION_SECRET,
+};
+writeDotEnv(join(REPO_ROOT, 'apps', 'demo-edge', '.dev.vars'), edgeVars, { preserveExtra: true });
 
 // demo-web-pro's vite dev server reads .env.local at startup; vars must be
 // VITE_-prefixed to be inlined into the bundle. Network-dependent — runs

@@ -12,6 +12,7 @@ import {
 } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
+import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
 import { executeGcpProvision, createGcpRestStepExecutor, sanitizeKeyId } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import {
@@ -388,7 +389,7 @@ async function authorizePersonVaultOp(
   return { ok: true, pv };
 }
 
-export interface Env {
+export interface Env extends AkcsEnv {
   DB: D1Database;
 
   RPC_URL: string;
@@ -722,7 +723,8 @@ app.use('/tools/*', async (c, next) => {
       .catch(() => {});
     return c.json({ error: 'service-mac headers required' }, 401);
   }
-  if (!c.env.A2A_MAC_SECRET) {
+  // agentic-kms: the MAC key is derived inside AKCS (ap-mac-v1) — no shared A2A_MAC_SECRET needed.
+  if (!c.env.A2A_MAC_SECRET && !isAgenticKms(c.env)) {
     if (process.env.NODE_ENV === 'production') {
       console.error('[demo-mcp] A2A_MAC_SECRET is not set in production — fail-closed');
       await auditSink
@@ -748,10 +750,13 @@ app.use('/tools/*', async (c, next) => {
   // the body.
   const rawBody = await c.req.text();
   const route = (c.req.path.split('/').pop() ?? '').trim();
-  const provider = buildMacProvider(c.env.MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: c.env.A2A_MAC_SECRET },
-  });
+  const provider = isAgenticKms(c.env)
+    ? buildMacProvider(c.env.MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(c.env) })
+    : buildMacProvider(c.env.MCP_AUDIENCE, {
+        backend: 'local-aes',
+        // Present here by the guard above (unset + not agentic-kms returned early).
+        config: { sessionSecretHex: c.env.A2A_MAC_SECRET as string },
+      });
   const result = await verifyServiceMac({
     ctx: {
       audience: c.env.MCP_AUDIENCE,

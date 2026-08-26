@@ -62,10 +62,18 @@ export function loadConfig(): DemoA2aConfig {
   // Signer backend: A2A_KMS_BACKEND controls which set of env vars is required.
   // 'local-aes' (default) → A2A_MASTER_PRIVATE_KEY
   // 'gcp-kms'             → GCP_KMS_KEY_NAME + GCP_SERVICE_ACCOUNT_JSON
+  // 'agentic-kms'         → AKCS_BASE_URL + AKCS_TENANT_ID + AKCS_TOKEN (+ AKCS_RELAY_KEY_ID unless
+  //                          A2A_RELAYER_KMS_BACKEND overrides the relayer to another backend)
   const backend = (process.env.A2A_KMS_BACKEND ?? 'local-aes').trim();
   if (backend === 'gcp-kms') {
     require_('GCP_KMS_KEY_NAME');
     require_('GCP_SERVICE_ACCOUNT_JSON');
+  } else if (backend === 'agentic-kms') {
+    // AKCS (spec 203 §4). Static AKCS_TOKEN is the local-stack shape; production wires a TokenProvider.
+    require_('AKCS_BASE_URL');
+    require_('AKCS_TENANT_ID');
+    require_('AKCS_TOKEN');
+    if ((process.env.A2A_RELAYER_KMS_BACKEND ?? backend) === 'agentic-kms') require_('AKCS_RELAY_KEY_ID');
   } else if (backend === 'aws-kms') {
     require_('AWS_KMS_KEY_ID');
     // AWS SDK reads AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY itself.
