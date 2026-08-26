@@ -966,6 +966,21 @@ app.post('/tools/get_org_sensitive', async (c) => {
 // NOTE: the proof binds the handler's argument object — for this route that is
 // `{ args: <toolArgs> }` (the call shape below). A client builds the proof with
 // `buildInvocationProof({ ..., args: { args: toolArgs } })`.
+//
+// CORS: browsers (demo-web-pro's Act-6 panels) call this ingress directly AND via the edge — the
+// edge forwards Origin and deliberately does not tag dispatched responses, so ACAO must come from
+// here. Same posture as the OAuth routes: no cookies, the authority is the delegation token +
+// invocation proof in the body. Registered BEFORE the route — Hono dispatches in registration
+// order, so the shared OAUTH_CORS_PATHS block (declared later in this file) can't wrap this route.
+// (`corsHeaders` is a hoisted function declaration, so calling it from here is safe.)
+app.use('/mcp/native', async (c, next) => {
+  const origin = c.req.header('Origin') ?? '*';
+  if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  await next();
+  const merged = new Headers(c.res.headers);
+  for (const [k, v] of Object.entries(corsHeaders(origin))) merged.set(k, v);
+  c.res = new Response(c.res.body, { status: c.res.status, statusText: c.res.statusText, headers: merged });
+});
 app.post('/mcp/native', async (c) => {
   if (c.env.DEMO_NATIVE_MCP_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
   const usv = c.env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
@@ -1751,6 +1766,8 @@ const OAUTH_CORS_PATHS = [
   // These carry no ambient authority: provision is fail-closed behind DEMO_VAULT_PROVISION_ENABLED,
   // and bind is gated by the person-SA signature it carries (verified server-side via ERC-1271).
   '/custody/vault-key/is-bound', '/custody/vault-key/server-info', '/custody/vault-key/provision', '/custody/vault-key/bind',
+  // NOTE: /mcp/native gets the same treatment but is registered directly ABOVE its route — Hono
+  // dispatches in registration order, and the route is declared earlier in this file than this block.
 ];
 function corsHeaders(origin: string): Record<string, string> {
   return {
