@@ -12,6 +12,7 @@ import {
 } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider } from '@agenticprimitives/key-custody';
+import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
 import { executeGcpProvision, createGcpRestStepExecutor, sanitizeKeyId } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import {
@@ -37,7 +38,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { localKekEnabled, localKekRef, resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
@@ -388,7 +389,7 @@ async function authorizePersonVaultOp(
   return { ok: true, pv };
 }
 
-export interface Env {
+export interface Env extends AkcsEnv {
   DB: D1Database;
 
   RPC_URL: string;
@@ -445,6 +446,9 @@ export interface Env {
    *  Default us-east1 / vault-keks. project_id + runtime SA are read from GCP_SERVICE_ACCOUNT_JSON. */
   GCP_KEK_LOCATION?: string;
   GCP_KEK_KEYRING?: string;
+  /** DEV ONLY (refused in production): derive per-person KEKs locally instead of GCP Cloud KMS so the
+   *  vault ceremony + reads/writes work on a local stack. See vault-key.ts `localKekEnabled`. */
+  DEMO_VAULT_LOCAL_KEK_SECRET?: string;
   /** Gates POST /custody/vault-key/provision (on-demand KEK creation — wields the admin credential).
    *  Fail-closed: the route 404s unless this is 'true'. The demo sets it; production leaves it unset
    *  and provisions out of band. */
@@ -719,7 +723,8 @@ app.use('/tools/*', async (c, next) => {
       .catch(() => {});
     return c.json({ error: 'service-mac headers required' }, 401);
   }
-  if (!c.env.A2A_MAC_SECRET) {
+  // agentic-kms: the MAC key is derived inside AKCS (ap-mac-v1) — no shared A2A_MAC_SECRET needed.
+  if (!c.env.A2A_MAC_SECRET && !isAgenticKms(c.env)) {
     if (process.env.NODE_ENV === 'production') {
       console.error('[demo-mcp] A2A_MAC_SECRET is not set in production — fail-closed');
       await auditSink
@@ -745,10 +750,13 @@ app.use('/tools/*', async (c, next) => {
   // the body.
   const rawBody = await c.req.text();
   const route = (c.req.path.split('/').pop() ?? '').trim();
-  const provider = buildMacProvider(c.env.MCP_AUDIENCE, {
-    backend: 'local-aes',
-    config: { sessionSecretHex: c.env.A2A_MAC_SECRET },
-  });
+  const provider = isAgenticKms(c.env)
+    ? buildMacProvider(c.env.MCP_AUDIENCE, { backend: 'agentic-kms', agenticKms: agenticKmsConfig(c.env) })
+    : buildMacProvider(c.env.MCP_AUDIENCE, {
+        backend: 'local-aes',
+        // Present here by the guard above (unset + not agentic-kms returned early).
+        config: { sessionSecretHex: c.env.A2A_MAC_SECRET as string },
+      });
   const result = await verifyServiceMac({
     ctx: {
       audience: c.env.MCP_AUDIENCE,
@@ -958,6 +966,21 @@ app.post('/tools/get_org_sensitive', async (c) => {
 // NOTE: the proof binds the handler's argument object — for this route that is
 // `{ args: <toolArgs> }` (the call shape below). A client builds the proof with
 // `buildInvocationProof({ ..., args: { args: toolArgs } })`.
+//
+// CORS: browsers (demo-web-pro's Act-6 panels) call this ingress directly AND via the edge — the
+// edge forwards Origin and deliberately does not tag dispatched responses, so ACAO must come from
+// here. Same posture as the OAuth routes: no cookies, the authority is the delegation token +
+// invocation proof in the body. Registered BEFORE the route — Hono dispatches in registration
+// order, so the shared OAUTH_CORS_PATHS block (declared later in this file) can't wrap this route.
+// (`corsHeaders` is a hoisted function declaration, so calling it from here is safe.)
+app.use('/mcp/native', async (c, next) => {
+  const origin = c.req.header('Origin') ?? '*';
+  if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  await next();
+  const merged = new Headers(c.res.headers);
+  for (const [k, v] of Object.entries(corsHeaders(origin))) merged.set(k, v);
+  c.res = new Response(c.res.body, { status: c.res.status, statusText: c.res.statusText, headers: merged });
+});
 app.post('/mcp/native', async (c) => {
   if (c.env.DEMO_NATIVE_MCP_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
   const usv = c.env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
@@ -1743,6 +1766,8 @@ const OAUTH_CORS_PATHS = [
   // These carry no ambient authority: provision is fail-closed behind DEMO_VAULT_PROVISION_ENABLED,
   // and bind is gated by the person-SA signature it carries (verified server-side via ERC-1271).
   '/custody/vault-key/is-bound', '/custody/vault-key/server-info', '/custody/vault-key/provision', '/custody/vault-key/bind',
+  // NOTE: /mcp/native gets the same treatment but is registered directly ABOVE its route — Hono
+  // dispatches in registration order, and the route is declared earlier in this file than this block.
 ];
 function corsHeaders(origin: string): Record<string, string> {
   return {
@@ -1877,6 +1902,8 @@ app.get('/custody/vault-key/server-info', (c) => {
       const keyRing = (c.env.GCP_KEK_KEYRING ?? '').trim() || 'vault-keks';
       if (sa.project_id) kmsKeyRef = `projects/${sa.project_id}/locations/${location}/keyRings/${keyRing}/cryptoKeys/${sanitizeKeyId(owner)}`;
     } catch { /* GCP env absent/unparseable → null; client signs the bind the old way */ }
+    // Dev-only local KEK (no GCP): same deterministic-ref contract, derived per owner.
+    if (!kmsKeyRef && localKekEnabled(c.env)) kmsKeyRef = localKekRef(owner);
   }
   return c.json({
     serverId: VAULT_SERVER_ID,
@@ -1907,7 +1934,10 @@ app.get('/custody/vault-key/server-info', (c) => {
 // (operator-side `provision-vault-kek.ts`, ideally with a least-privilege/separate admin credential).
 app.post('/custody/vault-key/provision', async (c) => {
   if (c.env.DEMO_VAULT_PROVISION_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
-  if (!c.env.GCP_SERVICE_ACCOUNT_JSON) {
+  // Dev-only local KEKs (vault-key.ts): nothing to mint — the ref is derived — but the owner-control
+  // proof below is still enforced so the route contract is identical.
+  const useLocalKek = !c.env.GCP_SERVICE_ACCOUNT_JSON && localKekEnabled(c.env);
+  if (!c.env.GCP_SERVICE_ACCOUNT_JSON && !useLocalKek) {
     return c.json({ error: 'unsupported', error_description: 'GCP_SERVICE_ACCOUNT_JSON unset (provisioning unavailable)' }, 501);
   }
   let body: Record<string, unknown> = {};
@@ -1940,9 +1970,12 @@ app.post('/custody/vault-key/provision', async (c) => {
     );
     if (!proof.ok) return c.json({ error: 'unauthorized', error_description: proof.reason }, 401);
   }
+  if (useLocalKek) {
+    return c.json({ ok: true, owner: owner.toLowerCase(), kmsKeyRef: localKekRef(owner), alreadyExisted: true });
+  }
   let sa: { project_id?: string; client_email?: string };
   try {
-    const raw = c.env.GCP_SERVICE_ACCOUNT_JSON.trim();
+    const raw = c.env.GCP_SERVICE_ACCOUNT_JSON!.trim();
     sa = JSON.parse(raw.startsWith('{') ? raw : atob(raw)) as { project_id?: string; client_email?: string };
   } catch {
     return c.json({ error: 'misconfigured', error_description: 'GCP_SERVICE_ACCOUNT_JSON not parseable' }, 500);
@@ -1955,7 +1988,7 @@ app.post('/custody/vault-key/provision', async (c) => {
   try {
     const result = await executeGcpProvision(
       { project: sa.project_id, location, keyRing, identities: [owner], runtimeServiceAccount: sa.client_email, purpose: 'encrypt-decrypt' },
-      createGcpRestStepExecutor({ serviceAccountJson: c.env.GCP_SERVICE_ACCOUNT_JSON }),
+      createGcpRestStepExecutor({ serviceAccountJson: c.env.GCP_SERVICE_ACCOUNT_JSON! }),
     );
     const kmsKeyRef = result.keyMap[owner];
     if (!kmsKeyRef) return c.json({ ok: false, error: 'provision_failed', error_description: 'no key in provisioning result' }, 500);

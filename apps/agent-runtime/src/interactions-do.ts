@@ -18,7 +18,7 @@
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
-import { baseSepolia } from 'viem/chains';
+import { chainFor } from './chain';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
@@ -423,7 +423,7 @@ export class InteractionsDO {
 
 
   private pub() {
-    return createPublicClient({ chain: baseSepolia, transport: http(this.env.RPC_URL) });
+    return createPublicClient({ chain: chainFor(this.env), transport: http(this.env.RPC_URL) });
   }
 
   /** spec 327 §3 — post-commit org-assistant dispatch. Fire-and-forget (the member's post already

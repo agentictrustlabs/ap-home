@@ -18,7 +18,7 @@
 //   - JWKS fetch failure is fail-closed (ADR-0013: no silent fallback).
 
 import { verifyAgentSession, verifyIdToken, importJwks, type VerifyKey } from '@agenticprimitives/connect';
-import { deriveSubjectSigner, type KmsBackend } from '@agenticprimitives/key-custody';
+import { deriveSubjectSigner, type AgenticKmsConfig, type KmsBackend } from '@agenticprimitives/key-custody';
 import { createKmsViemAccount } from '@agenticprimitives/key-custody/kms-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
 import type { Address, Hex } from '@agenticprimitives/types';
@@ -149,12 +149,15 @@ export interface SubjectCustodian {
 export async function deriveSubjectCustodian(
   subject: OidcSubject,
   masterHex: string,
-  opts: { backend?: KmsBackend; auditSink?: AuditSink; rotation?: number } = {},
+  opts: { backend?: KmsBackend; auditSink?: AuditSink; rotation?: number; agenticKms?: AgenticKmsConfig } = {},
 ): Promise<SubjectCustodian> {
+  const backend = opts.backend ?? 'local-aes';
+  // agentic-kms: the master never enters this process — AKCS derives C_sub from the tenant signing
+  // seed (the legacy master imported via ceremony) with the identical v1 scheme. No fallback.
   const signerBackend = deriveSubjectSigner({
     subject: { iss: subject.iss, sub: subject.sub, rotation: opts.rotation },
-    backend: opts.backend ?? 'local-aes',
-    config: { derivationSecretHex: masterHex },
+    backend,
+    ...(backend === 'agentic-kms' ? { agenticKms: opts.agenticKms } : { config: { derivationSecretHex: masterHex } }),
     auditSink: opts.auditSink, // G-2: every C_sub signature emits key-custody.sign
   });
   const acct = await createKmsViemAccount(signerBackend);

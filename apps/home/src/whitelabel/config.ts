@@ -101,6 +101,8 @@ const faithImpact: WhiteLabelConfig = {
       redirect_uris: [
         'https://engage-web-7um.pages.dev/',
         'http://localhost:5173/',
+        // Local-stack dev: engage-web moves off 5173 (demo-web holds it there) to 5177.
+        'http://localhost:5177/',
         // Field Workspace still sends `engage-app` today (field-a2a accepts that audience until
         // field-app tokens exist). Without this exact URI, Home fail-closes the enroll as
         // "Request blocked / Only start setup from a site you trust." Comes off this list once
@@ -218,6 +220,18 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       socialCustody: true,
+    },
+    {
+      // demo-web-pro (Treasury service-agent story). Uses quick-connect / demo personas locally:
+      // Alice + Bob ARE Home demo people, so their Person Smart Agents and custodian signatures come
+      // from the Home. The site delegation is unused (web-pro signs userOps + custody typed-data
+      // directly via the persona's custodian), but a registered client_id is required by /connect/demo-signin.
+      client_id: 'demo-web-pro',
+      name: 'agenticprimitives treasury demo',
+      redirect_uris: ['https://agenticprimitives-demo-pro.pages.dev/', 'http://localhost:5273/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     {
       client_id: 'demo-org',

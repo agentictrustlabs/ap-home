@@ -12,7 +12,7 @@
 // Bindings are created by the connected-custodian ceremony (P5). Until one exists
 // for an owner, this module returns null and the handlers return vault_key_unauthorized.
 
-import { createPublicClient, http, type Address } from 'viem';
+import { createPublicClient, http, keccak256, stringToHex, type Address } from 'viem';
 import type { Vault } from '@agenticprimitives/vault';
 import {
   createVaultKeyAuthorizationVerifier,
@@ -47,6 +47,51 @@ export interface VaultKeyEnv {
   DELEGATION_MANAGER: string;
   UNIVERSAL_SIGNATURE_VALIDATOR?: string;
   GCP_SERVICE_ACCOUNT_JSON?: string;
+  /** DEV ONLY — see {@link localKekEnabled}. */
+  DEMO_VAULT_LOCAL_KEK_SECRET?: string;
+}
+
+// ─── DEV-ONLY local per-person KEKs ─────────────────────────────────────────────────────────────
+// Production wields per-person KEKs in GCP Cloud KMS (spec 278 VKB-D1). A local stack (anvil / a
+// private chain, `wrangler dev`) has no KMS, so the vault ceremony used to stop at `provision` (501)
+// and every vault read/write stayed `vault_key_unauthorized`. With DEMO_VAULT_LOCAL_KEK_SECRET set —
+// and ONLY outside production, where it is refused like DEMO_VAULT_PROVISION_SKIP_PROOF — a binding
+// may reference `local-kek:<owner>`: a per-person key DERIVED from the dev secret + owner, wielded via
+// key-custody's LocalAesProvider (HKDF envelope, its own production guard). Still no global key on the
+// data path (each owner's derived master differs), and the owner-control proof + VaultKeyAuthorization
+// verification are unchanged; only WHERE the KEK lives differs.
+export const LOCAL_KEK_PREFIX = 'local-kek:';
+
+export function localKekRef(owner: string): string {
+  return `${LOCAL_KEK_PREFIX}${owner.toLowerCase()}`;
+}
+
+export function isLocalKekRef(kmsKeyRef: string | undefined | null): boolean {
+  return !!kmsKeyRef && kmsKeyRef.startsWith(LOCAL_KEK_PREFIX);
+}
+
+function isProductionRuntime(): boolean {
+  try {
+    return typeof process !== 'undefined' && process.env?.NODE_ENV === 'production';
+  } catch {
+    return false;
+  }
+}
+
+/** True iff the dev secret is set AND this is not a production runtime (fail-closed in prod). */
+export function localKekEnabled(env: Pick<VaultKeyEnv, 'DEMO_VAULT_LOCAL_KEK_SECRET'>): boolean {
+  const secret = (env.DEMO_VAULT_LOCAL_KEK_SECRET ?? '').trim();
+  if (!/^(0x)?[0-9a-fA-F]{32,}$/.test(secret)) return false;
+  if (isProductionRuntime()) {
+    console.warn('[demo-mcp] DEMO_VAULT_LOCAL_KEK_SECRET is set in production — REFUSED (per-person KEKs must live in KMS).');
+    return false;
+  }
+  return true;
+}
+
+/** The owner's derived local master (hex, no 0x): keccak256(secret ‖ owner). */
+function localKekMasterHex(secret: string, owner: string): string {
+  return keccak256(stringToHex(`${secret.trim().toLowerCase()}\n${owner.toLowerCase()}`)).slice(2);
 }
 
 // UniversalSignatureValidator.isValidSig(signer, hash, sig) — ERC-1271/6492/ECDSA
@@ -96,19 +141,34 @@ function delegationFromWire(json: string): Delegation {
 export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promise<PersonVault | null> {
   const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
   if (!row) return null;
-  if (!env.GCP_SERVICE_ACCOUNT_JSON) {
-    throw new Error(
-      'resolvePersonVault: GCP_SERVICE_ACCOUNT_JSON is required to wield a per-person KEK (spec 278). ' +
-        'No local-aes fallback for person data.',
-    );
+  let provider;
+  if (isLocalKekRef(row.kms_key_ref)) {
+    if (!localKekEnabled(env)) {
+      throw new Error(
+        'resolvePersonVault: this binding references a dev-only local KEK (local-kek:) but ' +
+          'DEMO_VAULT_LOCAL_KEK_SECRET is unset or this is production. Re-bind against a KMS KEK.',
+      );
+    }
+    provider = selectVaultKeyProvider({
+      allowFixtureKey: true, // dev-only local envelope — LocalAesProvider keeps its own production guard
+      fixtureKeyHex: localKekMasterHex(env.DEMO_VAULT_LOCAL_KEK_SECRET!, row.owner_address),
+    });
+  } else {
+    if (!env.GCP_SERVICE_ACCOUNT_JSON) {
+      throw new Error(
+        'resolvePersonVault: GCP_SERVICE_ACCOUNT_JSON is required to wield a per-person KEK (spec 278). ' +
+          'No local-aes fallback for person data.',
+      );
+    }
+    provider = selectVaultKeyProvider({
+      kmsKeyRef: row.kms_key_ref,
+      serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
+    });
   }
   // VL-W3 — memoize the KMS DEK-unwrap in-isolate (cachingDekWrapper). Sits downstream of this
   // function's callers' per-op vault-key auth gate, so it never bypasses authorization; it only spares
   // repeat reads the cross-cloud KMS `:decrypt` (the dominant read latency).
-  const wrapper = cachingDekWrapper(selectVaultKeyProvider({
-    kmsKeyRef: row.kms_key_ref,
-    serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
-  }));
+  const wrapper = cachingDekWrapper(provider);
   return {
     binding: bindingFromRow(row),
     authorization: delegationFromWire(row.authorization_json), // salt → bigint for hashDelegation

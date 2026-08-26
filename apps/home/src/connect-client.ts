@@ -30,11 +30,10 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { getClient } from './lib/oidc-clients';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
-import { baseSepolia } from 'viem/chains';
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
-import { CONTRACTS, DEFAULT_RPC_URL } from './lib/chain';
+import { CONTRACTS, DEFAULT_RPC_URL, CHAIN, CHAIN_ID } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership } from './lib/org-membership';
@@ -50,7 +49,6 @@ import { demoCustodySignHash, isDemoCustodyHome } from './lib/persona-custody';
 export type SignHash = (hash: Hex) => Promise<Hex>;
 
 export const AUD = 'demo-sso';
-const CHAIN_ID = 84532;
 
 export type SiweOutcome =
   | { status: 'issued'; token: string; address: Address; agent: Address }
@@ -222,7 +220,7 @@ const PAY_USDC_ABI = [
  *  gasless via executeCall. No SIWE-only window.ethereum, no service faucet, no held key. Non-fatal. */
 async function fundTreasuryIfNeeded(personSa: Address, treasury: Address, asset: Address, need: bigint, signHash: SignHash): Promise<void> {
   try {
-    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
     const bal = (await pc.readContract({ address: asset, abi: PAY_USDC_ABI, functionName: 'balanceOf', args: [treasury] })) as bigint;
     if (bal >= need) return;
     const topUp = need > 1_000_000n ? need * 4n : 1_000_000n; // a generous buffer so it rarely re-mints
@@ -390,7 +388,7 @@ export async function claimName(
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   // Already-claimed? Surface the existing name; never submit a reverting register.
   try {
-    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
     const prior = (await pc.readContract({
       address: CONTRACTS.permissionlessSubregistry, abi: SUBREG_CLAIMED_ABI, functionName: 'claimedBy', args: [agent],
     })) as Hex;
@@ -731,7 +729,7 @@ export async function deriveEoaSa(owner: Address, salt: bigint): Promise<Address
  *  derived from custodians=[EOA], so only a deploy under this EOA yields it). */
 export async function isAgentDeployed(sa: Address): Promise<boolean> {
   try {
-    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
     const code = await pub.getBytecode({ address: sa });
     return !!code && code !== '0x';
   } catch {
@@ -1205,7 +1203,7 @@ export async function createChildAgentForSite(
   // hands the grant off. Bounded (ADR-0013): the SAME getCode call, capped at ~15s.
   onStep?.('Confirming your organization…');
   {
-    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
     for (let i = 0; i < 15; i++) {
       const code = await pub.getBytecode({ address: childAgent }).catch(() => undefined);
       if (code && code !== '0x') break;
@@ -1439,7 +1437,7 @@ export async function createManagedAgent(
   // MAM-INV-1 — the SA must be deployed AND RPC-visible before it counts as "created" (SEC-011).
   onStep?.('Confirming on the network…');
   {
-    const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+    const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
     for (let i = 0; i < 15; i++) {
       const code = await pub.getBytecode({ address: child }).catch(() => undefined);
       if (code && code !== '0x') break;
@@ -1878,7 +1876,7 @@ const CREDENTIAL_READ_ABI = [
 /** Live credential counts (custodians = EOA + passkey-identity addresses; passkeys = WebAuthn keys).
  *  A view call through the demo-a2a /rpc proxy — never a log scan (ADR-0012). */
 export async function readCredentialCounts(personAgent: Address): Promise<{ custodians: number; passkeys: number }> {
-  const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
+  const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
   const [c, p] = await Promise.all([
     pub.readContract({ address: personAgent, abi: CREDENTIAL_READ_ABI, functionName: 'custodianCount' }) as Promise<bigint>,
     pub.readContract({ address: personAgent, abi: CREDENTIAL_READ_ABI, functionName: 'passkeyCount' }) as Promise<bigint>,
@@ -2548,7 +2546,7 @@ const ATL_SKILLS: Hex = keccak256(toBytes('atl:skills'));
 /** Read the capabilities the agent currently PUBLISHES for discovery (comma-joined labels), to prefill the UI. */
 export async function getSkills(sa: Address): Promise<string[]> {
   try {
-    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
     const v = (await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [sa, ATL_SKILLS] })) as string;
     return v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
   } catch { return []; }
@@ -2586,7 +2584,7 @@ export async function setSkills(
   // onlyRegistered gate — register the profile first (in-batch) if the SA has no profile yet.
   let registered = false;
   try {
-    const pc = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
     registered = (await pc.readContract({ address: resolver, abi: agentProfileResolverAbi, functionName: 'isRegistered', args: [sa] })) as boolean;
   } catch { /* default to not-registered → include register (safe: a never-registered SA needs it) */ }
   if (!registered) {
