@@ -354,7 +354,7 @@ GATHER_DIGEST_MAX = "120000"
 PUBLIC_GRAPH_URL = "https://graphdb.agentkg.io/repositories/gc-public"
 SA_BUDGET_LIMIT_UNITS = "50000"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "true"
-ALLOWED_ORIGINS = "http://localhost:5175,http://127.0.0.1:5175,https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev"
+ALLOWED_ORIGINS = "http://localhost:5175,http://127.0.0.1:5175,https://faithnet.me,https://www.faithnet.me,https://*.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev"
 MCP_URL = "https://mcp.faithnet.io"
 A2A_KMS_BACKEND = "gcp-kms"
 # C_sub (per-subject OIDC custodian) derives from A2A_CUSTODY_ROOT_KEY via a local secp256k1
