@@ -75,6 +75,7 @@ export function RecipientPicker({
   onPick,
   onCancel,
   recents,
+  names,
 }: {
   token: string;
   query: string;
@@ -83,6 +84,9 @@ export function RecipientPicker({
   onCancel: () => void;
   /** People you already DM (address → title) — ranked first under Names, like Slack's recents. */
   recents: readonly { address: string; title: string }[];
+  /** Naming-service names the Home has already resolved (lowercase address → name) — labels a roster
+   *  member who chose no join name, instead of showing their address. */
+  names?: Readonly<Record<string, string>>;
 }) {
   const [selected, setSelected] = useState<string>('names');
   const [rows, setRows] = useState<PickedRecipient[] | null>(null);
@@ -123,17 +127,24 @@ export function RecipientPicker({
     let cancelled = false;
     setNote(null);
     setLoading(true);
+    // A scope switch must never show the PREVIOUS scope's people under the new title, even for a
+    // frame — a stale list is a wrong list. Names re-queries keep their rows while the filter refines.
+    if (active.scope !== 'names' || !namesQuery) setRows(null);
     const t = window.setTimeout(() => {
       const load: Promise<PickedRecipient[]> = active.scope === 'names'
         ? listNamedAgents(namesQuery.length >= 2 ? namesQuery : '')
         : fetchRoster(token, active.id).then((roster) =>
-            roster.map((m) => ({
-              address: m.address,
-              title: m.displayName,
-              subtitle: m.publicName ?? m.role,
-              ...(m.publicName ? { name: m.publicName } : {}),
-              scope: active.scope,
-            })),
+            roster.map((m) => {
+              const known = m.publicName ?? names?.[m.address];
+              const chose = !/^0x[0-9a-f]{4}…[0-9a-f]{4}$/.test(m.displayName);
+              return {
+                address: m.address,
+                title: chose ? m.displayName : known ?? m.displayName,
+                subtitle: chose ? known ?? m.role : m.role,
+                ...(known ? { name: known } : {}),
+                scope: active.scope,
+              };
+            }),
           );
       void load
         .then((r) => { if (!cancelled) setRows(r); })
@@ -141,6 +152,7 @@ export function RecipientPicker({
         .finally(() => { if (!cancelled) setLoading(false); });
     }, active.scope === 'names' && namesQuery ? 250 : 0);
     return () => { cancelled = true; window.clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.id, active.scope, token, namesQuery]);
 
   const recentRows = useMemo(() => {

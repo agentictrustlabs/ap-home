@@ -124,9 +124,15 @@ internal-classification community boards. The descriptor/envelope shapes keep th
   **Names** (naming-service KB; empty query lists everyone indexed, re-queried as you type) ·
   **Organizations** (a select of the person's org-class agents, steward or member, then the org's
   `directory.list` roster) · **Workspaces** (teams + app-workspace agents, same roster read) — and the
-  list populates on selection and filters as you type. The roster carries **nameless members**: a
-  member with no naming-service name is listed by their org-local `localName` / listing
-  `displayName` (`publicName` null, chip "unnamed") and is addressed by ADDRESS like anyone else
-  (ADR-0010). Picking never authorizes — the wire ceremony still gates the first send to a new
-  counterparty. `src/lib/recipient-directory.ts` (pure roster/filter helpers, tested) +
-  `chat/RecipientPicker.tsx`.
+  list populates on selection and filters as you type. Layout is Slack's "New message": one search
+  box, scopes in a left pane (Names · each Organization · each Workspace), people on the right.
+  **The roster is a UNION of two projections of membership** (not a fallback chain, ADR-0013):
+  the community directory (`directory.list` — members who published a listing; readable by any
+  member) ∪ the steward's members index (`/connect/received-delegations` — invite-redeemed members,
+  readable when the person stewards the org). It carries **nameless members**: a member with no
+  naming-service name is listed by their org-local `localName` / listing `displayName` / join
+  `displayName` (`publicName` null, chip "unnamed"; a member who chose no name shows their address,
+  or the name the Home already resolved) and is addressed by ADDRESS like anyone else (ADR-0010).
+  Picking someone you already DM opens that DM. Picking never authorizes — the wire ceremony still
+  gates the first send to a new counterparty. `src/lib/recipient-directory.ts` (pure roster/merge/
+  filter helpers, tested) + `chat/RecipientPicker.tsx`; e2e `tests/e2e-sso/dm-scoped-picker.spec.ts`.

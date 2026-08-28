@@ -269,6 +269,16 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));
   }, [view, activeDm]);
 
+  // Slack opens a DM at its NEWEST message. Scroll the thread to the bottom when it opens, and again
+  // when a message lands (a body arriving for the last item counts — that is when it gets tall).
+  const threadBodyRef = useRef<HTMLDivElement>(null);
+  const lastId = thread[thread.length - 1]?.messageId;
+  const lastBodyLoaded = !!lastId && !!view?.bodies[lastId];
+  useEffect(() => {
+    const el = threadBodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activeKey, thread.length, lastBodyLoaded]);
+
   const caseFor = useCallback(
     (dm: DirectMessageSummaryV1): InteractionCaseV1 | null => {
       if (!view) return null;
@@ -560,19 +570,16 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   onPick={chooseRecipient}
                   onCancel={() => { setComposing(false); setToRecipient(null); }}
                   recents={recents}
+                  names={view?.names}
                 />
               )}
-              <div className="chat-thread-body">
-                {toRecipient ? (
+              {toRecipient && (
+                <div className="chat-thread-body">
                   <p style={{ textAlign: 'center', opacity: 0.6, margin: 'auto', fontSize: '0.85rem' }}>
                     This is the start of your direct message history with <b>{recipientTitle}</b>.
                   </p>
-                ) : (
-                  <p style={{ textAlign: 'center', opacity: 0.6, margin: 'auto', fontSize: '0.85rem' }}>
-                    Pick who to message.
-                  </p>
-                )}
-              </div>
+                </div>
+              )}
               <MessageComposer
                 value={composeBody}
                 onChange={setComposeBody}
@@ -616,7 +623,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 </div>
               )}
 
-              <div className="chat-thread-body">
+              <div className="chat-thread-body" ref={threadBodyRef}>
                 {thread.map((i, idx) => {
                   const meta = view?.envelopeMeta[i.messageId];
                   const mine = i.folder === 'sent';

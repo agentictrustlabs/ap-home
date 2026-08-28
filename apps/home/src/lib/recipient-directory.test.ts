@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rosterFromDirectoryResponse, filterRecipients } from './recipient-directory';
+import { rosterFromDirectoryResponse, filterRecipients, membersFromReceivedDelegations, mergeRosters } from './recipient-directory';
 
 const A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -37,5 +37,29 @@ describe('filterRecipients', () => {
     expect(filterRecipients(rows, 'IMPACT').map((r) => r.title)).toEqual(['Alice Named']);
     expect(filterRecipients(rows, 'zed').map((r) => r.title)).toEqual(['Zed Nameless']);
     expect(filterRecipients(rows, '0xbbbb').map((r) => r.title)).toEqual(['Zed Nameless']);
+  });
+});
+
+describe('membersFromReceivedDelegations + mergeRosters', () => {
+  const ORG = '0x1111111111111111111111111111111111111111';
+  it('takes only this org\'s members, keyed by viaOrg, naming them by the join display name', () => {
+    const rows = membersFromReceivedDelegations({ received: [
+      { viaOrg: ORG.toUpperCase().replace('0X', '0x'), orgAgent: B, displayName: 'Boris (invited)' },
+      { viaOrg: '0x2222222222222222222222222222222222222222', orgAgent: C, displayName: 'elsewhere' },
+      { viaOrg: ORG, orgAgent: A, orgName: 'Russian Team' },
+      { viaOrg: ORG, orgAgent: C, orgName: 'Carol' },
+    ] }, ORG);
+    // `orgName` never labels a person (it holds the ORG's name for a member who chose none).
+    expect(rows.map((r) => [r.address, r.displayName, r.publicName])).toEqual([[B, 'Boris (invited)', null], [A, '0xaaaa…aaaa', null], [C, '0xcccc…cccc', null]]);
+  });
+  it('unions listings with invited members — a listing wins for someone in both', () => {
+    const merged = mergeRosters(
+      [{ address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward' }],
+      [{ address: A, displayName: 'Alice (invited)', publicName: null }, { address: B, displayName: 'Boris', publicName: null }],
+    );
+    expect(merged).toEqual([
+      { address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward' },
+      { address: B, displayName: 'Boris', publicName: null },
+    ]);
   });
 });
