@@ -9,18 +9,18 @@
 // permissionless subregistry `<label>.demo.agent`.
 
 /** Registrable Connect SSO domain — each person's home is a single-label subdomain. */
-export const CONNECT_DOMAIN = 'impact-agent.me';
+export const CONNECT_DOMAIN = process.env.NEXT_PUBLIC_CONNECT_DOMAIN || 'impact-agent.me';
 /** Registrable A2A domain (served by demo-a2a, not this app) — for display/links. */
-export const A2A_DOMAIN = 'impact-agent.io';
+export const A2A_DOMAIN = process.env.NEXT_PUBLIC_A2A_DOMAIN || 'impact-agent.io';
 /** The TLD names are claimed under (the `.impact` permissionless subregistry). */
-export const AGENT_NAME_PARENT = 'impact';
+export const AGENT_NAME_PARENT = process.env.NEXT_PUBLIC_AGENT_NAME_PARENT || 'impact';
 
 /** The Agentic Edge origin (spec 288) — the admission Worker that signs the GatewayAssertion demo-a2a
  *  requires on `/mcp/*`. This MUST equal the `next.config` `DEMO_EDGE_URL` default: the browser MCP-data
  *  path (`/a2a/mcp/*` rewrite) and the server-side vault body-store both route THROUGH the edge, so both
  *  fall back to this same origin when `DEMO_EDGE_URL` is unset (the reason the edge "just works" on Vercel
  *  with no per-deploy env var). Override only for an edge-less local dev (`DEMO_EDGE_URL=''`). */
-export const DEMO_EDGE_ORIGIN_DEFAULT = 'https://demo-edge-production.richardpedersen3.workers.dev';
+export const DEMO_EDGE_ORIGIN_DEFAULT = process.env.NEXT_PUBLIC_DEMO_EDGE_ORIGIN || 'https://demo-edge-production.richardpedersen3.workers.dev';
 
 /** Alias kept for existing imports. */
 export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
