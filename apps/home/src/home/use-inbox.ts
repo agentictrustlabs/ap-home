@@ -64,6 +64,8 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   /** Set when a send needs the one-prompt ceremony (no wire, or a counterparty it does not cover).
    *  Kept separate from `error` because it is the one failure the person can actually resolve. */
   const [wireRequired, setWireRequired] = useState<MessagingWireRequiredError | null>(null);
+  /** The send the wire refused — kept so approving the contact can finish it without retyping. */
+  const [pendingSend, setPendingSend] = useState<{ input: Omit<SendMessageInput, 'person'>; key: string } | null>(null);
   const agentQs = targetAgent ? `?agent=${encodeURIComponent(targetAgent)}` : '';
 
   const refresh = useCallback(async () => {
@@ -172,10 +174,14 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       setWireRequired(null);
       try {
         await sendMessage({ person: sender, ...(stewardship ? { stewardship } : {}), ...input });
+        setPendingSend(null);
         await refresh();
         return true;
       } catch (e) {
-        if (e instanceof MessagingWireRequiredError) setWireRequired(e);
+        if (e instanceof MessagingWireRequiredError) {
+          setWireRequired(e);
+          setPendingSend({ input, key });
+        }
         setError(e instanceof Error ? e.message : String(e));
         return false;
       } finally {
@@ -184,6 +190,20 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     },
     [session, refresh, sender, stewardship],
   );
+
+  /**
+   * After the one-prompt approval: clear the refusal and FINISH the send it interrupted. The person
+   * already wrote the message and already signed — asking them to reload, or to type it again, turns
+   * one ceremony into three steps. No pending send ⇒ just clears (the approval came from elsewhere).
+   */
+  const approved = useCallback(async (): Promise<boolean> => {
+    setWireRequired(null);
+    setError(null);
+    const p = pendingSend;
+    setPendingSend(null);
+    if (!p) { await refresh(); return true; }
+    return send(p.input, p.key);
+  }, [pendingSend, send, refresh]);
 
   /** Deterministic chat test (spec 313 §2). */
   const isChat = useCallback(
@@ -217,7 +237,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, loadThread, loadPreviews, post, send, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {

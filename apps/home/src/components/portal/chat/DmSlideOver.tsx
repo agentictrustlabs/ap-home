@@ -33,7 +33,7 @@ export function DmSlideOver({
   onClose: () => void;
 }) {
   const { agentAddress, profile } = useSession();
-  const { view, refresh, loadThread, send: sendMessageViaAgent, wireRequired, setWireRequired, error, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
+  const { view, refresh, loadThread, send: sendMessageViaAgent, approved, wireRequired, error, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
   const [dmError, setDmError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   // The counterparty's ADDRESS — the DM is the pair, so this is what both the bucket lookup and the send key on.
@@ -208,7 +208,7 @@ export function DmSlideOver({
           person={agentAddress ?? null}
           session={session}
           credential={profile?.credential}
-          onApproved={() => { setWireRequired(null); setDmError(null); }}
+          onApproved={() => { setDmError(null); void approved(); }}
           onError={setDmError}
         />
         {(dmError ?? error) && (

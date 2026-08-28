@@ -135,7 +135,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const managed = targetAgent ? agents.find((a) => a.agent.toLowerCase() === targetAgent.toLowerCase()) : undefined;
   const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
   const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
-  const { view, refresh, loadThread, loadPreviews, post, send, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
   const me = (sendingAs ?? '').toLowerCase();
 
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -427,7 +427,10 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         session={session}
         credential={profile?.credential}
         onApproved={() => {
-          setWireRequired(null);
+          // Finish the send the approval was for, then show it: the recipient becomes a DM bucket.
+          void approved().then((ok) => {
+            if (ok && toRecipient) openDm(directMessageKey([toRecipient.address]));
+          });
           const ret = new URLSearchParams(window.location.search).get('return');
           if (ret && isAllowedRelyingOrigin(ret)) window.location.assign(ret);
         }}
