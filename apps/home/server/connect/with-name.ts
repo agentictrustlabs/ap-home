@@ -20,7 +20,7 @@ function fullName(name: string): string {
   return n.endsWith('.impact') ? n : `${n.replace(/\.+$/, '')}.impact`;
 }
 
-export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
+const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
     | {
         name?: string;
@@ -94,4 +94,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   );
   await recordCredentialFacet(env.AUTH_CODES, principal, sub);
   return json({ status: 'issued', token, name });
+};
+
+export const onRequestPost = async (ctx: FnContext): Promise<Response> => {
+  try {
+    return await onRequestPostImpl(ctx);
+  } catch (e) {
+    // An unhandled throw here (an RPC read on env.RPC_URL, the broker signer, etc.) would otherwise
+    // return an EMPTY 500 that breaks the client's response.json(). Surface it as JSON instead.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[with-name] 500:', msg, e instanceof Error ? e.stack : '');
+    return json({ error: `connect failed: ${msg}` }, 500);
+  }
 };
