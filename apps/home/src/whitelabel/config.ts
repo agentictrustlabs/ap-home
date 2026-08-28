@@ -9,9 +9,11 @@ import type { WhiteLabelConfig } from './schema';
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
-    name: 'Impact',
-    community: 'missional community',
-    tagline: 'Your home in the missional community',
+    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per host — "Impact" on
+    // impact-agent.me, "Faithnet" on faithnet.me — without a code change. Defaults preserve Impact.
+    name: process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact',
+    community: process.env.NEXT_PUBLIC_BRAND_COMMUNITY || 'missional community',
+    tagline: process.env.NEXT_PUBLIC_BRAND_TAGLINE || 'Your home in the missional community',
   },
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
@@ -175,16 +177,18 @@ const faithImpact: WhiteLabelConfig = {
         'https://gather27-web.richardpedersen3.workers.dev/',
         'http://localhost:5175/',
         'http://127.0.0.1:5175/',
+        // faithnet universe (chain 34348) — only present when the deploy sets it; production's list is unchanged.
+        ...(process.env.NEXT_PUBLIC_GATHER_ORIGIN ? [process.env.NEXT_PUBLIC_GATHER_ORIGIN] : []),
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // Where the service-agent-wire ceremony talks to gather27-a2a.
-      serviceAgentConfig: { a2aBase: 'https://gather27-a2a-production.richardpedersen3.workers.dev' },
+      serviceAgentConfig: { a2aBase: process.env.NEXT_PUBLIC_GATHER_A2A_BASE || 'https://gather27-a2a-production.richardpedersen3.workers.dev' },
       // Each host org grants the WORKSPACE a read of its own listing record at connect time: the
       // workspace roster reads listings in place, never copies them (org_read_grant — see schema).
       org_read_grant: {
-        delegate: '0xcE7bb378e132Cd373B366746B5F43533f9777Da7', // gather27-workspace.impact
+        delegate: (process.env.NEXT_PUBLIC_GATHER_WORKSPACE_SA || '0xcE7bb378e132Cd373B366746B5F43533f9777Da7') as `0x${string}`, // gather27-workspace (faithnet SA when set)
         server: 'demo-mcp',
         resources: ['vault:gather27:listing'],
       },

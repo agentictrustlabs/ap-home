@@ -13,8 +13,11 @@ export function DemoPeopleFold() {
   const [personas, setPersonas] = useState<readonly DemoPersona[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Localhost always; or any deployment that opts in via NEXT_PUBLIC_ENABLE_DEMO_PEOPLE=true
+  // (the faithnet pilot Home shows demo people; production leaves it unset and stays clean).
   const local =
-    typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) ||
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_PEOPLE === 'true';
   useEffect(() => {
     if (!local) return;
     void fetch('/connect/demo-personas')
