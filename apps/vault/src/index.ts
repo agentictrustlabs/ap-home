@@ -504,6 +504,11 @@ export interface Env extends AkcsEnv {
   /** When 'true', the native path REQUIRES a valid GatewayAssertion — only edge-admitted requests pass
    *  (the route-lockdown precursor). Default unset ⇒ advisory (direct callers still work). */
   DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
+  /** Spec 290 §6 Stage-2 soft-limit overrides. Unset ⇒ the committed defaults (120 / 60s). A local
+   *  stack raises the limit: one page fan-out + a live tab + the org agent's own gather share one
+   *  per-principal bucket there, and starving the agent's reads is not what the limit is for. */
+  STAGE2_VERIFIED_LIMIT?: string;
+  STAGE2_VERIFIED_WINDOW_MS?: string;
 }
 
 // spec 289 §5 — the resilient chain-read authority port (W1 revocation + W2 acceptance). Built once per
@@ -515,9 +520,11 @@ export interface Env extends AkcsEnv {
 // would never throttle). In-memory is per-isolate (not cross-isolate-durable) — fine for a soft traffic
 // limit; the cross-isolate HARD budget is the Stage-3 SmartAgentBudgetDO. 120 verified calls / 60s.
 let _stage2Limiter: SoftRateLimiter | undefined;
-function stage2RateLimiter(): SoftRateLimiter {
+function stage2RateLimiter(env?: { STAGE2_VERIFIED_LIMIT?: string; STAGE2_VERIFIED_WINDOW_MS?: string }): SoftRateLimiter {
   if (!_stage2Limiter) {
-    _stage2Limiter = createMemorySoftRateLimiter({ limits: { verified: { windowMs: 60_000, limit: 120 } } });
+    const limit = Math.max(1, Number(env?.STAGE2_VERIFIED_LIMIT ?? '') || 120);
+    const windowMs = Math.max(1_000, Number(env?.STAGE2_VERIFIED_WINDOW_MS ?? '') || 60_000);
+    _stage2Limiter = createMemorySoftRateLimiter({ limits: { verified: { windowMs, limit } } });
   }
   return _stage2Limiter;
 }
@@ -626,7 +633,7 @@ function baseConfig(env: Env): McpResourceVerifyConfig {
     chainAcceptanceReader: chainAuthorityReader(env),
     chainSignatureReader: chainAuthorityReader(env),
     // spec 290 §6 Stage-2 — post-verify soft rate limit, keyed on the verified principal/sponsor.
-    stage2RateLimiter: stage2RateLimiter(),
+    stage2RateLimiter: stage2RateLimiter(env),
     rateLimitProfileId: 'verified',
     rateLimitSecret: 'demo-mcp-stage2', // only obscures the opaque bucket key in logs (§9); not a secret-grade gate
   };
