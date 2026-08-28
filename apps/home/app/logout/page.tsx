@@ -21,7 +21,9 @@ import { disconnectWallet } from '../../src/lib/wallet';
 function rpFrontChannelLogouts(): string[] {
   const hereHttps = window.location.protocol === 'https:';
   const outs: string[] = [];
-  for (const id of ['commons-app', 'field-app']) {
+  const rpApps = (process.env.NEXT_PUBLIC_LOGOUT_RP_APPS ?? 'commons-app,field-app')
+    .split(',').map((x) => x.trim()).filter(Boolean);
+  for (const id of rpApps) {
     const client = getClient(id);
     if (!client) continue;
     for (const uri of client.redirect_uris) {
