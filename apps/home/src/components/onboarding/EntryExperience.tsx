@@ -919,6 +919,13 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
   const socialKind: 'google' | 'youversion' | 'email' | 'phone' | null =
     info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ||
     info?.connectionKind === 'email' || info?.connectionKind === 'phone' ? info.connectionKind : null;
+  // Robustness (esp. faithnet, where the on-chain connectionKind publish is best-effort and can
+  // fail/defer): a KMS/social-custodied home with an UNPUBLISHED kind looks like a plain EOA home
+  // (hasEoa, no passkey), so the screen would offer only wallet/email/phone and lock a Google/
+  // YouVersion member out of their own subdomain. When the kind is ABSENT and the home is
+  // EOA-custodied with no passkey, also offer the social sign-ins as a secondary fallback — they
+  // resolve THIS home via its OIDC facet. Wallet stays offered (it may genuinely be an EOA home).
+  const socialFallback = !socialKind && !!info?.hasEoa && !info?.hasPasskey;
   // PASSKEY-FIRST DEVICE: this browser holds a local passkey for this host AND the home has a
   // passkey custodian on-chain → the passkey is the fastest way in (the member enrolled it — via
   // the email-card offer or elsewhere — precisely so return visits skip the code/OIDC hop). Make
@@ -1050,11 +1057,11 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
             </p>
           )}
           {/* Social (OIDC/KMS) custodian → the credential's own sign-in is the primary CTA. */}
-          {socialKind === 'youversion' && (
-            <button className="btn-primary" onClick={() => continueWithYouVersion(name)}>Continue with YouVersion</button>
+          {(socialKind === 'youversion' || socialFallback) && (
+            <button className={socialKind === 'youversion' ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => continueWithYouVersion(name)}>Continue with YouVersion</button>
           )}
-          {socialKind === 'google' && (
-            <button className="btn-primary" onClick={() => continueWithGoogle(name)}>Continue with Google</button>
+          {(socialKind === 'google' || socialFallback) && (
+            <button className={socialKind === 'google' ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => continueWithGoogle(name)}>Continue with Google</button>
           )}
           {showPasskey && (
             <button className={socialKind && !passkeyFirst ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
