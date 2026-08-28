@@ -31,6 +31,7 @@ import {
   buildAssistantInboxReply,
   buildOutboundMessage,
   createBoardChannel,
+  directConversationId,
   canSeeChannel,
   interactionViewOfChannel,
   channelParticipationPolicy,
@@ -3411,12 +3412,21 @@ export class InteractionsDO {
           }
         }
 
+        // THE DM IS THE PAIR (spec 313 §2 amendment — the Slack model). A send that names no
+        // conversation is not a new thread; it is the one direct-message thread between these two
+        // agents, whose id is deterministic from the pair. Both sides mint the same id without
+        // coordinating, so a first message racing from each end lands in ONE conversation, and "new
+        // message to someone I already talk to" continues the DM instead of opening a fresh `conv_`.
+        // An explicit `conversationId` (assistant replies, invites continuing a thread) still wins.
+        const conversationId = body.conversationId
+          ? String(body.conversationId)
+          : await directConversationId(principal, recipient);
         const built = await buildOutboundMessage({
           from: caip10(chainId, principal as Address) as never,
           to: caip10(chainId, recipient as Address) as never,
           bodyText: String(body.bodyText ?? ''),
           ...(body.subject ? { subject: String(body.subject) } : {}),
-          ...(body.conversationId ? { conversationId: String(body.conversationId) } : {}),
+          conversationId,
           ...(body.title ? { title: String(body.title) } : {}),
           ...(Array.isArray(body.contextRefs) ? { contextRefs: body.contextRefs as ContextRefV1[] } : {}),
         });

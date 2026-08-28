@@ -8,6 +8,7 @@ import type {
   ContextRefV1,
   ConversationDescriptorV1,
   ConversationSummaryV1,
+  DirectMessageSummaryV1,
   FolderSummaryV1,
   InboxItemV1,
 } from '@agenticprimitives/fabric/messaging';
@@ -43,6 +44,8 @@ export interface InboxView {
   bodies: Record<string, string>;
   mandates: Record<string, InteractionMandateV1>;
   conversations: ConversationSummaryV1[];
+  /** Slack-model DM buckets: one row per counterparty, folding every conversation with them. */
+  directMessages: DirectMessageSummaryV1[];
   descriptors: Record<string, ConversationDescriptorV1>;
   envelopeMeta: Record<string, EnvelopeMeta>;
   /** Counterparty display names, keyed by lowercase 0x address (server reverse-resolves + caches). */
@@ -61,6 +64,8 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   /** Set when a send needs the one-prompt ceremony (no wire, or a counterparty it does not cover).
    *  Kept separate from `error` because it is the one failure the person can actually resolve. */
   const [wireRequired, setWireRequired] = useState<MessagingWireRequiredError | null>(null);
+  /** The send the wire refused — kept so approving the contact can finish it without retyping. */
+  const [pendingSend, setPendingSend] = useState<{ input: Omit<SendMessageInput, 'person'>; key: string } | null>(null);
   const agentQs = targetAgent ? `?agent=${encodeURIComponent(targetAgent)}` : '';
 
   const refresh = useCallback(async () => {
@@ -84,6 +89,20 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       if (!res.ok) return;
       const thread = (await res.json()) as InboxView;
       setView((prev) => (prev ? { ...prev, bodies: { ...prev.bodies, ...thread.bodies } } : thread));
+    },
+    [session, agentQs],
+  );
+
+  // Rail previews — the LAST message of each DM bucket. Fetched by exact id, so the cost is one vault
+  // read per bucket whose newest message the client has not seen yet, never one per message per poll.
+  const loadPreviews = useCallback(
+    async (messageIds: readonly string[]) => {
+      if (!session || messageIds.length === 0) return;
+      const qs = `${agentQs ? agentQs + '&' : '?'}messageIds=${encodeURIComponent(messageIds.slice(0, 50).join(','))}`;
+      const res = await fetch(`/connect/inbox${qs}`, { headers: { authorization: `Bearer ${session.token}` } });
+      if (!res.ok) return;
+      const got = (await res.json()) as InboxView;
+      setView((prev) => (prev ? { ...prev, bodies: { ...prev.bodies, ...got.bodies } } : got));
     },
     [session, agentQs],
   );
@@ -155,10 +174,14 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       setWireRequired(null);
       try {
         await sendMessage({ person: sender, ...(stewardship ? { stewardship } : {}), ...input });
+        setPendingSend(null);
         await refresh();
         return true;
       } catch (e) {
-        if (e instanceof MessagingWireRequiredError) setWireRequired(e);
+        if (e instanceof MessagingWireRequiredError) {
+          setWireRequired(e);
+          setPendingSend({ input, key });
+        }
         setError(e instanceof Error ? e.message : String(e));
         return false;
       } finally {
@@ -167,6 +190,20 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     },
     [session, refresh, sender, stewardship],
   );
+
+  /**
+   * After the one-prompt approval: clear the refusal and FINISH the send it interrupted. The person
+   * already wrote the message and already signed — asking them to reload, or to type it again, turns
+   * one ceremony into three steps. No pending send ⇒ just clears (the approval came from elsewhere).
+   */
+  const approved = useCallback(async (): Promise<boolean> => {
+    setWireRequired(null);
+    setError(null);
+    const p = pendingSend;
+    setPendingSend(null);
+    if (!p) { await refresh(); return true; }
+    return send(p.input, p.key);
+  }, [pendingSend, send, refresh]);
 
   /** Deterministic chat test (spec 313 §2). */
   const isChat = useCallback(
@@ -200,7 +237,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {

@@ -1,7 +1,10 @@
 'use client';
-// Messages (spec 313 v2) — Telegram/Outlook-style unified inbox: requests pinned,
-// conversation rail + thread, rich compose (emoji + images), amber design system.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Messages (spec 313 v2 + §2 amendment) — SLACK-STYLE DIRECT MESSAGES. The rail is bucketed by WHO
+// (one row per counterparty, folding every conversation with them — `view.directMessages`), each row
+// shows the last message ("You: …" when it was yours) and when, and "New message" is a To: typeahead
+// with no subject line. Requests stay pinned above; a request's thread lives inside the DM with the
+// party that raised it. Rich compose (emoji + images), amber design system.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
@@ -9,7 +12,8 @@ import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
-import { searchAgentsKb, type AgentSearchHit } from '../../lib/agent-search';
+import { directMessageKey, type DirectMessageSummaryV1 } from '@agenticprimitives/fabric/messaging';
+import { searchAgentsKb } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
 import { AvatarUpload } from './chat/AvatarUpload';
 import { useMessagingDelivery } from './agent/AgentTab';
@@ -18,6 +22,9 @@ import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
 import { useManagedAgents } from './ManagedAgents';
+import { railDate } from './chat/rail-date';
+import { RecipientPicker } from './chat/RecipientPicker';
+import type { PickedRecipient } from '../../lib/recipient-directory';
 import { ApproveMessaging } from './ApproveMessaging';
 import { MessagingWireRequiredError } from '../../lib/messaging-send';
 import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
@@ -111,18 +118,12 @@ function JoinDiscussionChip({ refId, label, names }: { refId: string; label?: st
   );
 }
 
-function ConvAvatar({ conversationId, title, view }: { conversationId: string; title: string; view: ReturnType<typeof useInboxView>['view'] }) {
-  const addr = useMemo(() => {
-    const d = view?.descriptors[conversationId];
-    const p = d?.participants.find((x) => {
-      const a = x.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-      return a && view?.names?.[a];
-    });
-    return p?.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? null;
-  }, [conversationId, view]);
+function DmAvatar({ addr, title, size = 48 }: { addr: string | null; title: string; size?: number }) {
   const imageUrl = useAvatar(addr ? personAvatarKey(addr) : null);
-  return <AvatarUpload name={title} imageUrl={imageUrl} size={48} />;
+  return <AvatarUpload name={title} imageUrl={imageUrl} size={size} />;
 }
+
+const ADDR_RE = /^0x[0-9a-f]{40}$/;
 
 export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { session, agentAddress, profile } = useSession();
@@ -134,181 +135,203 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const managed = targetAgent ? agents.find((a) => a.agent.toLowerCase() === targetAgent.toLowerCase()) : undefined;
   const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
   const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
-  const { view, refresh, loadThread, post, send, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
-  const [open, setOpen] = useState<string | null>(null);
+  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  const me = (sendingAs ?? '').toLowerCase();
+
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
-  const [composeOpen, setComposeOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<AgentSearchHit[] | null>(null);
-  const [recipient, setRecipient] = useState<AgentSearchHit | null>(null);
-  const [composeBody, setComposeBody] = useState('');
-  const [composeSubject, setComposeSubject] = useState('');
   const [mobileThread, setMobileThread] = useState(false);
   const [railFilter, setRailFilter] = useState('');
+
+  // ── New message (Slack "To:" — scope picker: Names · Organizations · Workspaces) ─────────────────
+  const [composing, setComposing] = useState(false);
+  const [toQuery, setToQuery] = useState('');
+  const [toRecipient, setToRecipient] = useState<PickedRecipient | null>(null);
+  const [composeBody, setComposeBody] = useState('');
 
   // spec 328 UX v2 — assistant config (toggle + SKILL.md playbook) lives on Manage → Agent
   // (`/agent`, AgentTab); this view keeps only the in-context delivery nudge via the shared hook.
   const delivery = useMessagingDelivery(targetAgent);
 
+  const dms = view?.directMessages ?? [];
+  const dmByKey = useMemo(() => new Map(dms.map((d) => [d.key, d])), [dms]);
+
+  const titleFor = useCallback(
+    (dm: DirectMessageSummaryV1): string => {
+      if (dm.counterparties.length === 1 && dm.counterparties[0] === me) return `${agentLabel(me, view?.names)} (you)`;
+      return dm.counterparties.map((a) => agentLabel(a, view?.names)).join(', ');
+    },
+    [me, view],
+  );
+
+  const previewFor = useCallback(
+    (dm: DirectMessageSummaryV1): string => {
+      if (!view) return '';
+      const text = messagePreview(view.bodies[dm.lastMessageId]) || view.envelopeMeta[dm.lastMessageId]?.subject || 'New message';
+      return dm.lastFromOwner ? `You: ${text}` : text;
+    },
+    [view],
+  );
+
+  const openDm = useCallback((key: string) => {
+    setComposing(false);
+    setToRecipient(null);
+    setOpenKey(key);
+    setMobileThread(true);
+  }, []);
+
+  const startCompose = useCallback(() => {
+    setComposing(true);
+    setToRecipient(null);
+    setToQuery('');
+    setMobileThread(true);
+  }, []);
+
+  /** Pick someone to message: an existing DM opens; a new counterparty stays in compose until the first send. */
+  const chooseRecipient = useCallback(
+    (r: PickedRecipient) => {
+      const key = directMessageKey([r.address]);
+      if (dmByKey.has(key)) { openDm(key); return; }
+      setToRecipient(r);
+      setToQuery('');
+    },
+    [dmByKey, openDm],
+  );
+
+  // Deep link `?to=<name|0x…>` — a relying app or profile page asking to message someone.
   useEffect(() => {
     const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
     if (!to) return;
     let cancelled = false;
     // An address is the identity. A relying app already resolved the name; do not search again.
-    if (/^0x[0-9a-f]{40}$/.test(to)) {
-      setRecipient({
-        name: to,
-        label: to,
-        smartAgent: to,
-        displayName: null,
-        description: null,
-        skills: null,
-        registryStatus: null,
-        facets: [],
-      });
-      setComposeOpen(true);
-      setWireRequired(
-        new MessagingWireRequiredError('wire_absent', to as Address, [], undefined, 'approve this contact'),
-      );
+    if (ADDR_RE.test(to)) {
+      setComposing(true);
+      setToRecipient({ address: to, title: shortId(to), scope: 'names' });
+      setWireRequired(new MessagingWireRequiredError('wire_absent', to as Address, [], undefined, 'approve this contact'));
       return;
     }
     void searchAgentsKb(to).then((found) => {
       if (cancelled || found.length === 0) return;
       const hit = found.find((h) => h.label.toLowerCase() === to) ?? found[0]!;
-      setRecipient(hit);
-      setComposeOpen(true);
+      if (!ADDR_RE.test(hit.smartAgent.toLowerCase())) return;
+      setComposing(true);
+      setToRecipient({ address: hit.smartAgent.toLowerCase(), title: hit.displayName ?? hit.name, subtitle: hit.name, name: hit.name, scope: 'names' });
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [setWireRequired]);
-
-  const conversations = useMemo(
-    () => [...(view?.conversations ?? [])].sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt)),
-    [view],
-  );
-  const activeId = open ?? conversations[0]?.conversationId ?? null;
-
-  // VL-W4 — the list/poll is metadata-only; lazily fetch the OPEN thread's bodies. The guard fires once
-  // per opened thread (and again when a poll delivers a new message into it, since that messageId won't be
-  // in `bodies`), and settles as soon as the bodies land — no render loop.
-  const threadNeedsBodies =
-    !!activeId && !!view &&
-    view.items.some((i) => i.conversationId === activeId && i.folder !== 'trash' && !(i.messageId in view.bodies));
+  // Once the view lands, a deep-linked recipient we already talk to opens their DM instead.
   useEffect(() => {
-    if (threadNeedsBodies && activeId) void loadThread(activeId);
-  }, [threadNeedsBodies, activeId, loadThread]);
+    if (!composing || !toRecipient) return;
+    const key = directMessageKey([toRecipient.address]);
+    if (dmByKey.has(key)) openDm(key);
+  }, [composing, toRecipient, dmByKey, openDm]);
+
+  // People you already message — the picker ranks them first under Names, like Slack's recents.
+  const recents = useMemo(
+    () => dms.filter((d) => d.counterparties.length === 1 && d.counterparties[0] !== me).map((dm) => ({ address: dm.counterparties[0]!, title: titleFor(dm) })),
+    [dms, me, titleFor],
+  );
+
+  const activeKey = composing ? null : (openKey && dmByKey.has(openKey) ? openKey : dms[0]?.key ?? null);
+  const activeDm = activeKey ? dmByKey.get(activeKey) ?? null : null;
+
+  // Rail previews — fetch the LAST message body per bucket, once per new last-message id.
+  const previewsAsked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!view) return;
+    const want = dms.map((d) => d.lastMessageId).filter((id) => !(id in view.bodies) && !previewsAsked.current.has(id));
+    if (want.length === 0) return;
+    for (const id of want) previewsAsked.current.add(id);
+    void loadPreviews(want);
+  }, [view, dms, loadPreviews]);
+
+  // VL-W4 — the list/poll is metadata-only; lazily fetch the OPEN DM's bodies, one conversation at a
+  // time (a bucket may fold several). Fires once per opened DM and again when a poll delivers a new
+  // message into it; settles as soon as the bodies land — no render loop.
+  const threadConvsNeedingBodies = useMemo(() => {
+    if (!activeDm || !view) return [] as string[];
+    return activeDm.conversationIds.filter((cid) =>
+      view.items.some((i) => i.conversationId === cid && i.folder !== 'trash' && !(i.messageId in view.bodies)),
+    );
+  }, [activeDm, view]);
+  const threadNeedKey = threadConvsNeedingBodies.join(',');
+  useEffect(() => {
+    if (!threadNeedKey) return;
+    for (const cid of threadNeedKey.split(',')) void loadThread(cid);
+  }, [threadNeedKey, loadThread]);
 
   const thread = useMemo(() => {
-    if (!view || !activeId) return [];
+    if (!view || !activeDm) return [];
+    const convs = new Set<string>(activeDm.conversationIds);
     return view.items
-      .filter((i) => i.conversationId === activeId && i.folder !== 'trash')
+      .filter((i) => convs.has(i.conversationId) && i.folder !== 'trash')
       .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));
-  }, [view, activeId]);
+  }, [view, activeDm]);
+
+  // Slack opens a DM at its NEWEST message. Scroll the thread to the bottom when it opens, and again
+  // when a message lands (a body arriving for the last item counts — that is when it gets tall).
+  const threadBodyRef = useRef<HTMLDivElement>(null);
+  const lastId = thread[thread.length - 1]?.messageId;
+  const lastBodyLoaded = !!lastId && !!view?.bodies[lastId];
+  useEffect(() => {
+    const el = threadBodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activeKey, thread.length, lastBodyLoaded]);
 
   const caseFor = useCallback(
-    (conversationId: string): InteractionCaseV1 | null => {
+    (dm: DirectMessageSummaryV1): InteractionCaseV1 | null => {
       if (!view) return null;
-      const ids = new Set(view.items.filter((i) => i.conversationId === conversationId).map((i) => i.interactionId).filter(Boolean));
+      const convs = new Set<string>(dm.conversationIds);
+      const ids = new Set(view.items.filter((i) => convs.has(i.conversationId)).map((i) => i.interactionId).filter(Boolean));
       return view.cases.find((c) => ids.has(c.id)) ?? null;
     },
     [view],
   );
   const pendingCases = useMemo(() => (view?.cases ?? []).filter((c) => PENDING_STATES.includes(c.state)), [view]);
-  const convForCase = useCallback(
-    (c: InteractionCaseV1): string | null =>
-      view?.items.find((i) => i.interactionId === c.id)?.conversationId ?? null,
-    [view],
-  );
-
-  const titleFor = useCallback(
-    (conversationId: string): string => {
-      const d = view?.descriptors[conversationId];
-      const other = d?.participants.find((p) => {
-        const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-        return a && view?.names?.[a];
-      });
-      if (other) return agentLabel(other, view?.names);
-      if (d?.title) return d.title;
-      const firstIn = view?.items.find((i) => i.conversationId === conversationId && i.folder !== 'sent');
-      const meta = firstIn ? view?.envelopeMeta[firstIn.messageId] : undefined;
-      return meta?.subject ?? (meta ? agentLabel(meta.from, view?.names) : 'Conversation');
+  const dmForCase = useCallback(
+    (c: InteractionCaseV1): string | null => {
+      const cid = view?.items.find((i) => i.interactionId === c.id)?.conversationId;
+      return cid ? dms.find((d) => d.conversationIds.includes(cid))?.key ?? null : null;
     },
-    [view],
+    [view, dms],
   );
 
-  const previewFor = useCallback(
-    (conversationId: string): string => {
-      if (!view) return '';
-      const last = [...view.items]
-        .filter((i) => i.conversationId === conversationId && i.folder !== 'trash')
-        .sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt))[0];
-      if (!last) return '';
-      // VL-W4 — bodies are lazy: use the body preview when it's already loaded (open threads), else fall
-      // back to the envelope subject (metadata, always present) so the rail never blocks on a body read.
-      return messagePreview(view.bodies[last.messageId]) || view.envelopeMeta[last.messageId]?.subject || 'New message';
-    },
-    [view],
-  );
-
-  const filteredConversations = useMemo(() => {
+  const filteredDms = useMemo(() => {
     const q = railFilter.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter((c) => {
-      const title = titleFor(c.conversationId).toLowerCase();
-      const preview = previewFor(c.conversationId).toLowerCase();
-      return title.includes(q) || preview.includes(q);
-    });
-  }, [conversations, railFilter, titleFor, previewFor]);
+    if (!q) return dms;
+    return dms.filter((d) => titleFor(d).toLowerCase().includes(q) || previewFor(d).toLowerCase().includes(q));
+  }, [dms, railFilter, titleFor, previewFor]);
 
   useEffect(() => {
-    if (!view || !activeId) return;
-    const unread = view.items.filter((i) => i.conversationId === activeId && i.unread && i.folder !== 'sent');
+    if (!view || !activeDm) return;
+    const convs = new Set<string>(activeDm.conversationIds);
+    const unread = view.items.filter((i) => convs.has(i.conversationId) && i.unread && i.folder !== 'sent');
     for (const i of unread) void post({ action: 'read', messageId: i.messageId }, `read:${i.messageId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, view?.summary.unreadTotal]);
+  }, [activeKey, view?.summary.unreadTotal]);
 
-  const activeDescriptor = activeId ? view?.descriptors[activeId] : undefined;
-  // The conversation SUBJECT (descriptor title, set from the first message's subject; replies inherit it).
-  // titleFor prefers the counterparty name, so surface the subject as the thread-header subtitle.
-  const activeSubject = activeDescriptor?.title && activeId && activeDescriptor.title !== titleFor(activeId) ? activeDescriptor.title : null;
-  const canReply = !!activeDescriptor && activeDescriptor.participants.length === 2;
-  const activeCase = activeId ? caseFor(activeId) : null;
+  const activeCase = activeDm ? caseFor(activeDm) : null;
   const activePending = !!activeCase && PENDING_STATES.includes(activeCase.state);
+  // Replies are two-party: the DM's one counterparty (or yourself). The agent derives the pair's
+  // conversation id, so a reply never needs to pick which of the folded conversations to continue.
+  const replyTo = activeDm && activeDm.counterparties.length === 1 ? (activeDm.counterparties[0] as Address) : null;
   const selfAvatarKey = agentAddress ? personAvatarKey(agentAddress) : null;
   const selfAvatar = useAvatar(selfAvatarKey);
 
   const sendReply = async (body: string) => {
-    if (!activeId || !body.trim()) return;
-    await send({ conversationId: activeId, bodyText: body }, `reply:${activeId}`);
+    if (!replyTo || !body.trim()) return;
+    await send({ recipient: replyTo, bodyText: body }, `reply:${activeKey}`);
   };
 
-  const runSearch = useCallback(async () => {
-    if (!query.trim()) return;
-    setError(null);
-    setHits(null);
-    try {
-      setHits(await searchAgentsKb(query.trim().toLowerCase()));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [query, setError]);
-
+  // Always by ADDRESS — the SA is the identity (ADR-0010); a nameless org member has nothing else.
   const sendNew = async (body: string) => {
-    if (!recipient || !body.trim()) return;
-    const subject = composeSubject.trim();
-    const addr = recipient.smartAgent.trim().toLowerCase();
-    const to = /^0x[0-9a-f]{40}$/.test(addr)
-      ? { recipient: addr as Address }
-      : { recipientName: recipient.name };
-    const ok = await send({ ...to, bodyText: body, ...(subject ? { subject } : {}) }, 'compose');
+    if (!toRecipient || !body.trim()) return;
+    const ok = await send({ recipient: toRecipient.address as Address, bodyText: body }, 'compose');
     if (ok) {
-      setComposeOpen(false);
-      setRecipient(null);
       setComposeBody('');
-      setComposeSubject('');
-      setQuery('');
-      setHits(null);
       await refresh();
+      openDm(directMessageKey([toRecipient.address]));
     }
   };
 
@@ -367,10 +390,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     });
   };
 
-  const selectConv = (id: string) => {
-    setOpen(id);
-    setMobileThread(true);
-  };
+  const recipientTitle = toRecipient?.title ?? '';
 
   return (
     <SectionShell
@@ -407,7 +427,10 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         session={session}
         credential={profile?.credential}
         onApproved={() => {
-          setWireRequired(null);
+          // Finish the send the approval was for, then show it: the recipient becomes a DM bucket.
+          void approved().then((ok) => {
+            if (ok && toRecipient) openDm(directMessageKey([toRecipient.address]));
+          });
           const ret = new URLSearchParams(window.location.search).get('return');
           if (ret && isAllowedRelyingOrigin(ret)) window.location.assign(ret);
         }}
@@ -420,6 +443,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
           <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Needs attention · {pendingCases.length}</div>
           {pendingCases.map((c) => {
             const card = view?.cards[c.id];
+            const key = dmForCase(c);
             return (
               <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.8rem', background: '#fff', border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: '0.4rem' }}>
                 <div>
@@ -430,8 +454,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   {caseActions(c)}
-                  {convForCase(c) && (
-                    <button type="button" className="ghost" onClick={() => selectConv(convForCase(c)!)}>Open thread</button>
+                  {key && (
+                    <button type="button" className="ghost" onClick={() => openDm(key)}>Open thread</button>
                   )}
                 </div>
               </div>
@@ -453,206 +477,205 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <AvatarUpload
-          name="You"
-          imageUrl={selfAvatar}
-          size={36}
-          editable={!!agentAddress}
-          onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
-        />
-        <input
-          placeholder="Search people…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { setComposeOpen(true); void runSearch(); } }}
-          style={{ flex: 1, minWidth: 180, padding: '0.5rem 0.85rem', border: '1px solid var(--color-border)', borderRadius: 999 }}
-        />
-        <button type="button" className="btn" disabled={!query.trim()} onClick={() => { setComposeOpen(true); void runSearch(); }}>Search</button>
-        <button type="button" className="ghost" onClick={() => { setComposeOpen((v) => !v); setHits(null); }}>
-          {composeOpen ? 'Close' : 'New message'}
-        </button>
-      </div>
-
-      {composeOpen && (
-        <div style={{ border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-          {!recipient ? (
-            <>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>To: pick a person from search results</div>
-              {hits === null ? (
-                <div style={{ fontSize: '0.82rem', opacity: 0.65 }}>Type above and hit Search.</div>
-              ) : hits.length === 0 ? (
-                <div style={{ fontSize: '0.82rem', opacity: 0.65 }}>No matches for “{query.trim()}”.</div>
-              ) : (
-                hits.map((h) => (
-                  <button
-                    key={h.smartAgent}
-                    type="button"
-                    onClick={() => setRecipient(h)}
-                    style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', justifyContent: 'flex-start', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--color-text-body)', fontWeight: 400, cursor: 'pointer', padding: '0.5rem 0', borderBottom: '1px solid var(--color-border)' }}
-                  >
-                    <AvatarUpload name={h.displayName ?? h.name} size={40} />
-                    <div>
-                      <b>{h.displayName ?? h.name}</b>
-                      {h.displayName && <div style={{ fontSize: '0.76rem', opacity: 0.65 }}>{h.name}</div>}
+      <div className={`chat-shell${mobileThread && (activeKey || composing) ? ' chat-shell--thread-open' : ''}`}>
+        <div className="chat-rail">
+          <div className="chat-rail-head">
+            <AvatarUpload
+              name="You"
+              imageUrl={selfAvatar}
+              size={30}
+              editable={!!agentAddress}
+              onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
+            />
+            <span className="chat-rail-head__title">Direct messages</span>
+            <button
+              type="button"
+              className={`chat-rail-compose${composing ? ' chat-rail-compose--active' : ''}`}
+              onClick={startCompose}
+              aria-label="New message"
+              title="New message"
+            >
+              ✎
+            </button>
+          </div>
+          <div className="chat-rail-search">
+            <input
+              placeholder="Find a DM…"
+              value={railFilter}
+              onChange={(e) => setRailFilter(e.target.value)}
+              aria-label="Find a direct message"
+            />
+          </div>
+          <div className="chat-rail-list">
+            {dms.length === 0 && (
+              <p className="chat-rail-empty">
+                No direct messages yet.{' '}
+                <button type="button" className="ghost" style={{ display: 'inline', padding: 0, minHeight: 0 }} onClick={startCompose}>Start one</button>
+              </p>
+            )}
+            {filteredDms.length === 0 && dms.length > 0 && railFilter.trim() ? (
+              <p className="chat-rail-empty">No matches for &ldquo;{railFilter.trim()}&rdquo;</p>
+            ) : null}
+            {filteredDms.map((dm) => {
+              const title = titleFor(dm);
+              const isPending = dm.hasPending || (() => { const c = caseFor(dm); return !!c && PENDING_STATES.includes(c.state); })();
+              return (
+                <button
+                  key={dm.key}
+                  type="button"
+                  className={`chat-rail-item${dm.key === activeKey ? ' chat-rail-item--active' : ''}`}
+                  onClick={() => openDm(dm.key)}
+                >
+                  <DmAvatar addr={dm.counterparties.length === 1 ? dm.counterparties[0]! : null} title={title} />
+                  <div className="chat-rail-item__meta">
+                    <div className={`chat-rail-item__title${dm.unread > 0 ? ' chat-rail-item__title--unread' : ''}`}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                      <span className="chat-rail-item__when">
+                        {dm.unread > 0 && <span className="chat-unread-badge">{dm.unread}</span>}
+                        <time dateTime={dm.lastEventAt}>{railDate(dm.lastEventAt)}</time>
+                      </span>
                     </div>
-                  </button>
-                ))
-              )}
-            </>
-          ) : (
+                    <div className="chat-rail-item__preview">
+                      {isPending && <span style={{ color: 'var(--color-amber-700)', fontWeight: 600 }}>● review · </span>}
+                      {previewFor(dm)}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="chat-thread">
+          {composing ? (
             <>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <AvatarUpload name={recipient.displayName ?? recipient.name} size={32} />
-                <span>To: <b>{recipient.displayName ?? recipient.name}</b></span>
-                <button type="button" className="ghost" style={{ fontSize: '0.75rem', minHeight: 0, padding: '0.15rem 0.5rem' }} onClick={() => setRecipient(null)}>change</button>
+              <div className="chat-thread-header">
+                <button type="button" className="chat-slide-back chat-thread-back" onClick={() => { setComposing(false); setMobileThread(false); }} aria-label="Back to direct messages">←</button>
+                <div className="chat-thread-header__title" style={{ flex: 1 }}>New message</div>
+                <button type="button" className="ghost" onClick={() => { setComposing(false); setToRecipient(null); }} aria-label="Close new message" style={{ minHeight: 0, padding: '0.2rem 0.5rem' }}>✕</button>
               </div>
-              <input
-                placeholder="Subject (optional)"
-                value={composeSubject}
-                onChange={(e) => setComposeSubject(e.target.value)}
-                style={{ width: '100%', marginBottom: '0.5rem', padding: '0.5rem 0.85rem', border: '1px solid var(--color-border)', borderRadius: 8 }}
-              />
+              {toRecipient ? (
+                <div className="chat-compose-to">
+                  <span className="chat-compose-to__label">To:</span>
+                  <span className="chat-compose-to__chip">
+                    <AvatarUpload name={recipientTitle} size={22} />
+                    <b>{recipientTitle}</b>
+                    {toRecipient.subtitle && toRecipient.subtitle !== recipientTitle && <span style={{ opacity: 0.65 }}>{toRecipient.subtitle}</span>}
+                    {!toRecipient.name && toRecipient.scope !== 'names' && <span className="chat-compose-result__tag" title="No naming-service name — addressed by their agent address">unnamed</span>}
+                    <button type="button" className="ghost" style={{ minHeight: 0, padding: '0 0.3rem', fontSize: '0.8rem' }} onClick={() => setToRecipient(null)} aria-label="Change recipient">✕</button>
+                  </span>
+                </div>
+              ) : (
+                <RecipientPicker
+                  token={session.token}
+                  query={toQuery}
+                  onQuery={setToQuery}
+                  onPick={chooseRecipient}
+                  onCancel={() => { setComposing(false); setToRecipient(null); }}
+                  recents={recents}
+                  names={view?.names}
+                />
+              )}
+              {toRecipient && (
+                <div className="chat-thread-body">
+                  <p style={{ textAlign: 'center', opacity: 0.6, margin: 'auto', fontSize: '0.85rem' }}>
+                    This is the start of your direct message history with <b>{recipientTitle}</b>.
+                  </p>
+                </div>
+              )}
               <MessageComposer
                 value={composeBody}
                 onChange={setComposeBody}
                 onSend={sendNew}
                 busy={busy === 'compose'}
+                disabled={!toRecipient}
                 rows={3}
-                placeholder="Write your message…"
+                placeholder={toRecipient ? `Message ${recipientTitle}…` : 'Choose a recipient first'}
               />
             </>
+          ) : activeDm ? (
+            <>
+              <div className="chat-thread-header">
+                <button
+                  type="button"
+                  className="chat-slide-back chat-thread-back"
+                  onClick={() => setMobileThread(false)}
+                  aria-label="Back to direct messages"
+                >
+                  ←
+                </button>
+                <DmAvatar addr={activeDm.counterparties.length === 1 ? activeDm.counterparties[0]! : null} title={titleFor(activeDm)} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="chat-thread-header__title">{titleFor(activeDm)}</div>
+                  {activeDm.counterparties.length === 1 && (
+                    <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{shortId(activeDm.counterparties[0]!)}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
+                    {activeDm.contextRefs.map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={view?.names} />)}
+                  </div>
+                </div>
+              </div>
+
+              {activeCase && activePending && (
+                <div className="chat-attention" style={{ margin: '0.75rem 1rem 0' }}>
+                  <b>{view?.cards[activeCase.id]?.title ?? activeCase.subject}</b>
+                  <div style={{ fontSize: '0.82rem', opacity: 0.75, margin: '0.2rem 0 0.5rem' }}>
+                    {view?.cards[activeCase.id]?.summary ?? `${activeCase.kind} · from ${agentLabel(activeCase.requester, view?.names)}`}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>{caseActions(activeCase)}</div>
+                </div>
+              )}
+
+              <div className="chat-thread-body" ref={threadBodyRef}>
+                {thread.map((i, idx) => {
+                  const meta = view?.envelopeMeta[i.messageId];
+                  const mine = i.folder === 'sent';
+                  const prev = thread[idx - 1];
+                  const next = thread[idx + 1];
+                  const firstOfGroup = !prev || (prev.folder === 'sent') !== mine;
+                  const lastOfGroup = !next || (next.folder === 'sent') !== mine;
+                  // spec 328 — acting-agent provenance chip: theirs-side assistant replies show
+                  // the author + "agent" chip; own-side assistant copies get a small caption.
+                  const agentAuthored = !!meta?.actor;
+                  return (
+                    <div key={i.messageId}>
+                      {agentAuthored && mine && firstOfGroup && (
+                        <div style={{ textAlign: 'right', fontSize: '0.68rem', opacity: 0.6, margin: '0.15rem 0.5rem 0.1rem 0' }}>
+                          🤖 sent by your assistant
+                        </div>
+                      )}
+                      <MessageBubble
+                        mine={mine}
+                        body={view?.bodies[i.messageId]}
+                        time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        verified={!!meta?.signatureSigner}
+                        {...(agentAuthored && !mine
+                          ? { showAuthor: true, authorName: meta ? agentLabel(meta.from, view?.names) : 'agent', authorBadge: 'agent' }
+                          : {})}
+                        firstOfGroup={firstOfGroup}
+                        lastOfGroup={lastOfGroup}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {replyTo ? (
+                <MessageComposer value={draft} onChange={setDraft} onSend={sendReply} busy={busy === `reply:${activeKey}`} rows={3} placeholder={`Message ${titleFor(activeDm)}…`} />
+              ) : (
+                <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', opacity: 0.6, borderTop: '1px solid var(--color-border)' }}>
+                  {activeCase ? 'Respond with the request actions above.' : 'Replies are two-party — this thread has several participants.'}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ margin: 'auto', padding: '2rem', textAlign: 'center', opacity: 0.7 }}>
+              <p style={{ margin: '0 0 0.5rem' }}>Select a direct message, or start a new one.</p>
+              <button type="button" className="btn" onClick={startCompose}>New message</button>
+            </div>
           )}
         </div>
-      )}
-
-      {conversations.length === 0 ? (
-        <p style={{ opacity: 0.7 }}>No conversations yet — search a name and send the first message.</p>
-      ) : (
-        <div className={`chat-shell${mobileThread && activeId ? ' chat-shell--thread-open' : ''}`}>
-          <div className="chat-rail">
-            <div className="chat-rail-search">
-              <input
-                placeholder="Filter conversations…"
-                value={railFilter}
-                onChange={(e) => setRailFilter(e.target.value)}
-                aria-label="Filter conversations"
-              />
-            </div>
-            <div className="chat-rail-list">
-              {filteredConversations.length === 0 && railFilter.trim() ? (
-                <p className="chat-rail-empty">No matches for &ldquo;{railFilter.trim()}&rdquo;</p>
-              ) : null}
-              {filteredConversations.map((c) => {
-                const cCase = caseFor(c.conversationId);
-                const isPending = !!cCase && PENDING_STATES.includes(cCase.state);
-                const title = titleFor(c.conversationId);
-                return (
-                  <button
-                    key={c.conversationId}
-                    type="button"
-                    className={`chat-rail-item${c.conversationId === activeId ? ' chat-rail-item--active' : ''}`}
-                    onClick={() => selectConv(c.conversationId)}
-                  >
-                    {view && <ConvAvatar conversationId={c.conversationId} title={title} view={view} />}
-                    <div className="chat-rail-item__meta">
-                      <div className={`chat-rail-item__title${c.unread > 0 ? ' chat-rail-item__title--unread' : ''}`}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                        {c.unread > 0 && <span className="chat-unread-badge">{c.unread}</span>}
-                      </div>
-                      <div className="chat-rail-item__preview">
-                        {isPending && <span style={{ color: 'var(--color-amber-700)', fontWeight: 600 }}>● review · </span>}
-                        {previewFor(c.conversationId)}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="chat-thread">
-            {activeId ? (
-              <>
-                <div className="chat-thread-header">
-                  <button
-                    type="button"
-                    className="chat-slide-back chat-thread-back"
-                    onClick={() => setMobileThread(false)}
-                    aria-label="Back to conversations"
-                  >
-                    ←
-                  </button>
-                  {view && <ConvAvatar conversationId={activeId} title={titleFor(activeId)} view={view} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="chat-thread-header__title">{titleFor(activeId)}</div>
-                    {activeSubject && (
-                      <div style={{ fontSize: '0.78rem', opacity: 0.65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeSubject}</div>
-                    )}
-                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
-                      {(view?.descriptors[activeId]?.contextRefs ?? []).map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={view?.names} />)}
-                    </div>
-                  </div>
-                </div>
-
-                {activeCase && activePending && (
-                  <div className="chat-attention" style={{ margin: '0.75rem 1rem 0' }}>
-                    <b>{view?.cards[activeCase.id]?.title ?? activeCase.subject}</b>
-                    <div style={{ fontSize: '0.82rem', opacity: 0.75, margin: '0.2rem 0 0.5rem' }}>
-                      {view?.cards[activeCase.id]?.summary ?? `${activeCase.kind} · from ${agentLabel(activeCase.requester, view?.names)}`}
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>{caseActions(activeCase)}</div>
-                  </div>
-                )}
-
-                <div className="chat-thread-body">
-                  {thread.map((i, idx) => {
-                    const meta = view?.envelopeMeta[i.messageId];
-                    const mine = i.folder === 'sent';
-                    const prev = thread[idx - 1];
-                    const next = thread[idx + 1];
-                    const firstOfGroup = !prev || (prev.folder === 'sent') !== mine;
-                    const lastOfGroup = !next || (next.folder === 'sent') !== mine;
-                    // spec 328 — acting-agent provenance chip: theirs-side assistant replies show
-                    // the author + "agent" chip; own-side assistant copies get a small caption.
-                    const agentAuthored = !!meta?.actor;
-                    return (
-                      <div key={i.messageId}>
-                        {agentAuthored && mine && firstOfGroup && (
-                          <div style={{ textAlign: 'right', fontSize: '0.68rem', opacity: 0.6, margin: '0.15rem 0.5rem 0.1rem 0' }}>
-                            🤖 sent by your assistant
-                          </div>
-                        )}
-                        <MessageBubble
-                          mine={mine}
-                          body={view?.bodies[i.messageId]}
-                          time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          verified={!!meta?.signatureSigner}
-                          {...(agentAuthored && !mine
-                            ? { showAuthor: true, authorName: meta ? agentLabel(meta.from, view?.names) : 'agent', authorBadge: 'agent' }
-                            : {})}
-                          firstOfGroup={firstOfGroup}
-                          lastOfGroup={lastOfGroup}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {canReply ? (
-                  <MessageComposer value={draft} onChange={setDraft} onSend={sendReply} busy={busy === `reply:${activeId}`} rows={3} />
-                ) : (
-                  <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', opacity: 0.6, borderTop: '1px solid var(--color-border)' }}>
-                    {activeCase ? 'Respond with the request actions above.' : 'Replies open once the conversation has a two-party descriptor.'}
-                  </div>
-                )}
-              </>
-            ) : (
-              <p style={{ opacity: 0.7, margin: 'auto', padding: '2rem' }}>Select a conversation.</p>
-            )}
-          </div>
-        </div>
-      )}
+      </div>
 
       {view && Object.keys(view.mandates).length > 0 && (
         <details style={{ marginTop: '1.25rem' }}>

@@ -11,11 +11,13 @@ import {
   createAuditedInboxDelivery,
   createInMemoryInboxProjector,
   summarizeConversations,
+  summarizeDirectMessages,
   summarizeFolders,
   validateConversationDescriptor,
   type ContextRefV1,
   type ConversationDescriptorV1,
   type ConversationSummaryV1,
+  type DirectMessageSummaryV1,
   type FolderSummaryV1,
   type InboxItemV1,
   type InboxProjector,
@@ -123,6 +125,9 @@ export interface InboxView {
   mandates: Record<string, InteractionMandateV1>;
   /** Conversation-first rows (spec 312 §7.1) — newest activity first. */
   conversations: ConversationSummaryV1[];
+  /** Direct-message buckets (spec 313 §2 amendment — the Slack model): every conversation with the
+   *  same counterparty folded into one row, newest activity first, naming its last message. */
+  directMessages: DirectMessageSummaryV1[];
   /** Owner's conversation descriptors, keyed by conversation id. */
   descriptors: Record<string, ConversationDescriptorV1>;
   /** Envelope metadata the UI needs (sender, subject, refs), keyed by messageId. */
@@ -163,12 +168,17 @@ export interface InboxView {
  *  never a KV fallback — the UI's "Enable vault storage" action is the one path to readable bodies.
  *  Vault reads go to `message.body:<id>` — the resource `putBody` actually keys by — never the
  *  sender-supplied `envelope.body.resource` (an external app's envelope may carry an `inline:*` stub). */
-async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyReader, conversationId?: string): Promise<Record<string, string>> {
+async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyReader, scope?: BodyScope): Promise<Record<string, string>> {
   if (!bodyStore) return {};
   const out: Record<string, string> = {};
   // VL-W4 — metadata-first: the list/poll passes NO body store (bodies stay lazy); a thread hydrate passes
-  // a store + conversationId so we resolve ONLY that conversation's bodies (not the whole inbox).
-  const envelopes = conversationId ? doc.envelopes.filter((e) => e.conversationId === conversationId) : doc.envelopes;
+  // a store + conversationId so we resolve ONLY that conversation's bodies (not the whole inbox); a rail
+  // preview hydrate passes the exact message ids it needs (one per DM bucket — the last message).
+  const envelopes = scope?.conversationId
+    ? doc.envelopes.filter((e) => e.conversationId === scope.conversationId)
+    : scope?.messageIds
+      ? doc.envelopes.filter((e) => scope.messageIds!.has(e.id))
+      : doc.envelopes;
   await Promise.all(envelopes.map(async (e) => {
     // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
     // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
@@ -182,7 +192,13 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyReader, co
 // anywhere. Reading them (`resolveBodies` → `loadBody`) is unchanged — an owner reading their own mail
 // is not the same operation as writing into someone else's.
 
-export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyReader, conversationId?: string): Promise<InboxView> {
+/** Which bodies a read resolves: one conversation's, an explicit set of messages', or (unscoped) all. */
+export interface BodyScope {
+  conversationId?: string;
+  messageIds?: Set<string>;
+}
+
+export async function readInboxView(kv: KV, person: string, bodyStore?: MessageBodyReader, scope?: BodyScope): Promise<InboxView> {
   const doc = await loadInboxData(kv, person);
   const { projector, interactions } = hydrate(person, doc);
   const items = projector.listInbox();
@@ -222,9 +238,15 @@ export async function readInboxView(kv: KV, person: string, bodyStore?: MessageB
     decisions,
     commitments,
     cards: doc.cards,
-    bodies: await resolveBodies(doc, bodyStore, conversationId),
+    bodies: await resolveBodies(doc, bodyStore, scope),
     mandates: doc.mandates ?? {},
     conversations: summarizeConversations(items),
+    directMessages: summarizeDirectMessages({
+      owner: person,
+      items,
+      descriptors,
+      envelopes: Object.fromEntries(doc.envelopes.map((e) => [e.id, { from: e.from, to: e.to }])),
+    }),
     descriptors,
     envelopeMeta,
   };

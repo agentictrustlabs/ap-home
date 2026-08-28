@@ -91,6 +91,19 @@ sequenceDiagram
 Key properties: sender never writes Bob's store directly; body hash bound in envelope; read/delivered
 are projection facts, not case states.
 
+> **Note (spec 341 §5.1c):** the `POST /connect/inbox {action:'send'}` step above is historical — the
+> browser now asks the sender's OWN agent (`/a2a/interactions/<sa>/messaging.send`); the Home is not in
+> the transfer. The properties listed still hold.
+
+### Direct messages are the pair (spec 313 §2.1)
+
+`/messages` is Slack-shaped: one DM per counterparty. A send that names no `conversationId` lands in
+`directConversationId(sender, recipient)` — deterministic from the pair, identical from either side —
+and the rail renders `view.directMessages` (`summarizeDirectMessages`, fabric), which folds every
+conversation with the same counterparty into one row with its last message. No subject line; the
+composer is a To: typeahead. Rail previews hydrate by exact message id (`?messageIds=`) so the list
+stays metadata-first.
+
 ---
 
 ## Flow — request → approval → mandate (T2 tempo)
