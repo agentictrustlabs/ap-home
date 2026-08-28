@@ -9,9 +9,11 @@ import type { WhiteLabelConfig } from './schema';
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
-    name: 'Impact',
-    community: 'missional community',
-    tagline: 'Your home in the missional community',
+    // Deployment-configurable (NEXT_PUBLIC_BRAND_*) so the SAME code brands per host — "Impact" on
+    // impact-agent.me, "Faithnet" on faithnet.me — without a code change. Defaults preserve Impact.
+    name: process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact',
+    community: process.env.NEXT_PUBLIC_BRAND_COMMUNITY || 'missional community',
+    tagline: process.env.NEXT_PUBLIC_BRAND_TAGLINE || 'Your home in the missional community',
   },
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
