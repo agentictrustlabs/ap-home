@@ -9,8 +9,9 @@ import '../src/components/shared/ui/ui.css';
 // vertical identity live in app config (whitelabel) + globals.css (ADR-0021).
 const inter = Inter({ subsets: ['latin'], variable: '--font-brand', display: 'swap' });
 
+const BRAND = process.env.NEXT_PUBLIC_BRAND_NAME || 'Impact';
 export const metadata: Metadata = {
-  title: 'Impact — your community portal',
+  title: `${BRAND} — your community portal`,
 };
 
 export const viewport: Viewport = {
