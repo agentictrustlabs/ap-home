@@ -108,3 +108,41 @@ service = "demo-a2a-production"
 # DEPLOY WITH `--env production`. The real Worker is `demo-edge-production`; the service bindings to
 # demo-mcp/demo-a2a live under [env.production] ONLY. A bare `wrangler deploy` publishes a SEPARATE,
 # binding-less Worker named `demo-edge` whose dispatch then loops and returns Cloudflare error 1042.
+
+# ── FAITHNET (faithchain 34348) — edge in front of demo-a2a/mcp faithnet ──
+[env.faithnet]
+name = "demo-edge-faithnet"
+workers_dev = true
+
+[[env.faithnet.routes]]
+pattern = "edge.faithnet.io"
+custom_domain = true
+
+[env.faithnet.vars]
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+SA_BUDGET_LIMIT_UNITS = "10"
+EDGE_ALLOWED_ORIGINS = "https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,http://localhost:5175"
+
+[[env.faithnet.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.faithnet.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.faithnet.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "2882"
+simple = { limit = 120, period = 60 }
+
+[[env.faithnet.services]]
+binding = "MCP"
+service = "demo-mcp-faithnet"
+
+[[env.faithnet.services]]
+binding = "A2A"
+service = "demo-a2a-faithnet"
