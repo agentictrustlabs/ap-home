@@ -3,6 +3,7 @@
 // AgentAccount._verifyEcdsa accepts raw-or-EIP-191 recovery).
 import type { Address, Hex } from '@agenticprimitives/types';
 import { remoteSignerActive, remoteSigner, isRemotePersonaSession, clearRemotePersonaMarker } from './remote-signer';
+import { CHAIN_ID, CHAIN_NAME, DEFAULT_RPC_URL } from './chain';
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -88,8 +89,44 @@ export function recallHomeEoa(name: string): Address | undefined {
   }
 }
 
+/** Prompt the injected wallet to select the app's chain (adding it first if unknown), so a SIWE
+ *  message built for CHAIN_ID is signed on the matching network — MetaMask's SIWE UI refuses a chain
+ *  mismatch. Best-effort: skipped for the remote-persona signer, and never blocks sign-in (a user who
+ *  declines can still sign; Home verifies the message and talks to the chain server-side). Adds the
+ *  chain only with an http(s) RPC MetaMask can reach (the browser read-RPC); on a wallet's built-in
+ *  chain (e.g. Base Sepolia) the switch alone suffices. */
+export async function ensureWalletChain(): Promise<void> {
+  if (remoteSignerActive()) return; // the opener's signer owns its own network
+  const eth = provider();
+  const hexId = `0x${CHAIN_ID.toString(16)}`;
+  try {
+    const current = (await eth.request({ method: 'eth_chainId' })) as string;
+    if (typeof current === 'string' && current.toLowerCase() === hexId.toLowerCase()) return; // already on it
+  } catch { /* fall through and attempt the switch */ }
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexId }] });
+  } catch (e) {
+    const code = (e as { code?: number; data?: { originalError?: { code?: number } } }).code
+      ?? (e as { data?: { originalError?: { code?: number } } }).data?.originalError?.code;
+    // 4902 = the wallet doesn't know this chain yet → add it (needs a reachable http RPC), which also
+    // selects it. Any other outcome (user declined the switch, method missing) is non-fatal.
+    if (code === 4902 && /^https?:\/\//.test(DEFAULT_RPC_URL)) {
+      try {
+        await eth.request({ method: 'wallet_addEthereumChain', params: [{
+          chainId: hexId,
+          chainName: CHAIN_NAME,
+          rpcUrls: [DEFAULT_RPC_URL],
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        }] });
+      } catch { /* user declined the add — non-fatal */ }
+    }
+  }
+}
+
 export async function connectWallet(forceSelect = false): Promise<Address> {
-  return (await connectWalletAccounts(forceSelect))[0]!;
+  const address = (await connectWalletAccounts(forceSelect))[0]!;
+  await ensureWalletChain(); // put the wallet on CHAIN_ID before any SIWE / deploy signature
+  return address;
 }
 
 /** The accounts already permitted to this dApp — a SILENT read (`eth_accounts`, no popup, no picker).

@@ -53,6 +53,10 @@ export const CHAIN: Chain =
       });
 
 /** CAIP-2 network id for this chain (`eip155:<id>`). */
+/** Human-readable network name for wallet_addEthereumChain (the MetaMask "add network" UI). */
+export const CHAIN_NAME: string =
+  process.env.NEXT_PUBLIC_CHAIN_NAME ?? (CHAIN_ID === baseSepolia.id ? 'Base Sepolia' : `Chain ${CHAIN_ID}`);
+
 export const CAIP2_NETWORK = `eip155:${CHAIN_ID}` as const;
 
 const DEPLOYED: DeploymentsDoc = INJECTED ?? (BASE_SEPOLIA as unknown as DeploymentsDoc);
