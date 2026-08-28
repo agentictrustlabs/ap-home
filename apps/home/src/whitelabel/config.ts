@@ -173,6 +173,11 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'gather-app',
       name: 'Gather27',
+      // faithnet demo (chain 34348): let a phone/Google sign-in bootstrap a KMS-custodied home
+      // THROUGH the gather connect flow. Off by default so production impact-agent.me keeps the
+      // login-grade posture (a relying app does not mint custody). ADR-0011 still holds: the phone
+      // is contact-control, and C_sub (KMS), not the phone, is the on-chain custodian.
+      socialCustody: process.env.NEXT_PUBLIC_GATHER_SOCIAL_CUSTODY === 'true',
       redirect_uris: [
         'https://gather27-web.richardpedersen3.workers.dev/',
         'http://localhost:5175/',
