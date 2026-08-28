@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
+import { agentAddressOf, directMessageKey } from '@agenticprimitives/fabric/messaging';
 import { useInboxView, agentLabel } from '../../../home/use-inbox';
 import { useSession } from '../../../context/session';
 import { ApproveMessaging } from '../ApproveMessaging';
@@ -34,21 +36,24 @@ export function DmSlideOver({
   const { view, refresh, loadThread, send: sendMessageViaAgent, wireRequired, setWireRequired, error, busy } = useInboxView(session, undefined, agentAddress ?? undefined);
   const [dmError, setDmError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [resolvedName, setResolvedName] = useState<string | null>(null);
+  // The counterparty's ADDRESS — the DM is the pair, so this is what both the bucket lookup and the send key on.
+  const [resolvedAddr, setResolvedAddr] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>('resolving');
   const historyPushed = useRef(false);
 
+  // The listing subject may arrive as CAIP-10 (`eip155:…:0x…`) or a bare address — the send + bucket key want the address.
+  const subjectAddr = recipientSubject ? agentAddressOf(recipientSubject) || null : null;
   const avatarKey = recipientSubject ? personAvatarKey(recipientSubject) : null;
   const imageUrl = useAvatar(avatarKey);
 
   const resolveRecipient = useCallback(async () => {
     setResolution('resolving');
-    setResolvedName(null);
+    setResolvedAddr(null);
     try {
       const hits = await searchAgentsKb(recipientLabel);
       const hit = hits.find((h) => h.label.toLowerCase() === recipientLabel.toLowerCase()) ?? hits[0];
       if (hit) {
-        setResolvedName(hit.name);
+        setResolvedAddr(hit.smartAgent.toLowerCase());
         setResolution('resolved');
       } else {
         setResolution('not-found');
@@ -62,13 +67,13 @@ export function DmSlideOver({
     let cancelled = false;
     void (async () => {
       setResolution('resolving');
-      setResolvedName(null);
+      setResolvedAddr(null);
       try {
         const hits = await searchAgentsKb(recipientLabel);
         if (cancelled) return;
         const hit = hits.find((h) => h.label.toLowerCase() === recipientLabel.toLowerCase()) ?? hits[0];
         if (hit) {
-          setResolvedName(hit.name);
+          setResolvedAddr(hit.smartAgent.toLowerCase());
           setResolution('resolved');
         } else {
           setResolution('not-found');
@@ -111,53 +116,57 @@ export function DmSlideOver({
     };
   }, [onClose, close]);
 
-  const conversationId = useMemo(() => {
+  // The DM bucket with this person (spec 313 §2 amendment): keyed by their address when the KB
+  // resolved one, else by the name the rail shows — every conversation with them folds into it.
+  const dm = useMemo(() => {
     if (!view) return null;
-    for (const c of view.conversations) {
-      const title = view.descriptors[c.conversationId]?.participants.find((p) => {
-        const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
-        return a && view.names?.[a]?.toLowerCase() === recipientLabel.toLowerCase();
-      });
-      if (title) return c.conversationId;
-      const d = view.descriptors[c.conversationId];
-      const other = d?.participants.find((p) => agentLabel(p, view.names).toLowerCase() === recipientName.toLowerCase());
-      if (other) return c.conversationId;
+    const known = subjectAddr ?? resolvedAddr;
+    if (known) {
+      const key = directMessageKey([known]);
+      const hit = view.directMessages.find((d) => d.key === key);
+      if (hit) return hit;
     }
-    return null;
-  }, [view, recipientLabel, recipientName]);
+    return view.directMessages.find((d) =>
+      d.counterparties.length === 1 &&
+      [recipientLabel, recipientName].some((n) => agentLabel(d.counterparties[0]!, view.names).toLowerCase() === n.toLowerCase()),
+    ) ?? null;
+  }, [view, recipientSubject, resolvedAddr, recipientLabel, recipientName]);
+  const sendTo = (subjectAddr ?? resolvedAddr ?? dm?.counterparties[0] ?? null) as Address | null;
 
-  const canSend = !!conversationId || resolution === 'resolved';
+  const canSend = !!sendTo;
 
-  // VL-W4 — bodies are lazy (metadata-first list); load this DM conversation's bodies when it resolves.
-  // Guard on missing bodies so it fires once + when a poll delivers a new message, without looping.
-  const dmNeedsBodies =
-    !!conversationId && !!view &&
-    view.items.some((i) => i.conversationId === conversationId && i.folder !== 'trash' && !(i.messageId in view.bodies));
+  // VL-W4 — bodies are lazy (metadata-first list); load the DM's bodies (one call per folded
+  // conversation) when it resolves. Guards on missing bodies so it fires once + when a poll delivers a
+  // new message, without looping.
+  const needBodies = useMemo(() => {
+    if (!dm || !view) return '';
+    return dm.conversationIds.filter((cid) => view.items.some((i) => i.conversationId === cid && i.folder !== 'trash' && !(i.messageId in view.bodies))).join(',');
+  }, [dm, view]);
   useEffect(() => {
-    if (dmNeedsBodies && conversationId) void loadThread(conversationId);
-  }, [dmNeedsBodies, conversationId, loadThread]);
+    if (!needBodies) return;
+    for (const cid of needBodies.split(',')) void loadThread(cid);
+  }, [needBodies, loadThread]);
 
   const thread = useMemo(() => {
-    if (!view || !conversationId) return [];
+    if (!view || !dm) return [];
+    const convs = new Set<string>(dm.conversationIds);
     return view.items
-      .filter((i) => i.conversationId === conversationId && i.folder !== 'trash')
+      .filter((i) => convs.has(i.conversationId) && i.folder !== 'trash')
       .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));
-  }, [view, conversationId]);
+  }, [view, dm]);
 
+  // The agent derives the pair's conversation id from the recipient — no thread to pick.
   const send = useCallback(async (body: string) => {
-    if (conversationId) {
-      await sendMessageViaAgent({ conversationId, bodyText: body }, `dm-reply:${conversationId}`);
-    } else if (resolvedName) {
-      await sendMessageViaAgent({ recipientName: resolvedName, bodyText: body }, 'dm-send');
-      await refresh();
-    }
-  }, [conversationId, resolvedName, sendMessageViaAgent, refresh]);
+    if (!sendTo) return;
+    await sendMessageViaAgent({ recipient: sendTo, bodyText: body }, `dm:${sendTo}`);
+    await refresh();
+  }, [sendTo, sendMessageViaAgent, refresh]);
 
   const composerPlaceholder = useMemo(() => {
-    if (conversationId || resolution === 'resolved') return `Message ${recipientName}…`;
+    if (sendTo) return `Message ${recipientName}…`;
     if (resolution === 'resolving') return `Finding ${recipientName}…`;
     return `Can't message until ${recipientName} is found`;
-  }, [conversationId, resolution, recipientName]);
+  }, [sendTo, resolution, recipientName]);
 
   return (
     <>
@@ -177,7 +186,7 @@ export function DmSlideOver({
           </div>
         </div>
 
-        {resolution === 'not-found' && !conversationId && (
+        {resolution === 'not-found' && !sendTo && (
           <div className="chat-dm-resolution-banner" role="status">
             <span>Couldn&apos;t find <b>{recipientName}</b> in the directory.</span>
             <div className="chat-dm-resolution-banner__actions">
@@ -187,7 +196,7 @@ export function DmSlideOver({
           </div>
         )}
 
-        {resolution === 'resolving' && !conversationId && (
+        {resolution === 'resolving' && !sendTo && (
           <div className="chat-dm-resolution-banner chat-dm-resolution-banner--pending" role="status">
             Finding {recipientName}…
           </div>

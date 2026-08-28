@@ -187,22 +187,33 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // `?preview=1` opts into resolving ALL bodies for the list (so a client can show a last-message
   // snippet per conversation) — heavier (one vault read per message), so it stays OFF by default and
   // the portal keeps its metadata-first fast paint. A thread hydrate (?conversationId) is unaffected.
+  // `?messageIds=a,b,c` resolves exactly those bodies (capped) — the rail's last-message previews, one
+  // per DM bucket, fetched once when a bucket's newest message changes rather than on every poll.
   const wantConversationId = url.searchParams.get('conversationId') ?? undefined;
+  const wantMessageIds = (url.searchParams.get('messageIds') ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
   const wantPreview = url.searchParams.get('preview') === '1';
-  const bodyStore = wantConversationId || wantPreview ? await makeBodyStoreFactory(env, bearer, stewardWire ?? undefined)(owner) : undefined;
+  const bodyStore = wantConversationId || wantMessageIds.length > 0 || wantPreview
+    ? await makeBodyStoreFactory(env, bearer, stewardWire ?? undefined)(owner)
+    : undefined;
   let view;
   try {
-    view = await readInboxView(inboxKv, owner, bodyStore, wantConversationId);
+    view = await readInboxView(
+      inboxKv,
+      owner,
+      bodyStore,
+      wantConversationId ? { conversationId: wantConversationId } : wantMessageIds.length > 0 ? { messageIds: new Set(wantMessageIds) } : undefined,
+    );
   } catch (e) {
     if (e instanceof InboxReadError) return jsonCors({ error: e.message, code: e.code }, request, e.status);
     throw e;
   }
-  // Counterparty display names: every sender + every conversation participant.
+  // Counterparty display names: every sender + every conversation participant + every DM counterparty.
   const addrs = new Set<string>();
   for (const m of Object.values(view.envelopeMeta)) {
     const a = m.from.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
     if (a && a !== owner) addrs.add(a);
   }
+  for (const dm of view.directMessages) for (const a of dm.counterparties) addrs.add(a);
   for (const d of Object.values(view.descriptors)) {
     for (const p of d.participants) {
       const a = p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();

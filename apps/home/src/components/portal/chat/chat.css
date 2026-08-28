@@ -747,3 +747,202 @@
     overflow-y: auto;
   }
 }
+
+/* ── Direct messages (Slack model): rail head + compose "To:" typeahead ─────────────────────────── */
+
+.chat-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat-rail-head__title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-rail-compose {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+
+.chat-rail-compose:hover,
+.chat-rail-compose--active {
+  background: var(--color-amber-50);
+  border-color: var(--color-amber-400);
+}
+
+.chat-rail-item__when {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.chat-compose-to {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+}
+
+.chat-compose-to__label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  flex: none;
+}
+
+.chat-compose-to__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.9rem;
+  padding: 0.3rem 0;
+}
+
+.chat-compose-to__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.25rem;
+  border: 1px solid var(--color-amber-400);
+  background: var(--color-amber-50);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.chat-compose-results {
+  max-height: 320px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 6px 16px rgba(28, 25, 23, 0.06);
+}
+
+.chat-compose-result {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.chat-compose-result:hover {
+  background: var(--color-surface-sunken);
+}
+
+.chat-compose-result--note {
+  cursor: default;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.chat-compose-result__name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.chat-compose-result__sub {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Recipient scope switch (Names · Organizations · Workspaces) */
+.chat-scope {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  flex: none;
+}
+
+.chat-scope__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-scope__tab:hover {
+  color: var(--color-text-primary);
+}
+
+.chat-scope__tab--active {
+  background: var(--color-amber-100, var(--color-amber-50));
+  color: var(--color-amber-700);
+}
+
+.chat-scope__select {
+  flex: none;
+  max-width: 220px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  font-size: 0.82rem;
+}
+
+.chat-compose-result__tag {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 720px) {
+  .chat-compose-to {
+    flex-wrap: wrap;
+  }
+  .chat-scope__tab span {
+    display: none;
+  }
+}
