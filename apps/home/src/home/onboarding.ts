@@ -8,6 +8,7 @@
 // branches on the chosen credential.
 import type { Address, Hex } from '@agenticprimitives/types';
 import { keccak256, toBytes } from 'viem';
+import { fastPollMs } from '../lib/fast-poll';
 import {
   createSecureHomePasskey,
   deployAndClaimAgent,
@@ -279,7 +280,7 @@ async function activatePersonPlanes(owner: Address, via: Via, auth?: Auth): Prom
     // this immediately; wallet/passkey homes whose deploy op is still mining wait it out.
     for (let i = 0; i < 20; i++) {
       if (await isAgentDeployed(owner).catch(() => false)) break;
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, fastPollMs(2000)));
     }
     const bound = await activateVaultIfNeeded(owner, via, auth); // also fires inbox-delivery
     // The interactions (messaging) plane is INDEPENDENT of the vault-key bind — a delegation to the
@@ -372,7 +373,7 @@ export async function secureHome(
     // Wait for the deploy to be RPC-visible so the DOs can verify the 0x03 wires against the approved
     // hashes set INSIDE the deploy batch, then hand them over (no signature). Vault-key still binds via
     // activateVaultIfNeeded for now (Phase B folds it into the deploy too).
-    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(res.agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, 2000)); }
+    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(res.agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, fastPollMs(2000))); }
     await planes.submit();
     if (!planes.vaultFolded) {
       try { const bound = await activateVaultIfNeeded(res.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }

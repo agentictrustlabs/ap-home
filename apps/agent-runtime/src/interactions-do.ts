@@ -79,7 +79,7 @@ import type { Vault } from '@agenticprimitives/vault';
 import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from './session-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
@@ -659,7 +659,11 @@ export class InteractionsDO {
   ): Promise<Response> {
     if (this.deps?.vaultTool) return this.deps.vaultTool(grant, toolName, toolArgs);
     const env = this.env;
-    if ((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()) {
+    // Same predicate as /agent/interactions-session-key and interactionsSessionAccount: GCP KMS in
+    // production, A2A_INTERACTIONS_SESSION_PRIVATE_KEY on a local stack. Gating on the GCP name alone
+    // here made local dev fail-closed even though the enable ceremony had custodied a leaf for the
+    // dev key — the two gates MUST agree or a leaf gets minted that ops then refuse to use.
+    if (interactionsSessionKeyConfigured(env)) {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       const leaf = st.sessionLeaf;
       if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
@@ -674,11 +678,12 @@ export class InteractionsDO {
         { status: 409, headers: { 'Content-Type': 'application/json' } },
       );
     }
-    // CRIT-2 W6 — server-mint retired. The interactions-session KMS key is REQUIRED for interactions vault
-    // ops (bound-mint above / DO-side proof). Unconfigured ⇒ FAIL-CLOSED (dev must provision
-    // GCP_KMS_INTERACTIONS_KEY_NAME); prod always sets it, taking the bound/409 branch above. No fallback.
+    // CRIT-2 W6 — server-mint retired. The interactions-session key is REQUIRED for interactions vault
+    // ops (bound-mint above / DO-side proof). Unconfigured ⇒ FAIL-CLOSED (provision
+    // GCP_KMS_INTERACTIONS_KEY_NAME, or A2A_INTERACTIONS_SESSION_PRIVATE_KEY on a local stack); prod
+    // always sets the KMS name, taking the bound/409 branch above. No fallback.
     return new Response(
-      JSON.stringify({ ok: false, error: 'interactions_key_unprovisioned', detail: 'GCP_KMS_INTERACTIONS_KEY_NAME is unset — interactions vault ops require it (server-mint retired, CRIT-2)' }),
+      JSON.stringify({ ok: false, error: 'interactions_key_unprovisioned', detail: 'no interactions-session key configured (GCP_KMS_INTERACTIONS_KEY_NAME / dev A2A_INTERACTIONS_SESSION_PRIVATE_KEY) — interactions vault ops require it (server-mint retired, CRIT-2)' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
   }
@@ -2700,6 +2705,49 @@ export class InteractionsDO {
             this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerBody: String(body.bodyText ?? '').trim() });
           }
           return json({ ok: true, messageId: r.envelope.id });
+        });
+      }
+
+      if (op === 'channels.react') {
+        // An emoji reaction is a TOGGLE on one message — the lightest utterance a member has.
+        // Same doors as posting (org member on an OPEN topic; participants only on a RESTRICTED
+        // one), but NO display name required: a reaction carries the reactor's SA, not a byline.
+        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        if (!presence.admitted) {
+          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+        }
+        const channelId = String(body.channelId ?? '');
+        const messageId = String(body.messageId ?? '');
+        const emoji = String(body.emoji ?? '').trim();
+        if (!channelId || !messageId) return json({ error: 'channelId and messageId required' }, 400);
+        if (!emoji || emoji.length > 16) return json({ error: 'emoji required (a short glyph, not a sentence)' }, 400);
+        const reactorSteward = !presence.listed && presence.steward;
+        return this.serialize(async () => { // same single-writer rule as post: one channel doc, many members
+          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+          const entry = index.find((c) => c.descriptor.id === channelId);
+          if (!entry) return json({ error: 'unknown channel' }, 404);
+          if (!canSeeChannel(entry, sessionSa, reactorSteward)) return json({ error: 'not a participant of this restricted topic — ask a facilitator for an invitation' }, 403);
+          type RowWithReactions = { envelope: MessageEnvelopeV1; authorName: string; reactions?: Record<string, string[]> };
+          const messages = await this.readDoc<RowWithReactions[]>(grant, TOPIC_RESOURCE(channelId), []);
+          const row = messages.find((m) => m.envelope.id === messageId);
+          if (!row) return json({ error: 'unknown message' }, 404);
+          const me = sessionSa.toLowerCase();
+          const cur = { ...(row.reactions ?? {}) };
+          const holders = (cur[emoji] ?? []).map((s) => s.toLowerCase());
+          if (holders.includes(me)) {
+            const rest = holders.filter((s) => s !== me);
+            if (rest.length) cur[emoji] = rest;
+            else delete cur[emoji];
+          } else {
+            // Bound the doc: 20 distinct emoji per message is a conversation, not a keyboard test.
+            if (!cur[emoji] && Object.keys(cur).length >= 20) return json({ error: 'this message already carries 20 distinct reactions' }, 400);
+            cur[emoji] = [...holders, me];
+          }
+          if (Object.keys(cur).length) row.reactions = cur;
+          else delete row.reactions;
+          await this.writeDoc(grant, TOPIC_RESOURCE(channelId), messages);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.react', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: messageId } });
+          return json({ ok: true, messageId, reactions: row.reactions ?? {} });
         });
       }
 

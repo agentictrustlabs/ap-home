@@ -29,6 +29,8 @@ import { whitelabel } from '../src/whitelabel/config';
 import { resolveClient, isAllowedRelyingOriginAsync } from './_lib/oidc-registry';
 import { CONNECT_DOMAIN } from '../src/lib/domain';
 import { signBridgeCall } from './_lib/bridge-hmac';
+import { demoPersonaFor, signDigestAsDemoPersona } from './_lib/demo-custody';
+import { issueSiteDelegation, toWire } from '../src/lib/delegation';
 import { resolveOrigin, getServer, type FnContext } from './_lib/server-broker';
 
 /** The home's own audience (same-origin demo; mirrors server/me/handler.ts `AUD`). */
@@ -385,19 +387,10 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
     return json({ error: 'client_has_no_delegate' }, 409, cors);
   }
 
-  // 3. Custody boundary (H-1) — decide on the VERIFIED principal (kind + role, from the signed
-  //    AgentSession), NOT the client-controlled cookie `via`. Only a custody-grade OIDC credential
-  //    (Google/YouVersion, KMS-custodied) is signable server-side; device credentials (passkey/wallet)
-  //    and login-grade sessions must sign on-device → popup fallback. The demo-a2a bridge re-verifies
-  //    custody-grade independently, so this is the trusted FIRST gate, not the only one.
-  const serverCustodied = hs.principal.kind === 'oidc' && hs.principal.role === 'custody-grade';
-  if (!serverCustodied) {
-    audit('needs_device_credential', { sub: hs.sub, kind: hs.principal.kind, role: hs.principal.role ?? null });
-    return json({ needs_device_credential: true, via: hs.via.toLowerCase() || 'unknown' }, 200, cors);
-  }
-
   // M-2: consume the id_token's one-time `nonce` (unique per FedCM ceremony) so a captured id_token can't
-  // be replayed for a second delegation within its TTL. Best-effort single-use via KV.
+  // be replayed for a second delegation within its TTL. Best-effort single-use via KV. Runs BEFORE the
+  // custody branching so every server-side signing path (OIDC bridge AND demo persona) is replay-guarded;
+  // burning it on a needs_device_credential answer is harmless — the popup fallback never reuses it.
   const nonce = (v.session as unknown as { nonce?: string }).nonce;
   if (!nonce) {
     audit('reject', { reason: 'id_token_missing_nonce', sub: hs.sub });
@@ -409,6 +402,31 @@ export const onFedcmGrant = async ({ request, env }: FnContext): Promise<Respons
     return json({ error: 'nonce_replayed' }, 409, cors);
   }
   await env.AUTH_CODES.put(nonceKey, '1', { expirationTtl: ID_TOKEN_TTL });
+
+  // DEMO PERSONA fast path: this Home HOLDS the seeded custodian key (DEMO_PERSONA_KEYS), so a demo
+  // person is server-custodied BY CONSTRUCTION — the same zero-prompt shape demo-signin gives them.
+  // Without this branch a persona session (kind siwe-eoa) fell to `needs_device_credential` and the
+  // FedCM Continue dead-ended at a wallet prompt no demo persona can satisfy. Same boundaries as
+  // demo-custody.ts: only registered personas resolve, and only for the session's OWN subject.
+  const persona = demoPersonaFor(env, addr);
+  if (persona) {
+    const signHash = (digest: Parameters<typeof signDigestAsDemoPersona>[1]) => signDigestAsDemoPersona(persona, digest);
+    const delegation = await issueSiteDelegation(addr as Address, client.delegate as Address, signHash, 12 * 3600);
+    audit('granted', { sub: hs.sub, delegate: client.delegate, persona: persona.handle });
+    const slp = loginStatusHeader('logged-in');
+    return json({ delegation: toWire(delegation) }, 200, { ...cors, [slp.name]: slp.value });
+  }
+
+  // 3. Custody boundary (H-1) — decide on the VERIFIED principal (kind + role, from the signed
+  //    AgentSession), NOT the client-controlled cookie `via`. Only a custody-grade OIDC credential
+  //    (Google/YouVersion, KMS-custodied) is signable server-side; device credentials (passkey/wallet)
+  //    and login-grade sessions must sign on-device → popup fallback. The demo-a2a bridge re-verifies
+  //    custody-grade independently, so this is the trusted FIRST gate, not the only one.
+  const serverCustodied = hs.principal.kind === 'oidc' && hs.principal.role === 'custody-grade';
+  if (!serverCustodied) {
+    audit('needs_device_credential', { sub: hs.sub, kind: hs.principal.kind, role: hs.principal.role ?? null });
+    return json({ needs_device_credential: true, via: hs.via.toLowerCase() || 'unknown' }, 200, cors);
+  }
 
   if (!env.A2A_CUSTODY_URL || !env.A2A_CUSTODY_BRIDGE_SECRET) {
     audit('error', { reason: 'custody_bridge_not_configured', sub: hs.sub });

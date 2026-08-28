@@ -52,6 +52,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     member?: string;
     /** Custodian leg: the signed `workspace → member` delegation (wire form). */
     delegation?: unknown;
+    /** Custodian leg: the record-covering MEMBERSHIP wire (P4) — stashed beside the site grant. */
+    membership?: unknown;
     workspaceName?: string;
     /** Member leg: claim (and consume) the pending invitation addressed to the session's person. */
     claim?: boolean;
@@ -67,7 +69,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // MEMBER leg — the session's person claims their own invitation. Single use: the stash is
     // deleted on read, so a leaked claim response cannot be replayed into a second link.
     const raw = await env.AUTH_CODES.get(key(person));
-    if (!raw) return jsonCors({ error: 'no invitation for you at this workspace' }, request, 404);
+    if (!raw) {
+      return jsonCors(
+        { error: 'Home holds no invitation for you at this workspace — it may have been used already, or sent before access signing. Ask the person who invited you to send it again.' },
+        request,
+        404,
+      );
+    }
     await env.AUTH_CODES.delete(key(person));
     return jsonCors({ ok: true, invite: JSON.parse(raw) }, request);
   }
@@ -90,6 +98,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       workspace,
       member,
       delegation: body.delegation,
+      membership: body.membership ?? null,
       workspaceName: body.workspaceName ?? '',
       invitedBy: person,
       createdAt: Date.now(),

@@ -28,6 +28,7 @@ import {
 } from '@agenticprimitives/agent-relationships';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { getClient } from './lib/oidc-clients';
+import { fastPollMs } from './lib/fast-poll';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
@@ -166,7 +167,7 @@ async function executeCall(
   let lastErr = 'execute failed';
 
   for (let i = 0; i < attempts; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, 2500));
+    if (i > 0) await new Promise((r) => setTimeout(r, fastPollMs(2500)));
 
     // Build (no signing yet → no credential prompt on this step).
     const buildRes = await fetch('/a2a/account/build-call-userop', {
@@ -1207,7 +1208,7 @@ export async function createChildAgentForSite(
     for (let i = 0; i < 15; i++) {
       const code = await pub.getBytecode({ address: childAgent }).catch(() => undefined);
       if (code && code !== '0x') break;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, fastPollMs(1000)));
     }
   }
 
@@ -1441,7 +1442,7 @@ export async function createManagedAgent(
     for (let i = 0; i < 15; i++) {
       const code = await pub.getBytecode({ address: child }).catch(() => undefined);
       if (code && code !== '0x') break;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, fastPollMs(1000)));
     }
   }
 
@@ -2400,7 +2401,7 @@ export async function signupWithName(
   if (!dep.ok) return { ok: false, error: dep.error };
   const agent = dep.agent;
   if (extra) {
-    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, 2000)); }
+    for (let i = 0; i < 20; i++) { if (await isAgentDeployed(agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, fastPollMs(2000))); }
     await extra.submit();
   }
   // B1 — self-serve `secureHome` passes signIn=false; the session is issued later by openHome, so skip the

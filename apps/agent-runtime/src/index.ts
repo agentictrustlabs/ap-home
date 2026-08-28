@@ -4172,7 +4172,7 @@ export async function interactionsSessionAccount(env: Env): Promise<Awaited<Retu
 }
 
 /** Is an interactions-session signer configured (KMS in production, a local dev key on a workstation)? */
-function interactionsSessionKeyConfigured(env: Env): boolean {
+export function interactionsSessionKeyConfigured(env: Env): boolean {
   return !!((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim() || (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim());
 }
 

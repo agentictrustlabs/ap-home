@@ -22,6 +22,7 @@ const youversionEnabled = whitelabel.onboarding.credentialMethods.includes('youv
 const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
 import { useEnrollReq, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
+import { DemoPeopleFold } from './DemoPeopleFold';
 import { RecognizedEnroll } from './RecognizedEnroll';
 import { CeremonyProgress } from './CeremonyProgress';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
@@ -332,7 +333,12 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     );
   }
   if (view.k === 'journey') {
-    return <OnboardingJourney variant={view.variant} name={view.name} api={mode === 'enroll' ? api : undefined} />;
+    return (
+      <>
+        <OnboardingJourney variant={view.variant} name={view.name} api={mode === 'enroll' ? api : undefined} />
+        
+      </>
+    );
   }
   if (view.k === 'enroll-existing') {
     return <OnboardingJourney variant="enroll-existing" name={view.name} api={api} existingAgent={view.agent} initialVia={view.via} />;
@@ -840,7 +846,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName }: {
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}
-    </Shell>
+    {!enroll && <DemoPeopleFold />}
+      </Shell>
   );
 }
 

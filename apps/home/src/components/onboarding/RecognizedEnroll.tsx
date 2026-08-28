@@ -22,7 +22,8 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
-import { issueSiteDelegation, toWire } from '../../lib/delegation';
+import { issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
+import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
 import { whitelabel, fmt } from '../../whitelabel/config';
@@ -298,6 +299,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         setGrantProgress({ step: 1, total: 2, label: 'Signing the member’s access…' });
         const signHash = await signHashFor(viaLower as Via, home.address, auth);
         const grant = await issueSiteDelegation(enroll.grantOrg, enroll.member, signHash);
+        // P4 record coverage: the site delegation is reach; the MEMBERSHIP wire is what lets the
+        // member READ the workspace/team's records (member plane + library, where every field
+        // artifact lives). Same shape the operator seeds mint — record scope, no allowedTargets.
+        const membership = await issueWorkspaceMembershipAccessDelegation(enroll.grantOrg, enroll.member, MCP_SERVER_ID, signHash);
         const res = await fetch('/connect/workspace-invite', {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
@@ -305,6 +310,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             workspace: enroll.grantOrg,
             member: enroll.member,
             delegation: toWire(grant),
+            membership: toWire(membership),
             workspaceName: enroll.orgBase ?? '',
           }),
         });
@@ -323,7 +329,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const out = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
           error?: string;
-          invite?: { delegation?: unknown; workspaceName?: string };
+          invite?: { delegation?: unknown; membership?: unknown; workspaceName?: string };
         };
         if (!res.ok || !out.ok || !out.invite?.delegation) {
           return fail(out.error ?? 'No invitation was found for you at this workspace — ask its steward to invite you.');
@@ -341,6 +347,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             parent: home.address,
             relationship: 'member',
             stewardshipDelegation: out.invite.delegation,
+            // The record-covering wire (P4): `scopedWireFor` reads this off the link, the library
+            // org-read presents it as scopedAccess, and the DO evaluates its scope per resource.
+            membershipDelegation: out.invite.membership ?? null,
           }),
         });
         const link = (await linked.json().catch(() => ({}))) as { ok?: boolean; error?: string };

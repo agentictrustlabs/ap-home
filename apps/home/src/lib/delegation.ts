@@ -372,7 +372,7 @@ export const APP_COORDINATION_READ_SCOPES = [
  *  and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking it denies per-record at
  *  demo-mcp, surfaced as "re-enable storage", never blanket-staled. Grounds the discussion @ask turn
  *  (and coordination) in the org's own recorded figures instead of invention. */
-export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*'] as const;
+export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*', 'vault:field:*'] as const;
 
 /** SEEDING scope — the same namespaces, read+WRITE, for provisioning a demo/sandbox org whose vault
  *  starts empty. Deliberately narrow and deliberately separate from the read scope above.
@@ -386,7 +386,7 @@ export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*
  *  exists because a shared sandbox has no owner to author them, and an empty vault makes every
  *  grounded answer impossible to demonstrate. Grants signed before it shipped simply lack it and
  *  deny the seed per-record, like every other additive scope. */
-export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*'] as const;
+export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*'] as const;
 // `vault:family:*` is the skills-app family-office relying namespace (record types like
 // `family:portfolio`, `family:budget`; resource = `vault:` + recordType). ADDITIVE + read-only:
 // only grants built AFTER this ships carry it, so existing grants are unaffected — an org must
@@ -491,6 +491,44 @@ export async function issueOrganizationResourceAccessDelegation(
   const d: Delegation = { delegator: orgSA, delegate: member, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
   const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
   d.signature = await signHash(digest); // the org's custody (the steward's credential) grants member access
+  return d;
+}
+
+/**
+ * P4 record coverage — the workspace/team MEMBERSHIP wire `org → member`, signed by the org's
+ * custody at invite time ALONGSIDE the site delegation. The site delegation is reach; this wire is
+ * what lets the member READ the org's records: the member plane (directory, conversation index) and
+ * the LIBRARY (content catalog + artifacts), which is where field workspaces and teams keep every
+ * ws- and team- artifact. Same caveat shape the operator seeds mint — a VAULT_RECORD_SCOPE and NO
+ * allowedTargets, which is the SEC-C1 line between member access and stewardship: under both shape
+ * tests this is member access and cannot be read as authority to act. The DO evaluates the caveat
+ * per resource (`hasScopedAccess`); read-only, time-boxed, on-chain revocable.
+ */
+export async function issueWorkspaceMembershipAccessDelegation(
+  orgSA: Address,
+  member: Address,
+  mcpServerId: string,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 365,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const caveats: Caveat[] = [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
+    buildVaultRecordScopeCaveat([
+      {
+        server: mcpServerId,
+        resources: ['vault:directory.data', 'vault:conversation.index', 'vault:content.catalog', 'vault:content.artifact.*'],
+        ops: ['read'],
+      },
+    ]),
+  ];
+  const d: Delegation = { delegator: orgSA, delegate: member, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const digest = hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager);
+  d.signature = await signHash(digest); // the org's custody signs the member's record read
   return d;
 }
 

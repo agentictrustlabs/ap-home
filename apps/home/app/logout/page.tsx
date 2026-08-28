@@ -6,30 +6,37 @@
 //
 // A TOP-LEVEL navigation (not a hidden iframe) is deliberate: `navigator.login.setStatus` and the cookie
 // clear must apply to the IdP origin itself, and Chrome restricts `setStatus` from cross-site iframes.
-// Same reason we notify Commons with a top-level GET: its session cookie is SameSite=Lax, so a
-// hidden iframe from this origin would not send it. Front-channel logout is a navigation.
+// Same reason relying apps are notified with a top-level GET: their session cookies/storage are
+// first-party only, so a hidden iframe from this origin would not reach them. Front-channel logout
+// is a navigation — the `fc` param walks the relying-app list (teardown above is idempotent).
 import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
 import { setFedcmLoginStatus, SESSION_KEY } from '../../src/context/session';
 import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
 import { disconnectWallet } from '../../src/lib/wallet';
 
-/** Commons keeps its own cookie. Tell it the Home session ended — https from prod, loopback from local. */
-function commonsFrontChannelLogout(): string | null {
-  const client = getClient('commons-app');
-  if (!client) return null;
+/** Relying apps that receive a front-channel sign-out at their `/sso-logout` — each clears its
+ *  own origin (and, via a storage marker, its other open tabs) and bounces back here. https from
+ *  prod, loopback from local — same filtering the Commons-only version applied. */
+function rpFrontChannelLogouts(): string[] {
   const hereHttps = window.location.protocol === 'https:';
-  for (const uri of client.redirect_uris) {
-    try {
-      const u = new URL(uri);
-      if (hereHttps && u.protocol !== 'https:') continue;
-      if (!hereHttps && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') continue;
-      return new URL('/sso-logout', u.origin).toString();
-    } catch {
-      /* skip a malformed registered URI */
+  const outs: string[] = [];
+  for (const id of ['commons-app', 'field-app']) {
+    const client = getClient(id);
+    if (!client) continue;
+    for (const uri of client.redirect_uris) {
+      try {
+        const u = new URL(uri);
+        if (hereHttps && u.protocol !== 'https:') continue;
+        if (!hereHttps && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') continue;
+        outs.push(new URL('/sso-logout', u.origin).toString());
+        break;
+      } catch {
+        /* skip a malformed registered URI */
+      }
     }
   }
-  return null;
+  return outs;
 }
 
 export default function LogoutPage() {
@@ -58,22 +65,41 @@ export default function LogoutPage() {
       /* malformed return — stay on this Home */
     }
 
-    // Commons' /sso-logout return allowlist trusts only itself and this Home — a relying-app
-    // origin (Gather, Field, …) is rejected and the person is stranded on Commons' door. So the
-    // notify bounces back HERE (`fc=1` marks the pass; teardown above is idempotent), and this
-    // Home forwards to the relying app itself.
-    const notify = params.get('fc') === '1' ? null : commonsFrontChannelLogout();
-    if (notify) {
-      const back = new URL('/logout', window.location.origin);
-      back.searchParams.set('fc', '1');
-      const ret = params.get('return');
-      if (ret) back.searchParams.set('return', ret);
-      const next = new URL(notify);
-      next.searchParams.set('return', back.toString());
-      window.location.replace(next.toString());
-      return;
-    }
-    window.location.replace(dest);
+    // Relying apps' /sso-logout return-allowlists trust only themselves and this Home — a foreign
+    // relying-app origin would strand the person. So every notify bounces back HERE (`fc` names
+    // the next index; teardown above is idempotent), and this Home forwards along the list, then
+    // finally to the original return.
+    const rps = rpFrontChannelLogouts();
+    const idx = Number(params.get('fc') ?? '0') || 0;
+    void (async () => {
+      for (let i = idx; i < rps.length; i++) {
+        const notify = rps[i]!;
+        // LOCAL stacks: a dev port may simply not be running, and a top-level navigation to a
+        // dead origin strands the person on a browser error page — AFTER the teardown above
+        // already finished, so the "error" is pure UX damage. Probe reachability first (no-cors —
+        // any response, even opaque, proves something is listening) and skip the notify when
+        // nothing answers. Production (https) navigates unconditionally, as before.
+        let reachable = true;
+        if (window.location.protocol !== 'https:') {
+          const ctl = new AbortController();
+          const t = window.setTimeout(() => ctl.abort(), 1200);
+          reachable = await fetch(new URL(notify).origin + '/', { mode: 'no-cors', signal: ctl.signal })
+            .then(() => true)
+            .catch(() => false);
+          window.clearTimeout(t);
+        }
+        if (!reachable) continue;
+        const back = new URL('/logout', window.location.origin);
+        back.searchParams.set('fc', String(i + 1));
+        const ret = params.get('return');
+        if (ret) back.searchParams.set('return', ret);
+        const next = new URL(notify);
+        next.searchParams.set('return', back.toString());
+        window.location.replace(next.toString());
+        return;
+      }
+      window.location.replace(dest);
+    })();
   }, []);
 
   return (
