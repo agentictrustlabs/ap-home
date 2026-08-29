@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { openHome, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
-import { passkeyLogin, fetchProfile, siweLogin, claimName, createManagedAgent } from '../../connect-client';
+import { passkeyLogin, fetchProfile, siweLogin, claimName, createManagedAgent, resolveHomeNameForLabel } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { initRemoteSigner } from '../../lib/remote-signer';
@@ -153,13 +153,28 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // A per-handle home subdomain (<label>.impact-agent.me) IS that member's home — recognize
       // them from the host and go straight to "welcome back, sign in", pre-filled (not a generic
       // create screen). www/apex fall through to the name chooser.
+      // spec 346 migration: the label may denote `<label>.me` or the legacy root — resolve the ordered candidates
+      // (effect below) before showing "welcome back"; until then, the neutral busy view.
       const subLabel = parseAgentSubdomain(window.location.hostname);
-      if (subLabel) return { k: 'signin', name: toAgentName(subLabel) };
+      if (subLabel) return { k: 'checking' };
     }
     // spec 257 W1 — the www/apex self-serve default is CREDENTIAL-FIRST, not name-first. The name
     // is a public handle, not a login key; social/passkey resolve the home without it.
     return { k: 'credential' };
   });
+  // Resolve the per-handle home subdomain to the ONE name its label denotes (typed-first candidates), then
+  // show sign-in pre-filled. An unknown label still lands on sign-in with the name a NEW claim would take.
+  useEffect(() => {
+    if (mode !== 'entry' || typeof window === 'undefined') return;
+    const subLabel = parseAgentSubdomain(window.location.hostname);
+    if (!subLabel) return;
+    let cancelled = false;
+    void resolveHomeNameForLabel(subLabel).then((r) => {
+      if (!cancelled) setView({ k: 'signin', name: r?.name ?? toAgentName(subLabel) });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
   // Curated entry first; a member-registered one once the hook has primed it. Both give the app
   // a NAME on the consent screen, which is the whole reason the person can tell who is asking.
   const clientCfg = api.enroll

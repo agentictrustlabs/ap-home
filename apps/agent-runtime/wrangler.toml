@@ -345,6 +345,8 @@ pattern = "a2a.faithnet.io"
 custom_domain = true
 
 [env.faithnet.vars]
+# spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
+AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
 ORCHESTRATION_LLM = "anthropic"
 ASSISTANT_RATE_MAX = "60"

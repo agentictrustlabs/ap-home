@@ -57,6 +57,22 @@ export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
+/**
+ * spec 346 migration — the ORDERED set of person roots a bare subdomain label may denote on this deployment
+ * (`NEXT_PUBLIC_AGENT_NAME_PARENTS`, e.g. `me,impact` while an estate moves from the legacy root to `.me`).
+ * A label denotes at most ONE home: the claim route refuses a label that is taken under any listed root, so
+ * resolving the candidates in order is a lookup over one well-defined key, not a fallback between mechanisms.
+ * Defaults to just `AGENT_NAME_PARENT`.
+ */
+export const AGENT_NAME_PARENTS: readonly string[] = (process.env.NEXT_PUBLIC_AGENT_NAME_PARENTS || AGENT_NAME_PARENT)
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+/** The candidate full names a bare label may resolve to, typed-first. */
+export function candidateNamesForLabel(label: string): string[] {
+  const l = nameLabel(label);
+  return AGENT_NAME_PARENTS.map((p) => `${l}.${p}`);
+}
+
 /** Typed suffixes the claim flow may offer next to the legacy `AGENT_NAME_PARENT` (spec 346 §4). Empty
  *  until the typed roots are provisioned on this deployment's chain (`AddTypedRoots.s.sol`) and the
  *  `permissionlessSubregistries` map lands in the deployment JSON. */
@@ -85,11 +101,15 @@ export function nameLabel(name: string): string {
   );
 }
 
-/** Normalize any name/label to a full name: a typed name stays typed (normalized); anything else becomes
- *  `<label>.<AGENT_NAME_PARENT>` — the legacy root this deployment claims under. */
+/** The root a NEW person claim goes under: `.me` once this deployment lists it as claimable, else the legacy parent. */
+export const NEW_PERSON_TLD: string = CLAIMABLE_TLDS.includes('me') ? 'me' : AGENT_NAME_PARENT;
+
+/** Normalize any name/label to a full name for a NEW claim: a typed name stays typed (normalized); a legacy
+ *  `<label>.<AGENT_NAME_PARENT>` stays as given; a bare label becomes `<label>.<NEW_PERSON_TLD>`. To find the home an
+ *  EXISTING label denotes, resolve `candidateNamesForLabel` instead (`resolveHomeNameForLabel` in connect-client). */
 export function toAgentName(nameOrLabel: string): string {
   const n = nameOrLabel.trim().toLowerCase();
   const p = parsedOrNull(n);
   if (p && (p.kind === 'canonical' || p.kind === 'scoped')) return p.normalized;
-  return n.endsWith(`.${AGENT_NAME_PARENT}`) ? n : `${nameLabel(n)}.${AGENT_NAME_PARENT}`;
+  return n.endsWith(`.${AGENT_NAME_PARENT}`) ? n : `${nameLabel(n)}.${NEW_PERSON_TLD}`;
 }

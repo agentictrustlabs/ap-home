@@ -11,7 +11,7 @@
 import { AgentNamingClient, namehash, isAgentTld, canonicalTld } from '@agenticprimitives/agent-naming';
 import { json, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
-import { AGENT_NAME_PARENT, CLAIMABLE_TLDS } from '../../src/lib/domain';
+import { AGENT_NAME_PARENT, AGENT_NAME_PARENTS, CLAIMABLE_TLDS } from '../../src/lib/domain';
 
 /** The suffix this request claims under: the legacy parent by default; a typed suffix only when claimable here. */
 function suffixFor(raw: string | null): { tld: string } | { error: string } {
@@ -43,23 +43,31 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     universalResolver: CONTRACTS.agentNameUniversalResolver,
   });
 
+  // spec 346 migration — a label must be free under EVERY root a bare subdomain label may denote here
+  // (`AGENT_NAME_PARENTS` ∪ the requested suffix), so `<label>.<zone>` keeps denoting exactly one home.
+  const roots = [...new Set([tld, ...AGENT_NAME_PARENTS])];
+  const labelTaken = async (label: string): Promise<boolean> => {
+    for (const r of roots) if (await naming.resolveName(`${label}.${r}`)) return true;
+    return false;
+  };
+
   // spec 275 MAM-D4: exact-or-fail. The member named this agent deliberately; a taken
   // label is an error, NEVER a silent `<label>2` (MAM-INV-2 / ADR-0013 no fallback).
   const exact = url.searchParams.get('exact');
   if (exact === '1' || exact === 'true') {
     const label = sanitize(url.searchParams.get('label') ?? url.searchParams.get('base') ?? '');
     const name = `${label}.${tld}`;
-    if (await naming.resolveName(name)) {
+    if (await labelTaken(label)) {
       return json({ error: 'taken', taken: true, label, name }, 409);
     }
-    return json({ label, name, node: namehash(name) });
+    return json({ label, name, node: namehash(name), tld });
   }
 
   const base = sanitize(url.searchParams.get('base') ?? 'agent');
   for (let i = 1; i < 50; i++) {
     const candidate = i === 1 ? base : `${base}${i}`;
     const name = `${candidate}.${tld}`;
-    if (!(await naming.resolveName(name))) {
+    if (!(await labelTaken(candidate))) {
       return json({ label: candidate, name, node: namehash(name), tld });
     }
   }

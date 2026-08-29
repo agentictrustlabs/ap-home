@@ -95,9 +95,13 @@ export interface AgentHostContext {
 }
 
 interface HostEnv {
-  /** The legacy/person root a bare subdomain label maps to (default `impact`). A deployment that has cut its
-   *  persons over to `.me` sets `AGENT_NAME_PARENT = "me"` — ONE parent per deployment, never a candidate list. */
+  /** The legacy/person root a bare subdomain label maps to (default `impact`). */
   AGENT_NAME_PARENT?: string;
+  /** spec 346 migration — an ORDERED list of person roots a bare label may denote (`me,impact`) while an
+   *  estate moves to `.me`. The Home's claim route keeps a label unique across these roots, so resolving them
+   *  in order is one lookup over a well-defined key, not a fallback between mechanisms. Overrides
+   *  AGENT_NAME_PARENT when set. */
+  AGENT_NAME_PARENTS?: string;
   RPC_URL?: string;
   CHAIN_ID?: string;
   AGENT_NAME_REGISTRY?: string;
@@ -139,10 +143,13 @@ export async function resolveAgentByLabel(
   publicOrigin: string,
 ): Promise<AgentHostContext> {
   const norm = label && label.trim() ? label.trim().toLowerCase() : null;
-  const name = norm ? agentNameForHandle(norm, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT) : null;
-  if (!norm || !name) return { label: null, agent: null, name: null, publicOrigin };
+  if (!norm) return { label: null, agent: null, name: null, publicOrigin };
+  const bare = !norm.includes('.') && !norm.includes('@') && !norm.includes('/');
+  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  // A bare label denotes ONE home across the deployment's ordered person roots; anything else is one typed/legacy name.
+  const candidates = bare ? parents.map((p) => `${norm}.${p}`) : [agentNameForHandle(norm, parents[0] ?? AGENT_NAME_PARENT)].filter((n): n is string => !!n);
+  if (candidates.length === 0) return { label: null, agent: null, name: null, publicOrigin };
 
-  let agent: Address | null = null;
   if (env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER) {
     const client = new AgentNamingClient({
       rpcUrl: env.RPC_URL,
@@ -150,9 +157,12 @@ export async function resolveAgentByLabel(
       registry: env.AGENT_NAME_REGISTRY as `0x${string}`,
       universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as `0x${string}`,
     });
-    agent = await client.resolveName(name);
+    for (const name of candidates) {
+      const agent = await client.resolveName(name);
+      if (agent) return { label: norm, agent, name, publicOrigin };
+    }
   }
-  return { label: norm, agent, name, publicOrigin };
+  return { label: norm, agent: null, name: candidates[0]!, publicOrigin };
 }
 
 /** One A2A skill-card entry (A2A protocol shape). */

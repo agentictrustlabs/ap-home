@@ -1,6 +1,6 @@
 // Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
-import { AGENT_NAME_PARENT, CLAIMABLE_TLDS } from './lib/domain';
+import { AGENT_NAME_PARENT, CLAIMABLE_TLDS, candidateNamesForLabel } from './lib/domain';
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
 import {
   buildSubregistryRegisterCall,
@@ -403,6 +403,17 @@ export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serv
   };
   const t = map[kind];
   return t && CLAIMABLE_TLDS.includes(t.tld) ? t : undefined;
+}
+
+/** The home an EXISTING subdomain label denotes: the first of `candidateNamesForLabel(label)` (typed-first, then
+ *  the legacy root) that resolves to an agent. `null` when none does — the label is free. One lookup over an
+ *  ordered candidate set whose uniqueness `/connect/name` enforces (spec 346 migration), not a fallback. */
+export async function resolveHomeNameForLabel(label: string): Promise<{ name: string; agent: Address } | null> {
+  for (const name of candidateNamesForLabel(label)) {
+    const info = (await (await fetch(`/connect/name-info?name=${encodeURIComponent(name)}`)).json().catch(() => ({}))) as { agent?: Address | null };
+    if (info.agent && BigInt(info.agent) !== 0n) return { name, agent: info.agent };
+  }
+  return null;
 }
 
 export interface TypedClaimOpts {
