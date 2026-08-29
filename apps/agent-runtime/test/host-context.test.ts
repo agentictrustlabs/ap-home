@@ -18,6 +18,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildA2aAgentCard,
   parseAgentSubdomain,
+  parseTypedAgentHost,
+  agentNameForHandle,
   agentNameForLabel,
   withConsultSkill,
   skillsFromLabels,
@@ -164,5 +166,35 @@ describe('the served Agent Card declares how to authenticate', () => {
     const c = card().capabilities as { streaming: boolean; pushNotifications: boolean };
     expect(c.streaming).toBe(false);
     expect(c.pushNotifications).toBe(false);
+  });
+});
+
+
+// spec 346 §5 — typed hosts + typed handles, next to the legacy single-label pattern (unchanged).
+describe('typed hosts and handles (spec 346)', () => {
+  const BASE = 'impact-agent.io';
+  it('parseTypedAgentHost: single label stays the legacy name; <label>.<type>.<base> is a typed root name', () => {
+    expect(parseTypedAgentHost(`alice.${BASE}`, BASE)).toEqual({ label: 'alice', name: 'alice.impact' });
+    expect(parseTypedAgentHost(`discovery.registry.${BASE}`, BASE)).toEqual({ label: 'discovery.registry', name: 'discovery.registry' });
+    expect(parseTypedAgentHost(`northern-colorado.team.${BASE}:443`, BASE)).toEqual({ label: 'northern-colorado.team', name: 'northern-colorado.team' });
+    expect(parseTypedAgentHost(`a.b.${BASE}`, BASE)).toBeNull(); // unknown type level
+    expect(parseTypedAgentHost(`a.b.c.${BASE}`, BASE)).toBeNull();
+    expect(parseTypedAgentHost(BASE, BASE)).toBeNull();
+    expect(parseTypedAgentHost(`evil-${BASE}`, BASE)).toBeNull();
+    // a deployment that cut persons over to `.me` passes its parent explicitly — one parent, never a list
+    expect(parseTypedAgentHost(`alice.${BASE}`, BASE, 'me')).toEqual({ label: 'alice', name: 'alice.me' });
+    expect(agentNameForHandle('alice', 'me')).toBe('alice.me');
+  });
+  it('agentNameForHandle: legacy label, typed canonical, scoped (@ and path), legacy dotted; roots/type-nodes are subject-less', () => {
+    expect(agentNameForHandle('alice')).toBe('alice.impact');
+    expect(agentNameForHandle('RPedersen.me')).toBe('rpedersen.me');
+    expect(agentNameForHandle('vault.svc@richcanvas.org')).toBe('vault.svc@richcanvas.org');
+    expect(agentNameForHandle('richcanvas.org/vault.svc')).toBe('vault.svc@richcanvas.org');
+    expect(agentNameForHandle('field.ws@richcanvas.org')).toBe('field.workspace@richcanvas.org');
+    expect(agentNameForHandle('alice.impact')).toBe('alice.impact');
+    expect(agentNameForHandle('me')).toBe('me.impact'); // a bare label is always the legacy root's label — typed roots are never addressed by a bare word
+    expect(agentNameForHandle('svc.richcanvas.org')).toBeNull();
+    expect(agentNameForHandle('alice.ai')).toBeNull();
+    expect(agentNameForHandle('')).toBeNull();
   });
 });

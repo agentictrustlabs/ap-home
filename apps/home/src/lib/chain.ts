@@ -101,3 +101,9 @@ export const CONTRACTS = {
   // (registry entries per named agent) + registers named agents into.
   agentRegistryBase: addr('agentRegistryBase'),
 } as const satisfies Record<string, Address>;
+
+/** spec 346 — per-suffix PermissionlessSubregistry map (`me org team svc workspace treasury registry`), present only on
+ *  deployments where `AddTypedRoots.s.sol` has run. An absent suffix means "no typed claim on this chain" — never a
+ *  fall-back to the legacy subregistry. */
+export const PERMISSIONLESS_SUBREGISTRIES: Partial<Record<string, Address>> =
+  ((DEPLOYED as unknown as { permissionlessSubregistries?: Record<string, string> }).permissionlessSubregistries ?? {}) as Partial<Record<string, Address>>;

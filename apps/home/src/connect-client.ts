@@ -1,9 +1,15 @@
 // Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
+import { AGENT_NAME_PARENT, CLAIMABLE_TLDS } from './lib/domain';
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
 import {
   buildSubregistryRegisterCall,
   buildSetPrimaryNameCall,
+  buildDeclareAgentTypeCalls,
+  agentProfileResolverTypeAbi,
+  derivedTypeForTld,
+  rootClassForDerivedType,
+  isAgentTld,
   buildSetBytes32AttributeCall,
   buildSetAddressAttributeCall,
   buildSetStringAttributeCall,
@@ -34,7 +40,7 @@ import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenti
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
-import { CONTRACTS, DEFAULT_RPC_URL, CHAIN, CHAIN_ID } from './lib/chain';
+import { CONTRACTS, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership } from './lib/org-membership';
@@ -368,6 +374,44 @@ const RESOLVER_NAMEOF_ABI = [
   { type: 'function', name: 'nameOf', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'string' }] },
 ] as const;
 
+/** spec 346 — the subregistry a claim goes through: the legacy parent's (default) or the typed suffix's
+ *  (from the deployment's `permissionlessSubregistries` map). A typed suffix this deployment cannot claim
+ *  is an error, never a silent fall-back to `.impact` (ADR-0013). */
+function subregistryForTld(tld: string | undefined): { ok: true; subregistry: Address; typed: boolean } | { ok: false; error: string } {
+  if (!tld || tld === AGENT_NAME_PARENT) return { ok: true, subregistry: CONTRACTS.permissionlessSubregistry, typed: false };
+  const a = isAgentTld(tld) ? PERMISSIONLESS_SUBREGISTRIES[tld] : undefined;
+  if (!a) return { ok: false, error: `".${tld}" is not claimable on this deployment` };
+  return { ok: true, subregistry: a, typed: true };
+}
+
+/** spec 346 §3.6 step 1b — declare the derived type on the SA's profile subject BEFORE a typed claim, so the
+ *  suffix ↔ record invariant holds from the first block. Reads `isRegistered` once (the setters require it). */
+async function declareTypeCalls(sa: Address, tld: string, serviceRole?: string): Promise<ContractCall[]> {
+  if (!isAgentTld(tld)) return [];
+  const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+  const registered = (await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverTypeAbi, functionName: 'isRegistered', args: [sa] })) as boolean;
+  return buildDeclareAgentTypeCalls({ profileResolver: CONTRACTS.agentProfileResolver, agent: sa, agentType: derivedTypeForTld(tld), serviceRole, registered });
+}
+
+/** spec 346 — the typed suffix an app-level kind claims under, IF this deployment lists it as claimable;
+ *  otherwise `undefined` = the legacy parent. Kinds map DOWN to a derived type (ADR-0046/0061): org, circle and
+ *  church are Organizations; team → Team; workspace → WorkspaceCoordinator; both treasuries → Treasury. */
+export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serviceRole?: string } | undefined {
+  const map: Record<string, { tld: string; serviceRole?: string }> = {
+    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'org' }, church: { tld: 'org' }, team: { tld: 'team' },
+    workspace: { tld: 'workspace', serviceRole: 'workspace-coordinator' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
+  };
+  const t = map[kind];
+  return t && CLAIMABLE_TLDS.includes(t.tld) ? t : undefined;
+}
+
+export interface TypedClaimOpts {
+  /** A typed suffix (spec 346). Omit for the deployment's legacy parent. */
+  tld?: string;
+  /** Required = the type name for `.workspace` / `.registry`; free for other services. */
+  serviceRole?: string;
+}
+
 /** Claim a forced-unique `<base>[N].impact` for the agent + set it as primary.
  *  register + setPrimaryName are BATCHED into one execute UserOp (one nonce, one signature):
  *  they must land together, and the batch avoids an inter-userOp race where the second op
@@ -386,12 +430,15 @@ export async function claimName(
   base: string,
   onStep?: (s: string) => void,
   minNonce?: bigint,
+  typed: TypedClaimOpts = {},
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const sub = subregistryForTld(typed.tld);
+  if (!sub.ok) return { ok: false, error: sub.error };
   // Already-claimed? Surface the existing name; never submit a reverting register.
   try {
     const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
     const prior = (await pc.readContract({
-      address: CONTRACTS.permissionlessSubregistry, abi: SUBREG_CLAIMED_ABI, functionName: 'claimedBy', args: [agent],
+      address: sub.subregistry, abi: SUBREG_CLAIMED_ABI, functionName: 'claimedBy', args: [agent],
     })) as Hex;
     if (prior && BigInt(prior) !== 0n) {
       let existing = '';
@@ -406,7 +453,7 @@ export async function claimName(
   } catch { /* read failed → fall through and attempt the claim (the on-chain AlreadyClaimed guard still protects) */ }
 
   onStep?.('Finding a free name…');
-  const nameRes = await fetch(`/connect/name?base=${encodeURIComponent(base)}`);
+  const nameRes = await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed.tld ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`);
   const picked = (await nameRes.json()) as { label?: string; name?: string; node?: Hex; error?: string };
   if (!nameRes.ok || !picked.name || !picked.node || !picked.label) {
     return { ok: false, error: picked.error ?? 'no free name' };
@@ -414,12 +461,15 @@ export async function claimName(
 
   onStep?.(`Claiming ${picked.name}…`);
   const register = buildSubregistryRegisterCall({
-    subregistry: CONTRACTS.permissionlessSubregistry,
+    subregistry: sub.subregistry,
     label: picked.label,
     newOwner: agent,
   });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
-  const batch = buildExecuteBatchCallData([register, setPrimary, ...buildNameRecordCalls(picked.node, agent, { agentKind: 'person' })]);
+  // Typed claim: declare the derived type first (step 1b); the name record's agentKind is the ROOT of that type.
+  const declare = sub.typed ? await declareTypeCalls(agent, typed.tld!, typed.serviceRole) : [];
+  const agentKind = sub.typed ? rootClassForDerivedType(derivedTypeForTld(typed.tld as never)) : 'person';
+  const batch = buildExecuteBatchCallData([...declare, register, setPrimary, ...buildNameRecordCalls(picked.node, agent, { agentKind })]);
   const res = await executeCall(agent, signHash, batch, { minNonce, attempts: 10 });
   if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
   requestReindex([agent]); // auto-index: surface the freshly-named agent in discovery immediately
@@ -803,12 +853,16 @@ async function buildClaimCallData(
   onStep?: (s: string) => void,
   exact = false,
   records: NameClaimRecords = { agentKind: 'person' },
+  typed: TypedClaimOpts = {},
 ): Promise<{ ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string }> {
+  const sub = subregistryForTld(typed.tld);
+  if (!sub.ok) return { ok: false, error: sub.error };
   // exact (spec 275 MAM-D4): the member typed the precise label — claim it or fail, no
   // suffix bump. Otherwise forced-unique (spec 220) picks the next free `<base>[N]`.
+  const tldQ = typed.tld ? `&tld=${encodeURIComponent(typed.tld)}` : '';
   const query = exact
-    ? `/connect/name?exact=1&label=${encodeURIComponent(base)}`
-    : `/connect/name?base=${encodeURIComponent(base)}`;
+    ? `/connect/name?exact=1&label=${encodeURIComponent(base)}${tldQ}`
+    : `/connect/name?base=${encodeURIComponent(base)}${tldQ}`;
   onStep?.(exact ? 'Checking that name…' : 'Finding a free name…');
   const picked = (await (await fetch(query)).json()) as {
     label?: string;
@@ -818,15 +872,21 @@ async function buildClaimCallData(
     taken?: boolean;
   };
   if (!picked.name || !picked.node || !picked.label) {
-    if (picked.taken) return { ok: false, error: `“${base}.impact” is already taken — pick another name.` };
+    if (picked.taken) return { ok: false, error: `“${base}.${typed.tld ?? AGENT_NAME_PARENT}” is already taken — pick another name.` };
     return { ok: false, error: picked.error ?? 'no free name' };
   }
-  const register = buildSubregistryRegisterCall({ subregistry: CONTRACTS.permissionlessSubregistry, label: picked.label, newOwner: sa });
+  const register = buildSubregistryRegisterCall({ subregistry: sub.subregistry, label: picked.label, newOwner: sa });
   const setPrimary = buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: picked.node });
+  // Typed claim (spec 346 §3.6): declare the derived type on the SA's profile FIRST; the name record's
+  // agentKind is the ROOT of that type; the display name carries the typed suffix.
+  const declare = sub.typed ? await declareTypeCalls(sa, typed.tld!, typed.serviceRole) : [];
+  const effective: NameClaimRecords = sub.typed
+    ? { ...records, agentKind: rootClassForDerivedType(derivedTypeForTld(typed.tld as never)), ...(records.displayName ? { displayName: `${picked.label}.${typed.tld}` } : {}) }
+    : records;
   // `calls` is surfaced so an org-create can EXTEND the batch with approveHash(digest) calls
   // (spec 253) and still deploy + claim + approve in ONE userOp. `callData` is the standalone
   // deploy+claim batch for the simpler person-SA bootstrap callers.
-  const calls: ContractCall[] = [register, setPrimary, ...buildNameRecordCalls(picked.node, sa, records)];
+  const calls: ContractCall[] = [...declare, register, setPrimary, ...buildNameRecordCalls(picked.node, sa, effective)];
   return { ok: true, callData: buildExecuteBatchCallData(calls), calls, name: picked.name };
 }
 
@@ -1128,7 +1188,7 @@ export async function createChildAgentForSite(
   if (childAgent.toLowerCase() === personAgent.toLowerCase()) {
     return { ok: false, error: 'agent collided with your person agent (salt)' };
   }
-  const claim = await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts));
+  const claim = await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts), typedTldForKind('org') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
 
   // spec 253 — ONE PROMPT. The org's outbound grants are built as approved-hash (0x03
@@ -1410,8 +1470,8 @@ export async function createManagedAgent(
   if (wantName) {
     const claim = await buildClaimCallData(input.label!, child, onStep, true, {
       agentKind: input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' ? 'org' : 'service',
-      displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.impact`,
-    });
+      displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
+    }, typedTldForKind(input.kind) ?? {});
     if (!claim.ok) return { ok: false, error: claim.error };
     claimCalls = claim.calls;
     name = claim.name;
@@ -1518,8 +1578,8 @@ export async function nameManagedAgent(
 
   const claim = await buildClaimCallData(input.label, input.agent, onStep, true, {
     agentKind: input.kind === 'org' ? 'org' : 'service',
-    displayName: `${input.label.replace(/\.(impact|demo\.agent)$/i, '')}.impact`,
-  }); // EXACT or fail
+    displayName: `${input.label.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
+  }, typedTldForKind(input.kind) ?? {}); // EXACT or fail
   if (!claim.ok) return { ok: false, error: claim.error };
 
   onStep?.('Naming your agent on the network…');
@@ -2316,7 +2376,7 @@ export async function deployAndClaimAgent(
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
   const sa = await derivePasskeySa(passkey, 0n);
-  const claim = await buildClaimCallData(base, sa);
+  const claim = await buildClaimCallData(base, sa, undefined, false, { agentKind: 'person' }, typedTldForKind('person') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
   // spec 253 batching — fold the person's plane-grant approveHash(digest) calls into the SAME deploy
   // userOp (deploy + claim + approve-all), so those grants need no separate signature (one passkey prompt).
@@ -2348,7 +2408,7 @@ export async function signupWithName(
     // Deploy + claim the name in ONE userOp (one device prompt): derive the SA address, build
     // the claim calldata (newOwner = that SA), and deploy with it attached.
     const sa = await derivePasskeySa(pk, 0n);
-    const claim = await buildClaimCallData(base, sa, onStep);
+    const claim = await buildClaimCallData(base, sa, onStep, false, { agentKind: 'person' }, typedTldForKind('person') ?? {});
     if (!claim.ok) return { ok: false, error: claim.error };
     const dep = await bootstrapWithPasskey(pk, onStep, claim.callData);
     if (!dep.ok) return { ok: false, error: dep.error };
@@ -2388,7 +2448,7 @@ export async function signupWithName(
   // Fresh EOA → DEPLOY + CLAIM in ONE userOp (B2), NO SIWE. `deriveEoaSa` matches the server's eoa deploy
   // (custodians=[owner], salt=0); build the claim calldata (newOwner = that SA) and attach it so the SA is
   // created AND the name claimed in a SINGLE wallet prompt.
-  const claim = await buildClaimCallData(base, sa, onStep);
+  const claim = await buildClaimCallData(base, sa, onStep, false, { agentKind: 'person' }, typedTldForKind('person') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
   // spec 253 batching — fold the person's plane-grant approveHash(digest) calls into this deploy userOp,
   // then submit the pre-approved 0x03 wires once the SA is RPC-visible: deploy + claim + approve-all in

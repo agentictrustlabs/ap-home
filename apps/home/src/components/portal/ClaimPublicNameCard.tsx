@@ -26,7 +26,7 @@ import { notifyAgentsChanged } from './ManagedAgents';
 import { signHashFor, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
 import type { Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
-import { CONNECT_DOMAIN, nameLabel } from '../../lib/domain';
+import { CONNECT_DOMAIN, nameLabel, CLAIMABLE_TLDS, AGENT_NAME_PARENT } from '../../lib/domain';
 import { whitelabel } from '../../whitelabel/config';
 
 const DISMISS_KEY = 'agenticprimitives:demo-sso:claim-name-dismissed';
@@ -60,6 +60,10 @@ export function ClaimPublicNameCard() {
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
   const [claimedName, setClaimedName] = useState('');
+  // spec 346 — a person home claims `.me` when this deployment's chain has the typed roots
+  // (NEXT_PUBLIC_CLAIMABLE_TLDS lists them); otherwise the legacy parent. Never a silent mix.
+  const typedPerson = CLAIMABLE_TLDS.includes('me');
+  const [tld, setTld] = useState<string>(typedPerson ? 'me' : AGENT_NAME_PARENT);
   const label = nameLabel(value);
 
   if (dismissed || phase === 'done') {
@@ -92,7 +96,7 @@ export function ClaimPublicNameCard() {
     try {
       const via = viaForSession(session.via);
       const signHash = await signHashFor(via, agentAddress as Address, { token: session.token });
-      const res = await claimName(agentAddress as Address, signHash, label, (s) => setStep(s));
+      const res = await claimName(agentAddress as Address, signHash, label, (s) => setStep(s), undefined, tld === AGENT_NAME_PARENT ? {} : { tld });
       if (!res.ok) {
         setErr(res.error);
         setPhase('error');

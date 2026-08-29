@@ -11,7 +11,7 @@
 // access we parse the Host header ourselves.
 
 import { apAuthorityExtension } from '@agenticprimitives/a2a';
-import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, isAgentTld, parseAgentName, InvalidNameError } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
 /** The TLD names are claimed under. `alice` → `alice.impact`. (Deployment convention — the
@@ -43,6 +43,46 @@ export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
+/**
+ * Typed-host projection (spec 346 §5), the inverse of agent-naming's `dnsHostForHandle` for the two host
+ * shapes this deployment serves under ONE base zone:
+ *   `<label>.<base>`          → `<label>.<AGENT_NAME_PARENT>`  (persons / legacy — the live pattern)
+ *   `<label>.<type>.<base>`   → `<label>.<type>`               (typed roots hosted under the deployment zone:
+ *                                                              `northern-colorado.team.<base>`, `discovery.registry.<base>`)
+ * Anything else (apex, deeper nesting, an unknown type level) → null. The type level is a projection of the
+ * suffix and is NEVER authority — `resolveTyped` re-validates the suffix against the on-chain record.
+ */
+export function parseTypedAgentHost(hostname: string | undefined, baseDomain: string, parent: string = AGENT_NAME_PARENT): { label: string; name: string } | null {
+  if (!hostname) return null;
+  const host = (hostname.split(':')[0] ?? '').toLowerCase();
+  const base = baseDomain.toLowerCase();
+  if (host === base || !host.endsWith('.' + base)) return null;
+  const rest = host.slice(0, host.length - base.length - 1);
+  const parts = rest.split('.');
+  if (parts.length === 1 && parts[0]) return { label: parts[0], name: `${parts[0]}.${parent}` };
+  if (parts.length === 2 && parts[0] && isAgentTld(parts[1]!)) return { label: `${parts[0]}.${parts[1]}`, name: `${parts[0]}.${parts[1]}` };
+  return null;
+}
+
+/**
+ * The on-chain name for an explicit handle (the edge path `POST /api/a2a/<handle>` and the injected
+ * `X-Agent-Subdomain`). A single label is the legacy `<label>.<AGENT_NAME_PARENT>`; a typed handle
+ * (`x.t`, `x.t@c.u`, `c.u/x.t`) or a legacy dotted name is parsed by the agent-naming grammar. Root and
+ * type-node forms name no subject → null (generic context). One grammar, no guessing (ADR-0013).
+ */
+export function agentNameForHandle(handle: string, parent: string = AGENT_NAME_PARENT): string | null {
+  const h = handle.trim().toLowerCase();
+  if (!h) return null;
+  if (!h.includes('.') && !h.includes('@') && !h.includes('/')) return `${h}.${parent}`;
+  try {
+    const p = parseAgentName(h);
+    return p.kind === 'canonical' || p.kind === 'scoped' || p.kind === 'legacy' ? p.normalized : null;
+  } catch (e) {
+    if (e instanceof InvalidNameError) return null;
+    throw e;
+  }
+}
+
 export interface AgentHostContext {
   /** Subdomain label, e.g. `alice`. Null on the apex / generic endpoint. */
   label: string | null;
@@ -55,6 +95,9 @@ export interface AgentHostContext {
 }
 
 interface HostEnv {
+  /** The legacy/person root a bare subdomain label maps to (default `impact`). A deployment that has cut its
+   *  persons over to `.me` sets `AGENT_NAME_PARENT = "me"` — ONE parent per deployment, never a candidate list. */
+  AGENT_NAME_PARENT?: string;
   RPC_URL?: string;
   CHAIN_ID?: string;
   AGENT_NAME_REGISTRY?: string;
@@ -76,7 +119,8 @@ export async function resolveAgentHost(
 ): Promise<AgentHostContext> {
   const baseDomain = env.A2A_PUBLIC_BASE_DOMAIN ?? DEFAULT_PUBLIC_BASE_DOMAIN;
   const injected = req.headers.get('x-agent-subdomain');
-  const label = injected && injected.trim() ? injected.trim().toLowerCase() : parseAgentSubdomain(new URL(req.url).hostname, baseDomain);
+  const fromHost = parseTypedAgentHost(new URL(req.url).hostname, baseDomain, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT);
+  const label = injected && injected.trim() ? injected.trim().toLowerCase() : fromHost?.label ?? null;
   const publicOrigin = req.headers.get('x-public-origin')?.trim() || (label ? `https://${label}.${baseDomain}` : requestOrigin);
   return resolveAgentByLabel(label, env, publicOrigin);
 }
@@ -86,7 +130,8 @@ export async function resolveAgentHost(
  * (spec 288 §6): the edge addresses a specific agent via `POST /api/a2a/<handle>`,
  * the handle rides in the signed GatewayAssertion `path` (tamper-evident), and this
  * resolves `<handle>` → the canonical Smart Agent address the same way the Host path
- * does. `null`/dotted labels → the generic (no-agent) context.
+ * does. Typed handles (`x.t`, `x.t@c.u`) resolve through the agent-naming grammar (spec 346); `null` /
+ * unparseable / subject-less forms → the generic (no-agent) context.
  */
 export async function resolveAgentByLabel(
   label: string | null,
@@ -94,9 +139,9 @@ export async function resolveAgentByLabel(
   publicOrigin: string,
 ): Promise<AgentHostContext> {
   const norm = label && label.trim() ? label.trim().toLowerCase() : null;
-  if (!norm || norm.includes('.')) return { label: null, agent: null, name: null, publicOrigin };
+  const name = norm ? agentNameForHandle(norm, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT) : null;
+  if (!norm || !name) return { label: null, agent: null, name: null, publicOrigin };
 
-  const name = agentNameForLabel(norm);
   let agent: Address | null = null;
   if (env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER) {
     const client = new AgentNamingClient({

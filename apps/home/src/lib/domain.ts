@@ -8,6 +8,8 @@
 // `<handle>.impact-agent.io` (the demo-a2a Worker). Names live under a
 // permissionless subregistry `<label>.demo.agent`.
 
+import { parseAgentName } from '@agenticprimitives/agent-naming';
+
 /** Registrable Connect SSO domain — each person's home is a single-label subdomain. */
 export const CONNECT_DOMAIN = process.env.NEXT_PUBLIC_CONNECT_DOMAIN || 'impact-agent.me';
 /** Registrable A2A domain (served by demo-a2a, not this app) — for display/links. */
@@ -55,8 +57,24 @@ export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
-/** The label of a name (alice.demo.agent → alice; alice → alice). */
+/** Typed suffixes the claim flow may offer next to the legacy `AGENT_NAME_PARENT` (spec 346 §4). Empty
+ *  until the typed roots are provisioned on this deployment's chain (`AddTypedRoots.s.sol`) and the
+ *  `permissionlessSubregistries` map lands in the deployment JSON. */
+export const CLAIMABLE_TLDS: readonly string[] = (process.env.NEXT_PUBLIC_CLAIMABLE_TLDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+/** Parse a name with the agent-naming grammar, or null when it is not a typed/legacy name at all. */
+function parsedOrNull(name: string) {
+  try {
+    return parseAgentName(name);
+  } catch {
+    return null;
+  }
+}
+
+/** The label of a name (alice.demo.agent → alice; alice → alice; rpedersen.me → rpedersen; vault.svc@x.org → vault). */
 export function nameLabel(name: string): string {
+  const p = parsedOrNull(name);
+  if (p && (p.kind === 'canonical' || p.kind === 'scoped')) return p.handle!.label;
   return (
     name
       .trim()
@@ -67,8 +85,11 @@ export function nameLabel(name: string): string {
   );
 }
 
-/** Normalize any name/label to its full `<label>.demo.agent` form. */
+/** Normalize any name/label to a full name: a typed name stays typed (normalized); anything else becomes
+ *  `<label>.<AGENT_NAME_PARENT>` — the legacy root this deployment claims under. */
 export function toAgentName(nameOrLabel: string): string {
   const n = nameOrLabel.trim().toLowerCase();
+  const p = parsedOrNull(n);
+  if (p && (p.kind === 'canonical' || p.kind === 'scoped')) return p.normalized;
   return n.endsWith(`.${AGENT_NAME_PARENT}`) ? n : `${nameLabel(n)}.${AGENT_NAME_PARENT}`;
 }
