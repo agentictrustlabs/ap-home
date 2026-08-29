@@ -145,6 +145,9 @@ const faithImpact: WhiteLabelConfig = {
         'https://field-web.richardpedersen3.workers.dev/',
         'http://localhost:5174/',
         'http://127.0.0.1:5174/',
+        // faithnet universe (chain 34348) — only present when the deploy sets it (field.faithnet.io);
+        // production's list is unchanged. Same env-gating as gather-app below.
+        ...(process.env.NEXT_PUBLIC_FIELD_ORIGIN ? [process.env.NEXT_PUBLIC_FIELD_ORIGIN] : []),
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: [
@@ -158,8 +161,15 @@ const faithImpact: WhiteLabelConfig = {
         'service-agent-wire',
       ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      operational_delegate: '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
-      serviceAgentConfig: { a2aBase: 'https://field-a2a-production.richardpedersen3.workers.dev' },
+      // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
+      // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
+      operational_delegate:
+        process.env.NEXT_PUBLIC_FIELD_SERVICE_SA || '0xD1F7Ef18537eFDBfE0cA265F60f7A59333066f20',
+      serviceAgentConfig: {
+        a2aBase:
+          process.env.NEXT_PUBLIC_FIELD_A2A_BASE ||
+          'https://field-a2a-production.richardpedersen3.workers.dev',
+      },
     },
     // gather-app — Gather27 (agentictrustlabs/engage apps/gather27-*). Find a group near you;
     // invite-driven host onboarding; events live in the host org vault. Login-grade connect via
