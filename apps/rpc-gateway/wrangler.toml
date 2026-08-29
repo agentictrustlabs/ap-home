@@ -1,0 +1,57 @@
+# chain-rpc-gateway — the Cloudflare Worker that fronts a private chain RPC origin with per-app tokens,
+# a JSON-RPC method allow-list, per-app rate limits and a read cache.
+#
+# The BARE name below is for `wrangler dev` only. `pnpm run deploy` refuses without `WRANGLER_ENV=<env>`;
+# never deploy this file without `--env` — that would publish a NEW Worker called `chain-rpc-gateway`
+# instead of updating the live one. A second private chain is another `[env.<name>]`, not another repo.
+#
+# Bindings are per-env on purpose (wrangler does not inherit vars / kv / DO bindings into envs):
+#   TOKENS  — KV: `t:<sha256(token)>` → { app, readRps, writeRps }
+#   RATE    — RateLimiter Durable Object (per-app token bucket)
+#   ORIGIN  — the private JSON-RPC origin this env fronts
+#   ESTIMATE_GAS_CAP — hex gas bound injected into eth_estimateGas when the call sets none
+#                      (Besu returns an empty 200 without one on heavy calls and errors when the
+#                      cap equals the block gas limit). Empty = never inject (non-Besu chains).
+name = "chain-rpc-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+[vars]
+ORIGIN = ""
+ESTIMATE_GAS_CAP = ""
+
+[[durable_objects.bindings]]
+name = "RATE"
+class_name = "RateLimiter"
+
+# Migration history is shared across envs. `v1` is ALREADY APPLIED to the live Worker of every env —
+# do not bump or rename it.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Deployment envs. CUTOVER RULE for every env: the Worker name is what the TOKENS KV, the RateLimiter
+# DO storage and the custom domain are bound to — never rename it (every issued app token would 401).
+# Token issuance is an operator action (no code, no secrets in git):
+#   wrangler kv key put --binding TOKENS --env <env> "t:<sha256(token)>" '{"app":"<name>","readRps":20,"writeRps":0}'
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+[env.faithnet]
+name = "faithchain-rpc-gateway"
+workers_dev = true
+
+[[env.faithnet.routes]]
+pattern = "rpc.faithnet.io"
+custom_domain = true
+
+[env.faithnet.vars]
+ORIGIN = "https://faithchain-rpc.agentkg.io"
+ESTIMATE_GAS_CAP = "0x2dc6c0"
+
+[[env.faithnet.kv_namespaces]]
+binding = "TOKENS"
+id = "efc60d50844441b5b585873605b1888b"
+
+[[env.faithnet.durable_objects.bindings]]
+name = "RATE"
+class_name = "RateLimiter"
