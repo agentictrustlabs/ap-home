@@ -58,7 +58,15 @@ function json(body: unknown, status = 200, extraHeaders: Record<string, string> 
  *  `accounts_endpoint` + `login_url` too (required from Chrome 145 when a `client_metadata_endpoint` is
  *  configured, which our config ships). */
 export const onWebIdentity = ({ request, env }: FnContext): Response => {
-  const origin = resolveOrigin(request, env);
+  let origin = resolveOrigin(request, env);
+  // The browser fetches THIS file at the eTLD+1 APEX for every configURL under the domain, but the
+  // canonical IdP config relying apps name lives on `www.` (the issuer origin). Production never
+  // shows the mismatch because the platform 307s apex→www before this handler runs; a deployment
+  // that serves the app on the apex directly (faithnet.me) would otherwise advertise apex
+  // endpoints here, fail Chrome's config/accounts match for the www config, and silently kill
+  // FedCM for every relying app. Canonicalize ONLY the bare apex — www, localhost dev, and
+  // per-handle subdomains keep echoing their own host.
+  if (origin === `https://${CONNECT_DOMAIN}`) origin = `https://www.${CONNECT_DOMAIN}`;
   return json(
     buildWebIdentity(`${origin}${PATHS.config}`, {
       accountsEndpoint: `${origin}${PATHS.accounts}`,
