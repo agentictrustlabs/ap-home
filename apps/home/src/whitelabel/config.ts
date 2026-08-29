@@ -142,12 +142,14 @@ const faithImpact: WhiteLabelConfig = {
       client_id: 'field-app',
       name: 'Field',
       redirect_uris: [
+        // faithnet universe (chain 34348) — only present when the deploy sets it (field.faithnet.io);
+        // production's list is unchanged. Same env-gating as gather-app below. FIRST on purpose:
+        // the front-channel sign-out (app/logout) takes the first https URI per client for the
+        // `/sso-logout` hop, and a faithnet sign-out must reach field.faithnet.io, not production.
+        ...(process.env.NEXT_PUBLIC_FIELD_ORIGIN ? [process.env.NEXT_PUBLIC_FIELD_ORIGIN] : []),
         'https://field-web.richardpedersen3.workers.dev/',
         'http://localhost:5174/',
         'http://127.0.0.1:5174/',
-        // faithnet universe (chain 34348) — only present when the deploy sets it (field.faithnet.io);
-        // production's list is unchanged. Same env-gating as gather-app below.
-        ...(process.env.NEXT_PUBLIC_FIELD_ORIGIN ? [process.env.NEXT_PUBLIC_FIELD_ORIGIN] : []),
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: [
