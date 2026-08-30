@@ -1,20 +1,22 @@
 'use client';
 // The inspector pane: a tab strip rendered from `A2A_CARD_EDITOR_MANIFEST.inspectorPanels`, always in that
 // order (design §4). Effective JSON · Provenance · Validation · Projection impact · Release diff.
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
-import type { A2AAgentCardDraftV1, A2AAgentCardReleaseV1, FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
+import { cardContentDigest, type A2AAgentCardDraftV1, type A2AAgentCardReleaseV1, type FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
-import { badgeFor, diffCards, projectionImpact, DRIFT_COPY, fieldLabelForPointer, sourceWords } from '../../lib/studio-view';
-import type { StoredProjection } from '../../studio-client';
+import { badgeFor, compareServed, diffCards, projectionImpact, DRIFT_COPY, fieldLabelForPointer, sourceWords } from '../../lib/studio-view';
+import { fetchWellKnownCard, type DelegationWire, type StoredProjection, type WellKnownCardView } from '../../studio-client';
+import { BusyButton } from '../shared/BusyButton';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { StewardProposals, type StewardProposalV1 } from './StewardProposals';
-import { Chip, FieldBadgeChip } from './ui';
+import { Chip, ErrorLine, FieldBadgeChip } from './ui';
 
 type PanelId = (typeof A2A_CARD_EDITOR_MANIFEST.inspectorPanels)[number];
 
 const PANEL_LABEL: Record<PanelId, string> = {
   'effective-json': 'Effective JSON',
+  'live-endpoint': 'Live endpoint',
   provenance: 'Provenance',
   validation: 'Validation',
   'projection-impact': 'Projection impact',
@@ -44,6 +46,134 @@ function EffectiveJson({ draft }: { draft: A2AAgentCardDraftV1 }) {
       <pre style={{ margin: 0, fontSize: '.7rem', background: 'var(--c-g50)', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem', maxHeight: 460, overflow: 'auto' }}>
         {text}
       </pre>
+    </div>
+  );
+}
+
+/**
+ * What the world actually fetches from `/.well-known/agent-card.json` — the operational endpoint, as opposed
+ * to "Effective JSON", which is the DRAFT (what WOULD be signed). Three states get conflated without this
+ * view: what you are editing, what you released, and what is being served. Read-only: looking never moves a
+ * release (proving a publication is the stepper's Verify step, which writes a receipt).
+ */
+function LiveEndpoint({
+  delegation,
+  draft,
+  release,
+}: {
+  delegation: DelegationWire;
+  draft: A2AAgentCardDraftV1;
+  release: A2AAgentCardReleaseV1 | null;
+}) {
+  const [view, setView] = useState<WellKnownCardView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setView(await fetchWellKnownCard(delegation));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [delegation]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const draftDigest = cardContentDigest(draft.card as { signatures?: unknown });
+  const cmp = view ? compareServed(view, { draftDigest, release: release ? { releaseId: release.releaseId, signedContentDigest: release.signedContentDigest } : null }) : null;
+  const tone = cmp?.verdict.kind === 'released-current' ? 'var(--c-ok, #15803d)' : cmp?.verdict.kind === 'live' ? 'var(--c-g700)' : 'var(--c-warn, #b45309)';
+
+  function download() {
+    if (!view?.body) return;
+    // The EXACT served bytes, not a re-serialization — a download that reformats proves nothing.
+    const url = URL.createObjectURL(new Blob([view.body], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'agent-card.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div>
+      <p className="manage-card-blurb" style={{ marginTop: 0 }}>
+        What this agent&apos;s public endpoint is serving right now. Everything else in this inspector is about your draft.
+      </p>
+
+      {view?.uri && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem', alignItems: 'center', marginBottom: '.5rem' }}>
+          <a href={view.uri} target="_blank" rel="noreferrer" style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-primary)', fontWeight: 600 }}>
+            {view.uri}
+          </a>
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ minHeight: 32, padding: '.25rem .5rem', fontSize: '.72rem' }}
+            onClick={() => {
+              void navigator.clipboard?.writeText(view.uri).then(() => setCopied(true));
+            }}
+          >
+            {copied ? 'Copied' : 'Copy URL'}
+          </button>
+          <button type="button" className="btn-ghost" style={{ minHeight: 32, padding: '.25rem .5rem', fontSize: '.72rem' }} disabled={!view.body} onClick={download}>
+            Download JSON
+          </button>
+          <BusyButton busy={busy} busyLabel="Fetching served card…" className="btn-ghost" style={{ minHeight: 32, padding: '.25rem .5rem', fontSize: '.72rem' }} onClick={() => void load()}>
+            Refresh
+          </BusyButton>
+        </div>
+      )}
+
+      {error && <ErrorLine error={error} />}
+      {busy && !view && <p className="manage-card-blurb">Fetching the served card…</p>}
+
+      {view && cmp && (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.3rem', marginBottom: '.4rem' }}>
+            <Chip>{view.source === 'released' ? 'Serving: released bytes' : view.source === 'live' ? 'Serving: live runtime card' : 'Serving: unknown plane'}</Chip>
+            {view.releaseId && <Chip>{view.releaseId}</Chip>}
+            {cmp.matchesDraft === true && <Chip>Matches your draft</Chip>}
+            {cmp.matchesDraft === false && <Chip>Differs from your draft</Chip>}
+          </div>
+          <p style={{ fontSize: '.75rem', color: tone, margin: '0 0 .5rem' }}>{cmp.verdict.line}</p>
+
+          {(view.servedDigest || view.canonicalDigest) && (
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '.15rem .5rem', fontSize: '.68rem', margin: '0 0 .5rem' }}>
+              {view.servedDigest && (
+                <>
+                  <dt style={{ color: 'var(--c-g700)' }}>Served bytes</dt>
+                  <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'ui-monospace, monospace' }}>{view.servedDigest}</dd>
+                </>
+              )}
+              {view.canonicalDigest && (
+                <>
+                  <dt style={{ color: 'var(--c-g700)' }}>Canonical</dt>
+                  <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'ui-monospace, monospace' }}>{view.canonicalDigest}</dd>
+                </>
+              )}
+              <dt style={{ color: 'var(--c-g700)' }}>Your draft</dt>
+              <dd style={{ margin: 0, wordBreak: 'break-all', fontFamily: 'ui-monospace, monospace' }}>{draftDigest}</dd>
+            </dl>
+          )}
+
+          {view.body ? (
+            <pre style={{ margin: 0, fontSize: '.7rem', background: 'var(--c-g50)', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem', maxHeight: 380, overflow: 'auto' }}>
+              {view.body}
+            </pre>
+          ) : (
+            <p className="manage-card-blurb">{view.detail ?? 'Nothing was served.'}</p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -154,6 +284,7 @@ export function ReleaseDiffPanel({ previous, draft }: { previous: A2AAgentCardRe
 }
 
 export function Inspector(props: {
+  delegation: DelegationWire;
   draft: A2AAgentCardDraftV1 | null;
   previousRelease: A2AAgentCardReleaseV1 | null;
   diagnostics: readonly ProjectionDiagnosticV1[];
@@ -197,6 +328,8 @@ export function Inspector(props: {
       </div>
       {!props.draft ? (
         <p className="manage-card-blurb">No draft on this card resource.</p>
+      ) : panel === 'live-endpoint' ? (
+        <LiveEndpoint delegation={props.delegation} draft={props.draft} release={props.previousRelease} />
       ) : panel === 'effective-json' ? (
         <EffectiveJson draft={props.draft} />
       ) : panel === 'provenance' ? (

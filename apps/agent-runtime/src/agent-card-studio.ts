@@ -245,7 +245,7 @@ export interface StoredApprovalV1 {
 }
 
 export type StudioOp =
-  | 'card.list' | 'card.create' | 'card.get' | 'card.patchDraft' | 'card.import' | 'card.validate' | 'card.createRelease'
+  | 'card.list' | 'card.create' | 'card.get' | 'card.patchDraft' | 'card.import' | 'card.validate' | 'card.createRelease' | 'card.wellKnown'
   | 'release.requestApproval' | 'release.approve' | 'release.sign' | 'release.publish' | 'release.verifyPublication'
   | 'release.deprecate' | 'release.revoke'
   | 'projection.list' | 'projection.configure' | 'projection.preview' | 'projection.planPublication'
@@ -253,7 +253,7 @@ export type StudioOp =
   | 'binding.list' | 'binding.verify';
 
 export const STUDIO_OPS: readonly StudioOp[] = [
-  'card.list', 'card.create', 'card.get', 'card.patchDraft', 'card.import', 'card.validate', 'card.createRelease',
+  'card.list', 'card.create', 'card.get', 'card.patchDraft', 'card.import', 'card.validate', 'card.createRelease', 'card.wellKnown',
   'release.requestApproval', 'release.approve', 'release.sign', 'release.publish', 'release.verifyPublication',
   'release.deprecate', 'release.revoke',
   'projection.list', 'projection.configure', 'projection.preview', 'projection.planPublication',
@@ -274,6 +274,7 @@ const OP_SCOPE: Record<Exclude<StudioOp, 'projection.recordPublication'>, Studio
   'card.import': 'agent.card.import',
   'card.validate': 'agent.card.validate',
   'card.createRelease': 'agent.card.draft',
+  'card.wellKnown': 'agent.card.read',
   'release.requestApproval': 'agent.card.draft',
   'release.approve': 'agent.card.approve',
   'release.sign': 'agent.card.sign',
@@ -424,6 +425,7 @@ export class AgentCardStudio {
       case 'card.import': return this.mutation(op, args, (m) => this.cardImport(caller, kind, args, m));
       case 'card.validate': return this.cardValidate(caller, kind, args);
       case 'card.createRelease': return this.mutation(op, args, (m) => this.cardCreateRelease(caller, kind, args, m));
+      case 'card.wellKnown': return this.cardWellKnown(caller);
       case 'release.requestApproval': return this.mutation(op, args, (m) => this.releaseTransition(caller, kind, args, m, 'approvalPending'));
       case 'release.approve': return this.mutation(op, args, (m) => this.releaseApprove(caller, kind, args, m));
       case 'release.sign': return this.mutation(op, args, (m) => this.releaseSign(caller, kind, args, m));
@@ -908,6 +910,60 @@ export class AgentCardStudio {
       await this.audit('agent.card.published', caller, kind, 'success', this.ctx(caller, releaseId, correlationId, { resultDigest: release.signedContentDigest, target: uri, receiptRef: receipt.receiptId, privacyClass: 'public' }));
     }
     return { release: next, receipt };
+  }
+
+  /**
+   * READ what the agent's public well-known URL is ACTUALLY serving right now — the operational endpoint,
+   * not the draft. The Home shows the real document beside "Effective JSON" (which is the draft, and is what
+   * WOULD be signed), so the difference between "what I am editing", "what I released" and "what the world
+   * fetches" is visible rather than assumed.
+   *
+   * Read-only on purpose: it writes no receipt and moves no release. PROVING a publication is
+   * `release.verifyPublication`'s job — that one records an `A2AWellKnownPublicationReceiptV1`. Egress goes
+   * through the same SSRF-pinned `sources.fetch`, and an unreachable endpoint is reported as unreachable,
+   * never as "no card" (ADR-0013).
+   */
+  private async cardWellKnown(caller: StudioCaller): Promise<Record<string, unknown>> {
+    const uri = await this.deps.sources.cardUri(caller.agent);
+    if (!uri) throw new StudioError(409, 'agent_has_no_host', 'this agent has no public A2A host, so nothing is served');
+    const fetchedAt = this.now();
+    let resp: Response;
+    try {
+      resp = await this.deps.sources.fetch(uri);
+    } catch (e) {
+      return { uri, fetchedAt, reachable: false, detail: `egress failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const head = {
+      uri,
+      fetchedAt,
+      reachable: true,
+      status: resp.status,
+      source: resp.headers.get('x-ap-card-source'),
+      releaseId: resp.headers.get('x-ap-card-release'),
+      headerDigest: resp.headers.get('x-ap-card-digest'),
+      etag: resp.headers.get('etag'),
+      cacheControl: resp.headers.get('cache-control'),
+      contentType: resp.headers.get('content-type'),
+    };
+    if (!resp.ok) return { ...head, detail: `HTTP ${resp.status}` };
+    const body = await resp.text();
+    // TWO digests, because they answer two different questions and are NOT interchangeable:
+    //   servedDigest    — sha256 of the EXACT bytes returned. This is what a byte-for-byte publication is
+    //                     proven with, and what equals a release's `signedContentDigest` once published.
+    //   canonicalDigest — RFC 8785 digest of the parsed card with `signatures` stripped. This is what a
+    //                     DRAFT's effective card hashes to, so it is the only fair draft-vs-served comparison.
+    // For a live (unpublished) card they legitimately differ: the runtime serializes with JSON.stringify.
+    const servedDigest = sha256Digest(utf8.encode(body));
+    let card: unknown = null;
+    let canonicalDigest: string | null = null;
+    let parseError: string | null = null;
+    try {
+      card = JSON.parse(body);
+      canonicalDigest = cardContentDigest(card as { signatures?: unknown });
+    } catch (e) {
+      parseError = e instanceof Error ? e.message : String(e);
+    }
+    return { ...head, body, servedDigest, canonicalDigest, card, ...(parseError ? { parseError } : {}) };
   }
 
   /** Re-fetch the public card and compare BOTH the served bytes' digest and the `x-ap-card-digest` header. */

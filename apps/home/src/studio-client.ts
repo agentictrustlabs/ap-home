@@ -190,6 +190,39 @@ export async function getCard(d: DelegationWire, cardResourceId: string): Promis
   return studioCall<CardDetail>('card.get', d, { cardResourceId });
 }
 
+/**
+ * What the agent's public `/.well-known/agent-card.json` is serving RIGHT NOW — the operational endpoint,
+ * not the draft. `source` says which plane answered: `released` = the published bytes, `live` = the runtime
+ * card the Worker builds when nothing is published.
+ */
+export interface WellKnownCardView {
+  uri: string;
+  fetchedAt: string;
+  reachable: boolean;
+  status?: number;
+  detail?: string;
+  /** The EXACT bytes served (present only on a 200). */
+  body?: string;
+  card?: Record<string, unknown>;
+  parseError?: string;
+  /** sha256 of the served bytes — equals a release's `signedContentDigest` once published. */
+  servedDigest?: string;
+  /** RFC 8785 digest of the served card with `signatures` stripped — comparable to a DRAFT's effective card. */
+  canonicalDigest?: string | null;
+  source?: string | null;
+  releaseId?: string | null;
+  headerDigest?: string | null;
+  etag?: string | null;
+  cacheControl?: string | null;
+  contentType?: string | null;
+}
+
+/** Read-only: fetches the public card through the agent's own service. Writes no receipt and moves no
+ *  release — proving a publication is `verifyReleasePublication`'s job. */
+export async function fetchWellKnownCard(d: DelegationWire): Promise<WellKnownCardView> {
+  return studioCall<WellKnownCardView>('card.wellKnown', d, {});
+}
+
 export interface CreateCardInput {
   environment?: CardEnvironment;
   primary?: boolean;

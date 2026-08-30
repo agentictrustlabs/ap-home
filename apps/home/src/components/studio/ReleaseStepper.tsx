@@ -190,8 +190,9 @@ export function ReleaseStepper({
       {publishNote && <Banner tone={publishNote.tone}>{publishNote.text}</Banner>}
 
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
-        {/* 2 — Create release. The diff IS the confirmation step; never a silent snapshot. */}
-        {(!release || !['validated', 'approvalPending', 'approved', 'signed'].includes(release.state)) && detail.draft && (
+        {/* 2 — Create release. The diff IS the confirmation step; never a silent snapshot. The trigger HIDES
+            while that panel is open: two identically-labelled buttons on screen read as the app asking twice. */}
+        {!confirmRelease && (!release || !['validated', 'approvalPending', 'approved', 'signed'].includes(release.state)) && detail.draft && (
           <BusyButton
             busy={busy === 'create-release'}
             busyLabel="Creating release…"
@@ -332,11 +333,12 @@ export function ReleaseStepper({
         )}
       </div>
 
-      {/* Create-release confirmation: the release diff, shown before anything is frozen. */}
+      {/* Create-release confirmation: the release diff, shown before anything is frozen. This panel IS step 2
+          in progress — it replaces its own trigger rather than sitting beside it. */}
       {confirmRelease && detail.draft && (
-        <div style={{ marginTop: '.8rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.7rem' }}>
+        <div style={{ marginTop: '.8rem', border: '1px solid var(--c-primary)', borderRadius: 8, padding: '.7rem' }}>
           <h3 className="subhead" style={{ marginTop: 0 }}>
-            What this {VERSION_LABELS.cardRelease.toLowerCase()} changes
+            Review, then freeze: what this {VERSION_LABELS.cardRelease.toLowerCase()} changes
           </h3>
           <ReleaseDiffPanel previous={release} draft={detail.draft} />
           <div style={{ display: 'flex', gap: '.4rem', marginTop: '.6rem' }}>

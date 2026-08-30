@@ -22,6 +22,7 @@ import {
   studioScopesFor,
   targetLabel,
   triStateOf,
+  compareServed,
 } from './studio-view';
 import type { CardListEntry, StoredProjection } from '../studio-client';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
@@ -293,5 +294,31 @@ describe('card URI derivation', () => {
   it('returns null for a nameless agent', () => {
     expect(cardUriForName('', opts)).toBeNull();
     expect(cardUriForName('impact', opts)).toBeNull();
+  });
+});
+
+describe('compareServed — editing vs released vs served', () => {
+  const D = 'sha256:' + 'ab'.repeat(32);
+  const E = 'sha256:' + 'cd'.repeat(32);
+  it('names the live plane when nothing is published', () => {
+    const c = compareServed({ reachable: true, status: 200, source: 'live', canonicalDigest: D }, { draftDigest: D });
+    expect(c.verdict.kind).toBe('live');
+    expect(c.matchesDraft).toBe(true);
+    expect(c.matchesRelease).toBeNull();
+  });
+  it('confirms a released card serving the selected release byte for byte', () => {
+    const c = compareServed({ reachable: true, status: 200, source: 'released', servedDigest: D, canonicalDigest: E }, { draftDigest: E, release: { releaseId: 'r1', signedContentDigest: D } });
+    expect(c.verdict.kind).toBe('released-current');
+    expect(c.matchesRelease).toBe(true);
+  });
+  it('says so when a DIFFERENT release is live', () => {
+    const c = compareServed({ reachable: true, status: 200, source: 'released', servedDigest: E }, { release: { releaseId: 'r2', signedContentDigest: D } });
+    expect(c.verdict.kind).toBe('released-superseded');
+    expect(c.verdict.line).toContain('r2');
+    expect(c.matchesRelease).toBe(false);
+  });
+  it('reports unreachable and HTTP errors without claiming anything about the card', () => {
+    expect(compareServed({ reachable: false, detail: 'egress failed: boom' }, {})).toMatchObject({ verdict: { kind: 'unreachable' }, matchesDraft: null });
+    expect(compareServed({ reachable: true, status: 503 }, { draftDigest: D }).verdict.kind).toBe('error');
   });
 });

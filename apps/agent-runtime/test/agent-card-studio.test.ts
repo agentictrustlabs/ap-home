@@ -15,6 +15,7 @@ import {
   generateA2ACardSigningKey,
   signA2ACard,
   sha256Digest,
+  cardContentDigest,
   type A2AAgentCardDraftV1,
   type A2AAgentCardReleaseV1,
   type A2AAgentCardResourceV1,
@@ -157,6 +158,57 @@ describe('the RELEASED_CARDS key is one key', () => {
     expect(hostForName('alice.impact', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
     expect(hostForName('alice.me', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
     expect(hostForName('x.y.z', 'impact-agent.io')).toBeNull();
+  });
+});
+
+describe('card.wellKnown — what the operational endpoint is actually serving', () => {
+  let w: World;
+  let studio: AgentCardStudio;
+  beforeEach(() => { w = makeWorld(); studio = new AgentCardStudio(deps(w)); });
+
+  it('returns the exact served bytes plus BOTH digests and the serving headers', async () => {
+    const r = await ok<{ uri: string; reachable: boolean; source: string | null; body: string; servedDigest: string; canonicalDigest: string; card: Record<string, unknown> }>(
+      studio.run(as(STEWARD), 'card.wellKnown', {}),
+    );
+    expect(r.uri).toBe(CARD_URI);
+    expect(r.reachable).toBe(true);
+    // Nothing published yet ⇒ the LIVE card is what the world fetches.
+    expect(JSON.parse(r.body)).toEqual(liveCard());
+    // The bytes' digest and the canonical (JCS) digest answer different questions and may differ.
+    expect(r.servedDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(r.canonicalDigest).toBe(cardContentDigest(liveCard() as { signatures?: unknown }));
+    expect(r.card).toEqual(liveCard());
+  });
+
+  it('after a publish it serves the released bytes, and servedDigest equals the release digest', async () => {
+    const s = await signedRelease(studio, w);
+    await ok(studio.run(as(STEWARD), 'release.publish', { cardResourceId: s.card, releaseId: s.release.releaseId, ...mutation() }));
+    const signed = s.release.signedContentDigest!;
+    const r = await ok<{ source: string | null; releaseId: string | null; servedDigest: string; headerDigest: string | null; body: string }>(
+      studio.run(as(STEWARD), 'card.wellKnown', {}),
+    );
+    expect(r.servedDigest).toBe(signed);
+    expect(r.headerDigest).toBe(signed);
+    expect(JSON.parse(r.body).signatures).toBeTruthy();
+  });
+
+  it('an unreachable endpoint is reported unreachable, never as "no card"', async () => {
+    w.serve = () => { throw new Error('boom'); };
+    const r = await ok<{ reachable: boolean; detail: string }>(studio.run(as(STEWARD), 'card.wellKnown', {}));
+    expect(r.reachable).toBe(false);
+    expect(r.detail).toContain('egress failed');
+  });
+
+  it('a non-200 keeps the headers and says which status, with no body claim', async () => {
+    w.serve = () => new Response('nope', { status: 503 });
+    const r = await ok<{ reachable: boolean; status: number; detail: string; body?: string }>(studio.run(as(STEWARD), 'card.wellKnown', {}));
+    expect(r).toMatchObject({ reachable: true, status: 503, detail: 'HTTP 503' });
+    expect(r.body).toBeUndefined();
+  });
+
+  it('needs only read scope — the steward agent may look', async () => {
+    const r = await studio.run(as(STEWARD_AGENT), 'card.wellKnown', {});
+    expect(r.status).toBe(200);
   });
 });
 

@@ -422,6 +422,7 @@ export function CardEditor({
         </section>
 
         <Inspector
+          delegation={delegation}
           draft={draft}
           previousRelease={previousRelease}
           diagnostics={diagnostics}

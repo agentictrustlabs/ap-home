@@ -50,6 +50,7 @@ export const STUDIO_OP_SCOPE = {
   'card.import': 'agent.card.import',
   'card.validate': 'agent.card.validate',
   'card.createRelease': 'agent.card.draft',
+  'card.wellKnown': 'agent.card.read',
   'release.requestApproval': 'agent.card.draft',
   'release.approve': 'agent.card.approve',
   'release.sign': 'agent.card.sign',
@@ -634,4 +635,48 @@ export function cardUriForName(name: string, opts: { nameParent: string; a2aDoma
   if (labels[labels.length - 1] === opts.nameParent) labels.pop();
   if (labels.length === 0) return null;
   return `https://${labels.join('.')}.${opts.a2aDomain}/.well-known/agent-card.json`;
+}
+
+// ─── The live endpoint (spec 347 §8.1) ───────────────────────────────────────────────────────────────────
+// "Effective JSON" is the DRAFT — what would be signed. This compares it against what the world actually
+// fetches, so the three states (editing / released / served) are never conflated.
+
+export type ServedVerdict =
+  | { kind: 'unreachable'; line: string }
+  | { kind: 'error'; line: string }
+  | { kind: 'released-current'; line: string }
+  | { kind: 'released-superseded'; line: string }
+  | { kind: 'live'; line: string };
+
+export interface ServedComparison {
+  verdict: ServedVerdict;
+  /** True when the served card canonicalizes to exactly the draft you are editing. */
+  matchesDraft: boolean | null;
+  /** True when the served BYTES are the selected release's signed bytes. */
+  matchesRelease: boolean | null;
+}
+
+/** Pure: given what the endpoint served and what we hold locally, say plainly what is out there. */
+export function compareServed(
+  served: { reachable: boolean; status?: number; detail?: string; source?: string | null; releaseId?: string | null; servedDigest?: string; canonicalDigest?: string | null },
+  local: { draftDigest?: string | null; release?: { releaseId: string; signedContentDigest?: string } | null },
+): ServedComparison {
+  if (!served.reachable) return { verdict: { kind: 'unreachable', line: served.detail ?? 'The endpoint could not be reached.' }, matchesDraft: null, matchesRelease: null };
+  if (served.status !== undefined && served.status >= 400) {
+    return { verdict: { kind: 'error', line: `The endpoint answered HTTP ${served.status}.` }, matchesDraft: null, matchesRelease: null };
+  }
+  const matchesDraft = served.canonicalDigest && local.draftDigest ? served.canonicalDigest === local.draftDigest : null;
+  const relDigest = local.release?.signedContentDigest;
+  const matchesRelease = served.servedDigest && relDigest ? served.servedDigest === relDigest : null;
+  if (served.source === 'released') {
+    const line = matchesRelease === false
+      ? `A released card is being served, but it is not release ${local.release?.releaseId ?? '—'} — a different release is live.`
+      : 'The published release is being served, byte for byte.';
+    return { verdict: { kind: matchesRelease === false ? 'released-superseded' : 'released-current', line }, matchesDraft, matchesRelease };
+  }
+  return {
+    verdict: { kind: 'live', line: 'Nothing is published yet, so the runtime builds this card on every request. Publish a release to serve fixed bytes.' },
+    matchesDraft,
+    matchesRelease,
+  };
 }
