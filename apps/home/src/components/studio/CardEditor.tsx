@@ -19,7 +19,6 @@ import {
   importCard,
   newMutation,
   patchDraft,
-  validateCard,
   StudioCallError,
   type CardDetail,
   type DelegationWire,
@@ -58,6 +57,7 @@ export function CardEditor({
   initialDiagnostic,
   initialPanel,
   staleBanner,
+  diagnostics: propDiagnostics,
 }: {
   delegation: DelegationWire;
   detail: CardDetail;
@@ -70,12 +70,17 @@ export function CardEditor({
   /** A deep-linked `?panel=` — opens the Inspector flyout straight to that panel on load (design §1.3). */
   initialPanel?: PanelId | null;
   staleBanner?: boolean;
+  /** Findings from the landing's automatic check, rendered on the fields they name. */
+  diagnostics?: readonly ProjectionDiagnosticV1[];
 }) {
   const draft = detail.draft;
   const [sectionId, setSectionId] = useState<CardEditorSectionV1['id']>('identity');
   const [focusPointer, setFocusPointer] = useState<string | null>(initialPointer ?? null);
-  const [diagnostics, setDiagnostics] = useState<ProjectionDiagnosticV1[]>([]);
-  const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
+  // The description is checked on the landing after every save (flow-redesign §3); the editor RENDERS those
+  // findings on the fields they belong to rather than running its own check behind a button.
+  const [importDiagnostics, setImportDiagnostics] = useState<ProjectionDiagnosticV1[]>([]);
+  const diagnostics: readonly ProjectionDiagnosticV1[] = importDiagnostics.length > 0 ? importDiagnostics : (propDiagnostics ?? []);
+  const errorCount = diagnostics.filter((d: ProjectionDiagnosticV1) => d.severity === 'error').length;
   // Inspector flyout — CONTROLLED here (design §4 rev.) so the last-viewed panel survives close/reopen; the
   // flyout itself never owns this state. A `?panel=`/`?diagnostic=` deep link opens it straight away.
   const [inspectorOpen, setInspectorOpen] = useState(!!initialPanel || !!initialDiagnostic);
@@ -88,7 +93,6 @@ export function CardEditor({
   }, []);
   /** The DRAFT's own lifecycle state (spec 347 §3) — `validated` is the only state a release may be cut from. */
   const draftState = detail.draft?.state ?? null;
-  const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
@@ -116,7 +120,7 @@ export function CardEditor({
 
   const diagnosticsFor = useCallback(
     (pointer: string): ProjectionDiagnosticV1[] =>
-      diagnostics.filter((d) => d.sourcePointer === pointer || (d.sourcePointer ?? '').startsWith(`${pointer}/`)),
+      diagnostics.filter((d: ProjectionDiagnosticV1) => d.sourcePointer === pointer || (d.sourcePointer ?? '').startsWith(`${pointer}/`)),
     [diagnostics],
   );
 
@@ -157,26 +161,12 @@ export function CardEditor({
     [applyPatch],
   );
 
-  const runValidate = useCallback(async () => {
-    setValidating(true);
-    setError(null);
-    try {
-      const report = await validateCard(delegation, detail.resource.cardResourceId);
-      setDiagnostics(report.diagnostics);
-      onReload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setValidating(false);
-    }
-  }, [delegation, detail.resource.cardResourceId, onReload]);
-
   const runImport = useCallback(async () => {
     setImporting(true);
     setError(null);
     try {
       const report = await importCard(delegation, detail.resource.cardResourceId, { source: importText }, newMutation());
-      setDiagnostics(report.diagnostics);
+      setImportDiagnostics(report.diagnostics);
       setImportOpen(false);
       setImportText('');
       onReload();
@@ -356,16 +346,6 @@ export function CardEditor({
       </div>
 
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '.7rem', alignItems: 'center' }}>
-        <BusyButton
-          busy={validating}
-          busyLabel="Validating…"
-          className={draftState === 'validated' && errorCount === 0 ? 'btn-ghost' : 'btn-primary'}
-          disabled={!gateForOp(scopes, 'card.validate').allowed}
-          title={gateForOp(scopes, 'card.validate').reason}
-          onClick={() => void runValidate()}
-        >
-          Validate
-        </BusyButton>
         <button
           type="button"
           className="btn-ghost"

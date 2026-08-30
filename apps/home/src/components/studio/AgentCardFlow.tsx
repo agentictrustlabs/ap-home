@@ -19,6 +19,7 @@ import {
   executePublicationPlan,
   newCardSigningKey,
   newMutation,
+  patchDraft,
   planProjectionPublication,
   previewProjection,
   publishRelease,
@@ -42,7 +43,7 @@ import { cardUriForName, publicationVerdict, studioErrorSentence, type Publicati
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
-import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, liveStage, planPublish, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
+import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
 import { ReleaseStepper } from './ReleaseStepper';
@@ -102,6 +103,24 @@ export function AgentCardFlow({
   const draftChanged = !!draft && (!latest || draft.basedOnReleaseId !== latest.releaseId);
   const typedName = typedNameOf(detail, agentName);
   const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }), [typedName]);
+
+  const problems = problemsFrom(validation?.diagnostics ?? []);
+  const served = servedInterfacesFrom(validation?.diagnostics ?? []);
+  const addressOnly = onlyAddressProblems(validation?.diagnostics ?? []);
+  const [fixing, setFixing] = useState(false);
+  const useServedAddress = useCallback(async () => {
+    if (!draft || served.length === 0) return;
+    setFixing(true); setError(null);
+    try {
+      const next = await patchDraft(delegation, detail.resource.cardResourceId, [{ op: 'replace', path: '/supportedInterfaces', value: served.map((i) => ({ url: i.url, protocolBinding: i.protocolBinding, protocolVersion: '1.0' })) }], { ...newMutation(), expectedRevision: draft.revision });
+      onDetail({ ...detail, draft: next.draft });
+      lastCheckedRevision.current = null;
+    } catch (e) {
+      setError(studioErrorSentence(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setFixing(false);
+    }
+  }, [draft, served, delegation, detail, onDetail]);
 
   const describe = describeStage({ draftState: draft?.state ?? null, errors, checked: !!validation, skillCount: draft?.card.skills.length ?? 0, name: draft?.card.name ?? agentName });
   const plan: PublishPlan = planPublish({ draftState: draft?.state ?? null, errors, release: latest, draftChanged, scopes });
@@ -192,6 +211,7 @@ export function AgentCardFlow({
           initialDiagnostic={editorDiagnostic}
           initialPanel={initialPanel ?? null}
           staleBanner={staleBanner}
+          diagnostics={validation?.diagnostics ?? []}
         />
       </div>
     );
@@ -210,10 +230,39 @@ export function AgentCardFlow({
       <Stage n="①" title="Describe your agent" status={{ tone: describe.tone, text: checking ? 'Checking…' : describe.status }}>
         <p className="manage-card-blurb" style={{ margin: '0 0 .4rem' }}>{describe.body}</p>
         {description && <p style={{ fontSize: '.85rem', margin: '0 0 .5rem', color: 'var(--c-g700)' }}>&ldquo;{description.length > 180 ? `${description.slice(0, 180)}…` : description}&rdquo;</p>}
+        {problems.length > 0 && (
+          <ul style={{ listStyle: 'none', margin: '0 0 .6rem', padding: 0, display: 'grid', gap: '.35rem' }}>
+            {problems.map((p, i) => (
+              <li key={`${p.pointer ?? 'x'}-${i}`} style={{ borderLeft: `3px solid ${TONE_COLOR.warn}`, paddingLeft: '.5rem', fontSize: '.82rem' }}>
+                {p.where && <b>{p.where}: </b>}
+                {p.message}
+                {p.pointer && (
+                  <>
+                    {' '}
+                    <button type="button" className="btn-ghost" style={{ minHeight: 28, padding: '.1rem .4rem', fontSize: '.72rem' }} onClick={() => { setEditorPointer(p.pointer!); setEditing(true); }}>
+                      Fix this
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {addressOnly && served.length > 0 && (
+          <div style={{ marginBottom: '.6rem' }}>
+            <p className="manage-card-blurb" style={{ margin: '0 0 .3rem' }}>
+              The card names an address this agent no longer serves. It now answers at <b>{served[0]!.url}</b> — that
+              usually means it moved. Updating the card to match is safe: it changes nothing in public until you publish.
+            </p>
+            <BusyButton busy={fixing} busyLabel="Updating…" className="btn-primary" onClick={() => void useServedAddress()}>
+              Use the address it serves
+            </BusyButton>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
           {describe.action?.id === 'show-problems' && (
-            <button type="button" className="btn-primary" onClick={() => { setEditorDiagnostic(validation?.diagnostics.find((d) => d.severity === 'error')?.code ?? null); setEditing(true); }}>
-              Show me
+            <button type="button" className="btn-ghost" onClick={() => { setEditorPointer(problems[0]?.pointer ?? null); setEditorDiagnostic(validation?.diagnostics.find((d) => d.severity === 'error')?.code ?? null); setEditing(true); }}>
+              Open the editor
             </button>
           )}
           <button type="button" className={describe.action?.id === 'edit' ? 'btn-primary' : 'btn-ghost'} onClick={() => setEditing(true)}>
@@ -254,7 +303,7 @@ export function AgentCardFlow({
             <>
               <button type="button" className="btn-primary" disabled title={plan.line}>Publish</button>
               <span className="manage-card-blurb">{plan.line}</span>
-              <button type="button" className="btn-ghost" onClick={() => { setEditorDiagnostic(validation?.diagnostics.find((d) => d.severity === 'error')?.code ?? null); setEditing(true); }}>Show me</button>
+              <button type="button" className="btn-ghost" onClick={() => { setEditorPointer(problems[0]?.pointer ?? null); setEditing(true); }}>Open the editor</button>
             </>
           )}
           {live.action?.id === 'open' && cardUri && (

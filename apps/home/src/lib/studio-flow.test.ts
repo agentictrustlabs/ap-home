@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardRowView, describeStage, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
+import { cardRowView, describeStage, problemsFrom, servedInterfacesFrom, onlyAddressProblems, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
 import { listingCatalog, listingRow, lossSentence, listingCopySamples, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
@@ -110,6 +110,30 @@ describe('cardRowView — a row says which card and whether it is live, nothing 
   });
   it('says what a non-primary card is for', () => {
     expect(cardRowView({ ...base, primary: false, draftState: null, releaseState: null }).subtitle).toContain('An additional card');
+  });
+});
+
+describe('problems are named on the screen that says there are problems', () => {
+  const diverge = (pointer: string, message: string) => ({ code: 'CATALOG_DIVERGENCE', severity: 'error' as const, sourcePointer: pointer, message });
+  it('says which field and what is wrong, in words', () => {
+    const p = problemsFrom([diverge('/supportedInterfaces', 'catalog interface JSONRPC https://x-workspace.faithnet.ai/api/a2a is missing from the card without an override binding')]);
+    expect(p).toHaveLength(1);
+    expect(p[0]!.where).toBe('How to reach it');
+    expect(p[0]!.message).toBe("This doesn't match what the agent actually serves.");
+  });
+  it('reads the served address out of the divergence, so the fix can be one press', () => {
+    const served = servedInterfacesFrom([
+      diverge('/supportedInterfaces', 'catalog interface JSONRPC https://ncf-workspace.faithnet.ai/api/a2a is missing from the card without an override binding'),
+      diverge('/supportedInterfaces/0', 'interface JSONRPC https://old.faithnet.io/api/a2a is not served per the surface catalog and carries no override binding'),
+    ]);
+    expect(served).toEqual([{ protocolBinding: 'JSONRPC', url: 'https://ncf-workspace.faithnet.ai/api/a2a' }]);
+    expect(servedInterfacesFrom([{ code: 'OTHER', severity: 'error', message: 'nope' }])).toEqual([]);
+  });
+  it('knows when every problem is just the address, and when it is not', () => {
+    const addr = [diverge('/supportedInterfaces', 'catalog interface JSONRPC https://a/api/a2a is missing from the card')];
+    expect(onlyAddressProblems(addr)).toBe(true);
+    expect(onlyAddressProblems([...addr, { code: 'SECRET_MATERIAL_DETECTED', severity: 'error', sourcePointer: '/description', message: 'x' }])).toBe(false);
+    expect(onlyAddressProblems([])).toBe(false);
   });
 });
 

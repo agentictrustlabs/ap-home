@@ -5,7 +5,8 @@
 // real decision is needed. No React, no I/O: every sentence a steward reads on the landing is assembled here
 // so a test can prove the main path never uses our vocabulary (§9.4).
 import type { A2AAgentCardReleaseV1, CardDraftState, CardReleaseState } from '@agenticprimitives/agent-profile/a2a';
-import { gateForOp, type StudioOp } from './studio-view';
+import { diagnosticView, gateForOp, type StudioOp } from './studio-view';
+import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
 
 // ── the publish chain ────────────────────────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,65 @@ export const BINDING_PROMPT = {
   sign: 'Sign with custodian',
   skip: 'Skip for now',
 } as const;
+
+// ── what is wrong, in words, on the screen that says something is wrong ──────────────────────────────────
+// "2 things to fix" with a Show me that opened an editor taught nothing (product owner, 2026-08-30). The
+// problems belong ON the stage, each naming its field and, where we can compute it, offering the fix.
+
+export interface ProblemView {
+  message: string;
+  /** The field it is about, in the editor's own words. */
+  where: string | null;
+  pointer?: string;
+}
+
+export function problemsFrom(diagnostics: readonly ProjectionDiagnosticV1[]): ProblemView[] {
+  return diagnostics
+    .filter((d) => d.severity === 'error')
+    .map((d) => {
+      const v = diagnosticView(d);
+      return { message: v.message, where: v.pointer ? fieldNameFor(v.pointer) : null, ...(v.pointer ? { pointer: v.pointer } : {}) };
+    });
+}
+
+const FIELD_NAMES: Record<string, string> = {
+  '/supportedInterfaces': 'How to reach it',
+  '/skills': 'Skills',
+  '/name': 'Agent name',
+  '/description': 'Description',
+  '/provider': 'Provider',
+  '/securitySchemes': 'Security',
+  '/capabilities': 'Capabilities',
+};
+
+function fieldNameFor(pointer: string): string {
+  for (const [prefix, label] of Object.entries(FIELD_NAMES)) if (pointer === prefix || pointer.startsWith(`${prefix}/`)) return label;
+  return pointer.replace(/^\//, '').split('/')[0] ?? 'This field';
+}
+
+export interface ServedInterface { url: string; protocolBinding: string }
+
+/**
+ * The addresses the RUNNING service says it serves, read out of the divergence messages the validator writes
+ * ("catalog interface JSONRPC https://… is missing from the card"). Our own generated text, stable format —
+ * but parsed defensively: no match, no offer. This is what makes "the card names an address the agent no
+ * longer serves" a one-press fix instead of a hunt (it happens whenever a deployment moves zones).
+ */
+export function servedInterfacesFrom(diagnostics: readonly ProjectionDiagnosticV1[]): ServedInterface[] {
+  const out: ServedInterface[] = [];
+  for (const d of diagnostics) {
+    if (d.code !== 'CATALOG_DIVERGENCE') continue;
+    const m = /catalog interface (\S+) (\S+) is missing/.exec(d.message);
+    if (m && m[1] && m[2]) out.push({ protocolBinding: m[1], url: m[2] });
+  }
+  return out;
+}
+
+/** True when every error is "the card's addresses disagree with the running service" — the one-press case. */
+export function onlyAddressProblems(diagnostics: readonly ProjectionDiagnosticV1[]): boolean {
+  const errors = diagnostics.filter((d) => d.severity === 'error');
+  return errors.length > 0 && errors.every((d) => d.code === 'CATALOG_DIVERGENCE' && (d.sourcePointer ?? '').startsWith('/supportedInterfaces'));
+}
 
 // ── the cards list (only ever seen when an agent has 0 or 2+ cards) ─────────────────────────────────────
 
