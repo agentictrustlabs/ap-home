@@ -113,3 +113,42 @@ export function listingCopySamples(): string[] {
   out.push(...Object.values(LISTING_PHRASE), lossSentence('Faithnet directory', [{ category: 'truncated', severity: 'warning', sourcePointer: '/skills/1' }], 5) ?? '');
   return out.filter(Boolean);
 }
+
+// ── the tab strip (flow-redesign.md, split of 2026-08-30) ────────────────────────────────────────────────
+// Agent Card first and always — a listing cannot exist without it, and a tab that shows its own gate
+// ("Publish the card first") is what makes these tabs ordered rather than the peer tabs that confused before.
+
+export interface StudioTab {
+  id: string;
+  label: string;
+  /** Appended to `…/card/<id>` — '' for the Agent Card itself. */
+  suffix: string;
+  status: string;
+  tone: 'good' | 'warn' | 'muted';
+}
+
+export function studioTabs(input: {
+  brand: string;
+  agentName: string;
+  published: { releaseId: string } | null;
+  cardStatus: { status: string; tone: 'good' | 'warn' | 'muted' };
+  projections: readonly { family: StudioFamily; instance: { lastPublication?: unknown; state: string }; selectedCard: { releaseId: string } | null }[];
+  scopes: readonly string[];
+  custodian?: boolean | null;
+}): StudioTab[] {
+  const cat = listingCatalog({ brand: input.brand, agentName: input.agentName });
+  const tabs: StudioTab[] = [{ id: 'card', label: 'Agent Card', suffix: '', status: input.cardStatus.status, tone: input.cardStatus.tone }];
+  for (const family of ['ap-naming', 'ap-registry'] as StudioFamily[]) {
+    const p = input.projections.find((x) => x.family === family) ?? null;
+    const row = listingRow({ descriptor: cat[family], projection: p as never, published: input.published, scopes: input.scopes, custodian: input.custodian });
+    tabs.push({
+      id: family,
+      label: cat[family].title,
+      suffix: `/listing/${family}`,
+      status: row.state === 'listed' ? 'Listed ✓' : row.state === 'out-of-date' ? 'Out of date' : row.state === 'needs-card' ? 'Card first' : row.state === 'missing-role' ? 'Needs someone else' : 'Not listed',
+      tone: row.state === 'listed' ? 'good' : row.state === 'out-of-date' ? 'warn' : 'muted',
+    });
+  }
+  tabs.push({ id: 'history', label: 'History', suffix: '/history', status: '', tone: 'muted' });
+  return tabs;
+}

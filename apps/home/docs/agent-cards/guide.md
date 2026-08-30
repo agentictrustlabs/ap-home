@@ -128,7 +128,7 @@ are `outcome: denied` rows under the op name; publication failures are `outcome:
 
 ## Using the Studio (flow of 2026-08-30)
 
-Open **Card & Projections** on an org or service you steward. One page, three steps, in order:
+Open **Card & Projections** on an org or service you steward. Tabs, in order — each one a complete job, each showing its own status in the strip:
 
 1. **Describe your agent.** The description is filled in from the agent's profile, names and running service.
    `Edit description` if something should differ. It is checked automatically whenever you save; the step's
@@ -138,7 +138,7 @@ Open **Card & Projections** on an org or service you steward. One page, three st
    different person is needed: an optional one-time custodian signature (*Sign with custodian* / *Skip for
    now*), or *Waiting for someone with approval rights* when roles are split. It ends at *Live ✓* with `Open`.
    Publishing does not list the agent anywhere; it makes the description available at its address.
-3. **List it.** Each place the agent can appear is one row — *Your name record*, *<Brand> directory* — with one
+3. **One tab per place it can be listed** (*Your name record*, *<Brand> directory*) — *Your name record*, *<Brand> directory* — with one
    `List it` / `Update listing` button that prepares the listing, asks your custodian to sign once, writes the
    record and confirms it. Anything that will not carry over is one sentence above the button; everything
    technical is under `Details`.

@@ -10,8 +10,15 @@ import { CardList } from './CardList';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type PanelId } from './Inspector';
-import { Overview } from './Overview';
-import { useCardDetail, useCards, useOneShotParam, useStudioAgent, type StudioScopeKind } from './useStudio';
+import { AgentCardFlow } from './AgentCardFlow';
+import { ListingFlow } from './ListingFlow';
+import { HistoryFlow } from './HistoryFlow';
+import { describeStage } from '../../lib/studio-flow';
+import { studioTabs } from '../../lib/studio-listings';
+import { whitelabel } from '../../whitelabel/config';
+import { typedNameOf } from './parts';
+import type { StudioFamily } from '../../studio-client';
+import { useCanSignFor, useCardDetail, useCards, useOneShotParam, useStudioAgent, type StudioScopeKind } from './useStudio';
 
 const INSPECTOR_PANEL_IDS = new Set<string>(A2A_CARD_EDITOR_MANIFEST.inspectorPanels);
 
@@ -21,6 +28,34 @@ function panelParam(value: string | null): PanelId | null {
 }
 
 const TITLE = 'Card & Projections';
+
+const TAB_TONE: Record<'good' | 'warn' | 'muted', string> = { good: 'var(--color-sage-700, #3f6b4a)', warn: 'var(--c-warn, #b45309)', muted: 'var(--c-g500, #6b7280)' };
+
+/** Ordered tabs: Agent Card, then one per place the agent can be listed, then History. Each carries its own
+ *  status, so the strip answers "where am I, and what still needs doing" without opening anything. */
+function Tabs({ tabs, base, cardId, active }: { tabs: ReturnType<typeof studioTabs>; base: string; cardId: string; active: string }) {
+  const href = `${base}/${encodeURIComponent(cardId)}`;
+  return (
+    <nav aria-label="Card sections" style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', margin: '0 0 .9rem' }}>
+      {tabs.map((t) => (
+        <a
+          key={t.id}
+          href={`${href}${t.suffix}`}
+          aria-current={t.id === active ? 'page' : undefined}
+          style={{
+            display: 'grid', gap: '.1rem', textDecoration: 'none', padding: '.4rem .7rem', minHeight: 44,
+            borderRadius: 8, border: '1px solid var(--c-g200)',
+            background: t.id === active ? 'var(--c-primary-subtle)' : 'var(--color-surface)',
+            color: t.id === active ? 'var(--c-primary)' : 'var(--c-g700)',
+          }}
+        >
+          <span style={{ fontSize: '.78rem', fontWeight: t.id === active ? 700 : 500 }}>{t.label}</span>
+          {t.status && <span style={{ fontSize: '.66rem', color: t.id === active ? 'var(--c-primary)' : TAB_TONE[t.tone] }}>{t.status}</span>}
+        </a>
+      ))}
+    </nav>
+  );
+}
 
 export function studioBasePath(kind: StudioScopeKind, agent: string): string {
   return kind === 'org' ? orgHref(agent, 'card') : serviceHref(agent, 'card');
@@ -94,26 +129,25 @@ function CardsListBody({ kind, agent, ctx }: { kind: StudioScopeKind; agent: str
 
 // ── editor tabs ──────────────────────────────────────────────────────────────────────────────────
 
-function EditorFrame({ kind, agent, cardId }: { kind: StudioScopeKind; agent: string; cardId: string }) {
+function EditorFrame({ kind, agent, cardId, tab }: { kind: StudioScopeKind; agent: string; cardId: string; tab: string }) {
   return (
     <Guarded kind={kind} agent={agent} title={TITLE}>
-      {(ctx) => <EditorBody kind={kind} agent={agent} cardId={cardId} ctx={ctx} />}
+      {(ctx) => <EditorBody kind={kind} agent={agent} cardId={cardId} tab={tab} ctx={ctx} />}
     </Guarded>
   );
 }
 
 function EditorBody({
-  kind,
-  agent,
-  cardId,
-  ctx,
+  kind, agent, cardId, tab, ctx,
 }: {
   kind: StudioScopeKind;
   agent: string;
   cardId: string;
+  tab: string;
   ctx: ReturnType<typeof useStudioAgent> & { delegation: NonNullable<ReturnType<typeof useStudioAgent>['delegation']>; sa: `0x${string}` };
 }) {
   const state = useCardDetail(ctx.delegation, cardId);
+  const canSign = useCanSignFor(ctx.sa);
   // Deep-link params are read once and cleared from the URL (design §1.3).
   const pointer = useOneShotParam('pointer');
   const diagnostic = useOneShotParam('diagnostic');
@@ -121,73 +155,102 @@ function EditorBody({
   const panel = panelParam(useOneShotParam('panel'));
 
   const base = studioBasePath(kind, agent);
+  const cardBase = `${base}/${encodeURIComponent(cardId)}`;
   const title = state.detail?.resource.displayName ?? TITLE;
 
   if (!state.loaded) {
-    return (
-      <SectionShell title={TITLE}>
-        <p className="manage-card-blurb">Loading…</p>
-      </SectionShell>
-    );
+    return <SectionShell title={TITLE}><p className="manage-card-blurb">Loading…</p></SectionShell>;
   }
   if (state.error || !state.detail) {
     return (
       <SectionShell title={TITLE}>
         <p className="manage-card-blurb">Couldn&rsquo;t load this card. Try again.</p>
-        <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={state.reload}>
-          Try again
-        </button>
+        <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={state.reload}>Try again</button>
       </SectionShell>
     );
   }
 
+  const detail = state.detail;
+  const published = detail.releases.filter((r) => r.state === 'published').at(-1) ?? null;
+  const typedName = typedNameOf(detail, ctx.name);
+  const cardStatus = describeStage({ draftState: detail.draft?.state ?? null, errors: 0, checked: !!published, skillCount: detail.draft?.card.skills.length ?? 0, name: typedName });
+  const tabs = studioTabs({
+    brand: whitelabel.brand.name,
+    agentName: typedName,
+    published: published ? { releaseId: published.releaseId } : null,
+    cardStatus: { status: published ? 'Live ✓' : cardStatus.status, tone: published ? 'good' : cardStatus.tone },
+    projections: state.projections,
+    scopes: ctx.scopes,
+    custodian: canSign,
+  });
+
   return (
-    <SectionShell
-      title={title}
-      actions={
-        <a className="btn-ghost" href={base}>
-          All cards
-        </a>
-      }
-    >
-      <Overview
-        delegation={ctx.delegation}
-        detail={state.detail}
-        projections={state.projections}
-        scopes={ctx.scopes}
-        sa={ctx.sa}
-        agentName={ctx.name}
-        signHashFor={ctx.signHashFor}
-        onDetail={state.patch}
-        onReload={state.reload}
-        initialPointer={pointer}
-        initialDiagnostic={diagnostic}
-        initialPanel={panel}
-        staleBanner={stale === '1' || state.detail.draft?.state === 'stale'}
-      />
+    <SectionShell title={title} actions={<a className="btn-ghost" href={base}>All cards</a>}>
+      <Tabs tabs={tabs} base={base} cardId={cardId} active={tab} />
+      {tab === 'card' && (
+        <AgentCardFlow
+          delegation={ctx.delegation}
+          detail={detail}
+          projections={state.projections}
+          scopes={ctx.scopes}
+          sa={ctx.sa}
+          agentName={ctx.name}
+          basePath={cardBase}
+          signHashFor={ctx.signHashFor}
+          onDetail={state.patch}
+          onReload={state.reload}
+          initialPointer={pointer}
+          initialDiagnostic={diagnostic}
+          initialPanel={panel}
+          staleBanner={stale === '1' || detail.draft?.state === 'stale'}
+        />
+      )}
+      {tab !== 'card' && tab !== 'history' && (
+        <ListingFlow
+          family={tab as StudioFamily}
+          delegation={ctx.delegation}
+          detail={detail}
+          projections={state.projections}
+          scopes={ctx.scopes}
+          sa={ctx.sa}
+          agentName={ctx.name}
+          basePath={cardBase}
+          canSign={canSign}
+          signHashFor={ctx.signHashFor}
+          onReload={state.reload}
+        />
+      )}
+      {tab === 'history' && <HistoryFlow delegation={ctx.delegation} detail={detail} onReload={state.reload} />}
     </SectionShell>
   );
 }
 
 /** The old tab routes keep working as deep links: they land on the overview at the matching anchor. */
-function RedirectToOverview({ kind, agent, cardId, hash }: { kind: StudioScopeKind; agent: string; cardId: string; hash: string }) {
+function RedirectTo({ kind, agent, cardId, suffix }: { kind: StudioScopeKind; agent: string; cardId: string; suffix: string }) {
   const router = useRouter();
   useEffect(() => {
     const q = typeof window !== 'undefined' ? window.location.search : '';
-    router.replace(`${studioBasePath(kind, agent)}/${encodeURIComponent(cardId)}${q}${hash}`);
-  }, [router, kind, agent, cardId, hash]);
+    router.replace(`${studioBasePath(kind, agent)}/${encodeURIComponent(cardId)}${suffix}${q}`);
+  }, [router, kind, agent, cardId, suffix]);
   return <SectionShell title={TITLE}><p className="manage-card-blurb">Opening…</p></SectionShell>;
 }
 
 export function AgentCardEditorSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <EditorFrame {...p} />;
+  return <EditorFrame {...p} tab="card" />;
 }
+export function ListingSection(p: { kind: StudioScopeKind; agent: string; cardId: string; family: string }) {
+  return <EditorFrame kind={p.kind} agent={p.agent} cardId={p.cardId} tab={p.family} />;
+}
+export function HistorySection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
+  return <EditorFrame {...p} tab="history" />;
+}
+/** Pre-split URLs keep working: Projections and Names & Bindings both meant "where is this agent listed". */
 export function ProjectionCenterSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <RedirectToOverview {...p} hash="#list" />;
+  return <RedirectTo {...p} suffix="/listing/ap-naming" />;
 }
 export function NamesBindingsSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <RedirectToOverview {...p} hash="#list" />;
+  return <RedirectTo {...p} suffix="/listing/ap-naming" />;
 }
 export function ReleasesAuditSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <RedirectToOverview {...p} hash="#history" />;
+  return <RedirectTo {...p} suffix="/history" />;
 }

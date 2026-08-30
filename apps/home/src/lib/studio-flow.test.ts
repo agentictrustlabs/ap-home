@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeStage, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
-import { listingCatalog, listingRow, lossSentence, listingCopySamples } from './studio-listings';
+import { listingCatalog, listingRow, lossSentence, listingCopySamples, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
 const ALL = ['agent.card.read', 'agent.card.draft', 'agent.card.validate', 'agent.card.approve', 'agent.card.sign', 'agent.card.publish'];
@@ -97,5 +97,34 @@ describe('§9.4 — the landing never speaks our vocabulary', () => {
     const all = [...landingCopySamples(), ...listingCopySamples(), ...Object.values(BINDING_PROMPT), ...Object.values(PUBLISH_PHRASE)];
     expect(all.length).toBeGreaterThan(40);
     for (const s of all) for (const w of FORBIDDEN_ON_LANDING) expect(s.toLowerCase(), `"${s}" contains "${w}"`).not.toContain(w);
+  });
+});
+
+describe('studioTabs — Agent Card first, one tab per place, each carrying its own status', () => {
+  const base = { brand: 'Faithnet', agentName: 'alice.me', cardStatus: { status: 'Ready to publish ✓', tone: 'good' as const }, scopes: ['agent.projection.preview', 'agent.projection.approve', 'agent.projection.publish:ap-naming', 'agent.projection.publish:ap-registry'], projections: [] };
+  it('gates every listing on the card before it exists', () => {
+    const tabs = studioTabs({ ...base, published: null });
+    expect(tabs.map((t) => t.label)).toEqual(['Agent Card', 'Your name record', 'Faithnet directory', 'History']);
+    expect(tabs[0]!.suffix).toBe('');
+    expect(tabs[1]!.suffix).toBe('/listing/ap-naming');
+    expect(tabs.slice(1, 3).map((t) => t.status)).toEqual(['Card first', 'Card first']);
+  });
+  it('shows Not listed once the card is live, and Listed ✓ when it is done', () => {
+    expect(studioTabs({ ...base, published: { releaseId: 'r1' } })[1]!.status).toBe('Not listed');
+    const listed = [{ family: 'ap-naming' as const, instance: { lastPublication: {}, state: 'published' }, selectedCard: { releaseId: 'r1' } }];
+    const tabs = studioTabs({ ...base, published: { releaseId: 'r1' }, projections: listed });
+    expect(tabs[1]).toMatchObject({ status: 'Listed ✓', tone: 'good' });
+    expect(studioTabs({ ...base, published: { releaseId: 'r2' }, projections: listed })[1]).toMatchObject({ status: 'Out of date', tone: 'warn' });
+  });
+  it('says when a listing needs someone else rather than offering it', () => {
+    expect(studioTabs({ ...base, published: { releaseId: 'r1' }, custodian: false })[1]!.status).toBe('Needs someone else');
+    expect(studioTabs({ ...base, published: { releaseId: 'r1' }, scopes: [] })[1]!.status).toBe('Needs someone else');
+  });
+  it('never speaks our vocabulary', () => {
+    for (const t of studioTabs({ ...base, published: { releaseId: 'r1' } })) {
+      for (const w of ['projection', 'release', 'digest', 'adapter', 'artifact']) {
+        expect(`${t.label} ${t.status}`.toLowerCase()).not.toContain(w);
+      }
+    }
   });
 });

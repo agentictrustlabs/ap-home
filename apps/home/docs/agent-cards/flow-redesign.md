@@ -199,3 +199,31 @@ reappear exactly where a different person has to act.
 5. With `SEPARATION_OF_DUTIES=strict` and an editor-only persona, ② stops at *"Waiting for someone with approval
    rights"* and shows the approval card; nothing else changes.
 6. Old tab URLs redirect to the landing with the right anchor.
+
+## 10. Split into per-flow tabs (2026-08-30, product direction)
+
+§2's single stacked page was right about ORDER and one-primary-action, wrong about scale: *"eventually we will
+have lots of projections."* Stage ③ as a stack works for two rows and fails at twenty. The stages are therefore
+separate screens, in a fixed order, each a complete flow:
+
+```
+[ Agent Card ]      [ Your name record ]   [ Faithnet directory ]   [ History ]
+  Live ✓              Listed ✓               Not listed
+```
+
+- **Agent Card** = §3 + §4 (describe, then one `Publish`). When it is live it points at the next tab; it never
+  shows listing controls.
+- **One tab per listing** = §5, but as a whole screen: what this place is, where you stand, one button, its own
+  `Details`. Before the card is published the tab still renders and shows its gate — *"Nothing to list yet — the
+  card has to be live first"* with a link back — so a tab is never a dead end and the order is visible without
+  being enforced by hiding things.
+- **History** = §6.
+- Tabs carry their own status (`Live ✓` · `Listed ✓` · `Out of date` · `Card first` · `Needs someone else`), so
+  the strip answers "what still needs doing" without opening anything. `studioTabs()` builds it, tested and
+  vocabulary-checked like the rest.
+- Routes: `…/card/<id>` · `…/card/<id>/listing/<family>` · `…/card/<id>/history`. Pre-split URLs
+  (`/projections`, `/names`, `/releases`) redirect. **Beyond ~5 listings** the strip becomes a *Listings* index
+  with search and a "Suggested for this agent" group; each listing keeps the same URL and the same component, so
+  nothing is rebuilt when the count grows.
+
+This is what the old tabs failed to be: ordered, each with one job, each showing its own gate.
