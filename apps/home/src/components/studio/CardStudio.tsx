@@ -107,6 +107,21 @@ export function CardsListSection({ kind, agent }: { kind: StudioScopeKind; agent
 
 function CardsListBody({ kind, agent, ctx }: { kind: StudioScopeKind; agent: string; ctx: { delegation: NonNullable<ReturnType<typeof useStudioAgent>['delegation']>; scopes: ReturnType<typeof useStudioAgent>['scopes'] } }) {
   const { cards, projections, loaded, error, reload } = useCards(ctx.delegation);
+  const router = useRouter();
+  const base = studioBasePath(kind, agent);
+  // ONE card is the normal case, and a list with a single row is a hop that teaches nothing: open it. The list
+  // renders only where it is real — no card yet, or more than one.
+  const only = loaded && !error && cards.length === 1 ? cards[0]!.resource.cardResourceId : null;
+  useEffect(() => {
+    if (only) router.replace(`${base}/${encodeURIComponent(only)}`);
+  }, [only, router, base]);
+  if (only) {
+    return (
+      <SectionShell title={TITLE}>
+        <p className="manage-card-blurb">Opening…</p>
+      </SectionShell>
+    );
+  }
   return (
     <SectionShell title={TITLE}>
       <CardList
