@@ -147,9 +147,9 @@ export function ServicePlaybookSection({ agent }: { agent: string }) {
   return (
     <SectionShell title="Playbook">
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-        The instructions this {what} agent answers under — markdown, the agent&rsquo;s SKILL.md. It shapes
+        The instructions this {what} agent answers under — markdown, the agent’s SKILL.md. It shapes
         every reply the agent writes in its own discussion topics
-        {svc.kind === 'workspace' ? ', including Field&rsquo;s Ask' : ''}. Saving is a steward&rsquo;s act: the
+        {svc.kind === 'workspace' ? ', including Field’s Ask' : ''}. Saving is a steward’s act: the
         agent verifies your stewardship before it accepts the text. An app may seed a default when none is
         set; it never overwrites what you write here.
       </p>
