@@ -291,9 +291,9 @@ describe('projection rows + impact', () => {
 
 describe('card URI derivation', () => {
   const opts = { nameParent: 'impact', a2aDomain: 'impact-agent.io' };
-  it('drops the naming zone and keeps typed suffixes', () => {
+  it('drops the naming zone and folds a typed suffix into one label', () => {
     expect(cardUriForName('vendor-payments.impact', opts)).toBe('https://vendor-payments.impact-agent.io/.well-known/agent-card.json');
-    expect(cardUriForName('finance.team.impact', opts)).toBe('https://finance.team.impact-agent.io/.well-known/agent-card.json');
+    expect(cardUriForName('finance.team.impact', opts)).toBe('https://finance-team.impact-agent.io/.well-known/agent-card.json');
   });
   it('returns null for a nameless agent', () => {
     expect(cardUriForName('', opts)).toBeNull();
@@ -485,5 +485,14 @@ describe('namesAndBindingsRows — every row states what is true, then what to d
   it('registry: pendingVerification reads as stale, not ok', () => {
     const row = namesAndBindingsRows({ ...base, registryBindings: [{ lifecycle: { state: 'pendingVerification', since: 't' } }] }).find((r) => r.id === 'registry')!;
     expect(row.state).toBe('stale');
+  });
+});
+
+describe('cardUriForName — one DNS label (spec 346 §5)', () => {
+  const opts = { nameParent: 'me', a2aDomain: 'faithnet.io' };
+  it('hyphenates the type into the label and drops a person root', () => {
+    expect(cardUriForName('fort-morgan-household.church', opts)).toBe('https://fort-morgan-household-church.faithnet.io/.well-known/agent-card.json');
+    expect(cardUriForName('alice.me', opts)).toBe('https://alice.faithnet.io/.well-known/agent-card.json');
+    expect(cardUriForName('', opts)).toBeNull();
   });
 });

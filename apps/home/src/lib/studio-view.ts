@@ -690,9 +690,13 @@ export const TRI_HELP: Record<TriState, string> = {
 export function cardUriForName(name: string, opts: { nameParent: string; a2aDomain: string }): string | null {
   const labels = name.trim().toLowerCase().split('.').filter(Boolean);
   if (labels.length === 0) return null;
+  // spec 346 §5 (2026-08-30): a typed agent's host is ONE label with the type hyphenated in
+  // (`field.workspace` → `field-workspace.<zone>`), so the zone's `*.<zone>` wildcard covers it; a person
+  // or legacy name drops its root entirely (`alice.me` → `alice.<zone>`). MUST match `hostForName` in
+  // demo-a2a — this only prefills the binding's card URI, but a mismatch would name the wrong endpoint.
   if (labels[labels.length - 1] === opts.nameParent) labels.pop();
   if (labels.length === 0) return null;
-  return `https://${labels.join('.')}.${opts.a2aDomain}/.well-known/agent-card.json`;
+  return `https://${labels.join('-')}.${opts.a2aDomain}/.well-known/agent-card.json`;
 }
 
 // ─── The live endpoint (spec 347 §8.1) ───────────────────────────────────────────────────────────────────
