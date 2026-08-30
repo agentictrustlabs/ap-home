@@ -75,7 +75,10 @@ describe('listings — projections in the user\'s words', () => {
     expect(listingRow({ descriptor: cat['ap-naming'], projection: null, published: null, scopes: LISTER })).toMatchObject({ state: 'needs-card', button: null });
     expect(listingRow({ descriptor: cat['ap-naming'], projection: null, published: { releaseId: 'r1' }, scopes: LISTER })).toMatchObject({ state: 'not-listed', button: { label: 'List it' } });
     const listed = proj({ lastPublication: { receiptId: 'x', planId: 'p', artifactDigest: ('sha256:' + '1'.repeat(64)) as `sha256:${string}`, publishedAt: '2026-08-30T12:00:00Z' } }, 'r1');
-    expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r1' }, scopes: LISTER })).toMatchObject({ state: 'listed', button: { label: 'Open' } });
+    expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r1' }, scopes: LISTER })).toMatchObject({ state: 'listed', button: { label: 'Open' }, secondary: { label: 'Write it again' } });
+    // Nothing outside the card is visible from here (a host move, a hand-edited record), so a listed row keeps
+    // a way to rewrite itself — except for someone who could not sign it anyway.
+    expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r1' }, scopes: LISTER, custodian: false }).secondary).toBeUndefined();
     expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r2' }, scopes: LISTER })).toMatchObject({ state: 'out-of-date', button: { label: 'Update listing' } });
     expect(listingRow({ descriptor: cat['ap-naming'], projection: null, published: { releaseId: 'r1' }, scopes: [] })).toMatchObject({ state: 'missing-role', button: null });
     // A steward who does not custody the agent: the row says so BEFORE the click, instead of AA24 after it.

@@ -107,6 +107,12 @@ export function ListingFlow({
           </Banner>
         )}
         {notSetUp && <Banner tone="muted">This Home hasn&rsquo;t been given a directory to list agents in yet, so there is nothing to publish to.</Banner>}
+        {row.secondary && (
+          <p className="manage-card-blurb" style={{ margin: '0 0 .4rem', fontSize: '.72rem' }}>
+            Written when you last listed it. If this agent has moved since — a new address, a changed name — write
+            it again so the record points at where it actually answers.
+          </p>
+        )}
         {(loss ?? row.loss) && <p className="manage-card-blurb" style={{ margin: '0 0 .4rem', color: TONE_COLOR.warn }}>{loss ?? row.loss}</p>}
         <ErrorLine error={error} />
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -116,6 +122,11 @@ export function ListingFlow({
             </BusyButton>
           )}
           {row.button?.id === 'open' && family === 'ap-naming' && <a className="btn-ghost" href="/naming">Open</a>}
+          {row.secondary && (
+            <BusyButton busy={busy} busyLabel={phase || 'Working…'} className="btn-ghost" onClick={() => void run()}>
+              {row.secondary.label}
+            </BusyButton>
+          )}
           {projection && (
             <button type="button" className="btn-ghost" onClick={() => setDetailsOpen((o) => !o)}>
               {detailsOpen ? 'Hide details' : 'Details'}

@@ -41,6 +41,10 @@ export interface ListingRow {
   /** The status line, plain. */
   line: string;
   button: { id: 'list' | 'update' | 'open'; label: string } | null;
+  /** Always available once listed: things change outside the card (an agent moves host, a record is edited by
+   *  hand), and "Listed ✓" only knows that the CARD VERSION matches — not that the record still says the right
+   *  thing. Without this, a stale record has no way back. */
+  secondary?: { id: 'update'; label: string };
   /** One sentence above the button when something will not carry over; null when nothing is lost. */
   loss: string | null;
   projection: StoredProjection | null;
@@ -79,7 +83,16 @@ export function listingRow(input: {
   }
   const current = p!.selectedCard?.releaseId === input.published.releaseId && !['drifted', 'stale', 'failed'].includes(p!.instance.state);
   const when = new Date(p!.instance.lastPublication!.publishedAt).toLocaleString();
-  if (current) return { ...base, state: 'listed', line: `Listed ✓ · updated ${when}`, button: { id: 'open', label: 'Open' }, loss: null };
+  if (current) {
+    return {
+      ...base,
+      state: 'listed',
+      line: `Listed ✓ · updated ${when}`,
+      button: { id: 'open', label: 'Open' },
+      ...(input.custodian === false ? {} : { secondary: { id: 'update' as const, label: 'Write it again' } }),
+      loss: null,
+    };
+  }
   if (!canList) return { ...base, state: 'missing-role', line: `Listed, but shows an older version of the card. Needs someone with listing rights to update it.`, button: null };
   if (input.custodian === false) return { ...base, state: 'missing-role', line: `Listed, but shows an older version of the card. ${NEEDS_CUSTODIAN}`, button: null };
   return { ...base, state: 'out-of-date', line: 'Listed, but shows an older version of the card.', button: { id: 'update', label: 'Update listing' } };
