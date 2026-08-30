@@ -126,75 +126,23 @@ are `outcome: denied` rows under the op name; publication failures are `outcome:
 - **Steward proposals** have no operation: a service-agent caller writes into the draft under
   `STEWARD_DEFAULT_SCOPES`; there is no proposal queue to read, accept or reject.
 
-## Using the Studio (W4b)
+## Using the Studio (flow of 2026-08-30)
 
-The screens live under **Home › {org|service workspace} › Manage › Card & Projections**
-(`src/components/studio/*`, nav ids `org-card` / `service-card`). A card belongs to the **agent**, so both
-workspace kinds render the same sections from `CardStudio.tsx` — there is no org copy and service copy.
+Open **Card & Projections** on an org or service you steward. One page, three steps, in order:
 
-### Routes
+1. **Describe your agent.** The description is filled in from the agent's profile, names and running service.
+   `Edit description` if something should differ. It is checked automatically whenever you save; the step's
+   status says *Ready to publish ✓* or *N things to fix* with a `Show me` that opens the editor at the problem.
+2. **Make it live.** One `Publish` button runs the whole chain — *Checking the description… → Freezing this
+   version… → Signing it… → Publishing… → Confirming it's live…* — and stops only where a decision or a
+   different person is needed: an optional one-time custodian signature (*Sign with custodian* / *Skip for
+   now*), or *Waiting for someone with approval rights* when roles are split. It ends at *Live ✓* with `Open`.
+   Publishing does not list the agent anywhere; it makes the description available at its address.
+3. **List it.** Each place the agent can appear is one row — *Your name record*, *<Brand> directory* — with one
+   `List it` / `Update listing` button that prepares the listing, asks your custodian to sign once, writes the
+   record and confirms it. Anything that will not carry over is one sentence above the button; everything
+   technical is under `Details`.
 
-| Route | What it is |
-| --- | --- |
-| `/org/<sa>/card` · `/service/<sa>/card` | The cards list. Empty → **Create from profile** (`card.create`, every inheritable field bound `inherit`), or *Import an existing A2A card instead* |
-| `…/card/<cardResourceId>` | **Agent Card** — the three-pane editor |
-| `…/card/<cardResourceId>/projections` | **Projections** — configure · preview · plan · approve · execute |
-| `…/card/<cardResourceId>/names` | **Names & Bindings** — ownership / resolution / canonical identity / current card publication / registry binding, as five separate rows |
-| `…/card/<cardResourceId>/releases` | **Releases & Audit** — the stepper plus every release this card has had |
+`History` shows every version with its audit detail (and *Retire* / *Withdraw* for a live one). `Advanced ▾`
+opens the inspector: the exact JSON, what the public endpoint is serving right now, provenance, checks.
 
-Deep-link params are read once on mount and cleared from the URL: `?pointer=<jsonPointer>` (open the owning
-section and focus the field), `?diagnostic=<code>`, `?stale=1`, `?release=<id>`, `?instance=<id>`,
-`?import=1`.
-
-### The editor
-
-Sections, fields and inspector panels are rendered **directly from `A2A_CARD_EDITOR_MANIFEST`** — a manifest
-change ships without a component edit. Each row shows the manifest's label and help, a provenance badge
-(`inherited` / `overridden` / `manual` / `computed` / `verified` / `stale` / `conflict`), and a source popover.
-Optional booleans are a three-way **radio group** (Unset · No · Yes) because `unset` and explicit `false` are
-different documents. Interfaces are ordered — first is preferred — and reorder by `Alt+↑`/`Alt+↓` as well as
-by the visible Move up / Move down buttons. Skills are a curation list: only what is listed appears publicly.
-
-Editing is optimistic and every mutation carries `expectedRevision`. A 409 `stale_revision` shows *"This
-draft changed while you were editing"* with **Review their changes** / **Overwrite with mine** — never a
-silent last-write-wins.
-
-### The stepper, and what each signature is
-
-`Validate → Create release → Request approval → Approve → Sign → Publish → Verify`. A step the viewer cannot
-perform shows *"Waiting on someone with … access"* instead of a button (the scope picture is rendered from
-`dutiesOf`; the service re-checks and refuses with 403 `scope_not_held`). Creating a release shows the
-release **diff** as its confirmation.
-
-Signing is two decisions by two different keys, so it stays two steps:
-
-1. **Card signature** — a WebCrypto ES256 key generated in your browser signs the RFC 8785 canonical bytes
-   (`newCardSigningKey` + `signReleaseLocally`). Any A2A client can check it; only the public JWK is sent.
-2. **Smart Agent binding** — your SA's custodian signs the EIP-712 `SmartAgentCardBindingV1`
-   (`buildSmartAgentBinding` + `signSmartAgentBinding`), verified on read through ERC-1271. Only AP-aware
-   verifiers need it.
-
-`release.sign` attaches a JWS and (optionally) the binding in **one** call and refuses a call carrying no new
-signature, so the binding cannot be bolted onto an already-signed release. The panel therefore *prepares* the
-JWS in the browser under ①, and the step you finish with submits: **Attach without binding** (card signature
-alone) or **Bind to Smart Agent** (both, one call). Nothing is collapsed and no second signature is minted
-behind your back.
-
-`Publish` stays busy through the well-known re-fetch (`Publishing…` → `Verifying…`) and only claims
-*"Live and verified"* when the served digest matches; otherwise it says the publish landed but the check
-hasn't confirmed yet.
-
-### What "Execute with your custodian" does
-
-On the Projections tab: `Preview` runs the pure projector (no side effects) and shows the artifact's **loss
-report** in plain language. `Plan publication` builds the `PublicationPlanV1`; the plan review discloses the
-operations, the estimated cost, the ceiling, whose credential, and how long the plan is valid — before any
-approval exists. After **Request approval** → **Approve this plan**, `Execute with your custodian` signs any
-requested digests with your SA's custodian, batches the plan's contract calls into ONE gasless userOp
-(`executePublicationPlan` / `executeNamingPlan`), and reports the transactions so the service can verify them
-on chain and record the receipt + binding. That is the moment a device confirmation appears; the button's
-step labels say so (`Preparing transaction…` → `Waiting for your confirmation…` → `Publishing…` →
-`Verifying…`).
-
-A remote change is never overwritten from here — it becomes a proposal to review, because the remote might be
-right and the canonical side stale.

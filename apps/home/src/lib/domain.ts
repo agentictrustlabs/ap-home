@@ -113,3 +113,7 @@ export function toAgentName(nameOrLabel: string): string {
   if (p && (p.kind === 'canonical' || p.kind === 'scoped')) return p.normalized;
   return n.endsWith(`.${AGENT_NAME_PARENT}`) ? n : `${nameLabel(n)}.${NEW_PERSON_TLD}`;
 }
+
+/** The deployment's agent directory (spec 346 §7 registry URN) the Studio lists agents in — e.g.
+ *  `urn:ap:registry:faithnet-agents`. Absent ⇒ the directory listing row says the directory is not set up. */
+export const AGENT_REGISTRY_URN = process.env.NEXT_PUBLIC_AGENT_REGISTRY_URN || '';

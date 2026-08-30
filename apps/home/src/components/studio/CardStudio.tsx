@@ -4,16 +4,13 @@
 // import the same sections and there is zero duplicated logic between them.
 import type { ReactNode } from 'react';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
-import type { A2AAgentCardReleaseV1, CardDraftState } from '@agenticprimitives/agent-profile/a2a';
 import { SectionShell } from '../portal/SectionShell';
 import { orgHref, serviceHref } from '../../lib/workspace';
-import { lifecycleOrientation } from '../../lib/studio-view';
 import { CardList } from './CardList';
-import { CardEditor } from './CardEditor';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { type PanelId } from './Inspector';
-import { ProjectionCenter } from './ProjectionCenter';
-import { NamesAndBindings } from './NamesAndBindings';
-import { ReleasesAndAudit } from './ReleasesAndAudit';
+import { Overview } from './Overview';
 import { useCardDetail, useCards, useOneShotParam, useStudioAgent, type StudioScopeKind } from './useStudio';
 
 const INSPECTOR_PANEL_IDS = new Set<string>(A2A_CARD_EDITOR_MANIFEST.inspectorPanels);
@@ -21,49 +18,6 @@ const INSPECTOR_PANEL_IDS = new Set<string>(A2A_CARD_EDITOR_MANIFEST.inspectorPa
 /** `?panel=` only makes sense as an Inspector deep link when it names a real panel (design §1.3). */
 function panelParam(value: string | null): PanelId | null {
   return value && INSPECTOR_PANEL_IDS.has(value) ? (value as PanelId) : null;
-}
-
-/**
- * Release-lifecycle orientation, shared by every tab (design §3.1/§6.1 rev. 2026-08-30) — "the editor
- * already has a 'Now:' line; integrate it with the tabs rather than duplicating" (product direction). This
- * renders ONCE, next to the tabs, instead of each tab re-deriving its own version of "what's next."
- */
-function LifecycleBar({
-  draftState,
-  release,
-  scopes,
-  releasesHref,
-  onReleasesTab,
-}: {
-  draftState: CardDraftState | null;
-  release: A2AAgentCardReleaseV1 | null;
-  scopes: readonly string[];
-  releasesHref: string;
-  onReleasesTab: boolean;
-}) {
-  const orientation = lifecycleOrientation({ draftState, release, scopes });
-  return (
-    <div className="studio-lifecycle" aria-label="Release lifecycle">
-      <ol className="studio-lifecycle-steps">
-        {orientation.steps.map((s) => (
-          <li key={s.id} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>
-            {s.label}
-          </li>
-        ))}
-      </ol>
-      <p className="studio-lifecycle-next">
-        {orientation.line}
-        {!onReleasesTab && orientation.current && (
-          <>
-            {' '}
-            <a href={releasesHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>
-              Go to Releases &amp; Audit →
-            </a>
-          </>
-        )}
-      </p>
-    </div>
-  );
 }
 
 const TITLE = 'Card & Projections';
@@ -106,40 +60,6 @@ function Guarded({
   return <>{children({ ...ctx, delegation: ctx.delegation, sa: ctx.sa })}</>;
 }
 
-function Tabs({ base, cardId, active }: { base: string; cardId: string; active: 'card' | 'projections' | 'names' | 'releases' }) {
-  const href = `${base}/${encodeURIComponent(cardId)}`;
-  const tabs: Array<{ id: typeof active; label: string; href: string }> = [
-    { id: 'card', label: 'Agent Card', href },
-    { id: 'projections', label: 'Projections', href: `${href}/projections` },
-    { id: 'names', label: 'Names & Bindings', href: `${href}/names` },
-    { id: 'releases', label: 'Releases & Audit', href: `${href}/releases` },
-  ];
-  return (
-    <nav aria-label="Card studio tabs" style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', margin: '0 0 .8rem' }}>
-      {tabs.map((t) => (
-        <a
-          key={t.id}
-          href={t.href}
-          aria-current={t.id === active ? 'page' : undefined}
-          style={{
-            fontSize: '.78rem',
-            fontWeight: t.id === active ? 700 : 500,
-            padding: '.4rem .7rem',
-            minHeight: 36,
-            borderRadius: 8,
-            textDecoration: 'none',
-            border: '1px solid var(--c-g200)',
-            background: t.id === active ? 'var(--c-primary-subtle)' : 'var(--color-surface)',
-            color: t.id === active ? 'var(--c-primary)' : 'var(--c-g700)',
-          }}
-        >
-          {t.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 // ── list ─────────────────────────────────────────────────────────────────────────────────────────
 
 export function CardsListSection({ kind, agent }: { kind: StudioScopeKind; agent: string }) {
@@ -155,9 +75,8 @@ function CardsListBody({ kind, agent, ctx }: { kind: StudioScopeKind; agent: str
   return (
     <SectionShell title={TITLE}>
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-        The A2A card is what other agents see when they look this one up. Author it here, release it through an
-        approval chain, then project it into AP Naming and the AP Registry — with every loss and every drift
-        visible.
+        A card is what other agents see when they look this one up — what it does and how to reach it. Describe it,
+        make it live at its public address, then list it where agents and people search.
       </p>
       <CardList
         delegation={ctx.delegation}
@@ -175,22 +94,10 @@ function CardsListBody({ kind, agent, ctx }: { kind: StudioScopeKind; agent: str
 
 // ── editor tabs ──────────────────────────────────────────────────────────────────────────────────
 
-type TabId = 'card' | 'projections' | 'names' | 'releases';
-
-function EditorFrame({
-  kind,
-  agent,
-  cardId,
-  tab,
-}: {
-  kind: StudioScopeKind;
-  agent: string;
-  cardId: string;
-  tab: TabId;
-}) {
+function EditorFrame({ kind, agent, cardId }: { kind: StudioScopeKind; agent: string; cardId: string }) {
   return (
     <Guarded kind={kind} agent={agent} title={TITLE}>
-      {(ctx) => <EditorBody kind={kind} agent={agent} cardId={cardId} tab={tab} ctx={ctx} />}
+      {(ctx) => <EditorBody kind={kind} agent={agent} cardId={cardId} ctx={ctx} />}
     </Guarded>
   );
 }
@@ -199,13 +106,11 @@ function EditorBody({
   kind,
   agent,
   cardId,
-  tab,
   ctx,
 }: {
   kind: StudioScopeKind;
   agent: string;
   cardId: string;
-  tab: TabId;
   ctx: ReturnType<typeof useStudioAgent> & { delegation: NonNullable<ReturnType<typeof useStudioAgent>['delegation']>; sa: `0x${string}` };
 }) {
   const state = useCardDetail(ctx.delegation, cardId);
@@ -213,8 +118,6 @@ function EditorBody({
   const pointer = useOneShotParam('pointer');
   const diagnostic = useOneShotParam('diagnostic');
   const stale = useOneShotParam('stale');
-  const focusRelease = useOneShotParam('release');
-  const focusInstance = useOneShotParam('instance');
   const panel = panelParam(useOneShotParam('panel'));
 
   const base = studioBasePath(kind, agent);
@@ -223,7 +126,6 @@ function EditorBody({
   if (!state.loaded) {
     return (
       <SectionShell title={TITLE}>
-        <Tabs base={base} cardId={cardId} active={tab} />
         <p className="manage-card-blurb">Loading…</p>
       </SectionShell>
     );
@@ -231,7 +133,6 @@ function EditorBody({
   if (state.error || !state.detail) {
     return (
       <SectionShell title={TITLE}>
-        <Tabs base={base} cardId={cardId} active={tab} />
         <p className="manage-card-blurb">Couldn&rsquo;t load this card. Try again.</p>
         <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={state.reload}>
           Try again
@@ -239,9 +140,6 @@ function EditorBody({
       </SectionShell>
     );
   }
-
-  const detail = state.detail;
-  const latest = detail.releases[detail.releases.length - 1];
 
   return (
     <SectionShell
@@ -252,82 +150,44 @@ function EditorBody({
         </a>
       }
     >
-      <Tabs base={base} cardId={cardId} active={tab} />
-      <p className="manage-card-blurb" style={{ margin: '0 0 .35rem' }}>
-        {detail.resource.environment} · {detail.resource.primary ? 'primary' : 'secondary'}
-      </p>
-      <LifecycleBar
-        draftState={detail.draft?.state ?? null}
-        release={latest ?? null}
+      <Overview
+        delegation={ctx.delegation}
+        detail={state.detail}
+        projections={state.projections}
         scopes={ctx.scopes}
-        releasesHref={`${base}/${cardId}/releases`}
-        onReleasesTab={tab === 'releases'}
+        sa={ctx.sa}
+        agentName={ctx.name}
+        signHashFor={ctx.signHashFor}
+        onDetail={state.patch}
+        onReload={state.reload}
+        initialPointer={pointer}
+        initialDiagnostic={diagnostic}
+        initialPanel={panel}
+        staleBanner={stale === '1' || state.detail.draft?.state === 'stale'}
       />
-      {tab === 'card' && (
-        <CardEditor
-          delegation={ctx.delegation}
-          detail={detail}
-          projections={state.projections}
-          scopes={ctx.scopes}
-          onDetail={state.patch}
-          onReload={state.reload}
-          initialPointer={pointer}
-          initialDiagnostic={diagnostic}
-          initialPanel={panel}
-          staleBanner={stale === '1' || detail.draft?.state === 'stale'}
-        />
-      )}
-      {tab === 'projections' && (
-        <ProjectionCenter
-          delegation={ctx.delegation}
-          detail={detail}
-          projections={state.projections}
-          bindings={state.bindings}
-          scopes={ctx.scopes}
-          sa={ctx.sa}
-          signHashFor={ctx.signHashFor}
-          onReload={state.reload}
-          focusInstance={focusInstance}
-        />
-      )}
-      {tab === 'names' && (
-        <NamesAndBindings
-          delegation={ctx.delegation}
-          detail={detail}
-          projections={state.projections}
-          bindings={state.bindings}
-          scopes={ctx.scopes}
-          sa={ctx.sa}
-          agentName={ctx.name}
-          releasesHref={`${base}/${cardId}/releases`}
-          projectionsHref={`${base}/${cardId}/projections`}
-        />
-      )}
-      {tab === 'releases' && (
-        <ReleasesAndAudit
-          delegation={ctx.delegation}
-          detail={detail}
-          scopes={ctx.scopes}
-          sa={ctx.sa}
-          agentName={ctx.name}
-          signHashFor={ctx.signHashFor}
-          onReload={state.reload}
-          focusRelease={focusRelease}
-        />
-      )}
     </SectionShell>
   );
 }
 
+/** The old tab routes keep working as deep links: they land on the overview at the matching anchor. */
+function RedirectToOverview({ kind, agent, cardId, hash }: { kind: StudioScopeKind; agent: string; cardId: string; hash: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    const q = typeof window !== 'undefined' ? window.location.search : '';
+    router.replace(`${studioBasePath(kind, agent)}/${encodeURIComponent(cardId)}${q}${hash}`);
+  }, [router, kind, agent, cardId, hash]);
+  return <SectionShell title={TITLE}><p className="manage-card-blurb">Opening…</p></SectionShell>;
+}
+
 export function AgentCardEditorSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <EditorFrame {...p} tab="card" />;
+  return <EditorFrame {...p} />;
 }
 export function ProjectionCenterSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <EditorFrame {...p} tab="projections" />;
+  return <RedirectToOverview {...p} hash="#list" />;
 }
 export function NamesBindingsSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <EditorFrame {...p} tab="names" />;
+  return <RedirectToOverview {...p} hash="#list" />;
 }
 export function ReleasesAuditSection(p: { kind: StudioScopeKind; agent: string; cardId: string }) {
-  return <EditorFrame {...p} tab="releases" />;
+  return <RedirectToOverview {...p} hash="#history" />;
 }

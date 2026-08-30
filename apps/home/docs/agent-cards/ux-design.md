@@ -1,5 +1,10 @@
 # Agent Card & Projection Studio — UX Design
 
+> **Superseded (2026-08-30):** the information architecture in §1–§9 (tabs, stepper, projection center, names & bindings
+> tab) is replaced by [`flow-redesign.md`](./flow-redesign.md) — one page, three ordered stages, one primary action each.
+> Component-level rules here (field rows, diagnostics copy, BusyButton, `VERSION_LABELS`) still hold.
+
+
 **Surface:** `Home › Agents › {agent} › Card & Projections`
 **Spec of record:** [`specs/347-a2a-agent-card-and-projection-studio.md`](../../../../specs/347-a2a-agent-card-and-projection-studio.md) §3, §4.3, §4.4, §9
 **ADR of record:** [ADR-0062](../../../../docs/architecture/decisions/0062-agent-card-projection-publication-binding.md)
