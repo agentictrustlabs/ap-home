@@ -121,13 +121,17 @@ export function ListingFlow({
               {row.button.label}
             </BusyButton>
           )}
-          {row.button?.id === 'open' && family === 'ap-naming' && <a className="btn-ghost" href="/naming">Open</a>}
+          {row.button?.id === 'open' && (
+            <button type="button" className="btn-ghost" onClick={() => setDetailsOpen((o) => !o)}>
+              {detailsOpen ? 'Hide what it says' : 'See what it says'}
+            </button>
+          )}
           {row.secondary && (
             <BusyButton busy={busy} busyLabel={phase || 'Working…'} className="btn-ghost" onClick={() => void run()}>
               {row.secondary.label}
             </BusyButton>
           )}
-          {projection && (
+          {projection && row.button?.id !== 'open' && (
             <button type="button" className="btn-ghost" onClick={() => setDetailsOpen((o) => !o)}>
               {detailsOpen ? 'Hide details' : 'Details'}
             </button>

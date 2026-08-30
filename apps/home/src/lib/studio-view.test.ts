@@ -375,6 +375,7 @@ describe('studioErrorSentence — service codes become something a steward can a
     expect(studioErrorSentence('stale_revision')).toContain('Someone else changed this draft');
     expect(studioErrorSentence('scope_not_held')).toContain('do not hold the access');
     expect(studioErrorSentence('Network request failed')).toBe('Network request failed');
+    expect(studioErrorSentence('[registry-kit/projection] illegal projection transition: published --configure-->')).toContain('does not allow that step right now');
     expect(studioErrorSentence('publication execute failed: userop_reverted — inner userOp reverted (no UserOperationEvent for sender=0xb2 — sendersSeen=[] tx=0xfd)')).toContain("account rejected the write");
   });
 });
