@@ -155,6 +155,36 @@ export const BINDING_PROMPT = {
   skip: 'Skip for now',
 } as const;
 
+// ── the cards list (only ever seen when an agent has 0 or 2+ cards) ─────────────────────────────────────
+
+export interface CardRowView {
+  /** What this card IS, for a steward scanning several. */
+  title: string;
+  subtitle: string;
+  status: string;
+  tone: StageStatus['tone'];
+}
+
+export function cardRowView(entry: {
+  displayName?: string;
+  environment: string;
+  primary: boolean;
+  draftState: 'clean' | 'dirty' | 'stale' | 'validated' | 'draft' | 'conflict' | null;
+  releaseState: string | null;
+  servedReleaseId: string | null;
+  listedCount: number;
+  listedTotal: number;
+}): CardRowView {
+  const subtitle = [entry.primary ? 'The card other agents see' : 'An additional card', entry.environment === 'production' ? null : entry.environment].filter(Boolean).join(' · ');
+  if (entry.releaseState === 'published' || entry.servedReleaseId) {
+    const listed = entry.listedTotal === 0 ? '' : entry.listedCount === entry.listedTotal ? ' · listed everywhere' : ` · listed in ${entry.listedCount} of ${entry.listedTotal} places`;
+    return { title: entry.displayName ?? 'Agent card', subtitle, status: `Live ✓${listed}`, tone: 'good' };
+  }
+  if (entry.draftState === 'dirty' || entry.draftState === 'draft') return { title: entry.displayName ?? 'Agent card', subtitle, status: 'Being written', tone: 'muted' };
+  if (entry.draftState === 'stale' || entry.draftState === 'conflict') return { title: entry.displayName ?? 'Agent card', subtitle, status: 'Needs a look', tone: 'warn' };
+  return { title: entry.displayName ?? 'Agent card', subtitle, status: 'Not live yet', tone: 'muted' };
+}
+
 // ── §9.4: the main path never speaks our vocabulary ──────────────────────────────────────────────────────
 
 export const FORBIDDEN_ON_LANDING = ['projection', 'release', 'digest', 'sha256', 'erc-1271', 'erc1271', 'spec ', 'adapter', 'bundle', 'artifact', 'validate', 'card_not_selected'] as const;
@@ -175,6 +205,10 @@ export function landingCopySamples(): string[] {
     r(liveStage({ plan, release: null, cardUri: null, lastVerdict: null }));
     if (plan.kind === 'blocked') out.push(plan.line);
     if (plan.kind === 'ready' && plan.stopAt) out.push(plan.stopAt.line);
+  }
+  for (const rs of ['published', null]) for (const ds of ['dirty', 'stale', null] as const) {
+    const v = cardRowView({ displayName: 'Alice', environment: 'production', primary: true, draftState: ds, releaseState: rs, servedReleaseId: null, listedCount: 1, listedTotal: 2 });
+    out.push(v.title, v.subtitle, v.status);
   }
   out.push(...Object.values(PUBLISH_PHRASE), ...Object.values(WAITING_LINE), ...Object.values(BINDING_PROMPT));
   return out.filter(Boolean);

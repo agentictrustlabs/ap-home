@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeStage, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
+import { cardRowView, describeStage, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
 import { listingCatalog, listingRow, lossSentence, listingCopySamples, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
@@ -89,6 +89,27 @@ describe('listings — projections in the user\'s words', () => {
   it('summarises a loss in one sentence, never as a count headline', () => {
     expect(lossSentence('Faithnet directory', [{ category: 'truncated', severity: 'warning', sourcePointer: '/skills/3' }, { category: 'truncated', severity: 'warning', sourcePointer: '/skills/4' }], 5)).toBe("Faithnet directory can't show 2 of your 5 skills — it will list the other 3.");
     expect(lossSentence('x', [{ category: 'targetDefault', severity: 'info' }])).toBeNull();
+  });
+});
+
+describe('cardRowView — a row says which card and whether it is live, nothing else', () => {
+  const base = { displayName: 'Alice', environment: 'production', primary: true, servedReleaseId: null, listedCount: 1, listedTotal: 2 };
+  it('reports live with how far the listings got', () => {
+    expect(cardRowView({ ...base, draftState: 'clean', releaseState: 'published' })).toMatchObject({ status: 'Live ✓ · listed in 1 of 2 places', tone: 'good' });
+    expect(cardRowView({ ...base, draftState: 'clean', releaseState: 'published', listedCount: 2 }).status).toBe('Live ✓ · listed everywhere');
+    expect(cardRowView({ ...base, draftState: 'clean', releaseState: 'published', listedTotal: 0 }).status).toBe('Live ✓');
+  });
+  it('never shows a version number, a state word or a digest', () => {
+    for (const rs of [null, 'signed', 'approved']) for (const ds of ['dirty', 'stale', 'clean'] as const) {
+      const v = cardRowView({ ...base, draftState: ds, releaseState: rs });
+      expect(`${v.title} ${v.subtitle} ${v.status}`.toLowerCase()).not.toMatch(/sha256|release|version|published|validate/);
+    }
+    expect(cardRowView({ ...base, draftState: 'dirty', releaseState: null }).status).toBe('Being written');
+    expect(cardRowView({ ...base, draftState: 'stale', releaseState: null })).toMatchObject({ status: 'Needs a look', tone: 'warn' });
+    expect(cardRowView({ ...base, draftState: null, releaseState: null }).status).toBe('Not live yet');
+  });
+  it('says what a non-primary card is for', () => {
+    expect(cardRowView({ ...base, primary: false, draftState: null, releaseState: null }).subtitle).toContain('An additional card');
   });
 });
 

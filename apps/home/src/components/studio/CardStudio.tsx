@@ -109,10 +109,6 @@ function CardsListBody({ kind, agent, ctx }: { kind: StudioScopeKind; agent: str
   const { cards, projections, loaded, error, reload } = useCards(ctx.delegation);
   return (
     <SectionShell title={TITLE}>
-      <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-        A card is what other agents see when they look this one up — what it does and how to reach it. Describe it,
-        make it live at its public address, then list it where agents and people search.
-      </p>
       <CardList
         delegation={ctx.delegation}
         cards={cards}
