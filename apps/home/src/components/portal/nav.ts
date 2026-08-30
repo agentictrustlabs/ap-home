@@ -118,6 +118,9 @@ export function buildNav(
       {
         heading: 'Manage',
         items: [
+          // Agent: the service's own Playbook (assistant skill) — what its discussion agent answers
+          // as when an app addresses it (a field workspace's coordinator "Ask"). Mirrors org → Agent.
+          { id: 'service-agent', label: 'Agent', href: serviceHref(a, 'playbook'), Icon: BotIcon, status: 'live' },
           { id: 'service-records', label: 'Records', href: serviceHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'service-access', label: 'Access', href: serviceHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
         ],
