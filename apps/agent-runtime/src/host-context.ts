@@ -23,6 +23,22 @@ export const AGENT_NAME_PARENT = 'impact';
 export const DEFAULT_PUBLIC_BASE_DOMAIN = 'impact-agent.io';
 
 /**
+ * The zones this deployment serves agents on, most-canonical FIRST (`A2A_PUBLIC_BASE_DOMAIN` accepts a
+ * comma list). New cards publish at the first; the rest stay parseable so hosts named inside cards that are
+ * ALREADY published and signed keep resolving through a zone move. Agents belong on a zone of their own — a
+ * wildcard route on a zone shared with other Workers captures them (learned on faithnet.io, 2026-08-30).
+ */
+export function a2aBaseDomains(env: { A2A_PUBLIC_BASE_DOMAIN?: string }): string[] {
+  const list = (env.A2A_PUBLIC_BASE_DOMAIN ?? DEFAULT_PUBLIC_BASE_DOMAIN).split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+  return list.length > 0 ? list : [DEFAULT_PUBLIC_BASE_DOMAIN];
+}
+
+/** Where NEW publications go: the canonical zone. */
+export function a2aCanonicalDomain(env: { A2A_PUBLIC_BASE_DOMAIN?: string }): string {
+  return a2aBaseDomains(env)[0]!;
+}
+
+/**
  * Extract a single-label subdomain from a hostname given the base domain.
  * `alice.impact-agent.io` + `impact-agent.io` → `alice`. The apex, nested
  * labels (`a.b.impact-agent.io`), and non-matching hosts → `null`.
@@ -158,11 +174,17 @@ export async function resolveAgentHost(
   env: HostEnv,
   requestOrigin: string,
 ): Promise<AgentHostContext> {
-  const baseDomain = env.A2A_PUBLIC_BASE_DOMAIN ?? DEFAULT_PUBLIC_BASE_DOMAIN;
+  const domains = a2aBaseDomains(env);
+  const baseDomain = domains[0]!;
   const injected = req.headers.get('x-agent-subdomain');
-  const fromHost = parseTypedAgentHost(new URL(req.url).hostname, baseDomain, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT);
+  const hostname = new URL(req.url).hostname;
+  // Parse against every zone we serve, not just the canonical one, so a host published before a zone move
+  // still names its agent (the URL is inside the card's SIGNED bytes and cannot be edited in place).
+  const fromHost = domains.map((d) => parseTypedAgentHost(hostname, d, env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)).find((r) => r !== null) ?? null;
   const label = injected && injected.trim() ? injected.trim().toLowerCase() : fromHost?.label ?? null;
-  const publicOrigin = req.headers.get('x-public-origin')?.trim() || (label ? `https://${label}.${baseDomain}` : requestOrigin);
+  // The public origin echoes the host that was ASKED for, so a card served from the old zone keeps naming it.
+  const servedDomain = domains.find((d) => hostname === d || hostname.endsWith(`.${d}`)) ?? baseDomain;
+  const publicOrigin = req.headers.get('x-public-origin')?.trim() || (label ? `https://${label}.${servedDomain}` : requestOrigin);
   return resolveAgentByLabel(label, env, publicOrigin);
 }
 

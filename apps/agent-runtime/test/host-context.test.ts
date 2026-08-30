@@ -20,6 +20,8 @@ import {
   parseAgentSubdomain,
   parseTypedAgentHost,
   hostForName,
+  a2aBaseDomains,
+  a2aCanonicalDomain,
   agentNameForHandle,
   agentNameForLabel,
   withConsultSkill,
@@ -220,5 +222,21 @@ describe('typed hosts are one label and reverse cleanly (spec 346 §5, 2026-08-3
       expect(host.split('.').length).toBe(3); // one label under the zone
       expect(parseTypedAgentHost(host, base, 'me')?.name).toBe(name);
     }
+  });
+});
+
+describe('a zone move keeps already-published hosts parseable (spec 346 §5)', () => {
+  const env = { A2A_PUBLIC_BASE_DOMAIN: 'faithnet.ai, faithnet.io' };
+  it('publishes at the canonical zone and still serves the older one', () => {
+    expect(a2aCanonicalDomain(env)).toBe('faithnet.ai');
+    expect(a2aBaseDomains(env)).toEqual(['faithnet.ai', 'faithnet.io']);
+    expect(hostForName('fort-morgan-household.church', a2aCanonicalDomain(env), ['me', 'impact'])).toBe('fort-morgan-household-church.faithnet.ai');
+    for (const zone of a2aBaseDomains(env)) {
+      expect(parseTypedAgentHost(`fort-morgan-household-church.${zone}`, zone, 'me')?.name).toBe('fort-morgan-household.church');
+    }
+  });
+  it('falls back to the packaged default when unset, and ignores empty entries', () => {
+    expect(a2aCanonicalDomain({})).toBe('impact-agent.io');
+    expect(a2aBaseDomains({ A2A_PUBLIC_BASE_DOMAIN: ' , ' })).toEqual(['impact-agent.io']);
   });
 });

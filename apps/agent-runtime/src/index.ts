@@ -59,7 +59,7 @@ import {
   caip10,
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, hostForName, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
 import { ardHostManifest, ARD_WELL_KNOWN_PATH } from './ard';
 import { cardContentDigest, jcsDigest as cardJcsDigest } from '@agenticprimitives/agent-profile/a2a';
 import { AgentIdentityClient } from '@agenticprimitives/agent-profile';
@@ -1001,7 +1001,8 @@ function studioSources(env: Env): StudioSources {
     return new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId, registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) });
   };
   const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-  const baseDomain = env.A2A_PUBLIC_BASE_DOMAIN ?? DEFAULT_PUBLIC_BASE_DOMAIN;
+  const baseDomain = a2aCanonicalDomain(env);
+  const servedDomains = a2aBaseDomains(env);
   const hostContext = async (agent: Address): Promise<AgentHostContext> => {
     const name = await naming().reverseResolve(agent);
     const host = name ? hostForName(name, baseDomain, parents) : null;
@@ -1087,7 +1088,7 @@ function studioSources(env: Env): StudioSources {
     // Egress is pinned to THIS deployment's public zone: the Studio never fetches an arbitrary URL.
     fetch: async (url) => {
       const u = new URL(url);
-      if (u.protocol !== 'https:' || !(u.hostname === baseDomain || u.hostname.endsWith(`.${baseDomain}`))) throw new Error(`well-known re-fetch refused: ${u.hostname} is outside ${baseDomain}`);
+      if (u.protocol !== 'https:' || !servedDomains.some((d) => u.hostname === d || u.hostname.endsWith(`.${d}`))) throw new Error(`well-known re-fetch refused: ${u.hostname} is outside ${servedDomains.join(', ')}`);
       // A host under our own base domain IS this Worker. Cloudflare refuses a Worker's subrequest to a
       // hostname the same account serves (the CF-1042 loopback; it surfaces as 522/530), so a network
       // re-fetch of our own card can never succeed — it would report "endpoint unreachable" about an

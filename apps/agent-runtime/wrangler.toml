@@ -349,6 +349,13 @@ workers_dev = true
 pattern = "a2a.faithnet.io"
 custom_domain = true
 
+# One wildcard for the whole agent estate, present and future. Safe HERE and not on faithnet.io because this
+# zone hosts nothing but agents — the same shape production uses on impact-agent.io. Needs a proxied `*` DNS
+# record on the zone.
+[[env.faithnet.routes]]
+pattern = "*.faithnet.ai/*"
+zone_name = "faithnet.ai"
+
 [env.faithnet.vars]
 # spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
 AGENT_NAME_PARENTS = "me,impact"
@@ -388,7 +395,9 @@ AGENT_NAME_UNIVERSAL_RESOLVER = "0xF343054e046A4145ccae499ECB28197394eE0798"
 PROFILE_RESOLVER = "0xB03F7C06ad3274F584AB72794406D639c02A45e1"
 PERMISSIONLESS_SUBREGISTRY = "0x9E803ac48b0F32BCE10BFC183b30f6d756DB11CC"
 AGENT_RELATIONSHIP = "0x5015bD7d422e003511246f848cDd798cb00BB968"
-A2A_PUBLIC_BASE_DOMAIN = "faithnet.io"
+# Agents live on their OWN zone (2026-08-30). faithnet.io stays parseable because two cards were already
+# published under it and their URLs are inside signed bytes; nothing new publishes there.
+A2A_PUBLIC_BASE_DOMAIN = "faithnet.ai,faithnet.io"
 DEMO_EDGE_URL = "https://edge.faithnet.io"
 BROKER_ISS = "https://www.faithnet.me"
 BROKER_JWKS_URL = "https://www.faithnet.me/jwks"
