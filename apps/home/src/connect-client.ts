@@ -398,7 +398,7 @@ async function declareTypeCalls(sa: Address, tld: string, serviceRole?: string):
  *  church are Organizations; team → Team; workspace → WorkspaceCoordinator; both treasuries → Treasury. */
 export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serviceRole?: string } | undefined {
   const map: Record<string, { tld: string; serviceRole?: string }> = {
-    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'org' }, church: { tld: 'org' }, team: { tld: 'team' },
+    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, team: { tld: 'team' },
     workspace: { tld: 'workspace', serviceRole: 'workspace-coordinator' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
   };
   const t = map[kind];
