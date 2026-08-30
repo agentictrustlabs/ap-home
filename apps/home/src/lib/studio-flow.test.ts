@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardRowView, describeStage, problemsFrom, servedInterfacesFrom, onlyAddressProblems, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
+import { cardRowView, describeStage, publicEndpoints, problemsFrom, servedInterfacesFrom, onlyAddressProblems, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
 import { listingCatalog, listingRow, lossSentence, listingCopySamples, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
@@ -134,6 +134,22 @@ describe('problems are named on the screen that says there are problems', () => 
     expect(onlyAddressProblems(addr)).toBe(true);
     expect(onlyAddressProblems([...addr, { code: 'SECRET_MATERIAL_DETECTED', severity: 'error', sourcePointer: '/description', message: 'x' }])).toBe(false);
     expect(onlyAddressProblems([])).toBe(false);
+  });
+});
+
+describe('publicEndpoints — both documents a live agent serves', () => {
+  it('names the card and the discovery entry on the same host, each with its standard', () => {
+    const e = publicEndpoints('https://ncf-workspace.faithnet.ai/.well-known/agent-card.json');
+    expect(e.map((x) => x.url)).toEqual([
+      'https://ncf-workspace.faithnet.ai/.well-known/agent-card.json',
+      'https://ncf-workspace.faithnet.ai/.well-known/ard.json',
+    ]);
+    expect(e.map((x) => x.standard)).toEqual(['A2A 1.0', 'ARD 0.91']);
+    expect(e[1]!.what).toContain('crawlers and directories');
+  });
+  it('has nothing to show without an address', () => {
+    expect(publicEndpoints(null)).toEqual([]);
+    expect(publicEndpoints('not a url')).toEqual([]);
   });
 });
 

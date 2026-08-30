@@ -113,6 +113,16 @@ function LiveEndpoint({
         What this agent&apos;s public endpoint is serving right now. Everything else in this inspector is about your draft.
       </p>
 
+      {view?.uri && (() => {
+        let ardUri: string | null = null;
+        try { ardUri = `${new URL(view.uri).origin}/.well-known/ard.json`; } catch { ardUri = null; }
+        return ardUri ? (
+          <p className="manage-card-blurb" style={{ margin: '0 0 .4rem', fontSize: '.72rem' }}>
+            The same host also serves its discovery entry (ARD 0.91):{' '}
+            <a href={ardUri} target="_blank" rel="noreferrer" style={{ color: 'var(--c-primary)' }}>{ardUri} ↗</a>
+          </p>
+        ) : null;
+      })()}
       {view?.uri && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem', alignItems: 'center', marginBottom: '.5rem' }}>
           <a href={view.uri} target="_blank" rel="noreferrer" style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-primary)', fontWeight: 600 }}>

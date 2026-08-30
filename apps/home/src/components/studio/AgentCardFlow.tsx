@@ -43,7 +43,7 @@ import { cardUriForName, publicationVerdict, studioErrorSentence, type Publicati
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
-import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
+import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
 import { ReleaseStepper } from './ReleaseStepper';
@@ -306,10 +306,26 @@ export function AgentCardFlow({
               <button type="button" className="btn-ghost" onClick={() => { setEditorPointer(problems[0]?.pointer ?? null); setEditing(true); }}>Open the editor</button>
             </>
           )}
-          {live.action?.id === 'open' && cardUri && (
-            <a className="btn-ghost" href={cardUri} target="_blank" rel="noreferrer">Open</a>
-          )}
         </div>
+        {plan.kind === 'live' && (
+          <div style={{ marginTop: '.6rem', display: 'grid', gap: '.4rem' }}>
+            <span className="manage-card-blurb" style={{ margin: 0, fontWeight: 700 }}>What this address serves</span>
+            {publicEndpoints(cardUri).map((e) => (
+              <div key={e.id} style={{ border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.5rem .6rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.6rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+                  <span style={{ fontWeight: 700, fontSize: '.82rem' }}>{e.label}</span>
+                  <a href={e.standardUrl} target="_blank" rel="noreferrer" style={{ fontSize: '.7rem', color: 'var(--c-g500)' }}>
+                    follows {e.standard} ↗
+                  </a>
+                </div>
+                <p className="manage-card-blurb" style={{ margin: '.1rem 0 .3rem' }}>{e.what}</p>
+                <a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-primary)', fontWeight: 600 }}>
+                  {e.url} ↗
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
       </Stage>
 
       {plan.kind === 'live' && (

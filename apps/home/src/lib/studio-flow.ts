@@ -148,6 +148,48 @@ export function liveStage(input: {
   };
 }
 
+// ── what a live agent actually serves ────────────────────────────────────────────────────────────────────
+// Publishing puts TWO documents at the agent's address, and a steward should be able to open both: the card
+// itself, and the one-line entry that points at it so crawlers and directories can find it without being told.
+// Named by what they are, with the standard each one follows shown as a link for whoever needs it.
+
+export interface PublicEndpoint {
+  id: 'card' | 'entry';
+  label: string;
+  what: string;
+  url: string;
+  standard: string;
+  standardUrl: string;
+}
+
+export const A2A_STANDARD_URL = 'https://a2a-protocol.org/latest/specification/';
+export const ARD_STANDARD_URL = 'https://agenticresourcediscovery.org/spec/';
+
+/** `cardUri` is `https://<host>/.well-known/agent-card.json`; both documents sit on that host. */
+export function publicEndpoints(cardUri: string | null): PublicEndpoint[] {
+  if (!cardUri) return [];
+  let origin: string;
+  try { origin = new URL(cardUri).origin; } catch { return []; }
+  return [
+    {
+      id: 'card',
+      label: 'Agent card',
+      what: 'What this agent is, what it can do, and how to talk to it.',
+      url: `${origin}/.well-known/agent-card.json`,
+      standard: 'A2A 1.0',
+      standardUrl: A2A_STANDARD_URL,
+    },
+    {
+      id: 'entry',
+      label: 'Discovery entry',
+      what: 'A short entry pointing at the card, so crawlers and directories can find this agent without being told about it.',
+      url: `${origin}/.well-known/ard.json`,
+      standard: 'ARD 0.91',
+      standardUrl: ARD_STANDARD_URL,
+    },
+  ];
+}
+
 /** The one prompt the chain stops for: the optional custodian binding (flow-redesign §4). */
 export const BINDING_PROMPT = {
   title: 'Sign with your custodian?',
@@ -270,6 +312,7 @@ export function landingCopySamples(): string[] {
     const v = cardRowView({ displayName: 'Alice', environment: 'production', primary: true, draftState: ds, releaseState: rs, servedReleaseId: null, listedCount: 1, listedTotal: 2 });
     out.push(v.title, v.subtitle, v.status);
   }
+  for (const e of publicEndpoints('https://x.example/.well-known/agent-card.json')) out.push(e.label, e.what, e.standard);
   out.push(...Object.values(PUBLISH_PHRASE), ...Object.values(WAITING_LINE), ...Object.values(BINDING_PROMPT));
   return out.filter(Boolean);
 }
