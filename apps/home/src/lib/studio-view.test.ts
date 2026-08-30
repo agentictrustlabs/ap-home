@@ -327,6 +327,13 @@ describe('compareServed — editing vs released vs served', () => {
 
 describe('publicationVerdict — what a steward is told after publish/verify', () => {
   const uri = 'https://ncf.faithnet.io/.well-known/agent-card.json';
+  it('an in-process check is reported as serving-verified, never as proof of public routing', () => {
+    const v = publicationVerdict({ verificationResult: 'valid', uri, observedVia: 'serving-handler' });
+    expect(v.tone).toBe('good');
+    expect(v.title).toContain('returns exactly these bytes');
+    expect(v.title).not.toMatch(/Live and verified/);
+    expect(v.next).toContain('Live endpoint');
+  });
   it('confirms a verified publication and asks for nothing', () => {
     const v = publicationVerdict({ verificationResult: 'valid', uri });
     expect(v).toMatchObject({ tone: 'good', next: null });

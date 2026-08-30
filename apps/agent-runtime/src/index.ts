@@ -1088,8 +1088,20 @@ function studioSources(env: Env): StudioSources {
     fetch: async (url) => {
       const u = new URL(url);
       if (u.protocol !== 'https:' || !(u.hostname === baseDomain || u.hostname.endsWith(`.${baseDomain}`))) throw new Error(`well-known re-fetch refused: ${u.hostname} is outside ${baseDomain}`);
-      return fetch(url, { headers: { accept: 'application/json' }, redirect: 'manual' });
+      // A host under our own base domain IS this Worker. Cloudflare refuses a Worker's subrequest to a
+      // hostname the same account serves (the CF-1042 loopback; it surfaces as 522/530), so a network
+      // re-fetch of our own card can never succeed — it would report "endpoint unreachable" about an
+      // endpoint that is answering the public internet perfectly well.
+      //
+      // This is NOT a fallback (ADR-0013): the mechanism is chosen by a FACT known before the call —
+      // "do I serve this host?" — not by watching a request fail. We ask this Worker's own handler the
+      // exact request the public URL receives, so the check covers the real serving path (host
+      // resolution → agent binding → released-vs-live). What it does not cover is DNS and edge routing;
+      // the receipt says so via `observedVia`, and the Home's Live-endpoint panel fetches the public URL
+      // from the browser, which is a genuinely external observation.
+      return app.fetch(new Request(url, { headers: { accept: 'application/json' } }), env);
     },
+    observedVia: 'serving-handler',
     principalKind: async (address) => {
       const d = await derived(address);
       const root = d.agentType ? rootClassForDerivedType(d.agentType) : d.agentKind;

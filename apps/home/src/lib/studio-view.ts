@@ -696,12 +696,21 @@ export interface PublicationVerdict {
   detail: string | null;
 }
 
-export function publicationVerdict(receipt: { verificationResult: string; uri?: string; detail?: string }): PublicationVerdict {
+export function publicationVerdict(receipt: { verificationResult: string; uri?: string; detail?: string; observedVia?: 'network' | 'serving-handler' }): PublicationVerdict {
   const host = (() => { try { return receipt.uri ? new URL(receipt.uri).host : null; } catch { return null; } })();
   const where = host ? `at ${host}` : 'at your agent\'s endpoint';
   const detail = receipt.detail ?? null;
   if (receipt.verificationResult === 'valid') {
-    return { tone: 'good', title: `Live and verified — this is the card being served ${where}.`, next: null, detail: null };
+    // An in-process check proves the serving path returns these bytes for that host; it cannot prove DNS
+    // and edge routing, so it does not get to claim "live on the internet".
+    return receipt.observedVia === 'serving-handler'
+      ? {
+          tone: 'good',
+          title: `Verified — the service behind ${host ?? 'this agent'} returns exactly these bytes for its card.`,
+          next: 'Open the Live endpoint panel in the editor to fetch the public URL from your own browser, which also proves DNS and routing.',
+          detail: null,
+        }
+      : { tone: 'good', title: `Live and verified — this is the card being served ${where}.`, next: null, detail: null };
   }
   if (receipt.verificationResult === 'invalid') {
     return {

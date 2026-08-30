@@ -153,6 +153,8 @@ export interface StudioSources {
   cardUri(agent: Address): Promise<string | null>;
   /** Egress for the well-known re-fetch (SSRF-safe at the wiring). */
   fetch(url: string): Promise<Response>;
+  /** What `fetch` above actually is, recorded on every receipt. Omitted = a real network fetch. */
+  observedVia?: 'network' | 'serving-handler';
   /** Which class of principal presented the delegation. A Service Agent is the Agent Metadata Steward. */
   principalKind(address: Address): Promise<'human' | 'service-agent'>;
 }
@@ -202,6 +204,11 @@ export interface A2AWellKnownPublicationReceiptV1 {
   httpEtag?: string;
   cacheControl?: string;
   verifiedAt: string;
+  /** How the served bytes were observed. `serving-handler` = the serving Worker answered its own request
+   *  in-process (covers host binding and released-vs-live, NOT DNS or edge routing — Cloudflare refuses a
+   *  Worker subrequest to a hostname the same account serves); `network` = a real HTTPS fetch. The two are
+   *  different evidence, so the receipt says which one it is. */
+  observedVia?: 'network' | 'serving-handler';
   verificationResult: 'valid' | 'invalid' | 'unverified';
   /** Why `invalid` / `unverified` (served digest, HTTP status, egress error) — evidence, never a retry hint. */
   detail?: string;
@@ -969,7 +976,8 @@ export class AgentCardStudio {
   /** Re-fetch the public card and compare BOTH the served bytes' digest and the `x-ap-card-digest` header. */
   private async verifyWellKnown(uri: string, releaseId: string, digest: Sha256): Promise<A2AWellKnownPublicationReceiptV1> {
     const verifiedAt = this.now();
-    const base = { type: 'A2AWellKnownPublicationReceiptV1' as const, receiptId: `wk-${idFrom(uri, releaseId, digest, verifiedAt)}`, uri, releaseId, contentDigest: digest, verifiedAt };
+    const observedVia = this.deps.sources.observedVia ?? 'network';
+    const base = { type: 'A2AWellKnownPublicationReceiptV1' as const, receiptId: `wk-${idFrom(uri, releaseId, digest, verifiedAt)}`, uri, releaseId, contentDigest: digest, verifiedAt, observedVia };
     let resp: Response;
     try {
       resp = await this.deps.sources.fetch(uri);
