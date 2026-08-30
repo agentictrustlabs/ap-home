@@ -12,17 +12,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenticprimitives/content-storage": "workspace:*",
     "@agenticprimitives/a2a": "workspace:*",
     "@agenticprimitives/agent-account": "workspace:*",
     "@agenticprimitives/agent-naming": "workspace:*",
+    "@agenticprimitives/agent-profile": "workspace:*",
+    "@agenticprimitives/agent-resolution": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
     "@agenticprimitives/chain-state": "workspace:*",
     "@agenticprimitives/chain-state-viem": "workspace:*",
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
+    "@agenticprimitives/content-storage": "workspace:*",
     "@agenticprimitives/coordination": "workspace:*",
-    "@agenticprimitives/situations": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/fabric": "workspace:*",
@@ -32,12 +33,12 @@
     "@agenticprimitives/orchestration-anthropic": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/related-agents": "workspace:*",
+    "@agenticprimitives/situations": "workspace:*",
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
     "hono": "^4.12.33",
-    "viem": "^2.52.2",
-    "@agenticprimitives/agent-resolution": "workspace:*"
+    "viem": "^2.52.2"
   },
   "devDependencies": {
     "@agenticprimitives/provenance": "workspace:*",

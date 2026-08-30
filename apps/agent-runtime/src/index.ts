@@ -60,6 +60,7 @@ import {
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
 import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
+import { cardContentDigest } from '@agenticprimitives/agent-profile/a2a';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -176,6 +177,12 @@ export interface Env {
   // Bridge anti-replay nonce store (audit M-1) — cross-isolate single-use via KV. Optional: when unbound
   // (e.g. local dev) the bridge falls back to the per-isolate in-memory store.
   BRIDGE_NONCES?: KVNamespace;
+  /**
+   * spec 347 §8.1 — serving-plane CACHE of RELEASED A2A Agent Cards, keyed `released-card:<sa lowercase>`
+   * → the exact released bytes (JSON: `{ digest, releaseId, bytes }`). The RECORD is the release in the
+   * owner's vault (ADR-0055); this is a rebuild, not a bereavement. Absent binding ⇒ the live card is served.
+   */
+  RELEASED_CARDS?: KVNamespace;
   // Federated user-data tokens (spec 265) — per-person YouVersion OAuth tokens, KMS-encrypted at rest,
   // keyed by person SA. Read ONLY server-side; never returned to a relying app.
   FED_TOKENS?: KVNamespace;
@@ -910,7 +917,26 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
   // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
   // self-asserted labels and never the mounted ones.
   if (ctx.agent) skills = withMountedSkills(skills);
-  return c.json(buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined, !!c.env.SKILLS_CORPUS_URL?.trim()));
+  // spec 347 §8.1 — a RELEASED card, when one is published for this agent, is served byte-for-byte: the
+  // well-known publisher re-fetches and compares digests, and `atl:cardDigest` on the name points at it.
+  // ONE mechanism (ADR-0013): a present-but-unparseable cache entry is a 500, never a quiet fall-through.
+  if (ctx.agent && c.env.RELEASED_CARDS) {
+    const raw = await c.env.RELEASED_CARDS.get(releasedCardKey(ctx.agent));
+    if (raw) {
+      const entry = JSON.parse(raw) as { digest: string; releaseId: string; bytes: string };
+      if (!/^sha256:[0-9a-f]{64}$/.test(entry.digest) || typeof entry.bytes !== 'string') return c.json({ error: 'released card cache entry malformed' }, 500);
+      return new Response(entry.bytes, { headers: { 'content-type': 'application/json; charset=utf-8', etag: `"${entry.digest}"`, 'x-ap-card-digest': entry.digest, 'x-ap-card-release': entry.releaseId, 'x-ap-card-source': 'released' } });
+    }
+  }
+  const live = buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined, !!c.env.SKILLS_CORPUS_URL?.trim());
+  // Live-truth card (ADR-0059): digest over the RFC 8785 canonical bytes (signatures stripped), so a
+  // released card's digest and this one are comparable without either side re-implementing anything.
+  const digest = cardContentDigest(live as { signatures?: unknown });
+  return c.json(live, 200, { etag: `"${digest}"`, 'x-ap-card-digest': digest, 'x-ap-card-source': 'live' });
+}
+/** KV key for the released-card cache (spec 347 §8.1). */
+export function releasedCardKey(agent: string): string {
+  return `released-card:${agent.toLowerCase()}`;
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias

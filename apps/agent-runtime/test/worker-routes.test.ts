@@ -12,7 +12,8 @@
 // direction of that failure and worth keeping that way on purpose.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import app from '../src/index.js';
+import app, { releasedCardKey } from '../src/index.js';
+import { cardContentDigest } from '@agenticprimitives/agent-profile/a2a';
 
 // THE WORKER BRIDGES ITS ENV INTO GLOBAL `process.env` AT REQUEST ENTRY (`bridgeEnvToProcessEnv`), and
 // never clears it — our packages read secrets from `process.env`, and in production one isolate serves
@@ -75,6 +76,26 @@ describe('the agent card is public and says only public things', () => {
 
   it('serves the legacy card path too, so older clients keep resolving', async () => {
     expect((await call('/.well-known/agent.json')).status).toBe(200);
+  });
+
+  // spec 347 §8.1 — the live card carries its own RFC 8785 content digest, so a verifier (or the naming
+  // record `atl:cardDigest`) can compare without trusting the server's word for it.
+  it('stamps the live card with its canonical content digest', async () => {
+    const r = await call('/.well-known/agent-card.json');
+    expect(r.headers.get('x-ap-card-source')).toBe('live');
+    const digest = r.headers.get('x-ap-card-digest')!;
+    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(cardContentDigest(await r.json())).toBe(digest);
+    expect(r.headers.get('etag')).toBe(`"${digest}"`);
+  });
+
+  it('without a bound agent the released-card cache is never consulted', async () => {
+    let reads = 0;
+    const kv = { get: async () => { reads++; return null; } } as unknown as KVNamespace;
+    const r = await call('/.well-known/agent-card.json', {}, env({ RELEASED_CARDS: kv }));
+    expect(r.status).toBe(200);
+    expect(reads).toBe(0);
+    expect(releasedCardKey('0xABC')).toBe('released-card:0xabc');
   });
 });
 
