@@ -21,6 +21,11 @@ const EVENT_COPY: Record<HomeControlEventV1['eventType'], string> = {
   'credential-received': 'Credential received',
   'inbox-decision': 'Inbox decision recorded',
   'home-rotated': 'Home manifest published',
+  // spec 347 — Agent Card & Projection Studio
+  'card-released': 'Agent card released',
+  'card-published': 'Agent card published',
+  'projection-published': 'Registry projection published',
+  'binding-revoked': 'External binding revoked',
 };
 
 export default function ActivityPage() {
