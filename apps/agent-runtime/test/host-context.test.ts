@@ -240,3 +240,22 @@ describe('a zone move keeps already-published hosts parseable (spec 346 §5)', (
     expect(a2aBaseDomains({ A2A_PUBLIC_BASE_DOMAIN: ' , ' })).toEqual(['impact-agent.io']);
   });
 });
+
+describe('the card advertises the agent\'s NAME on the edge path, not its DNS label', () => {
+  it('uses the typed name so the handle resolves through the naming grammar', () => {
+    const card = buildA2aAgentCard(
+      { label: 'northern-colorado-field-workspace', name: 'northern-colorado-field.workspace', agent: `0x${'a'.repeat(40)}`, publicOrigin: 'https://northern-colorado-field-workspace.faithnet.ai' },
+      34348,
+      [],
+      'https://edge.faithnet.io',
+    ) as { supportedInterfaces: Array<{ url: string }> };
+    expect(card.supportedInterfaces[0]!.url).toBe('https://edge.faithnet.io/api/a2a/northern-colorado-field.workspace');
+  });
+  it('falls back to the host origin when no edge is configured', () => {
+    const card = buildA2aAgentCard(
+      { label: 'alice', name: 'alice.me', agent: `0x${'b'.repeat(40)}`, publicOrigin: 'https://alice.faithnet.ai' },
+      34348,
+    ) as { supportedInterfaces: Array<{ url: string }> };
+    expect(card.supportedInterfaces[0]!.url).toBe('https://alice.faithnet.ai/api/a2a');
+  });
+});

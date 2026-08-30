@@ -324,9 +324,16 @@ export function buildA2aAgentCard(
   provenanceEnabled = false,
 ): Record<string, unknown> {
   const origin = ctx.publicOrigin.replace(/\/$/, '');
+  // The edge path carries the agent's NAME — `POST <edge>/api/a2a/<handle>` is resolved by the naming grammar
+  // (`agentNameForHandle`), and the handle rides in the signed GatewayAssertion. NOT `ctx.label`: since spec 346
+  // §5 folded the type into one DNS label (2026-08-30) that is a hostname fragment
+  // (`northern-colorado-field-workspace`), and advertising it made every card disagree with itself — the stored
+  // card said `…/api/a2a/northern-colorado-field.workspace`, the live one said the label form, and validation
+  // reported two divergences a steward could do nothing about.
+  const handle = ctx.name ?? ctx.label;
   const messageEndpoint =
-    edgeBase && ctx.label
-      ? `${edgeBase.replace(/\/$/, '')}/api/a2a/${ctx.label}`
+    edgeBase && handle
+      ? `${edgeBase.replace(/\/$/, '')}/api/a2a/${handle}`
       : `${origin}/api/a2a`;
   const bound = Boolean(ctx.agent);
   return {
