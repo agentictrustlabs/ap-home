@@ -203,8 +203,10 @@ describe('typed hosts and handles (spec 346)', () => {
 describe('typed hosts are one label and reverse cleanly (spec 346 §5, 2026-08-30)', () => {
   const base = 'faithnet.io';
   it('reads the type back off the label suffix', () => {
-    expect(parseTypedAgentHost('fort-morgan-household-church.faithnet.io', base, 'me')).toEqual({ label: 'fort-morgan-household.church', name: 'fort-morgan-household.church' });
-    expect(parseTypedAgentHost('northern-colorado-field-workspace.faithnet.io', base, 'me')).toEqual({ label: 'northern-colorado-field.workspace', name: 'northern-colorado-field.workspace' });
+    expect(parseTypedAgentHost('fort-morgan-household-church.faithnet.io', base, 'me')).toEqual({ label: 'fort-morgan-household-church', name: 'fort-morgan-household.church' });
+    expect(parseTypedAgentHost('northern-colorado-field-workspace.faithnet.io', base, 'me')).toEqual({ label: 'northern-colorado-field-workspace', name: 'northern-colorado-field.workspace' });
+    // A legacy name whose LABEL ends in a type word keeps its own host; the resolver tries both readings.
+    expect(parseTypedAgentHost('alice-home-church.faithnet.io', base, 'me')).toEqual({ label: 'alice-home-church', name: 'alice-home.church' });
   });
   it('a bare label is still a person/legacy name against the ordered roots', () => {
     expect(parseTypedAgentHost('alice.faithnet.io', base, 'me')).toEqual({ label: 'alice', name: 'alice.me' });

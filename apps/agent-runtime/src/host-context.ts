@@ -73,11 +73,11 @@ export function parseTypedAgentHost(hostname: string | undefined, baseDomain: st
   const parts = rest.split('.');
   if (parts.length === 1 && parts[0]) {
     // spec 346 §5 (2026-08-30): a typed agent is ONE label, `<label>-<type>`, so the zone's existing
-    // `*.<zone>` wildcard and its certificate cover every agent. The type is read back off the label's
-    // last `-<type>` suffix; a bare label is a person/legacy name resolved against the ordered roots.
-    const typed = typedFromLabel(parts[0]);
-    if (typed) return typed;
-    return { label: parts[0], name: `${parts[0]}.${parent}` };
+    // `*.<zone>` wildcard and its certificate cover every agent. The DNS label is returned RAW: a label may
+    // read BOTH ways — `alice-home-church` is `alice-home.church` and also the legacy person/org name
+    // `alice-home-church.impact` — so the choice belongs to `resolveAgentByLabel`, which tries an ordered
+    // candidate set against the chain (one mechanism, ordered candidates — not a fallback, ADR-0013).
+    return { label: parts[0], name: typedFromLabel(parts[0])?.name ?? `${parts[0]}.${parent}` };
   }
   // MIGRATION: the dotted form `<label>.<type>.<base>` was the convention until 2026-08-30 and is still
   // served, because cards published under it carry that URL in signed bytes. Nothing emits it any more
@@ -184,7 +184,11 @@ export async function resolveAgentByLabel(
   const bare = !norm.includes('.') && !norm.includes('@') && !norm.includes('/');
   const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
   // A bare label denotes ONE home across the deployment's ordered person roots; anything else is one typed/legacy name.
-  const candidates = bare ? parents.map((p) => `${norm}.${p}`) : [agentNameForHandle(norm, parents[0] ?? AGENT_NAME_PARENT)].filter((n): n is string => !!n);
+  // spec 346 §5: a DNS label ending in `-<type>` reads as that typed name FIRST, then as a literal label under
+  // the ordered roots — `alice-home-church` is `alice-home.church` before it is `alice-home-church.impact`.
+  // Both are real names on this estate, so the host asks the chain in that order rather than guessing once.
+  const typedFirst = bare ? typedFromLabel(norm)?.name : undefined;
+  const candidates = bare ? [...(typedFirst ? [typedFirst] : []), ...parents.map((p) => `${norm}.${p}`)] : [agentNameForHandle(norm, parents[0] ?? AGENT_NAME_PARENT)].filter((n): n is string => !!n);
   if (candidates.length === 0) return { label: null, agent: null, name: null, publicOrigin };
 
   if (env.RPC_URL && env.CHAIN_ID && env.AGENT_NAME_REGISTRY && env.AGENT_NAME_UNIVERSAL_RESOLVER) {
