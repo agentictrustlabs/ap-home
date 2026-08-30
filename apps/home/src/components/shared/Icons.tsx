@@ -99,6 +99,10 @@ export const SearchIcon: IconComponent = (p) => (
 export const GlobeIcon: IconComponent = (p) => (
   <Svg {...p}><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></Svg>
 );
+/** Id card — the agent's A2A card (Card & Projections). Distinct from TagIcon (naming) and CodeIcon (apps). */
+export const IdCardIcon: IconComponent = (p) => (
+  <Svg {...p}><rect width="20" height="14" x="2" y="5" rx="2" /><circle cx="8" cy="11" r="2" /><path d="M5 16c.6-1.2 1.7-2 3-2s2.4.8 3 2" /><path d="M14 10h5M14 13.5h5" /></Svg>
+);
 export const BotIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" /></Svg>
 );

@@ -6,7 +6,7 @@ import type { WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
-  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon, CodeIcon,
+  ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon, CodeIcon, IdCardIcon,
   type IconComponent,
 } from '../shared/Icons';
 
@@ -88,6 +88,9 @@ export function buildNav(
           // Agent: the org's discussion bot ("Manage Bot" — auto-reply + member routing) + the org
           // Playbook that shapes every discussion reply. Mirrors the person Manage → Agent tab.
           { id: 'org-agent', label: 'Agent', href: orgHref(a, 'agent'), Icon: BotIcon, status: 'live' },
+          // spec 347 §9 / ADR-0062 — the A2A Agent Card & Projection Studio. An identity-and-presentation
+          // concern, so it sits beside Profile and Agent, ahead of the data/authority surfaces.
+          { id: 'org-card', label: 'Card & Projections', href: orgHref(a, 'card'), Icon: IdCardIcon, status: 'live' },
           { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
           { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
@@ -121,6 +124,9 @@ export function buildNav(
           // Agent: the service's own Playbook (assistant skill) — what its discussion agent answers
           // as when an app addresses it (a field workspace's coordinator "Ask"). Mirrors org → Agent.
           { id: 'service-agent', label: 'Agent', href: serviceHref(a, 'playbook'), Icon: BotIcon, status: 'live' },
+          // spec 347 §9 / ADR-0062 — same Studio, same card resources; a card belongs to the AGENT, not to
+          // the workspace kind it is viewed from.
+          { id: 'service-card', label: 'Card & Projections', href: serviceHref(a, 'card'), Icon: IdCardIcon, status: 'live' },
           { id: 'service-records', label: 'Records', href: serviceHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'service-access', label: 'Access', href: serviceHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
         ],
