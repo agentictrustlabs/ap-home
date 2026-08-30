@@ -24,6 +24,7 @@ import {
   triStateOf,
   compareServed,
   publicationVerdict,
+  studioErrorSentence,
 } from './studio-view';
 import type { CardListEntry, StoredProjection } from '../studio-client';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
@@ -351,5 +352,19 @@ describe('publicationVerdict — what a steward is told after publish/verify', (
     expect(v.title).toContain('could not confirm');
     expect(v.title).not.toContain('418');
     expect(v.detail).toBe('HTTP 418');
+  });
+});
+
+describe('studioErrorSentence — service codes become something a steward can act on', () => {
+  it('explains a nameless agent instead of printing agent_has_no_host', () => {
+    const m = studioErrorSentence('agent_has_no_host');
+    expect(m).toContain('no public name yet');
+    expect(m).toContain('Naming');
+    expect(studioErrorSentence('the agent has no name, so no well-known host to publish at')).toBe(m);
+  });
+  it('covers the other terse codes and passes anything else through unchanged', () => {
+    expect(studioErrorSentence('stale_revision')).toContain('Someone else changed this draft');
+    expect(studioErrorSentence('scope_not_held')).toContain('do not hold the access');
+    expect(studioErrorSentence('Network request failed')).toBe('Network request failed');
   });
 });

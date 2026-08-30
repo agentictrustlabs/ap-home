@@ -31,7 +31,7 @@ import {
 } from '../../studio-client';
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
-import { cardUriForName, editForksNewDraft, gateForOp, publicationVerdict, stepperSteps, STEP_OP, type PublicationVerdict, type StepId } from '../../lib/studio-view';
+import { cardUriForName, editForksNewDraft, gateForOp, publicationVerdict, studioErrorSentence, stepperSteps, STEP_OP, type PublicationVerdict, type StepId } from '../../lib/studio-view';
 import { ReleaseDiffPanel } from './Inspector';
 import { Banner, Chip, Digest, ErrorLine, LiveRegion, inputStyle } from './ui';
 import { notifyCardChanged } from './useStudio';
@@ -119,6 +119,9 @@ export function ReleaseStepper({
   const [cardUri, setCardUri] = useState(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }) ?? '');
   const [revokeReason, setRevokeReason] = useState('');
   const [publishNote, setPublishNote] = useState<PublicationVerdict | null>(null);
+  /** Publishing needs a public host, which comes from the agent's NAME. Checked before the button, so a
+   *  nameless agent reads as "needs a name", not as a failed publish. */
+  const NO_HOST = studioErrorSentence('agent_has_no_host');
   /** The JWS produced in THIS browser, held until the steward chooses how to attach it (see §6.2 below). */
   const [prepared, setPrepared] = useState<ReleaseSignature | null>(null);
 
@@ -135,7 +138,7 @@ export function ReleaseStepper({
         notifyCardChanged();
         onReload();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(studioErrorSentence(e instanceof Error ? e.message : String(e)));
       } finally {
         setBusy(null);
         setStep('');
@@ -187,6 +190,7 @@ export function ReleaseStepper({
       )}
 
       <ErrorLine error={error} />
+      {release?.state === 'signed' && !cardUri && <Banner tone="warn">{NO_HOST}</Banner>}
       {publishNote && (
         <Banner tone={publishNote.tone}>
           <span style={{ display: 'grid', gap: '.15rem' }}>
@@ -262,8 +266,8 @@ export function ReleaseStepper({
             busy={busy === 'publish'}
             busyLabel={step || 'Publishing…'}
             className="btn-primary"
-            disabled={!gate('publish').allowed}
-            title={gate('publish').reason}
+            disabled={!gate('publish').allowed || !cardUri}
+            title={!cardUri ? NO_HOST : gate('publish').reason}
             onClick={() =>
               void run('publish', 'Publishing…', async () => {
                 const res = await publishRelease(delegation, cardResourceId, release.releaseId, newMutation());

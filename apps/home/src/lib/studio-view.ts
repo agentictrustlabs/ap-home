@@ -736,3 +736,28 @@ export function publicationVerdict(receipt: { verificationResult: string; uri?: 
     detail,
   };
 }
+
+/** Service error code → a sentence a steward can act on. The service's codes are precise and terse
+ *  (`agent_has_no_host`); showing them raw makes a dead end out of a fixable situation. */
+export function studioErrorSentence(codeOrMessage: string): string {
+  const c = codeOrMessage.trim();
+  switch (c) {
+    case 'agent_has_no_host':
+    case 'the agent has no name, so no well-known host to publish at':
+      return 'This agent has no public name yet, so there is nowhere on the web to publish its card. Give it a name first (Manage → Naming); the endpoint follows from the name.';
+    case 'release_not_signed':
+      return 'This release has to be signed before it can be published.';
+    case 'scope_not_held':
+      return 'You do not hold the access this step needs — someone with that role has to do it.';
+    case 'stale_revision':
+      return 'Someone else changed this draft while you were working. Reload to see their version before saving.';
+    case 'primary_exists':
+      return 'This agent already has a primary production card. Make the new one non-primary, or retire the existing one first.';
+    case 'plan_not_approved':
+      return 'This publication plan has not been approved, or the approval no longer matches it. Request approval again.';
+    case 'no_selected_card':
+      return 'Pick which card release this projection should carry before generating it.';
+    default:
+      return c;
+  }
+}
