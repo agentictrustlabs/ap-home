@@ -414,7 +414,7 @@ export function CardEditor({
                     onClick={() => setSectionId(s.id)}
                     style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: '.45rem',
                       width: '100%',
                       textAlign: 'left',
@@ -429,8 +429,14 @@ export function CardEditor({
                       color: s.id === sectionId ? 'var(--c-primary)' : 'var(--c-g700)',
                     }}
                   >
-                    <span aria-hidden title={status.label} style={{ width: 8, height: 8, borderRadius: 999, background: DOT[status.status], flex: 'none' }} />
-                    {s.title}
+                    <span aria-hidden title={status.label} style={{ width: 8, height: 8, borderRadius: 999, background: DOT[status.status], flex: 'none', marginTop: '.3rem' }} />
+                    <span style={{ display: 'grid', gap: '.1rem' }}>
+                      <span>{s.title}</span>
+                      {/* The titles are A2A vocabulary; the blurb is what a steward actually needs to choose. */}
+                      <span className="studio-section-blurb" style={{ fontSize: '.68rem', fontWeight: 400, color: 'var(--c-g500, #6b7280)', lineHeight: 1.25 }}>
+                        {s.blurb}
+                      </span>
+                    </span>
                   </button>
                 </li>
               );
@@ -439,9 +445,10 @@ export function CardEditor({
         </nav>
 
         <section aria-label={section.title}>
-          <h2 className="subhead" style={{ marginTop: 0 }}>
+          <h2 className="subhead" style={{ marginTop: 0, marginBottom: '.15rem' }}>
             {section.title}
           </h2>
+          <p className="manage-card-blurb" style={{ marginTop: 0, marginBottom: '.6rem' }}>{section.blurb}</p>
           {section.fields.map((f) => (
             <FieldShell
               key={f.pointer}

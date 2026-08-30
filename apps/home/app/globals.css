@@ -1311,6 +1311,7 @@
           scrollbar-width: thin; -webkit-overflow-scrolling: touch;
         }
         .studio-section-list > li { flex: none; }
+        .studio-section-blurb { display: none; }
         .studio-section-list button {
           white-space: nowrap; border: 1px solid var(--c-g200) !important; border-radius: 999px !important;
           padding: .35rem .7rem !important; min-height: 36px !important;

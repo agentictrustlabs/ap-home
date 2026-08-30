@@ -23,6 +23,7 @@ import {
   targetLabel,
   triStateOf,
   compareServed,
+  publicationVerdict,
 } from './studio-view';
 import type { CardListEntry, StoredProjection } from '../studio-client';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
@@ -320,5 +321,35 @@ describe('compareServed — editing vs released vs served', () => {
   it('reports unreachable and HTTP errors without claiming anything about the card', () => {
     expect(compareServed({ reachable: false, detail: 'egress failed: boom' }, {})).toMatchObject({ verdict: { kind: 'unreachable' }, matchesDraft: null });
     expect(compareServed({ reachable: true, status: 503 }, { draftDigest: D }).verdict.kind).toBe('error');
+  });
+});
+
+describe('publicationVerdict — what a steward is told after publish/verify', () => {
+  const uri = 'https://ncf.faithnet.io/.well-known/agent-card.json';
+  it('confirms a verified publication and asks for nothing', () => {
+    const v = publicationVerdict({ verificationResult: 'valid', uri });
+    expect(v).toMatchObject({ tone: 'good', next: null });
+    expect(v.title).toContain('ncf.faithnet.io');
+  });
+  it('an unreachable host says the release is safe and names what an operator must fix', () => {
+    const v = publicationVerdict({ verificationResult: 'unverified', uri, detail: 'HTTP 530' });
+    expect(v.tone).toBe('warn');
+    expect(v.title).toContain('Nothing is serving your card yet');
+    expect(v.next).toMatch(/signed and stored safely/);
+    expect(v.next).toContain('ncf.faithnet.io');
+    expect(v.detail).toBe('HTTP 530');
+    expect(publicationVerdict({ verificationResult: 'unverified', uri, detail: 'egress failed: getaddrinfo ENOTFOUND' }).title).toContain('did not answer');
+  });
+  it('distinguishes a 404 from an unreachable host and from a byte mismatch', () => {
+    expect(publicationVerdict({ verificationResult: 'unverified', uri, detail: 'HTTP 404' }).title).toContain('not serving a card at that path');
+    const mismatch = publicationVerdict({ verificationResult: 'invalid', uri, detail: 'served digest a, expected b' });
+    expect(mismatch.title).toContain('different bytes');
+    expect(mismatch.next).toMatch(/publish this release again/);
+  });
+  it('falls back to a plain wait-and-retry line, never a raw status code as the headline', () => {
+    const v = publicationVerdict({ verificationResult: 'unverified', uri, detail: 'HTTP 418' });
+    expect(v.title).toContain('could not confirm');
+    expect(v.title).not.toContain('418');
+    expect(v.detail).toBe('HTTP 418');
   });
 });

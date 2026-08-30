@@ -31,7 +31,7 @@ import {
 } from '../../studio-client';
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
-import { cardUriForName, editForksNewDraft, gateForOp, stepperSteps, STEP_OP, type StepId } from '../../lib/studio-view';
+import { cardUriForName, editForksNewDraft, gateForOp, publicationVerdict, stepperSteps, STEP_OP, type PublicationVerdict, type StepId } from '../../lib/studio-view';
 import { ReleaseDiffPanel } from './Inspector';
 import { Banner, Chip, Digest, ErrorLine, LiveRegion, inputStyle } from './ui';
 import { notifyCardChanged } from './useStudio';
@@ -118,7 +118,7 @@ export function ReleaseStepper({
   const [signOpen, setSignOpen] = useState(!!autoExpand);
   const [cardUri, setCardUri] = useState(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }) ?? '');
   const [revokeReason, setRevokeReason] = useState('');
-  const [publishNote, setPublishNote] = useState<{ tone: 'good' | 'warn'; text: string } | null>(null);
+  const [publishNote, setPublishNote] = useState<PublicationVerdict | null>(null);
   /** The JWS produced in THIS browser, held until the steward chooses how to attach it (see §6.2 below). */
   const [prepared, setPrepared] = useState<ReleaseSignature | null>(null);
 
@@ -187,7 +187,15 @@ export function ReleaseStepper({
       )}
 
       <ErrorLine error={error} />
-      {publishNote && <Banner tone={publishNote.tone}>{publishNote.text}</Banner>}
+      {publishNote && (
+        <Banner tone={publishNote.tone}>
+          <span style={{ display: 'grid', gap: '.15rem' }}>
+            <b>{publishNote.title}</b>
+            {publishNote.next && <span>{publishNote.next}</span>}
+            {publishNote.detail && <span style={{ fontSize: '.7rem', opacity: 0.75 }}>Endpoint said: {publishNote.detail}</span>}
+          </span>
+        </Banner>
+      )}
 
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
         {/* 2 — Create release. The diff IS the confirmation step; never a silent snapshot. The trigger HIDES
@@ -260,11 +268,7 @@ export function ReleaseStepper({
               void run('publish', 'Publishing…', async () => {
                 const res = await publishRelease(delegation, cardResourceId, release.releaseId, newMutation());
                 setStep('Verifying…');
-                setPublishNote(
-                  res.receipt.verificationResult === 'valid'
-                    ? { tone: 'good', text: "Live and verified — this is the card your agent's endpoint is actually serving." }
-                    : { tone: 'warn', text: "Published, but we couldn't confirm your agent's endpoint is serving it yet. This usually resolves within a minute." },
-                );
+                setPublishNote(publicationVerdict(res.receipt));
               })
             }
           >
@@ -283,11 +287,7 @@ export function ReleaseStepper({
             onClick={() =>
               void run('verify', 'Verifying…', async () => {
                 const res = await verifyReleasePublication(delegation, cardResourceId, release.releaseId);
-                setPublishNote(
-                  res.receipt.verificationResult === 'valid'
-                    ? { tone: 'good', text: "Live and verified — this is the card your agent's endpoint is actually serving." }
-                    : { tone: 'warn', text: `Still unconfirmed (${res.receipt.verificationResult}). ${res.receipt.detail ?? ''}` },
-                );
+                setPublishNote(publicationVerdict(res.receipt));
               })
             }
           >

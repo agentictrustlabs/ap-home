@@ -680,3 +680,59 @@ export function compareServed(
     matchesRelease,
   };
 }
+
+// ─── Publication verdicts ────────────────────────────────────────────────────────────────────────────────
+// A receipt says valid | invalid | unverified plus a raw `detail` ("HTTP 530", "egress failed: …", a digest
+// comparison). Those are the right things to RECORD and the wrong things to show a steward, who needs to know
+// what happened, whether the release is safe, and what to do next.
+
+export interface PublicationVerdict {
+  tone: 'good' | 'warn';
+  /** One sentence: what is true now. */
+  title: string;
+  /** What to do about it, or null when nothing is required. */
+  next: string | null;
+  /** The raw receipt detail, kept for the audit-minded — never the headline. */
+  detail: string | null;
+}
+
+export function publicationVerdict(receipt: { verificationResult: string; uri?: string; detail?: string }): PublicationVerdict {
+  const host = (() => { try { return receipt.uri ? new URL(receipt.uri).host : null; } catch { return null; } })();
+  const where = host ? `at ${host}` : 'at your agent\'s endpoint';
+  const detail = receipt.detail ?? null;
+  if (receipt.verificationResult === 'valid') {
+    return { tone: 'good', title: `Live and verified — this is the card being served ${where}.`, next: null, detail: null };
+  }
+  if (receipt.verificationResult === 'invalid') {
+    return {
+      tone: 'warn',
+      title: `Your endpoint answered ${where}, but it is serving different bytes than this release.`,
+      next: 'A newer release or a cache may be in front of it. Check again in a minute; if it persists, publish this release again.',
+      detail,
+    };
+  }
+  const d = detail ?? '';
+  const status = /HTTP (\d{3})/.exec(d)?.[1];
+  if (/egress failed|ENOTFOUND|refused|getaddrinfo|dns/i.test(d) || status === '530' || status === '523' || status === '522') {
+    return {
+      tone: 'warn',
+      title: `Nothing is serving your card yet — ${host ?? 'the endpoint'} did not answer.`,
+      next: `The release is signed and stored safely; only the public copy is missing. ${host ? `${host} has to resolve and route to this agent's A2A service` : "This agent needs a public A2A host"} — an operator sets that up once per Home. Then press Check again.`,
+      detail,
+    };
+  }
+  if (status === '404') {
+    return {
+      tone: 'warn',
+      title: `${host ?? 'The endpoint'} answered, but it is not serving a card at that path yet.`,
+      next: 'Publish again once the agent\'s A2A service is running there, then press Check again.',
+      detail,
+    };
+  }
+  return {
+    tone: 'warn',
+    title: `Published, but we could not confirm ${where} is serving it yet.`,
+    next: 'This usually settles within a minute — press Check again.',
+    detail,
+  };
+}
