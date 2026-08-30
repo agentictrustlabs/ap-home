@@ -65,7 +65,12 @@ export function ListingFlow({
       setPhase(LISTING_PHRASE.preparing);
       const cfg = await configureProjection(delegation, {
         family,
-        ...(family === 'ap-registry' ? { configuration: { registry: CONTRACTS.agentRegistryBase as Address, registryId: AGENT_REGISTRY_URN } as never } : {}),
+        ...(family === 'ap-registry'
+          ? { configuration: { registry: CONTRACTS.agentRegistryBase as Address, registryId: AGENT_REGISTRY_URN } as never }
+          // The record's display name is the label a person chose for this agent ("Northern Colorado Field"),
+          // so the listing writes THAT. Left unset the projector writes nothing, and an earlier default had
+          // overwritten it with the name label — a human-facing value a card projection has no opinion about.
+          : agentName && agentName !== typedName ? { configuration: { displayName: agentName } as never } : {}),
         cardResourceId: detail.resource.cardResourceId,
         selectedReleaseId: published.releaseId,
       }, newMutation());
