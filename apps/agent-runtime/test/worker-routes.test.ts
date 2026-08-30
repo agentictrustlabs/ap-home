@@ -89,6 +89,13 @@ describe('the agent card is public and says only public things', () => {
     expect(r.headers.get('etag')).toBe(`"${digest}"`);
   });
 
+  // spec 347 §8.5 — an unbound host publishes a VALID, EMPTY ARD manifest rather than inventing an entry.
+  it('serves /.well-known/ard.json with no entries on an unbound host', async () => {
+    const r = await call('/.well-known/ard.json');
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ entries: [] });
+  });
+
   it('without a bound agent the released-card cache is never consulted', async () => {
     let reads = 0;
     const kv = { get: async () => { reads++; return null; } } as unknown as KVNamespace;

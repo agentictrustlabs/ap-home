@@ -65,6 +65,21 @@ export function parseTypedAgentHost(hostname: string | undefined, baseDomain: st
 }
 
 /**
+ * The inverse of `parseTypedAgentHost` (spec 346 §5): the public host this deployment serves an on-chain
+ * name at. `<label>.<parent>` (parent ∈ the ordered person roots) → `<label>.<base>`; `<label>.<tld>` for
+ * any other typed suffix → `<label>.<tld>.<base>`. Anything deeper or untyped → null (no host to publish at).
+ * Used by the Card Studio to know WHERE a released card is served — a projection of the name, never authority.
+ */
+export function hostForName(name: string, baseDomain: string, parents: readonly string[] = [AGENT_NAME_PARENT]): string | null {
+  const parts = name.trim().toLowerCase().split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [label, tld] = parts as [string, string];
+  if (parents.includes(tld)) return `${label}.${baseDomain}`;
+  if (isAgentTld(tld)) return `${label}.${tld}.${baseDomain}`;
+  return null;
+}
+
+/**
  * The on-chain name for an explicit handle (the edge path `POST /api/a2a/<handle>` and the injected
  * `X-Agent-Subdomain`). A single label is the legacy `<label>.<AGENT_NAME_PARENT>`; a typed handle
  * (`x.t`, `x.t@c.u`, `c.u/x.t`) or a legacy dotted name is parsed by the agent-naming grammar. Root and

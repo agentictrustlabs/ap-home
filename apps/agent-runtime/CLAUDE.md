@@ -27,6 +27,15 @@ proxies selected MCP requests during local demos.
   @-mention → in-Worker dispatch to the org's `A2aTaskDO` `/internal/discussion-respond` (marker-gated,
   NOT on the agent card) → `src/discussion-skill.ts` runs the shared loop → reply lands via
   `internal.channels.post`, `from`/`actor` pinned to the org SA.
+- The **Card Studio service side** (spec 347 §9 / ADR-0062, `src/agent-card-studio.ts`, route
+  `POST /agent-cards/:op` mirroring `/mcp/vault/*`): the Home presents the stewardship delegation; every
+  record (`agent-cards:* projections:* bindings:* approvals:*`) lives in the AGENT's vault via
+  `callMcpToolWithProof`; `RELEASED_CARDS` KV is a serving-plane cache the well-known route serves
+  byte-for-byte (rebuild, never a bereavement). Client-produced ES256 JWS + EIP-712 SA binding are
+  VERIFIED here, never signed here; publication plans return `{to,value,data}` calls the Home executes with
+  the custodian, then `recordPublication` verifies with `readContract` only. Service-agent callers get
+  `STEWARD_DEFAULT_SCOPES`; `SEPARATION_OF_DUTIES=strict` refuses editor-approves. Guide:
+  `apps/demo-sso-next/docs/agent-cards/guide.md`.
 
 ## What this app does not own
 
@@ -38,25 +47,18 @@ proxies selected MCP requests during local demos.
 
 ## Read These First
 
-1. `package.json` — Worker scripts.
-2. `src/index.ts` — route map and app wiring.
-3. `src/validate.ts` — request validation.
-4. `../demo-mcp/CLAUDE.md` when changing MCP proxy behavior.
+`package.json` (scripts) → `src/index.ts` (route map + wiring; contains a stray non-UTF8 byte — `grep -a`) →
+`src/validate.ts` → `../demo-mcp/CLAUDE.md` when changing MCP proxy behavior.
 
 ## Validate
 
-```bash
-pnpm --filter @agenticprimitives-demo/a2a typecheck
-```
+`pnpm --filter @agenticprimitives-demo/a2a typecheck` + `pnpm --filter @agenticprimitives-demo/a2a test`.
 
 ## Deploy — NEVER bare `wrangler deploy`
 
-Deploy ONLY via `pnpm deploy:cloudflare` (repo root). The wrangler.toml production vars are
-fail-closed placeholders (`ALLOWED_ORIGINS=""`, `MCP_URL=""`); the script injects the real values
-via `--var` (plus PAYMASTER, BROKER_ISS/JWKS, edge flags, KMS backend). A bare
-`wrangler deploy --env production` wipes them → every browser POST fails CSRF with 403
-(2026-07-07 incident; fixed by `wrangler rollback`).
+Deploy ONLY via `pnpm deploy:cloudflare` (repo root). The wrangler.toml production vars are fail-closed
+placeholders (`ALLOWED_ORIGINS=""`, `MCP_URL=""`); the script injects the real values via `--var` (plus
+PAYMASTER, BROKER_ISS/JWKS, edge flags, KMS backend). A bare `wrangler deploy --env production` wipes
+them → every browser POST fails CSRF with 403 (2026-07-07 incident; fixed by `wrangler rollback`).
 
-## Generated Files
-
-`.wrangler/`, `dist/`, `node_modules/`.
+Generated (ignore): `.wrangler/`, `dist/`, `node_modules/`.

@@ -51,7 +51,7 @@ import {
   SaMismatchError,
 } from '@agenticprimitives/agent-account';
 import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
-import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
 import {
   verifyCustodySession,
   deriveSubjectCustodian,
@@ -59,8 +59,12 @@ import {
   caip10,
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, AGENT_NAME_PARENT, type A2aSkill } from './host-context';
-import { cardContentDigest } from '@agenticprimitives/agent-profile/a2a';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, hostForName, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
+import { ardHostManifest, ARD_WELL_KNOWN_PATH } from './ard';
+import { cardContentDigest, jcsDigest as cardJcsDigest } from '@agenticprimitives/agent-profile/a2a';
+import { AgentIdentityClient } from '@agenticprimitives/agent-profile';
+import { AgentCardStudio, type StudioDeps, type StudioSources, type RegistryEntryOnChain } from './agent-card-studio.js';
+import type { AgentNameBindingV1, PublicSkillClaimV1 } from '@agenticprimitives/registry-kit/projection';
 import {
   buildKeyProvider,
   buildSignerBackend,
@@ -94,7 +98,7 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import type { Address, Hex } from '@agenticprimitives/types';
+import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 import {
@@ -183,6 +187,15 @@ export interface Env {
    * owner's vault (ADR-0055); this is a rebuild, not a bereavement. Absent binding ⇒ the live card is served.
    */
   RELEASED_CARDS?: KVNamespace;
+  /**
+   * spec 347 §9 — Card Studio separation of duties. `strict` refuses `release.approve` / `projection.approve`
+   * from the principal who last edited the draft / built the plan. Default OFF (demo: one steward holds every
+   * duty; they remain distinct scopes + audit events either way).
+   */
+  SEPARATION_OF_DUTIES?: string;
+  /** Person-root(s) a bare subdomain label denotes (see `host-context.ts` `HostEnv`); typed here for the Studio host projection. */
+  AGENT_NAME_PARENT?: string;
+  AGENT_NAME_PARENTS?: string;
   // Federated user-data tokens (spec 265) — per-person YouVersion OAuth tokens, KMS-encrypted at rest,
   // keyed by person SA. Read ONLY server-side; never returned to a relying app.
   FED_TOKENS?: KVNamespace;
@@ -890,6 +903,35 @@ app.use('/mcp/*', gateAgenticData);
 app.use('/tools/*', gateAgenticData);
 app.use('/intent', gateAgenticData); // ADR-0044 — the first-party INTENT surface is agentic data; edge it too.
 
+/** spec 282 — the agent's PUBLICLY-ASSERTED skill labels (`atl:skills`), the set discovery ranks on.
+ *  Best-effort read; absence → no labels (the card still serves). */
+async function readSkillLabels(env: Env, agent: Address): Promise<string> {
+  if (!env.PROFILE_RESOLVER || !env.RPC_URL) return '';
+  try {
+    const client = createPublicClient({ transport: http(env.RPC_URL) });
+    return (await client.readContract({
+      address: env.PROFILE_RESOLVER as Address,
+      abi: [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const,
+      functionName: 'getStringProperty',
+      args: [agent, keccak256(toBytes('atl:skills'))],
+    })) as string;
+  } catch {
+    return ''; // best-effort — serve the card without self-asserted skills
+  }
+}
+
+/** The LIVE card for a host context (ADR-0059 — the live-truth surface the Studio inherits from and the
+ *  well-known publisher verifies against). One builder, used by the route AND the Studio. */
+async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<string, unknown>> {
+  let skills: A2aSkill[] = ctx.agent ? skillsFromLabels(await readSkillLabels(env, ctx.agent)) : [];
+  // spec 341 §2.3 — advertise what this runtime MOUNTS, not only what the agent claims. Bound agents
+  // only: an unbound host (no `ctx.agent`) serves no per-agent skills, because there is no agent whose
+  // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
+  // self-asserted labels and never the mounted ones.
+  if (ctx.agent) skills = withMountedSkills(skills);
+  return buildA2aAgentCard(ctx, Number(env.CHAIN_ID), skills, env.DEMO_EDGE_URL?.trim() || undefined, !!env.SKILLS_CORPUS_URL?.trim());
+}
+
 /** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
 async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
   const reqOrigin = new URL(c.req.url).origin;
@@ -897,26 +939,6 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
   if (ctx.label && !ctx.agent) {
     return c.json({ error: 'agent_not_found', detail: `no Smart Agent for ${ctx.name}` }, 404);
   }
-  // spec 282 — surface the agent's PUBLICLY-ASSERTED skills (atl:skills profile property) on the card,
-  // the same set discovery ranks on. Best-effort read; absence → no skills (the card still serves).
-  let skills: A2aSkill[] = [];
-  if (ctx.agent && c.env.PROFILE_RESOLVER && c.env.RPC_URL) {
-    try {
-      const client = createPublicClient({ transport: http(c.env.RPC_URL) });
-      const csv = (await client.readContract({
-        address: c.env.PROFILE_RESOLVER as Address,
-        abi: [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const,
-        functionName: 'getStringProperty',
-        args: [ctx.agent, keccak256(toBytes('atl:skills'))],
-      })) as string;
-      skills = skillsFromLabels(csv);
-    } catch { /* best-effort — serve the card without self-asserted skills */ }
-  }
-  // spec 341 §2.3 — advertise what this runtime MOUNTS, not only what the agent claims. Bound agents
-  // only: an unbound host (no `ctx.agent`) serves no per-agent skills, because there is no agent whose
-  // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
-  // self-asserted labels and never the mounted ones.
-  if (ctx.agent) skills = withMountedSkills(skills);
   // spec 347 §8.1 — a RELEASED card, when one is published for this agent, is served byte-for-byte: the
   // well-known publisher re-fetches and compares digests, and `atl:cardDigest` on the name points at it.
   // ONE mechanism (ADR-0013): a present-but-unparseable cache entry is a 500, never a quiet fall-through.
@@ -928,7 +950,7 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
       return new Response(entry.bytes, { headers: { 'content-type': 'application/json; charset=utf-8', etag: `"${entry.digest}"`, 'x-ap-card-digest': entry.digest, 'x-ap-card-release': entry.releaseId, 'x-ap-card-source': 'released' } });
     }
   }
-  const live = buildA2aAgentCard(ctx, Number(c.env.CHAIN_ID), skills, c.env.DEMO_EDGE_URL?.trim() || undefined, !!c.env.SKILLS_CORPUS_URL?.trim());
+  const live = await liveCardFor(c.env, ctx);
   // Live-truth card (ADR-0059): digest over the RFC 8785 canonical bytes (signatures stripped), so a
   // released card's digest and this one are comparable without either side re-implementing anything.
   const digest = cardContentDigest(live as { signatures?: unknown });
@@ -940,6 +962,181 @@ export function releasedCardKey(agent: string): string {
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias
+
+// spec 347 §8.5 — per-host ARD manifest (Agentic Resource Discovery v0.91): ONE entry for the bound agent whose `url`
+// is this host's own well-known card (released bytes when published, live otherwise — same rule as serveAgentCard).
+// An unbound host publishes an empty `entries` array: valid ARD, nothing invented (ADR-0013).
+app.get(ARD_WELL_KNOWN_PATH, async (c) => {
+  const url = new URL(c.req.url);
+  const ctx = await resolveAgentHost(c.req.raw, c.env, url.origin);
+  if (!ctx.agent) return c.json({ '@context': ['https://agenticresourcediscovery.org/context/v1'], entries: [] }, ctx.label ? 404 : 200);
+  let card: Record<string, unknown> | null = null; let cardDigest: string | null = null; let cardSource: 'released' | 'live' = 'live';
+  const raw = c.env.RELEASED_CARDS ? await c.env.RELEASED_CARDS.get(releasedCardKey(ctx.agent)) : null;
+  if (raw) {
+    const entry = JSON.parse(raw) as { digest: string; bytes: string };
+    if (!/^sha256:[0-9a-f]{64}$/.test(entry.digest) || typeof entry.bytes !== 'string') return c.json({ error: 'released card cache entry malformed' }, 500);
+    card = JSON.parse(entry.bytes) as Record<string, unknown>; cardDigest = entry.digest; cardSource = 'released';
+  } else {
+    card = await liveCardFor(c.env, ctx); cardDigest = cardContentDigest(card as { signatures?: unknown });
+  }
+  const skills = Array.isArray(card.skills) ? (card.skills as Array<{ id?: string; examples?: string[] }>).filter((s) => typeof s?.id === 'string').map((s) => ({ id: s.id!, examples: Array.isArray(s.examples) ? s.examples.filter((x) => typeof x === 'string') : undefined })) : [];
+  const m = ardHostManifest({ host: url.host, agent: ctx.agent, name: ctx.name ?? null, displayName: typeof card.name === 'string' ? card.name : null, description: typeof card.description === 'string' ? card.description : null, version: typeof card.version === 'string' ? card.version : null, skills, cardDigest, cardSource });
+  return c.json(m, 200, { 'cache-control': 'public, max-age=300', 'x-ap-card-digest': cardDigest });
+});
+
+// ─── A2A Agent Card & Projection Studio (spec 347 §9, ADR-0062) — the SERVICE side ───────────────────
+//
+// TRANSPORT: route-shaped, mirroring the first-party per-agent record path the Home already uses
+// (`/mcp/vault/*`). The Home posts `{ delegation, requester, args }` to `/agent-cards/<op>`; the delegation
+// (delegator = the managed agent, delegate = the acting principal — the stewardship wire) is the ONLY
+// authority, enforced where the records live: every vault read/write below rides `callMcpToolWithProof`
+// and demo-mcp verifies the grant per call. The Home never touches MCP (ADR-0044), the server never holds
+// the custodian (publication plans return `{to,value,data}` calls the Home executes), and the
+// RELEASED_CARDS entry is a serving-plane cache of a vault record (ADR-0055).
+function studioSources(env: Env): StudioSources {
+  const chainId = Number(env.CHAIN_ID);
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  const naming = () => {
+    if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) throw new Error('AGENT_NAME_REGISTRY / AGENT_NAME_UNIVERSAL_RESOLVER are not configured');
+    return new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId, registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) });
+  };
+  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const baseDomain = env.A2A_PUBLIC_BASE_DOMAIN ?? DEFAULT_PUBLIC_BASE_DOMAIN;
+  const hostContext = async (agent: Address): Promise<AgentHostContext> => {
+    const name = await naming().reverseResolve(agent);
+    const host = name ? hostForName(name, baseDomain, parents) : null;
+    return { label: host ? host.slice(0, host.length - baseDomain.length - 1) : null, agent, name, publicOrigin: host ? `https://${host}` : `https://${baseDomain}` };
+  };
+  const derived = async (agent: Address) => {
+    if (!env.PROFILE_RESOLVER) throw new Error('PROFILE_RESOLVER is not configured (needed to read atl:agentType)');
+    return naming().readDerivedType(agent);
+  };
+  const stringProp = async (agent: Address, predicate: string): Promise<string> =>
+    (await pub.readContract({
+      address: env.PROFILE_RESOLVER as Address,
+      abi: [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const,
+      functionName: 'getStringProperty',
+      args: [agent, keccak256(toBytes(predicate))],
+    })) as string;
+  return {
+    liveCard: async (agent) => liveCardFor(env, await hostContext(agent)),
+    profile: async (agent) => {
+      if (!env.PROFILE_RESOLVER) return null;
+      const client = new AgentIdentityClient({ rpcUrl: env.RPC_URL, chainId, profileResolver: env.PROFILE_RESOLVER as Address });
+      const profile = await client.fetchProfile(agent);
+      if (!profile) return null;
+      const uri = await stringProp(agent, 'atl:metadataURI');
+      return { profile, ...(uri ? { uri } : {}) };
+    },
+    names: async (agent): Promise<AgentNameBindingV1[]> => {
+      const client = naming();
+      const name = await client.reverseResolve(agent);
+      if (!name) return [];
+      let derivedType: AgentNameBindingV1['derivedType'];
+      try {
+        const p = parseAgentName(name);
+        if (p.derivedType) derivedType = p.derivedType;
+      } catch (e) {
+        if (!(e instanceof NamingInvalidNameError)) throw e;
+      }
+      const resolvesTo = (await client.resolveName(name)) ?? agent;
+      return [{ name, node: namehash(name), chainId, registry: env.AGENT_NAME_REGISTRY as Address, role: 'primary', ...(derivedType ? { derivedType } : {}), resolvesTo }];
+    },
+    derivedType: async (agent) => {
+      const d = await derived(agent);
+      return d.agentType ?? d.agentKind ?? null;
+    },
+    // `atl:skills` labels are public by construction (the agent wrote them on chain at `setSkills` time —
+    // that WAS the disclosure decision), so every label is an eligible public claim (spec 347 §5).
+    publicSkillClaims: async (agent): Promise<PublicSkillClaimV1[]> =>
+      skillsFromLabels(await readSkillLabels(env, agent)).map((s) => ({ claimId: `atl:skills:${s.id}`, skillId: s.id, name: s.name, tags: s.tags ?? [], visibility: 'public', claimDigest: cardJcsDigest({ skillId: s.id, name: s.name }) })),
+    nameRecords: (name) => naming().getRecords(name),
+    nameResolver: async (node) => {
+      const r = (await pub.readContract({ address: env.AGENT_NAME_REGISTRY as Address, abi: agentNameRegistryAbi, functionName: 'resolver', args: [node] })) as Address;
+      return r === '0x0000000000000000000000000000000000000000' ? null : r;
+    },
+    registryEntry: async ({ registry, registryId, entryId }): Promise<RegistryEntryOnChain | null> => {
+      try {
+        const e = (await pub.readContract({
+          address: registry,
+          abi: [{ type: 'function', name: 'getEntry', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'subjectAgent', type: 'address' }, { name: 'cardHash', type: 'bytes32' }, { name: 'bindingProofHash', type: 'bytes32' }, { name: 'claimsRoot', type: 'bytes32' }, { name: 'status', type: 'uint8' }, { name: 'registeredAtBucket', type: 'uint64' }, { name: 'expiresAt', type: 'uint64' }] }] }] as const,
+          functionName: 'getEntry',
+          args: [registryId, entryId],
+        })) as { subjectAgent: Address; cardHash: Hex; bindingProofHash: Hex; status: number; expiresAt: bigint };
+        return { subjectAgent: e.subjectAgent, cardHash: e.cardHash, bindingProofHash: e.bindingProofHash, status: Number(e.status), expiresAt: Number(e.expiresAt) };
+      } catch (e) {
+        // `EntryNotFound()` is the contract's "no such entry" — an answer, not a failure (ADR-0013).
+        if (e instanceof Error && /EntryNotFound|revert/i.test(e.message)) return null;
+        throw e;
+      }
+    },
+    erc1271: {
+      verifyHash: async ({ address, hash, signature }) => {
+        try {
+          const magic = (await pub.readContract({ address, abi: [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const, functionName: 'isValidSignature', args: [hash, signature] })) as Hex;
+          return magic.toLowerCase() === '0x1626ba7e';
+        } catch {
+          return false;
+        }
+      },
+    },
+    cardUri: async (agent) => {
+      const ctx = await hostContext(agent);
+      return ctx.name ? `${ctx.publicOrigin}/.well-known/agent-card.json` : null;
+    },
+    // Egress is pinned to THIS deployment's public zone: the Studio never fetches an arbitrary URL.
+    fetch: async (url) => {
+      const u = new URL(url);
+      if (u.protocol !== 'https:' || !(u.hostname === baseDomain || u.hostname.endsWith(`.${baseDomain}`))) throw new Error(`well-known re-fetch refused: ${u.hostname} is outside ${baseDomain}`);
+      return fetch(url, { headers: { accept: 'application/json' }, redirect: 'manual' });
+    },
+    principalKind: async (address) => {
+      const d = await derived(address);
+      const root = d.agentType ? rootClassForDerivedType(d.agentType) : d.agentKind;
+      return root === 'service' ? 'service-agent' : 'human';
+    },
+  };
+}
+
+/** `SEPARATION_OF_DUTIES` is a named knob: unset/empty = off, `strict` = strict, anything else is a config error. */
+function separationOfDuties(env: Env): 'strict' | 'off' | null {
+  const v = env.SEPARATION_OF_DUTIES?.trim() ?? '';
+  if (v === 'strict') return 'strict';
+  if (v === '' || v === 'off') return 'off';
+  return null;
+}
+
+app.post('/agent-cards/:op', async (c) => {
+  const op = c.req.param('op');
+  const body = (await c.req.json().catch(() => null)) as { delegation?: IncomingDelegation; requester?: Address; args?: Record<string, unknown> } | null;
+  if (!body?.delegation || !body.requester) return c.json({ ok: false, error: 'bad_body', detail: 'delegation + requester required' }, 400);
+  if (body.requester.toLowerCase() !== body.delegation.delegate.toLowerCase()) return c.json({ ok: false, error: 'requester_not_delegate' }, 400);
+  const sod = separationOfDuties(c.env);
+  if (!sod) return c.json({ ok: false, error: 'bad_config', detail: 'SEPARATION_OF_DUTIES must be strict|off' }, 500);
+  if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'bad_config', detail: 'AGENT_NAME_REGISTRY is not configured' }, 500);
+  const delegation = body.delegation;
+  const mcp = async (toolName: 'get_vault_record' | 'set_vault_record' | 'list_vault_record', toolArgs?: Record<string, unknown>) => {
+    const resp = await callMcpToolWithProof({ env: c.env, toolName, delegation, toolArgs });
+    const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!resp.ok || !j || j.ok !== true) throw new Error(`vault ${toolName} failed (HTTP ${resp.status})${j?.error ? `: ${String(j.error)}` : ''}`);
+    return j;
+  };
+  const kv = c.env.RELEASED_CARDS;
+  const deps: StudioDeps = {
+    vault: {
+      get: async <T,>(recordType: string) => ((await mcp('get_vault_record', { recordType })).data ?? null) as T | null,
+      set: async (recordType, data) => { await mcp('set_vault_record', { recordType, data }); },
+      list: async () => ((await mcp('list_vault_record')).records ?? []) as Array<{ record_type: string; updated_at?: string }>,
+    },
+    releasedCards: kv ? { get: (k) => kv.get(k), put: (k, v) => kv.put(k, v), delete: (k) => kv.delete(k) } : null,
+    sources: studioSources(c.env),
+    audit: buildAuditSink(c.env),
+    env: { chainId: Number(c.env.CHAIN_ID), namingRegistry: c.env.AGENT_NAME_REGISTRY as Address, separationOfDuties: sod },
+  };
+  const studio = new AgentCardStudio(deps);
+  const result = await studio.run({ principal: delegation.delegate, agent: delegation.delegator }, op, body.args ?? {});
+  return c.json(result.body, result.status as 200);
+});
 
 // Validate the JSON-RPC envelope, then hand the EXACT body bytes to the agent's live Task runtime (spec
 // 269 W5). The runtime is an A2aTaskDO sharded per agent (idFromName(agentSA)); it authorizes the delegation
