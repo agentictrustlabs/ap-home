@@ -350,8 +350,15 @@ pattern = "a2a.faithnet.io"
 custom_domain = true
 
 # One wildcard for the whole agent estate, present and future. Safe HERE and not on faithnet.io because this
-# zone hosts nothing but agents — the same shape production uses on impact-agent.io. Needs a proxied `*` DNS
-# record on the zone.
+# zone hosts nothing but agents — the same shape production uses on impact-agent.io.
+#
+# ROUTE, not custom domain: wrangler refuses a wildcard custom domain ("Wildcard operators (*) are not allowed
+# in Custom Domains"), though the API accepts one. A wildcard custom domain therefore cannot be declared here,
+# and anything not declared here is DELETED by the next deploy — with its DNS record.
+#
+# So DNS belongs to the zone, not to a Worker trigger: the zone needs a proxied `*` record, and this declared
+# route does the serving. Until that record exists the estate is held up by an API-created `*.faithnet.ai`
+# custom domain, which a deploy of this Worker WILL remove — add the record before the next deploy.
 [[env.faithnet.routes]]
 pattern = "*.faithnet.ai/*"
 zone_name = "faithnet.ai"
