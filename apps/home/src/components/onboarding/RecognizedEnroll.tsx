@@ -341,9 +341,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             person: home.address,
             orgAgent: enroll.grantOrg,
             orgName: out.invite.workspaceName || enroll.orgBase || 'Field Workspace',
-            purpose: 'field-workspace',
+            // The org's purpose IS the kind of this link (related-orgs maps it back): a join into a
+            // field TEAM under a hard-coded 'field-workspace' listed the team as one of the person's
+            // workspaces (2026-08-30). The app says what it is in `org_purpose`; default stays workspace.
+            purpose: enroll.purpose ?? 'field-workspace',
             requestedBy: enroll.aud,
-            kind: 'workspace',
+            kind:
+              enroll.purpose === 'field-team' ? 'team'
+              : enroll.purpose === 'field-circle' ? 'circle'
+              : enroll.purpose === 'field-church' ? 'church'
+              : 'workspace',
             parent: home.address,
             relationship: 'member',
             stewardshipDelegation: out.invite.delegation,
