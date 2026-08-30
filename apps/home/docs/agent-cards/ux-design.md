@@ -5,7 +5,12 @@
 **ADR of record:** [ADR-0062](../../../../docs/architecture/decisions/0062-agent-card-projection-publication-binding.md)
 **Renders (portable, UI-framework-neutral):** `packages/home/src/agent-management/{card-editor-manifest,projection-center-manifest,action-cards,permissions}.ts`
 **App (this doc):** `apps/demo-sso-next` — Next.js App Router, light corporate palette (Warm Civic Light — no dark mode)
-**Status:** Design deliverable — build starts from this spec + the manifests. No components have been written yet.
+**Status:** SHIPPED and functionally complete end-to-end (create → validate → release → approve → sign →
+publish → verify), components live under `src/components/studio/*`. This doc has been revised in place as the
+build diverged from the original design in specific, documented spots — see the "Status change from the
+original design" notes at the top of §3.1 and §9, which are the two places a live walkthrough found the shape
+wrong: the inspector moved from a permanent third column to a flyout, and Names & Bindings collapsed its
+always-empty three-fact first-visit state into something that states what to do next.
 
 ---
 
@@ -180,38 +185,97 @@ here beyond: paste/upload → `agent.card.import` → import proposal, never a s
 
 ## 3. The editor (`…/card/<cardResourceId>`, tab: Agent Card)
 
-### 3.1 Three-pane layout
+### 3.1 Two-pane layout + inspector flyout (SHIPPED, rev. 2026-08-30)
+
+**Status change from the original design.** A live walkthrough at ~1300–1500px content width (portal
+sidebar ~240px) found the three-pane layout genuinely too cramped: an 8-item section rail carrying a
+two-line blurb each, a squeezed ~500–700px form column, and a permanent 320px inspector that was only
+sometimes wanted. The product owner's verdict: *"maybe use flyout for right side content viewer… Card
+sections … is not intuitive at all."* This section describes what shipped instead — the layout decision
+below **supersedes** the original three-pane diagram.
+
+**The decision: inspector → flyout, section rail → compact single-line list.** Three options were on the
+table for the rail (compact dot+label rail / a full-page accordion / a top segmented strip). The rail won:
+an accordion re-introduces "wall of content" scrolling for what is fundamentally a *choice* (which section
+do I want), and 8 section names don't fit a segmented strip's single row without wrapping into something
+less scannable than a vertical list. A vertical rail is also the pattern every other dense Manage-band page
+in this portal already uses (Records/Access/Settings) — least surprise wins when nothing else forces a
+different shape.
 
 ```
-┌───────────────┬─────────────────────────────────┬──────────────────────┐
-│ Section nav    │ Form (active section's fields)   │ Inspector             │
-│ (left, ~200px) │ (center, flexible)                │ (right, ~320px,       │
-│                │                                    │  tabbed panels)       │
-│ Identity &     │ [field rows for the active        │ [ Effective JSON ]    │
-│  presentation  │  section only]                     │ [ Provenance ]        │
-│ Interfaces     │                                    │ [ Validation ]        │
-│ Capabilities   │                                    │ [ Projection impact ] │
-│ Media types    │                                    │ [ Release diff ]      │
-│ Security       │                                    │                       │
-│ Skills         │                                    │  (panel content for   │
-│ Signatures     │                                    │   whatever field is   │
-│ Extended card  │                                    │   focused, or the     │
-│  policies      │                                    │   whole card if none) │
-└───────────────┴─────────────────────────────────┴──────────────────────┘
+┌────────────────┬──────────────────────────────────────────────────┐
+│ Section nav     │ Form (active section's fields)                    │      ┌─ Inspector flyout ─────────┐
+│ (left, 190–240px)│ (flexible — gets the width the inspector used to │      │ (opens as a right-side      │
+│                 │  take)                                             │  ⇠   │  OVERLAY, not a column —    │
+│ ● Identity &    │ H2 <section title>                                 │      │  min(640px, 92vw), never    │
+│   presentation  │ <section blurb — full width, ONE copy, not         │      │  shifts the form)            │
+│ ○ Interfaces    │  duplicated in the rail>                            │      │ [Effective JSON][Live       │
+│ ○ Capabilities  │ [field rows for the active section only,            │      │  endpoint][Provenance]       │
+│ ○ Media types   │  each with an "Inspect" control]                    │      │ [Validation][Projection      │
+│ ○ Security      │                                                     │      │  impact][Release diff]       │
+│ ○ Skills        │                                                     │      │  ✕ close                    │
+│ ○ Signatures    │                                                     │      └──────────────────────────────┘
+│ ○ Extended card │                                                     │
+└────────────────┴──────────────────────────────────────────────────┘
 ```
 
 Section nav and inspector panel list are rendered **directly from `A2A_CARD_EDITOR_MANIFEST.sections`** and
 `inspectorPanels` — the app never hardcodes a section list, so a manifest change (new section, reordered
 fields) ships without a component edit. Section nav shows a small dot per section: gray (all inherited/clean),
 amber (has an override or unresolved diagnostic), red (has an error-severity diagnostic) — so a steward scans
-eight words and knows where to look.
+eight words and knows where to look. The rail label is now **single-line, ellipsis-truncated** with the full
+title in a native `title` tooltip and the full status (`"Interfaces — 1 error"`) in `aria-label` — the two-line
+blurb that used to sit under each label is gone from the rail entirely; it wasn't deleted, it moved: the
+identical `section.blurb` string is what the form pane already prints as its own subhead (`§3.1` original had
+this too, duplicated in miniature in the rail — the rail copy was a stopgap and is now retired in favor of the
+one, full-width copy).
+
+**The inspector (`src/components/studio/Inspector.tsx`) is a controlled flyout, not an owned-state panel.**
+`CardEditor` lifts `inspectorOpen` / `inspectorPanel` / `inspectorFocusPointer` and passes them down —
+`Inspector` never unmounts on close, it just stops rendering the overlay, which is *why* the last-viewed
+panel survives a close/reopen without extra plumbing (design intent: "remembering the last panel"). It is a
+`role="dialog" aria-modal="true"` fixed-position overlay (`position: fixed`, `top/right/bottom: 0`), so it
+never participates in the grid and **never shifts the form** — opening and closing it is purely additive.
+Width `min(640px, 92vw)` (`.studio-flyout` in `app/globals.css`) so Effective JSON/Live endpoint's raw JSON
+has room to breathe. Closes on Esc, backdrop click, or the ✕ button; a manual focus trap (Tab/Shift+Tab cycle
+within the dialog, implemented in `Inspector.tsx` rather than a new dependency — see constraints) opens by
+focusing the close button and restores focus to whatever triggered it (a toolbar button or a field row's
+Inspect control) on close.
+
+**Two ways in:** (1) a **persistent toolbar button** — "Inspector" next to Validate/Import, opens to the
+last-viewed panel, carries a small red dot when `errorCount > 0` so there's a reason to look without opening
+it; (2) **every field row now has an "Inspect" control** (`FieldShell`'s `onInspect`, `fields.tsx`) — opens
+straight to **Validation** (scrolled implicitly — the panel already groups by severity) when that field
+currently has diagnostics, else to **Provenance**, scrolled to and highlighting that field's row
+(`Inspector.tsx`'s `Provenance` component takes a `focusPointer` and scrolls `#prov-<pointer>` into view).
+Clicking "Go to field" from *inside* the flyout (Provenance/Validation/Release diff) closes the flyout after
+jumping — the point of that action is to look at the form, not the panel that sent you there.
+
+**Deep-linkable**, per §1.3's existing table: `?panel=<id>` opens the flyout straight to a named panel on
+load (validated against `A2A_CARD_EDITOR_MANIFEST.inspectorPanels` — an unrecognized value is silently
+ignored, never a blank/broken panel); `?diagnostic=` still opens Validation the same way it always did. Both
+are one-shot params, cleared from the URL after read (existing `useOneShotParam` convention), so a refresh
+doesn't re-trigger the auto-open.
 
 Below 1024px viewport (SHIPPED as CSS in `app/globals.css`: `.studio-sections` / `.studio-section-list`):
-section nav collapses to a horizontal scroll strip at top; the inspector stacks below the form (the per-row
-"Details" bottom sheet is still open work). Above the panes sits an orientation block naming what the card is
-for, where the draft stands, and the single next action — without it the page opens on a toolbar and eight
-section names, which reads as a table of contents (same responsive pattern the portal already uses
-for its dense settings pages).
+section nav collapses to a horizontal scroll strip at top; the flyout doesn't need a mobile-specific layout
+of its own — it is already an overlay at `min(640px, 92vw)`, which is close to full-width on a phone. Above
+the panes sits an orientation block naming what the card is for and how to treat editing it (§3.1's original
+"Now:" line moved — see below).
+
+**Lifecycle orientation moved to the tabs, not duplicated per-tab.** The original design had the editor's
+orientation block carry a `"Now:"` line ("validated and ready to release" / "N problems to fix" / a link to
+Releases & Audit) that only appeared on the Agent Card tab and re-derived, slightly differently worded, what
+the release stepper already knows. That's gone from `CardEditor`'s orientation block. In its place,
+`CardStudio.tsx`'s `LifecycleBar` renders **once**, directly under the tab strip, **on all four tabs** —
+a compact horizontal mini-stepper (`lifecycleOrientation`, `src/lib/studio-view.ts`, pure + tested) plus one
+sentence: what's next, or who it's waiting on (reusing `gateForOp`'s exact duty wording — "Waiting on someone
+with approve access — you don't hold …" — rather than a second hand-written copy of that sentence), or the
+terminal/published state. A "Go to Releases & Audit →" link appears only when the viewer isn't already on
+that tab. `CardEditor`'s own orientation block is now scoped to what's true about *editing a draft*
+specifically — the inheritance framing, and (only when `errorCount > 0`) a short line with a "Review in
+Inspector" button that opens the flyout to Validation. The two blocks answer different questions ("where is
+this release in the pipeline" vs. "is this specific draft healthy") and no longer say the same thing twice.
 
 ### 3.2 Field row anatomy
 
@@ -381,8 +445,17 @@ make "everything got published" structurally impossible:
 
 ## 4. Inspector panels
 
-Rendered from `inspectorPanels: ['effective-json', 'provenance', 'validation', 'projection-impact',
-'release-diff']` — a tab strip at the top of the inspector pane, always in that order.
+Rendered from `inspectorPanels: ['effective-json', 'live-endpoint', 'provenance', 'validation',
+'projection-impact', 'release-diff']` — a tab strip at the top of the inspector, always in that order. **The
+inspector itself is a flyout, not a permanent pane — see §3.1** for the layout decision, how it opens
+(toolbar button, or a field row's Inspect control), focus/close behavior, and the `?panel=` deep link. Panel
+*content* below is unchanged by that move; only the frame around it changed. `live-endpoint` (shipped after
+this doc's §4.1–§4.5 were written; deliberately kept unnumbered below rather than renumbering every existing
+§4.x cross-reference in this document) sits between Effective JSON and Provenance: it fetches
+`/.well-known/agent-card.json` from the agent's own endpoint and shows what the world is *actually* being
+served right now, separately from Effective JSON's "what would be signed" — three states a steward must not
+conflate are what you're editing (the draft), what you released, and what is being served, and this panel is
+the third one. Read-only; `Copy URL` / `Download JSON` / `Refresh` are its only controls.
 
 ### 4.1 Effective JSON
 The card as it would be released **right now** — pretty-printed, syntax-highlighted, read-only, with a
@@ -473,7 +546,13 @@ message as fallback for unmapped codes — never a blank).
 ### 6.1 Stepper
 
 `draft → validated → approvalPending → approved → signed → published` (plus terminal `superseded /
-deprecated / revoked`, spec §3). Rendered as a horizontal stepper at the top of the **Releases & Audit** tab
+deprecated / revoked`, spec §3). Two renderings share ONE state machine (`stepperSteps`, `src/lib/studio-view.ts`)
+now (rev. 2026-08-30): the full, interactive `ReleaseStepper` below — with per-step action buttons, who-did-it,
+and timestamps — lives on **Releases & Audit** only; a compact, read-only summary (`LifecycleBar`,
+`CardStudio.tsx`, built on the new `lifecycleOrientation` helper) renders next to the tab strip on **every**
+tab, so a steward on Agent Card or Projections still sees where the release stands and what's next without a
+tab switch (see §3.1's "lifecycle orientation moved to the tabs" for why this replaced the old per-tab "Now:"
+line). The full stepper is rendered as a horizontal stepper at the top of the **Releases & Audit** tab
 when a release is in progress, collapsing to a single status line once `published`:
 
 ```
@@ -736,51 +815,76 @@ both plans share the same credential/signer, falling back to two separate flows 
 
 ---
 
-## 9. Names & Bindings tab (`…/card/<cardResourceId>/names`)
+## 9. Names & Bindings tab (`…/card/<cardResourceId>/names`) — SHIPPED, redesigned 2026-08-30
 
-Per spec §8.3: *"the Naming UI distinguishes ownership / resolution / canonical identity / current card
-publication / registry binding."* This tab exists specifically to keep those five things from blurring into
-one "your agent's name" line, because they answer different questions and can legitimately disagree
-(e.g. name resolves, but the card it points at is stale):
+**Status change from the original design.** The original three-fact-per-row layout below shipped, then a
+verified product review of the actual first-visit state found it read as *"the same address three times,
+then two empty lines… a status page with no status… a doctrine diagram, not a working surface."* A new card
+is `signed` or earlier with no publication and no projections on a first visit, so **three of its five rows
+were empty by default** — the empty state is the normal case here, not an edge case, and the original design
+didn't design for it. This section describes what shipped instead.
+
+Per spec §8.3, the tab still exists to keep five things from blurring into one "your agent's name" line —
+ownership / resolution / canonical identity / current card publication / registry binding — because they
+answer different questions and CAN legitimately disagree (a name can resolve while the card it points at is
+stale). What changed is **when** they're shown apart: this tab is only ever reached for an agent the viewer
+already stewards, so ownership and resolution never actually disagree with each other in this app's current
+data model (there is no third-party-owned-name case surfaced here yet — open question below). Repeating that
+non-disagreement as three labelled rows was the "same fact three times" the product review flagged. The fix:
+**collapse ownership/resolution/canonical identity into one confirmed line in the healthy case**, keep the
+full doctrinal breakdown one click away for when a steward actually needs it, and make **every** row —
+`identity` / `publication` / `registry` — say what's true, then name the next step, the same tone
+`publicationVerdict` and `studioErrorSentence` already use elsewhere in this Studio. One sentence at the top
+now says what the tab answers before any row: *"Where this agent can be found, and whether each public record
+agrees with the card you published."*
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ Ownership                                                     │
-│  This name is owned by: 0xAbC…1234 (this agent)                │
-│                                                                │
-│ Resolution                                                    │
-│  vendor-payments.impact  →  0xAbC…1234                          │
-│  Anyone can look this name up and get this address.              │
-│                                                                │
-│ Canonical identity                                              │
-│  0xAbC…1234  (the Smart Agent — this never changes)               │
-│                                                                    │
-│ Current card publication                                           │
-│  Card release 4 · sha256:9f2a… · published at                       │
-│  https://vendor-payments.impact/.well-known/agent-card.json           │
-│  atl:cardDigest on this name record: sha256:9f2a…  ✓ matches            │
-│                                                                          │
-│ Registry binding                                                          │
-│  AP Registry entry #4471 · active                                          │
-└────────────────────────────────────────────────────────────┘
+Where this agent can be found, and whether each public record agrees with the card you published.
+
+IDENTITY                                                          [✓ Agrees]
+vendor-payments.impact resolves to this agent, and this agent owns the name.
+Canonical identity — this never changes, however the name or the card evolves:  0xAbC…1234
+▸ Why ownership, resolution and canonical identity are different questions  (collapsed disclosure)
+
+CARD PUBLICATION                                                  [— Not yet]
+This card has a signed release, but nothing is published yet.
+Publish it from Releases & Audit →
+
+REGISTRY BINDING                                                  [— Not yet]
+This agent isn't listed in a registry yet.
+Configure it from Projections →
 ```
 
-- **Ownership** — who controls the name record (the SA itself, in every case this tab is reachable from).
-- **Resolution** — the public name→address mapping anyone can query; a plain statement, not a control (this
-  tab doesn't let you *change* resolution, that's the Naming surface elsewhere).
-- **Canonical identity** — the SA address, framed as the one thing that never rotates (ADR-0010), sitting
-  between resolution and publication so a steward sees the anchor point.
-- **Current card publication** — the released card this name currently points at, with the **digest
-  comparison spelled out**: if the name record's `atl:cardDigest` matches the current release's digest, a
-  small sage "✓ matches"; if it doesn't (the name wasn't updated after the last release), amber "doesn't
-  match the latest release yet" with a `[ Update name record ]` action (routes to `agent.naming.update`,
-  itself an approval-required, publisher-duty action).
-- **Registry binding** — the `ExternalIdentityBindingV1` for `ap-registry`, if any, with its verification
-  state chip (same vocabulary as §8.2).
+- **Identity row** — collapses ownership + resolution + canonical identity. `ok`: *"{name} resolves to this
+  agent, and this agent owns the name."* `empty` (no public name): *"This agent has no public name yet —
+  nothing will resolve to it, or to any card it releases, until it has one"* — states the consequence, never a
+  bare *"no name."* The SA address always renders underneath as a small reference chip regardless of state
+  (useful independent of whether anything agrees). A collapsed `<details>`-style disclosure — closed by
+  default, never pushed at a first-time visitor — carries the original three-concept explanation for when a
+  steward actually needs the distinction.
+- **Card publication row** — four states depending on where the release actually is, each naming its own next
+  step: nothing signed yet → *"No release is ready to publish yet…"* → **Go to Releases & Audit**; signed but
+  unpublished → *"This card has a signed release, but nothing is published yet"* → **Publish it from Releases
+  & Audit**; published but not linked to the name (no AP Naming projection) → *"Card release N is live…, but
+  it isn't linked to this agent's name yet"* → **Link it from Projections**; published and linked but the name
+  record hasn't caught up to a newer release → *"stale"* → **Update in Projections**. Only the fully-agreeing
+  case is quiet (`ok`, no `next`); the raw `atl:cardDigest` value still renders underneath as a supporting
+  detail line for the audit-minded, same spirit as the Effective JSON panel never asking a steward to trust a
+  summary.
+- **Registry binding row** — `empty` (no bindings) → **Configure it from Projections**; otherwise an aggregate
+  read of every `ap-registry` binding's `lifecycle.state`: any `revoked` → `mismatch`; any
+  `pendingVerification`/`stale`/`suspended`/`superseded` → `stale`, needs attention; all `active` → `ok` with a
+  count (*"Listed in 1 registry, active"*). The existing per-binding detail list (state chips + **Verify
+  binding**, an interactive on-chain check) still renders below the aggregate line exactly as before — the row
+  summarizes, it doesn't replace the detail.
 
-Empty/partial states: a name that resolves but has never had `atl:cardDigest` set shows *"No card is linked
-to this name yet"* with a link to the Agent Card tab's Publish step, not an error — this is a valid, common
-pre-card state.
+**The state machine is pure and tested**, per this Studio's convention of keeping steward-facing logic
+provable without a DOM testing library: `namesAndBindingsRows` in `src/lib/studio-view.ts` takes the agent
+name, publication/naming/registry facts, and the Releases/Projections tab hrefs, and returns
+`{ id, state: 'ok' | 'empty' | 'stale' | 'mismatch', line, next?: { label, href } }[]` — the component
+(`NamesAndBindings.tsx`) only renders it and layers the interactive `Verify binding` check on top. 13 cases
+covered in `studio-view.test.ts` (identity ok/empty; all four publication branches; registry empty/ok/mismatch/
+stale).
 
 ---
 
@@ -830,10 +934,17 @@ so the list, editor, and any open approval card all reflect a change without a f
   required `*`, not a colored dot alone). The section-nav status dots (§3.1) are the one purely-color signal
   in this design; each dot's `title` attribute and an `aria-label` on the nav item spell out the state in
   words ("Interfaces — 1 error") for screen readers and colorblind users alike.
-- **Focus order** — three-pane layout: tab into section nav → active section's fields top-to-bottom → inspector
-  panel tabs → active panel content. The inspector's field-click-to-scroll (§4.2 Provenance) also moves focus
-  to the target field, not just the viewport, so a keyboard/screen-reader user gets the same jump a mouse
-  user does.
+- **Focus order** — two-pane layout: tab into section nav → active section's fields top-to-bottom → the
+  persistent Inspector toolbar button. The inspector's field-click-to-scroll (Provenance) also moves focus to
+  the target field, not just the viewport, so a keyboard/screen-reader user gets the same jump a mouse user
+  does.
+- **Inspector flyout dialog semantics (§3.1, §4)** — `role="dialog" aria-modal="true" aria-label="Inspector"`.
+  Opening it moves focus to the close button; a manual Tab/Shift+Tab trap keeps focus cycling within the
+  dialog while open (no headless-dialog dependency in this app — constraint, hand-rolled in `Inspector.tsx`);
+  Escape closes it from anywhere inside; closing restores focus to whatever opened it — the toolbar button, or
+  the specific field row's Inspect control, so a keyboard user lands back exactly where they left off rather
+  than at the top of the page. The backdrop is `aria-hidden` and click-to-close; Escape is its keyboard
+  equivalent, so the backdrop itself is never a tab stop.
 - **Drag-and-drop interfaces list (§3.5)** — MUST have a full keyboard equivalent: focus a row, `Alt+↑`/`Alt+↓`
   (or a visible "Move up"/"Move down" icon-button pair shown on focus, not hover-only) reorders it. Drag alone
   is never the only way to reach "first = preferred."
@@ -914,6 +1025,19 @@ so the list, editor, and any open approval card all reflect a change without a f
 - **Ontologist** — `SkillTaxonomyMappingV1` relations (`exact/close/broad/narrow`) surfaced as plain labels
   in the skill picker (§3.7): confirm these four words are the right steward-facing gloss for
   `skos:exactMatch/closeMatch/broadMatch/narrowMatch` before they ship as fixed UI copy.
+- **Ownership/resolution divergence detection (§9)** — the redesigned Identity row collapses ownership,
+  resolution and canonical identity into one confirmed line because, in this app's CURRENT data model, this
+  tab is only ever reached for an agent the viewer already stewards and no separate ownership-record or
+  resolution-mismatch fetch exists to detect a genuine disagreement between them. The doctrinal case for
+  keeping them separate (a name resolving while pointing at the wrong owner) is real and stays documented in
+  the tab's disclosure — but nothing currently WATCHES for it. **→ Information Architect + Security**: is a
+  third-party-owned-name case reachable from this tab in a later wave, and if so what read produces the
+  `mismatch` state `namesAndBindingsRows` doesn't yet have a way to compute?
+- **Inspector Validation deep-scroll** — a field row's Inspect control opens Validation for a field that has
+  diagnostics, but (unlike Provenance's `focusPointer`) it doesn't yet scroll to and highlight that field's
+  specific diagnostic row within the panel — the panel opens with everything from Validate still visible,
+  grouped by severity, which is usually enough since a steward just came from that exact field. **→
+  Developer**, low-priority polish if it turns out not to be.
 
 ---
 

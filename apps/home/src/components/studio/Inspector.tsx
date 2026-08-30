@@ -1,7 +1,11 @@
 'use client';
-// The inspector pane: a tab strip rendered from `A2A_CARD_EDITOR_MANIFEST.inspectorPanels`, always in that
-// order (design §4). Effective JSON · Provenance · Validation · Projection impact · Release diff.
-import { useCallback, useEffect, useState } from 'react';
+// The inspector: a right-side FLYOUT (design §4, §3.1 rev. 2026-08-30 — product direction, "use a flyout
+// for right-side content viewer") over panels rendered from `A2A_CARD_EDITOR_MANIFEST.inspectorPanels`,
+// always in that order. Effective JSON · Live endpoint · Provenance · Validation · Projection impact ·
+// Release diff. It is CONTROLLED by the caller (`open`/`onClose`/`panel`/`onPanelChange`) rather than
+// owning its own open state, so the last-viewed panel survives close/reopen without extra plumbing — the
+// caller (CardEditor) never unmounts it, it just stops rendering the overlay.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
 import { cardContentDigest, type A2AAgentCardDraftV1, type A2AAgentCardReleaseV1, type FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
@@ -178,11 +182,14 @@ function LiveEndpoint({
   );
 }
 
+const provenanceRowId = (pointer: string): string => `prov-${pointer.replace(/\//g, '-')}`;
+
 function Provenance({
   bindings,
   diagnostics,
   proposals,
   busy,
+  focusPointer,
   onGoToField,
   onAcceptProposal,
   onRejectProposal,
@@ -191,18 +198,36 @@ function Provenance({
   diagnostics: readonly ProjectionDiagnosticV1[];
   proposals: StewardProposalV1[];
   busy: boolean;
+  /** Set when opened via a field row's Inspect control — scrolls to and highlights that row. */
+  focusPointer?: string | null;
   onGoToField(pointer: string): void;
   onAcceptProposal(p: StewardProposalV1): void;
   onRejectProposal(p: StewardProposalV1): void;
 }) {
   const rows = Object.entries(bindings).sort(([a], [b]) => a.localeCompare(b));
   const overridden = rows.filter(([, b]) => b.mode === 'override').map(([p]) => p);
+
+  useEffect(() => {
+    if (!focusPointer) return;
+    document.getElementById(provenanceRowId(focusPointer))?.scrollIntoView({ block: 'nearest' });
+  }, [focusPointer]);
+
   return (
     <div>
       <StewardProposals proposals={proposals} overriddenPointers={overridden} busy={busy} onAccept={onAcceptProposal} onReject={onRejectProposal} />
       <ul style={{ listStyle: 'none', margin: '.5rem 0 0', padding: 0 }}>
         {rows.map(([pointer, b]) => (
-          <li key={pointer} style={{ borderBottom: '1px solid var(--c-g200)', padding: '.35rem 0' }}>
+          <li
+            key={pointer}
+            id={provenanceRowId(pointer)}
+            style={{
+              borderBottom: '1px solid var(--c-g200)',
+              padding: '.35rem',
+              margin: '0 -.35rem',
+              borderRadius: 6,
+              ...(focusPointer === pointer ? { background: 'var(--c-primary-subtle)' } : {}),
+            }}
+          >
             <button
               type="button"
               onClick={() => onGoToField(pointer)}
@@ -283,6 +308,14 @@ export function ReleaseDiffPanel({ previous, draft }: { previous: A2AAgentCardRe
   );
 }
 
+export type { PanelId };
+
+/**
+ * A right-side flyout, controlled by the caller. `open`/`onClose` toggle visibility; `panel`/`onPanelChange`
+ * are lifted to the caller too, so the panel choice survives the flyout closing (CardEditor never unmounts
+ * this component — it just stops rendering the overlay while `open` is false). Focus-trapped, closes on
+ * Esc/backdrop/the close button, and restores focus to whatever opened it (design §11).
+ */
 export function Inspector(props: {
   delegation: DelegationWire;
   draft: A2AAgentCardDraftV1 | null;
@@ -297,58 +330,119 @@ export function Inspector(props: {
   onGoToField(pointer: string): void;
   onAcceptProposal(p: StewardProposalV1): void;
   onRejectProposal(p: StewardProposalV1): void;
-  initialPanel?: PanelId;
+  open: boolean;
+  onClose(): void;
+  panel: PanelId;
+  onPanelChange(p: PanelId): void;
+  /** Set when opened from a field row's Inspect control (design §3.2) — highlights that row in Provenance. */
+  focusPointer?: string | null;
 }) {
-  const [panel, setPanel] = useState<PanelId>(props.initialPanel ?? 'effective-json');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocus = useRef<HTMLElement | null>(null);
+  const { open, onClose } = props;
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocus.current = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = Array.from(root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(
+        (el) => !el.hasAttribute('disabled'),
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      // Restore focus to whatever opened the flyout — a trigger button, or a field row's Inspect control.
+      restoreFocus.current?.focus();
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const panel = props.panel;
+
   return (
-    <aside style={{ border: '1px solid var(--c-g200)', borderRadius: 10, padding: '.7rem', background: 'var(--color-surface)' }}>
-      <div role="tablist" aria-label="Inspector" style={{ display: 'flex', flexWrap: 'wrap', gap: '.25rem', marginBottom: '.6rem' }}>
-        {A2A_CARD_EDITOR_MANIFEST.inspectorPanels.map((p) => (
-          <button
-            key={p}
-            role="tab"
-            type="button"
-            aria-selected={panel === p}
-            onClick={() => setPanel(p)}
-            style={{
-              fontSize: '.7rem',
-              fontWeight: panel === p ? 700 : 500,
-              padding: '.3rem .5rem',
-              minHeight: 32,
-              borderRadius: 6,
-              border: '1px solid var(--c-g200)',
-              cursor: 'pointer',
-              background: panel === p ? 'var(--c-primary-subtle)' : 'var(--color-surface)',
-              color: panel === p ? 'var(--c-primary)' : 'var(--c-g700)',
-            }}
-          >
-            {PANEL_LABEL[p]}
+    <>
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop click-to-close; Esc is the keyboard equivalent (handled above) */}
+      <div className="studio-flyout-backdrop" aria-hidden="true" onClick={onClose} />
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Inspector" className="studio-flyout">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '.5rem', marginBottom: '.6rem' }}>
+          <div role="tablist" aria-label="Inspector panels" style={{ display: 'flex', flexWrap: 'wrap', gap: '.25rem' }}>
+            {A2A_CARD_EDITOR_MANIFEST.inspectorPanels.map((p) => (
+              <button
+                key={p}
+                role="tab"
+                type="button"
+                aria-selected={panel === p}
+                onClick={() => props.onPanelChange(p)}
+                style={{
+                  fontSize: '.7rem',
+                  fontWeight: panel === p ? 700 : 500,
+                  padding: '.3rem .5rem',
+                  minHeight: 32,
+                  borderRadius: 6,
+                  border: '1px solid var(--c-g200)',
+                  cursor: 'pointer',
+                  background: panel === p ? 'var(--c-primary-subtle)' : 'var(--color-surface)',
+                  color: panel === p ? 'var(--c-primary)' : 'var(--c-g700)',
+                }}
+              >
+                {PANEL_LABEL[p]}
+              </button>
+            ))}
+          </div>
+          <button ref={closeRef} type="button" aria-label="Close inspector" className="btn-ghost" onClick={onClose} style={{ minWidth: 36, minHeight: 36, padding: '.3rem .55rem', flex: 'none' }}>
+            ✕
           </button>
-        ))}
+        </div>
+        <div className="studio-flyout-body">
+          {!props.draft ? (
+            <p className="manage-card-blurb">No draft on this card resource.</p>
+          ) : panel === 'live-endpoint' ? (
+            <LiveEndpoint delegation={props.delegation} draft={props.draft} release={props.previousRelease} />
+          ) : panel === 'effective-json' ? (
+            <EffectiveJson draft={props.draft} />
+          ) : panel === 'provenance' ? (
+            <Provenance
+              bindings={props.draft.fieldBindings}
+              diagnostics={props.diagnostics}
+              proposals={props.proposals}
+              busy={props.busy}
+              focusPointer={props.focusPointer}
+              onGoToField={props.onGoToField}
+              onAcceptProposal={props.onAcceptProposal}
+              onRejectProposal={props.onRejectProposal}
+            />
+          ) : panel === 'validation' ? (
+            <DiagnosticsPanel diagnostics={props.diagnostics} onGoToField={props.onGoToField} emptyText="Run Validate to check this draft." />
+          ) : panel === 'projection-impact' ? (
+            <ProjectionImpact projections={props.projections} latestReleaseId={props.latestReleaseId} pendingNewRelease={props.pendingNewRelease} />
+          ) : (
+            <ReleaseDiffPanel previous={props.previousRelease} draft={props.draft} />
+          )}
+        </div>
       </div>
-      {!props.draft ? (
-        <p className="manage-card-blurb">No draft on this card resource.</p>
-      ) : panel === 'live-endpoint' ? (
-        <LiveEndpoint delegation={props.delegation} draft={props.draft} release={props.previousRelease} />
-      ) : panel === 'effective-json' ? (
-        <EffectiveJson draft={props.draft} />
-      ) : panel === 'provenance' ? (
-        <Provenance
-          bindings={props.draft.fieldBindings}
-          diagnostics={props.diagnostics}
-          proposals={props.proposals}
-          busy={props.busy}
-          onGoToField={props.onGoToField}
-          onAcceptProposal={props.onAcceptProposal}
-          onRejectProposal={props.onRejectProposal}
-        />
-      ) : panel === 'validation' ? (
-        <DiagnosticsPanel diagnostics={props.diagnostics} onGoToField={props.onGoToField} emptyText="Run Validate to check this draft." />
-      ) : panel === 'projection-impact' ? (
-        <ProjectionImpact projections={props.projections} latestReleaseId={props.latestReleaseId} pendingNewRelease={props.pendingNewRelease} />
-      ) : (
-        <ReleaseDiffPanel previous={props.previousRelease} draft={props.draft} />
-      )}
-    </aside>
+    </>
   );
 }

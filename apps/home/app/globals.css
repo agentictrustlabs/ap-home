@@ -1291,22 +1291,25 @@
         font-size: 1.15rem; line-height: 1; color: var(--stone-500, #78716c); padding: 0 .25rem;
       }
 
-      /* ── Agent Card & Projection Studio (spec 347 §9; docs/agent-cards/ux-design.md §3.1, §11) ──
-         Below 1024px the three-pane editor stacks: section nav on top, form, then the inspector —
-         the same responsive move the portal's other dense settings pages make. */
-      .studio-panes { grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(280px, 320px); }
+      /* ── Agent Card & Projection Studio (spec 347 §9; docs/agent-cards/ux-design.md §3.1, §4, §11) ──
+         rev. 2026-08-30: the inspector moved from a permanent third column to a flyout (product direction —
+         "use a flyout for right-side content viewer"), so the editor is a TWO-pane grid: section rail + form.
+         Below 1024px the rail collapses to a horizontal scroll strip, same as before. */
+      .studio-panes { grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); }
       .studio-sections { position: sticky; top: 1rem; min-width: 0; }
-      .studio-section-list button { min-width: 0; overflow-wrap: anywhere; }
-      /* Two lines, then ellipsis — a blurb may never push the nav into the form pane. */
-      .studio-section-blurb {
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      .studio-section-list button { min-width: 0; }
+      /* One line, ellipsis — the section's own blurb now lives ONCE, at full width, as the form pane's
+         subhead (design §3.1); the rail only needs to be scannable, not explanatory. */
+      .studio-section-label {
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
+      .studio-section-btn:focus-visible { outline: 2px solid var(--c-primary); outline-offset: -2px; }
       .studio-sections-title {
         margin: 0 0 .3rem; padding: 0 .55rem; font-size: .68rem; font-weight: 700;
         letter-spacing: .04em; text-transform: uppercase; color: var(--c-g500, #6b7280);
       }
-      /* Below 1024px the three panes stack, and an eight-item vertical section list becomes a wall of
-         headings before the first field. Design §3.1: the nav becomes a horizontal scroll strip. */
+      /* Below 1024px the rail becomes a horizontal scroll strip rather than an eight-item wall of headings
+         before the first field (design §3.1). */
       @media (max-width: 1024px) {
         .studio-panes { grid-template-columns: 1fr !important; }
         .studio-sections { position: static; }
@@ -1316,17 +1319,59 @@
           scrollbar-width: thin; -webkit-overflow-scrolling: touch;
         }
         .studio-section-list > li { flex: none; }
-        .studio-section-blurb { display: none; }
         .studio-section-list button {
           white-space: nowrap; border: 1px solid var(--c-g200) !important; border-radius: 999px !important;
           padding: .35rem .7rem !important; min-height: 36px !important;
         }
+        .studio-section-label { max-width: 40vw; }
       }
+
+      /* Lifecycle bar (design §6.1) — shared by every editor tab, next to the tabs, so "where is this
+         release / what's next" is answered once instead of re-derived per tab. */
+      .studio-lifecycle { margin: 0 0 .7rem; }
+      .studio-lifecycle-steps {
+        display: flex; flex-wrap: wrap; gap: .3rem .5rem; list-style: none; margin: 0 0 .3rem; padding: 0;
+        font-size: .68rem;
+      }
+      .studio-lifecycle-steps li {
+        display: flex; align-items: center; gap: .3rem; color: var(--c-g400); white-space: nowrap;
+      }
+      .studio-lifecycle-steps li::before {
+        content: ''; width: 8px; height: 8px; border-radius: 999px; border: 2px solid var(--c-g300); flex: none;
+      }
+      .studio-lifecycle-steps li[data-state='done'] { color: var(--c-g700); }
+      .studio-lifecycle-steps li[data-state='done']::before { background: var(--c-primary); border-color: var(--c-primary); }
+      .studio-lifecycle-steps li[data-state='current'] { color: var(--c-primary); font-weight: 700; }
+      .studio-lifecycle-steps li[data-state='current']::before { border-color: var(--c-primary); background: var(--color-surface); }
+      .studio-lifecycle-next { margin: 0; font-size: .78rem; color: var(--c-g700); }
+
+      /* Inspector flyout (design §4) — a right-side overlay, never a layout column, so opening it never
+         shifts the form. Width holds JSON comfortably; never wider than the viewport allows. */
+      .studio-flyout-backdrop {
+        position: fixed; inset: 0; background: rgba(15, 23, 42, .35); z-index: 60;
+      }
+      .studio-flyout {
+        position: fixed; top: 0; right: 0; bottom: 0; z-index: 61;
+        width: min(640px, 92vw); max-width: 100vw;
+        background: var(--color-surface); border-left: 1px solid var(--c-g200);
+        box-shadow: -12px 0 28px rgba(15, 23, 42, .14);
+        display: flex; flex-direction: column; padding: .85rem .9rem;
+      }
+      .studio-flyout-body { flex: 1; min-height: 0; overflow-y: auto; }
+      @media (prefers-reduced-motion: no-preference) {
+        .studio-flyout { animation: studio-flyout-in .18s ease-out; }
+        .studio-flyout-backdrop { animation: studio-flyout-fade .18s ease-out; }
+      }
+      @keyframes studio-flyout-in { from { transform: translateX(12px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+      @keyframes studio-flyout-fade { from { opacity: 0; } to { opacity: 1; } }
+
       /* Visually hidden, still announced (the stepper's "current step" and multi-step signing labels). */
       .sr-only {
         position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
         overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
       }
       @media (prefers-reduced-motion: reduce) {
-        .studio-panes * { transition: none !important; animation: none !important; }
+        .studio-panes *, .studio-flyout, .studio-flyout-backdrop, .studio-lifecycle-steps li {
+          transition: none !important; animation: none !important;
+        }
       }

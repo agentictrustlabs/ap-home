@@ -538,6 +538,64 @@ export function editForksNewDraft(state: CardReleaseState | undefined): boolean 
   return state === 'approved' || state === 'signed' || state === 'published';
 }
 
+// ── lifecycle orientation (design §3.1, §6.1) ───────────────────────────────────────────────────
+// The editor's tabs all share ONE picture of "where is this release, and what's next" — this is that
+// picture, computed once and shown next to the tabs (design §1.3's "Now:" line moves here so it stops
+// being re-derived, slightly differently worded, per tab). `stepperSteps` already knows the state
+// machine; this adds the sentence a steward reads without visiting Releases & Audit.
+
+export interface LifecycleOrientation {
+  steps: StepView[];
+  /** The step currently in progress, or null once every step (incl. terminal states) is done. */
+  current: StepId | null;
+  /** True when the VIEWER (not just anyone) can act on the current step right now. */
+  actionable: boolean;
+  /** One sentence: what to do next, or who it's waiting on, or the terminal/published state. */
+  line: string;
+}
+
+const NEXT_ACTION_LINE: Record<StepId, string> = {
+  validate: 'Next: validate this draft.',
+  'create-release': 'Next: create a release from this draft.',
+  'request-approval': 'Next: request approval for this release.',
+  approve: 'Next: approve or reject this release.',
+  sign: 'Next: sign this release.',
+  publish: 'Next: publish this release.',
+  verify: 'Confirming your agent is serving it…',
+};
+
+const TERMINAL_LINE: Partial<Record<CardReleaseState, string>> = {
+  superseded: 'This release was superseded by a newer one — edit the draft to start a fresh one.',
+  deprecated: 'This release is deprecated. Edit the draft to start a new one.',
+  revoked: 'This release was revoked. Edit the draft to start a new one.',
+};
+
+export function lifecycleOrientation(input: {
+  draftState: CardDraftState | null;
+  release: Pick<A2AAgentCardReleaseV1, 'state'> | null;
+  scopes: readonly string[];
+}): LifecycleOrientation {
+  const steps = stepperSteps({ draftState: input.draftState, release: input.release });
+  const currentStep = steps.find((s) => s.state === 'current');
+  const releaseState = input.release?.state;
+
+  if (releaseState && releaseState in TERMINAL_LINE) {
+    return { steps, current: null, actionable: false, line: TERMINAL_LINE[releaseState]! };
+  }
+  if (!currentStep) {
+    // completedSteps hit the high-water mark with nothing left — published (verify has no button of its
+    // own; the Releases tab's own verify check carries the verified/unverified detail).
+    return { steps, current: null, actionable: false, line: 'Live — this release is published.' };
+  }
+  const gate = gateForOp(input.scopes, STEP_OP[currentStep.id]);
+  return {
+    steps,
+    current: currentStep.id,
+    actionable: gate.allowed,
+    line: gate.allowed ? NEXT_ACTION_LINE[currentStep.id] : (gate.reason ?? NEXT_ACTION_LINE[currentStep.id]),
+  };
+}
+
 // ── release diff (design §4.5) ───────────────────────────────────────────────────────────────────
 
 export interface CardDiffRow {
@@ -769,4 +827,107 @@ export function studioErrorSentence(codeOrMessage: string): string {
     default:
       return c;
   }
+}
+
+// ─── Names & Bindings (design §9) ───────────────────────────────────────────────────────────────────────
+// Five things that answer different questions and CAN legitimately disagree — ownership, resolution,
+// canonical identity, current card publication, registry binding. But this tab is only ever reached for
+// an agent the viewer already stewards, so ownership and resolution never disagree with each other here
+// (there is no third-party-owned-name case in this app's data model yet — open question, doc §13). That
+// means the first three collapse into ONE confirmed line in the healthy case, and every row — including
+// every empty one — says what's true, then names the next step, matching `publicationVerdict`'s tone.
+
+export interface NamesAndBindingsRow {
+  id: 'identity' | 'publication' | 'registry';
+  state: 'ok' | 'empty' | 'stale' | 'mismatch';
+  /** What's true right now. Never a bare negative — an empty/stale/mismatch state still says this much. */
+  line: string;
+  /** The one control that moves this row forward, when there is one. */
+  next?: { label: string; href: string };
+}
+
+const REGISTRY_ATTENTION_STATES = new Set(['pendingVerification', 'stale', 'suspended', 'superseded']);
+
+export function namesAndBindingsRows(input: {
+  agentName: string;
+  hasSignedRelease: boolean;
+  published: { releaseNumber: number; uri: string | null } | null;
+  namingConfigured: boolean;
+  /** null when no AP Naming projection is configured yet — a different question from "does it match". */
+  namingDigestMatches: boolean | null;
+  registryBindings: readonly Pick<ExternalIdentityBindingV1, 'lifecycle'>[];
+  releasesHref: string;
+  projectionsHref: string;
+}): NamesAndBindingsRow[] {
+  const rows: NamesAndBindingsRow[] = [];
+
+  rows.push(
+    input.agentName
+      ? { id: 'identity', state: 'ok', line: `${input.agentName} resolves to this agent, and this agent owns the name.` }
+      : {
+          id: 'identity',
+          state: 'empty',
+          line: "This agent has no public name yet — nothing will resolve to it, or to any card it releases, until it has one.",
+        },
+  );
+
+  if (input.published) {
+    const where = input.published.uri ? ` at ${input.published.uri}` : '';
+    if (!input.namingConfigured) {
+      rows.push({
+        id: 'publication',
+        state: 'empty',
+        line: `Card release ${input.published.releaseNumber} is live${where}, but it isn't linked to this agent's name yet.`,
+        next: { label: 'Link it from Projections', href: input.projectionsHref },
+      });
+    } else if (input.namingDigestMatches) {
+      rows.push({ id: 'publication', state: 'ok', line: `Card release ${input.published.releaseNumber} is live and the name record matches it.` });
+    } else {
+      rows.push({
+        id: 'publication',
+        state: 'stale',
+        line: `The name record still points at an older release than release ${input.published.releaseNumber} — republish the AP Naming projection to catch it up.`,
+        next: { label: 'Update in Projections', href: input.projectionsHref },
+      });
+    }
+  } else if (input.hasSignedRelease) {
+    rows.push({
+      id: 'publication',
+      state: 'empty',
+      line: 'This card has a signed release, but nothing is published yet.',
+      next: { label: 'Publish it from Releases & Audit', href: input.releasesHref },
+    });
+  } else {
+    rows.push({
+      id: 'publication',
+      state: 'empty',
+      line: 'No release is ready to publish yet — validate, create a release, and sign it first.',
+      next: { label: 'Go to Releases & Audit', href: input.releasesHref },
+    });
+  }
+
+  if (input.registryBindings.length === 0) {
+    rows.push({
+      id: 'registry',
+      state: 'empty',
+      line: "This agent isn't listed in a registry yet.",
+      next: { label: 'Configure it from Projections', href: input.projectionsHref },
+    });
+  } else {
+    const states = input.registryBindings.map((b) => b.lifecycle.state);
+    const state: NamesAndBindingsRow['state'] = states.includes('revoked')
+      ? 'mismatch'
+      : states.some((s) => REGISTRY_ATTENTION_STATES.has(s))
+        ? 'stale'
+        : 'ok';
+    const line =
+      state === 'ok'
+        ? `Listed in ${states.length} ${states.length === 1 ? 'registry' : 'registries'}, active.`
+        : state === 'mismatch'
+          ? 'One or more registry entries were revoked — review below.'
+          : 'One or more registry entries need attention — review below.';
+    rows.push({ id: 'registry', state, line });
+  }
+
+  return rows;
 }

@@ -1,22 +1,55 @@
 'use client';
-// Names & Bindings (design §9). FIVE things that answer different questions and can legitimately disagree —
-// ownership · resolution · canonical identity · current card publication · registry binding. Keeping them
-// as separate rows is the whole point: a name can resolve while the card it points at is stale.
+// Names & Bindings (design §9, rev. 2026-08-30). Answers ONE question: where can this agent be found, and
+// does each public record agree with the card you published? Ownership / resolution / canonical identity /
+// current card publication / registry binding are five things that CAN legitimately disagree — but on a
+// first visit, before anything is released, three of five rows are empty, and the healthy case (everything
+// agrees) doesn't need three separately-labelled facts to say so once. `namesAndBindingsRows` (studio-view.ts)
+// is the pure state machine behind every line here — this component only renders it and layers the
+// interactive "Verify binding" check on top.
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { ExternalIdentityBindingV1 } from '@agenticprimitives/registry-kit/projection';
-import { VERSION_LABELS } from '@agenticprimitives/home';
 import { BusyButton } from '../shared/BusyButton';
 import { AddressChip } from '../shared/AddressChip';
 import { verifyBinding, type CardDetail, type DelegationWire, type StoredProjection } from '../../studio-client';
-import { gateForOp, targetLabel } from '../../lib/studio-view';
+import { gateForOp, namesAndBindingsRows, targetLabel, type NamesAndBindingsRow } from '../../lib/studio-view';
 import { Chip, Digest, ErrorLine } from './ui';
 
-function Row({ title, children }: { title: string; children: React.ReactNode }) {
+const ROW_TITLE: Record<NamesAndBindingsRow['id'], string> = {
+  identity: 'Identity',
+  publication: 'Card publication',
+  registry: 'Registry binding',
+};
+
+const ROW_TONE: Record<NamesAndBindingsRow['state'], 'good' | 'muted' | 'warn' | 'danger'> = {
+  ok: 'good',
+  empty: 'muted',
+  stale: 'warn',
+  mismatch: 'danger',
+};
+
+const ROW_GLYPH: Record<NamesAndBindingsRow['state'], string> = {
+  ok: '✓',
+  empty: '—',
+  stale: '⚠',
+  mismatch: '✕',
+};
+
+function StateRow({ row }: { row: NamesAndBindingsRow }) {
   return (
     <section style={{ borderTop: '1px solid var(--c-g200)', padding: '.7rem 0' }}>
-      <h3 style={{ fontSize: '.72rem', textTransform: 'uppercase', letterSpacing: '.03em', color: 'var(--c-g500)', margin: '0 0 .3rem' }}>{title}</h3>
-      {children}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '.5rem', flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: '.72rem', textTransform: 'uppercase', letterSpacing: '.03em', color: 'var(--c-g500)', margin: 0 }}>{ROW_TITLE[row.id]}</h3>
+        <Chip tone={ROW_TONE[row.state]}>
+          <span aria-hidden>{ROW_GLYPH[row.state]}</span> {row.state === 'ok' ? 'Agrees' : row.state === 'empty' ? 'Not yet' : row.state === 'stale' ? 'Needs attention' : 'Mismatch'}
+        </Chip>
+      </div>
+      <p style={{ fontSize: '.82rem', margin: '.3rem 0 0', color: row.state === 'mismatch' ? 'var(--c-danger)' : 'var(--c-g900)' }}>{row.line}</p>
+      {row.next && (
+        <a href={row.next.href} style={{ display: 'inline-block', marginTop: '.35rem', fontSize: '.78rem', fontWeight: 600, color: 'var(--c-primary)' }}>
+          {row.next.label} →
+        </a>
+      )}
     </section>
   );
 }
@@ -29,6 +62,8 @@ export function NamesAndBindings({
   scopes,
   sa,
   agentName,
+  releasesHref,
+  projectionsHref,
 }: {
   delegation: DelegationWire;
   detail: CardDetail;
@@ -37,17 +72,35 @@ export function NamesAndBindings({
   scopes: readonly string[];
   sa: Address;
   agentName: string;
+  releasesHref: string;
+  projectionsHref: string;
 }) {
   const [verifying, setVerifying] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, { ok: boolean; detail: string | null }>>({});
   const [error, setError] = useState<string | null>(null);
+  const [whyOpen, setWhyOpen] = useState(false);
 
   const published = [...detail.releases].reverse().find((r) => r.state === 'published') ?? null;
   const latest = detail.releases[detail.releases.length - 1] ?? null;
   const latestDigest = latest?.signedContentDigest ?? latest?.unsignedContentDigest ?? null;
+  const hasSignedRelease = detail.releases.some((r) => r.state === 'signed');
   const naming = projections.find((p) => p.family === 'ap-naming') ?? null;
   const namingDigest = naming?.instance.desiredSources.selectedCardDigest ?? null;
   const registryBindings = bindings.filter((b) => b.target.family === 'ap-registry');
+
+  const rows = namesAndBindingsRows({
+    agentName,
+    hasSignedRelease,
+    published: published ? { releaseNumber: published.releaseNumber, uri: published.publication?.uri ?? null } : null,
+    namingConfigured: !!naming,
+    namingDigestMatches: naming ? (!!namingDigest && !!latestDigest && namingDigest === latestDigest) : null,
+    registryBindings,
+    releasesHref,
+    projectionsHref,
+  });
+  const identityRow = rows.find((r) => r.id === 'identity')!;
+  const publicationRow = rows.find((r) => r.id === 'publication')!;
+  const registryRow = rows.find((r) => r.id === 'registry')!;
 
   const check = useCallback(
     async (bindingId: string) => {
@@ -67,90 +120,53 @@ export function NamesAndBindings({
 
   return (
     <div className="manage-card">
+      <p className="manage-card-blurb" style={{ margin: '0 0 .5rem' }}>
+        Where this agent can be found, and whether each public record agrees with the card you published.
+      </p>
       <ErrorLine error={error} />
 
-      <Row title="Ownership">
-        <p className="manage-card-blurb" style={{ margin: 0 }}>
-          This name is owned by the agent itself:
+      <StateRow row={identityRow} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', margin: '.3rem 0 0', flexWrap: 'wrap' }}>
+        <span className="manage-card-blurb" style={{ margin: 0 }}>
+          Canonical identity — this never changes, however the name or the card evolves:
+        </span>
+        <AddressChip address={sa} size="sm" />
+      </div>
+      <button
+        type="button"
+        className="btn-ghost"
+        style={{ marginTop: '.4rem', minHeight: 30, padding: '.2rem .5rem', fontSize: '.72rem' }}
+        aria-expanded={whyOpen}
+        onClick={() => setWhyOpen((o) => !o)}
+      >
+        {whyOpen ? 'Hide' : 'Why'} ownership, resolution and canonical identity are different questions
+      </button>
+      {whyOpen && (
+        <p className="manage-card-blurb" style={{ margin: '.35rem 0 0' }}>
+          <b>Ownership</b> is who controls the name record. <b>Resolution</b> is the public mapping anyone can
+          look up — the name pointing at this agent&rsquo;s address. <b>Canonical identity</b> is the Smart
+          Agent address itself, the one thing that never rotates. They usually agree, which is why this page
+          shows them as one line — but a name can resolve while pointing at the wrong owner, or an owner can
+          change a name&rsquo;s target without the card catching up, which is exactly when a steward needs to
+          see them apart.
         </p>
-        <div style={{ marginTop: '.25rem' }}>
-          <AddressChip address={sa} size="sm" />
-        </div>
-      </Row>
+      )}
 
-      <Row title="Resolution">
-        {agentName ? (
-          <>
-            <p style={{ fontSize: '.8rem', margin: 0 }}>
-              <b>{agentName}</b> → <code style={{ fontSize: '.75rem' }}>{sa}</code>
-            </p>
-            <p className="manage-card-blurb" style={{ margin: 0 }}>
-              Anyone can look this name up and get this address.
-            </p>
-          </>
-        ) : (
-          <p className="manage-card-blurb" style={{ margin: 0 }}>
-            This agent has no public name — nothing resolves to it yet.
-          </p>
-        )}
-      </Row>
-
-      <Row title="Canonical identity">
-        <p style={{ fontSize: '.8rem', margin: 0 }}>
-          <code style={{ fontSize: '.75rem' }}>{sa}</code> — the Smart Agent. This never changes; names,
-          credentials and cards all point at it.
+      <StateRow row={publicationRow} />
+      {published && naming && namingDigest && (
+        <p className="manage-card-blurb" style={{ margin: '.3rem 0 0' }}>
+          Name record carries <Digest value={namingDigest} label="atl:cardDigest" />
+          {latestDigest === namingDigest ? <Chip tone="good" style={{ marginLeft: '.3rem' }}>✓ matches</Chip> : null}
         </p>
-      </Row>
+      )}
 
-      <Row title="Current card publication">
-        {published ? (
-          <>
-            <p style={{ fontSize: '.8rem', margin: 0 }}>
-              {VERSION_LABELS.cardRelease} {published.releaseNumber} · <Digest value={published.signedContentDigest ?? published.unsignedContentDigest} />
-            </p>
-            {published.publication?.uri && (
-              <p className="manage-card-blurb" style={{ margin: '.15rem 0' }}>
-                published at{' '}
-                <a href={published.publication.uri} target="_blank" rel="noreferrer">
-                  {published.publication.uri}
-                </a>
-              </p>
-            )}
-            <p className="manage-card-blurb" style={{ margin: '.15rem 0' }}>
-              {naming ? (
-                namingDigest && latestDigest && namingDigest === latestDigest ? (
-                  <>
-                    The name record carries <Digest value={namingDigest} label="atl:cardDigest" /> <Chip tone="good">✓ matches</Chip>
-                  </>
-                ) : (
-                  <>
-                    The name record carries <Digest value={namingDigest ?? '—'} label="atl:cardDigest" />{' '}
-                    <Chip tone="warn">⚠ doesn&rsquo;t match the latest release yet</Chip> — publish the AP Naming
-                    projection to catch it up.
-                  </>
-                )
-              ) : (
-                'No card is linked to this name yet — configure the AP Naming projection to publish the card digest onto the name record.'
-              )}
-            </p>
-          </>
-        ) : (
-          <p className="manage-card-blurb" style={{ margin: 0 }}>
-            No card release is published yet. Nothing is being served at the well-known endpoint.
-          </p>
-        )}
-      </Row>
-
-      <Row title="Registry binding">
-        {registryBindings.length === 0 ? (
-          <p className="manage-card-blurb" style={{ margin: 0 }}>
-            No registry entry is bound to this agent yet.
-          </p>
-        ) : (
-          registryBindings.map((b) => {
+      <StateRow row={registryRow} />
+      {registryBindings.length > 0 && (
+        <div style={{ marginTop: '.3rem', display: 'grid', gap: '.3rem' }}>
+          {registryBindings.map((b) => {
             const v = verdicts[b.bindingId];
             return (
-              <div key={b.bindingId} style={{ display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap', padding: '.2rem 0' }}>
+              <div key={b.bindingId} style={{ display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '.8rem' }}>
                   {targetLabel(b.target.family)} entry <code style={{ fontSize: '.75rem' }}>{b.externalId}</code>
                 </span>
@@ -173,9 +189,9 @@ export function NamesAndBindings({
                 )}
               </div>
             );
-          })
-        )}
-      </Row>
+          })}
+        </div>
+      )}
     </div>
   );
 }

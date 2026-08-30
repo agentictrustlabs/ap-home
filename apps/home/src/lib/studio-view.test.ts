@@ -13,7 +13,9 @@ import {
   gateForOp,
   gateForPublish,
   groupDiagnostics,
+  lifecycleOrientation,
   lossLead,
+  namesAndBindingsRows,
   projectionImpact,
   projectionRowFrom,
   sectionIdForPointer,
@@ -373,5 +375,115 @@ describe('studioErrorSentence — service codes become something a steward can a
     expect(studioErrorSentence('stale_revision')).toContain('Someone else changed this draft');
     expect(studioErrorSentence('scope_not_held')).toContain('do not hold the access');
     expect(studioErrorSentence('Network request failed')).toBe('Network request failed');
+  });
+});
+
+describe('lifecycleOrientation — one shared "where am I / what next" picture for every tab', () => {
+  it('names Validate as the next action on a fresh, unvalidated draft', () => {
+    const o = lifecycleOrientation({ draftState: 'draft', release: null, scopes: HUMAN });
+    expect(o.current).toBe('validate');
+    expect(o.actionable).toBe(true);
+    expect(o.line).toContain('validate this draft');
+  });
+  it('names Create release once the draft validates clean', () => {
+    const o = lifecycleOrientation({ draftState: 'validated', release: null, scopes: HUMAN });
+    expect(o.current).toBe('create-release');
+    expect(o.line).toContain('create a release');
+  });
+  it('tells a non-approver they are waiting, using the same duty wording gateForOp already produces', () => {
+    const editorOnly = studioScopesFor({ principalKind: 'service-agent', relationship: 'steward' });
+    const o = lifecycleOrientation({ draftState: 'validated', release: { state: 'approvalPending' }, scopes: editorOnly });
+    expect(o.current).toBe('approve');
+    expect(o.actionable).toBe(false);
+    expect(o.line).toBe(gateForOp(editorOnly, 'release.approve').reason);
+  });
+  it('tells the approver they can act', () => {
+    const o = lifecycleOrientation({ draftState: 'validated', release: { state: 'approvalPending' }, scopes: HUMAN });
+    expect(o.current).toBe('approve');
+    expect(o.actionable).toBe(true);
+    expect(o.line).toContain('approve or reject');
+  });
+  it('reports published as live, not as a pending step', () => {
+    const o = lifecycleOrientation({ draftState: 'validated', release: { state: 'published' }, scopes: HUMAN });
+    expect(o.current).toBeNull();
+    expect(o.line).toContain('Live');
+  });
+  it('names each terminal state instead of falling through to the generic "Live" line', () => {
+    expect(lifecycleOrientation({ draftState: 'validated', release: { state: 'superseded' }, scopes: HUMAN }).line).toContain('superseded');
+    expect(lifecycleOrientation({ draftState: 'validated', release: { state: 'revoked' }, scopes: HUMAN }).line).toContain('revoked');
+  });
+});
+
+describe('namesAndBindingsRows — every row states what is true, then what to do about it', () => {
+  const base = {
+    agentName: 'vendor-payments.impact',
+    hasSignedRelease: false,
+    published: null,
+    namingConfigured: false,
+    namingDigestMatches: null,
+    registryBindings: [],
+    releasesHref: '/releases',
+    projectionsHref: '/projections',
+  } as const;
+
+  it('collapses ownership/resolution/canonical into one confirmed line when the agent has a name', () => {
+    const rows = namesAndBindingsRows(base);
+    const identity = rows.find((r) => r.id === 'identity')!;
+    expect(identity.state).toBe('ok');
+    expect(identity.line).toContain('vendor-payments.impact');
+    expect(identity.line).toContain('owns the name');
+  });
+  it('the nameless case explains the consequence, never a bare negative', () => {
+    const identity = namesAndBindingsRows({ ...base, agentName: '' }).find((r) => r.id === 'identity')!;
+    expect(identity.state).toBe('empty');
+    expect(identity.line).toContain('no public name yet');
+  });
+  it('publication: nothing signed yet points at Releases & Audit', () => {
+    const row = namesAndBindingsRows(base).find((r) => r.id === 'publication')!;
+    expect(row.state).toBe('empty');
+    expect(row.next).toEqual({ label: 'Go to Releases & Audit', href: '/releases' });
+  });
+  it('publication: a signed-but-unpublished release still names the exact next step', () => {
+    const row = namesAndBindingsRows({ ...base, hasSignedRelease: true }).find((r) => r.id === 'publication')!;
+    expect(row.state).toBe('empty');
+    expect(row.line).toContain('signed release');
+    expect(row.next?.label).toBe('Publish it from Releases & Audit');
+  });
+  it('publication: published but not linked to the name points at Projections', () => {
+    const row = namesAndBindingsRows({ ...base, published: { releaseNumber: 4, uri: 'https://x/.well-known/agent-card.json' } }).find((r) => r.id === 'publication')!;
+    expect(row.state).toBe('empty');
+    expect(row.line).toContain('release 4');
+    expect(row.next?.label).toBe('Link it from Projections');
+  });
+  it('publication: linked and matching is the healthy, quiet state', () => {
+    const row = namesAndBindingsRows({ ...base, published: { releaseNumber: 4, uri: null }, namingConfigured: true, namingDigestMatches: true }).find((r) => r.id === 'publication')!;
+    expect(row.state).toBe('ok');
+    expect(row.next).toBeUndefined();
+  });
+  it('publication: linked but stale still says exactly what to do', () => {
+    const row = namesAndBindingsRows({ ...base, published: { releaseNumber: 4, uri: null }, namingConfigured: true, namingDigestMatches: false }).find((r) => r.id === 'publication')!;
+    expect(row.state).toBe('stale');
+    expect(row.next?.label).toBe('Update in Projections');
+  });
+  it('registry: none configured points at Projections', () => {
+    const row = namesAndBindingsRows(base).find((r) => r.id === 'registry')!;
+    expect(row.state).toBe('empty');
+    expect(row.next?.href).toBe('/projections');
+  });
+  it('registry: all active bindings read as ok with a count, no dangling next', () => {
+    const row = namesAndBindingsRows({ ...base, registryBindings: [{ lifecycle: { state: 'active', since: 't' } }] }).find((r) => r.id === 'registry')!;
+    expect(row.state).toBe('ok');
+    expect(row.line).toContain('1 registry');
+  });
+  it('registry: a revoked binding among others reads as mismatch, not ok', () => {
+    const row = namesAndBindingsRows({
+      ...base,
+      registryBindings: [{ lifecycle: { state: 'active', since: 't' } }, { lifecycle: { state: 'revoked', since: 't' } }],
+    }).find((r) => r.id === 'registry')!;
+    expect(row.state).toBe('mismatch');
+  });
+  it('registry: pendingVerification reads as stale, not ok', () => {
+    const row = namesAndBindingsRows({ ...base, registryBindings: [{ lifecycle: { state: 'pendingVerification', since: 't' } }] }).find((r) => r.id === 'registry')!;
+    expect(row.state).toBe('stale');
   });
 });

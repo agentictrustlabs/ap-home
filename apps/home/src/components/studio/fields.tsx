@@ -23,12 +23,15 @@ export function FieldShell({
   diagnostics,
   control,
   focused,
+  onInspect,
 }: {
   field: CardEditorFieldV1;
   binding: FieldBindingV1 | undefined;
   diagnostics: ProjectionDiagnosticV1[];
   control: ReactNode;
   focused: boolean;
+  /** Opens the Inspector flyout scoped to this field — Validation if it has diagnostics, else Provenance. */
+  onInspect?: (pointer: string) => void;
 }) {
   const badge = badgeFor(binding, diagnostics);
   const showSource = badge === 'inherited' || badge === 'stale' || badge === 'computed';
@@ -62,6 +65,16 @@ export function FieldShell({
             onClick={() => setSourceOpen((o) => !o)}
           >
             ↗
+          </button>
+        )}
+        {onInspect && (
+          <button
+            type="button"
+            style={{ ...iconButtonStyle, minWidth: 28, minHeight: 28, fontSize: '.68rem' }}
+            title={diagnostics.length > 0 ? 'Inspect — open Validation for this field' : 'Inspect — open Provenance for this field'}
+            onClick={() => onInspect(field.pointer)}
+          >
+            Inspect
           </button>
         )}
       </div>

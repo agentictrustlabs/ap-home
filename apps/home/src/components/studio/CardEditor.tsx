@@ -30,7 +30,7 @@ import { ChipListControl, ExtensionListControl, FieldShell, ReadonlyControl, Sec
 import { InterfacesEditor } from './InterfacesEditor';
 import { SecuritySchemesEditor } from './SecuritySchemesEditor';
 import { SkillsCurator } from './SkillsCurator';
-import { Inspector } from './Inspector';
+import { Inspector, type PanelId } from './Inspector';
 import type { StewardProposalV1 } from './StewardProposals';
 import { Banner, ErrorLine, inputStyle } from './ui';
 import { notifyCardChanged } from './useStudio';
@@ -56,8 +56,8 @@ export function CardEditor({
   onReload,
   initialPointer,
   initialDiagnostic,
+  initialPanel,
   staleBanner,
-  releasesHref,
 }: {
   delegation: DelegationWire;
   detail: CardDetail;
@@ -67,15 +67,25 @@ export function CardEditor({
   onReload(): void;
   initialPointer?: string | null;
   initialDiagnostic?: string | null;
+  /** A deep-linked `?panel=` — opens the Inspector flyout straight to that panel on load (design §1.3). */
+  initialPanel?: PanelId | null;
   staleBanner?: boolean;
-  /** Where the release flow lives — the editor's only "what next" (design §6). */
-  releasesHref?: string;
 }) {
   const draft = detail.draft;
   const [sectionId, setSectionId] = useState<CardEditorSectionV1['id']>('identity');
   const [focusPointer, setFocusPointer] = useState<string | null>(initialPointer ?? null);
   const [diagnostics, setDiagnostics] = useState<ProjectionDiagnosticV1[]>([]);
   const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
+  // Inspector flyout — CONTROLLED here (design §4 rev.) so the last-viewed panel survives close/reopen; the
+  // flyout itself never owns this state. A `?panel=`/`?diagnostic=` deep link opens it straight away.
+  const [inspectorOpen, setInspectorOpen] = useState(!!initialPanel || !!initialDiagnostic);
+  const [inspectorPanel, setInspectorPanel] = useState<PanelId>(initialPanel ?? (initialDiagnostic ? 'validation' : 'effective-json'));
+  const [inspectorFocusPointer, setInspectorFocusPointer] = useState<string | null>(null);
+  const openInspector = useCallback((panel: PanelId, pointer?: string) => {
+    setInspectorPanel(panel);
+    setInspectorFocusPointer(pointer ?? null);
+    setInspectorOpen(true);
+  }, []);
   /** The DRAFT's own lifecycle state (spec 347 §3) — `validated` is the only state a release may be cut from. */
   const draftState = detail.draft?.state ?? null;
   const [validating, setValidating] = useState(false);
@@ -324,30 +334,25 @@ export function CardEditor({
       )}
       <ErrorLine error={error} />
 
-      {/* Orientation: what this page is, where the draft stands, and the one next action. Without it the
-          editor opens on a toolbar and a list of section names, which reads as a table of contents. */}
+      {/* Orientation: what this page is and how to treat it. Release-lifecycle status ("where is this
+          release, what's next") lives ONCE, next to the tabs (CardStudio's lifecycle bar) — not duplicated
+          here (design §3.1 rev. 2026-08-30). This block stays scoped to what's true about EDITING a draft. */}
       <div className="manage-card" style={{ marginBottom: '.7rem' }}>
         <p className="manage-card-blurb" style={{ margin: 0 }}>
           This is the card other agents fetch to learn what <b>{draft.card.name || 'this agent'}</b> does and how to reach it. Fields are
           inherited from this agent&apos;s profile, names and running service — <b>override only what must differ</b>. Editing changes
           nothing in public: a card goes live only when you release, sign and publish it.
         </p>
-        <p className="manage-card-blurb" style={{ margin: '.35rem 0 0' }}>
-          <b>Now:</b>{' '}
-          {errorCount > 0
-            ? `${errorCount} problem${errorCount === 1 ? '' : 's'} to fix — see Validation in the inspector.`
-            : draftState === 'validated'
-              ? 'This draft is validated and ready to release.'
-              : 'Edit any section, then validate the draft.'}
-          {draftState === 'validated' && errorCount === 0 && releasesHref && (
-            <>
-              {' '}
-              <a href={releasesHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>
-                Go to Releases &amp; Audit to publish →
-              </a>
-            </>
-          )}
-        </p>
+        {errorCount > 0 && (
+          <p className="manage-card-blurb" style={{ margin: '.35rem 0 0', color: 'var(--c-danger)', display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap' }}>
+            <span>
+              {errorCount} problem{errorCount === 1 ? '' : 's'} to fix before this draft can be released.
+            </span>
+            <button type="button" className="btn-ghost" style={{ minHeight: 30, padding: '.2rem .5rem', fontSize: '.72rem' }} onClick={() => openInspector('validation')}>
+              Review in Inspector
+            </button>
+          </p>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '.7rem', alignItems: 'center' }}>
@@ -369,6 +374,23 @@ export function CardEditor({
           onClick={() => setImportOpen((o) => !o)}
         >
           Import an existing A2A card
+        </button>
+        <span style={{ flex: 1 }} />
+        {/* The PERSISTENT inspector affordance (product direction, "use a flyout for right-side content
+            viewer") — opens to the last-viewed panel; a red dot names the reason to look without opening it. */}
+        <button
+          type="button"
+          className="btn-ghost"
+          aria-haspopup="dialog"
+          aria-expanded={inspectorOpen}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}
+          onClick={() => (inspectorOpen ? setInspectorOpen(false) : openInspector(inspectorPanel))}
+        >
+          Inspector
+          {errorCount > 0 && (
+            <span aria-hidden style={{ width: 8, height: 8, borderRadius: 999, background: 'var(--c-danger)', display: 'inline-block' }} />
+          )}
+          <span className="sr-only">{errorCount > 0 ? `, ${errorCount} problem${errorCount === 1 ? '' : 's'}` : ''}</span>
         </button>
         <span className="manage-card-blurb">
           {VERSION_LABELS.protocolVersion}: {draft.card.protocolVersion} · revision {draft.revision}
@@ -399,10 +421,14 @@ export function CardEditor({
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 200px) minmax(0, 1fr) minmax(280px, 320px)', gap: '1rem', alignItems: 'start' }} className="studio-panes">
+      {/* TWO columns now the inspector is a flyout (design §3.1 rev. 2026-08-30) — section rail + form. The
+          rail is compact: a status dot and a single-line label; the section's own blurb (identical text,
+          never a second hand-written copy) sits ONCE, as the form pane's own subhead, so a steward reads it
+          at full width instead of clipped in a narrow column. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 240px) minmax(0, 1fr)', gap: '1.25rem', alignItems: 'start' }} className="studio-panes">
         <nav aria-label="Card sections" className="studio-sections">
           <p className="studio-sections-title">Card sections</p>
-          <ul className="studio-section-list" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '.15rem' }}>
+          <ul className="studio-section-list" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '.1rem' }}>
             {A2A_CARD_EDITOR_MANIFEST.sections.map((s) => {
               const status = sectionStatus(s, draft.fieldBindings, diagnostics);
               return (
@@ -411,10 +437,12 @@ export function CardEditor({
                     type="button"
                     aria-current={s.id === sectionId ? 'true' : undefined}
                     aria-label={status.label}
+                    title={s.title}
                     onClick={() => setSectionId(s.id)}
+                    className="studio-section-btn"
                     style={{
                       display: 'flex',
-                      alignItems: 'flex-start',
+                      alignItems: 'center',
                       gap: '.45rem',
                       width: '100%',
                       textAlign: 'left',
@@ -429,14 +457,8 @@ export function CardEditor({
                       color: s.id === sectionId ? 'var(--c-primary)' : 'var(--c-g700)',
                     }}
                   >
-                    <span aria-hidden title={status.label} style={{ width: 8, height: 8, borderRadius: 999, background: DOT[status.status], flex: 'none', marginTop: '.3rem' }} />
-                    <span style={{ display: 'grid', gap: '.1rem' }}>
-                      <span>{s.title}</span>
-                      {/* The titles are A2A vocabulary; the blurb is what a steward actually needs to choose. */}
-                      <span className="studio-section-blurb" style={{ fontSize: '.68rem', fontWeight: 400, color: 'var(--c-g500, #6b7280)', lineHeight: 1.25 }}>
-                        {s.blurb}
-                      </span>
-                    </span>
+                    <span aria-hidden title={status.label} style={{ width: 8, height: 8, borderRadius: 999, background: DOT[status.status], flex: 'none' }} />
+                    <span className="studio-section-label">{s.title}</span>
                   </button>
                 </li>
               );
@@ -457,30 +479,37 @@ export function CardEditor({
               diagnostics={diagnosticsFor(f.pointer)}
               focused={focusPointer === f.pointer}
               control={renderControl(f)}
+              onInspect={(pointer) => openInspector(diagnosticsFor(pointer).length > 0 ? 'validation' : 'provenance', pointer)}
             />
           ))}
         </section>
-
-        <Inspector
-          delegation={delegation}
-          draft={draft}
-          previousRelease={previousRelease}
-          diagnostics={diagnostics}
-          projections={projections}
-          latestReleaseId={latest?.releaseId ?? null}
-          pendingNewRelease={draft.basedOnReleaseId !== latest?.releaseId || draft.state !== 'validated'}
-          proposals={proposals}
-          busy={saving}
-          onGoToField={(pointer) => {
-            const owner = A2A_CARD_EDITOR_MANIFEST.sections.find((s) => s.fields.some((f) => pointer === f.pointer || pointer.startsWith(`${f.pointer}/`)));
-            if (owner) setSectionId(owner.id);
-            setFocusPointer(pointer);
-          }}
-          onAcceptProposal={() => undefined}
-          onRejectProposal={() => undefined}
-          initialPanel={initialDiagnostic ? 'validation' : undefined}
-        />
       </div>
+
+      <Inspector
+        delegation={delegation}
+        draft={draft}
+        previousRelease={previousRelease}
+        diagnostics={diagnostics}
+        projections={projections}
+        latestReleaseId={latest?.releaseId ?? null}
+        pendingNewRelease={draft.basedOnReleaseId !== latest?.releaseId || draft.state !== 'validated'}
+        proposals={proposals}
+        busy={saving}
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        panel={inspectorPanel}
+        onPanelChange={setInspectorPanel}
+        focusPointer={inspectorFocusPointer}
+        onGoToField={(pointer) => {
+          const owner = A2A_CARD_EDITOR_MANIFEST.sections.find((s) => s.fields.some((f) => pointer === f.pointer || pointer.startsWith(`${f.pointer}/`)));
+          if (owner) setSectionId(owner.id);
+          setFocusPointer(pointer);
+          // "Go to field" means leaving the inspector to look at the form — close it so the field is visible.
+          setInspectorOpen(false);
+        }}
+        onAcceptProposal={() => undefined}
+        onRejectProposal={() => undefined}
+      />
     </div>
   );
 }

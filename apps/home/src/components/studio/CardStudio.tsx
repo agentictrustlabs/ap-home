@@ -3,15 +3,68 @@
 // AGENT, not to which workspace it happens to be viewed from — so the org routes and the service routes
 // import the same sections and there is zero duplicated logic between them.
 import type { ReactNode } from 'react';
-import { VERSION_LABELS } from '@agenticprimitives/home';
+import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
+import type { A2AAgentCardReleaseV1, CardDraftState } from '@agenticprimitives/agent-profile/a2a';
 import { SectionShell } from '../portal/SectionShell';
 import { orgHref, serviceHref } from '../../lib/workspace';
+import { lifecycleOrientation } from '../../lib/studio-view';
 import { CardList } from './CardList';
 import { CardEditor } from './CardEditor';
+import { type PanelId } from './Inspector';
 import { ProjectionCenter } from './ProjectionCenter';
 import { NamesAndBindings } from './NamesAndBindings';
 import { ReleasesAndAudit } from './ReleasesAndAudit';
 import { useCardDetail, useCards, useOneShotParam, useStudioAgent, type StudioScopeKind } from './useStudio';
+
+const INSPECTOR_PANEL_IDS = new Set<string>(A2A_CARD_EDITOR_MANIFEST.inspectorPanels);
+
+/** `?panel=` only makes sense as an Inspector deep link when it names a real panel (design §1.3). */
+function panelParam(value: string | null): PanelId | null {
+  return value && INSPECTOR_PANEL_IDS.has(value) ? (value as PanelId) : null;
+}
+
+/**
+ * Release-lifecycle orientation, shared by every tab (design §3.1/§6.1 rev. 2026-08-30) — "the editor
+ * already has a 'Now:' line; integrate it with the tabs rather than duplicating" (product direction). This
+ * renders ONCE, next to the tabs, instead of each tab re-deriving its own version of "what's next."
+ */
+function LifecycleBar({
+  draftState,
+  release,
+  scopes,
+  releasesHref,
+  onReleasesTab,
+}: {
+  draftState: CardDraftState | null;
+  release: A2AAgentCardReleaseV1 | null;
+  scopes: readonly string[];
+  releasesHref: string;
+  onReleasesTab: boolean;
+}) {
+  const orientation = lifecycleOrientation({ draftState, release, scopes });
+  return (
+    <div className="studio-lifecycle" aria-label="Release lifecycle">
+      <ol className="studio-lifecycle-steps">
+        {orientation.steps.map((s) => (
+          <li key={s.id} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>
+            {s.label}
+          </li>
+        ))}
+      </ol>
+      <p className="studio-lifecycle-next">
+        {orientation.line}
+        {!onReleasesTab && orientation.current && (
+          <>
+            {' '}
+            <a href={releasesHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>
+              Go to Releases &amp; Audit →
+            </a>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 const TITLE = 'Card & Projections';
 
@@ -162,6 +215,7 @@ function EditorBody({
   const stale = useOneShotParam('stale');
   const focusRelease = useOneShotParam('release');
   const focusInstance = useOneShotParam('instance');
+  const panel = panelParam(useOneShotParam('panel'));
 
   const base = studioBasePath(kind, agent);
   const title = state.detail?.resource.displayName ?? TITLE;
@@ -199,10 +253,16 @@ function EditorBody({
       }
     >
       <Tabs base={base} cardId={cardId} active={tab} />
-      <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
-        {detail.resource.environment} · {detail.resource.primary ? 'primary' : 'secondary'} ·{' '}
-        {latest ? `${VERSION_LABELS.cardRelease} ${latest.releaseNumber} (${latest.state})` : `no ${VERSION_LABELS.cardRelease.toLowerCase()} yet`}
+      <p className="manage-card-blurb" style={{ margin: '0 0 .35rem' }}>
+        {detail.resource.environment} · {detail.resource.primary ? 'primary' : 'secondary'}
       </p>
+      <LifecycleBar
+        draftState={detail.draft?.state ?? null}
+        release={latest ?? null}
+        scopes={ctx.scopes}
+        releasesHref={`${base}/${cardId}/releases`}
+        onReleasesTab={tab === 'releases'}
+      />
       {tab === 'card' && (
         <CardEditor
           delegation={ctx.delegation}
@@ -213,8 +273,8 @@ function EditorBody({
           onReload={state.reload}
           initialPointer={pointer}
           initialDiagnostic={diagnostic}
+          initialPanel={panel}
           staleBanner={stale === '1' || detail.draft?.state === 'stale'}
-          releasesHref={`${base}/${cardId}/releases`}
         />
       )}
       {tab === 'projections' && (
@@ -239,6 +299,8 @@ function EditorBody({
           scopes={ctx.scopes}
           sa={ctx.sa}
           agentName={ctx.name}
+          releasesHref={`${base}/${cardId}/releases`}
+          projectionsHref={`${base}/${cardId}/projections`}
         />
       )}
       {tab === 'releases' && (
