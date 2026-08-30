@@ -314,6 +314,11 @@ id = "ceb52b3418ae4ac9acde3206b3ec8862"
 binding = "FED_TOKENS"
 id = "e050ce20dd6e4a88b568e2f5ed1b47a0"
 
+# spec 347 §8.1 — serving-plane cache of RELEASED A2A Agent Cards (the record is the vault; this is a rebuild).
+[[env.production.kv_namespaces]]
+binding = "RELEASED_CARDS"
+id = "e77f15d7da2a48b2802c454be0e9412a"
+
 # Service binding: demo-a2a → demo-mcp. Cloudflare blocks direct
 # fetch(*.workers.dev) between sibling Workers on the same account
 # with error 1042 (recursion/loop protection). Service bindings are
@@ -407,6 +412,11 @@ id = "b8429f3ce1664857a926c8e5f2282494"
 [[env.faithnet.kv_namespaces]]
 binding = "FED_TOKENS"
 id = "7aeeedfa2a7043208193bd57bfb6f63d"
+
+# spec 347 §8.1 — serving-plane cache of RELEASED A2A Agent Cards (the record is the vault; this is a rebuild).
+[[env.faithnet.kv_namespaces]]
+binding = "RELEASED_CARDS"
+id = "7212055cf68d460aac90ac54b0bee5c8"
 
 [[env.faithnet.services]]
 binding = "MCP"
