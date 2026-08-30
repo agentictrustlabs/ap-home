@@ -22,7 +22,7 @@ import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
-import { agentClassOf } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf } from '../../lib/agent-class';
 
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -463,7 +463,8 @@ export function OrganizationsManager({
                   <span className="manage-card-icon"><BuildingIcon size={17} /></span>
                   <span className="manage-card-label">{org.name || 'Unnamed organization'}</span>
                   <span className={`manage-card-badge${inactive ? '' : ' live'}`}>
-                    {inactive ? STATUS_LABEL.inactive : KIND_LABEL.org}
+                    {/* The subclass word (team / circle / church), not the class — a church is an organization, and says which. */}
+                    {inactive ? STATUS_LABEL.inactive : orgKindWordOf(org.kind).replace(/^./, (c) => c.toUpperCase())}
                   </span>
                 </div>
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
