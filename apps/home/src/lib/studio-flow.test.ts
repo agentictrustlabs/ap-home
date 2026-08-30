@@ -42,6 +42,22 @@ describe('planPublish — one button, the whole chain, stops only where it must'
   });
 });
 
+describe('a live card whose address moved can be published again', () => {
+  const uri = 'https://ncf-workspace.faithnet.ai/.well-known/agent-card.json';
+  it('planPublish treats a moved address like an edit — a fresh version', () => {
+    const p = planPublish({ draftState: 'validated', errors: 0, release: { state: 'published' }, draftChanged: false, addressMoved: true, scopes: ALL });
+    expect(p.kind).toBe('ready');
+    if (p.kind === 'ready') expect(p.steps[0]).toBe('create-release');
+    expect(planPublish({ draftState: 'validated', errors: 0, release: { state: 'published' }, draftChanged: false, addressMoved: false, scopes: ALL }).kind).toBe('live');
+  });
+  it('says where it sits, where the agent is, and offers the fix', () => {
+    const v = liveStage({ plan: { kind: 'ready', steps: [], runnable: [], stopAt: null, asksForBinding: false }, release: { state: 'published' }, cardUri: uri, lastVerdict: null, publishedAtOldAddress: 'https://ncf.workspace.faithnet.io/.well-known/agent-card.json' });
+    expect(v).toMatchObject({ tone: 'warn', status: 'Published at an old address', action: { label: 'Publish at the new address' } });
+    expect(v.body).toContain('ncf.workspace.faithnet.io');
+    expect(v.body).toContain('ncf-workspace.faithnet.ai');
+  });
+});
+
 describe('stage copy', () => {
   it('describe: problems → Show me; unchecked → review or publish as is; clean → ready', () => {
     expect(describeStage({ draftState: 'draft', errors: 3, checked: true, skillCount: 0, name: 'x' })).toMatchObject({ status: '3 things to fix', action: { id: 'show-problems' } });

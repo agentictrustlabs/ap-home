@@ -123,7 +123,13 @@ export function AgentCardFlow({
   }, [draft, served, delegation, detail, onDetail]);
 
   const describe = describeStage({ draftState: draft?.state ?? null, errors, checked: !!validation, skillCount: draft?.card.skills.length ?? 0, name: draft?.card.name ?? agentName });
-  const plan: PublishPlan = planPublish({ draftState: draft?.state ?? null, errors, release: latest, draftChanged, scopes });
+  // A live card whose published address is not the address this agent answers at now: the card is fine, the
+  // world was told something that has since moved. Publishing again is the fix (and the only way to move a
+  // listing, which is written from where the card was published).
+  const publishedUri = detail.releases.filter((r) => r.state === 'published').at(-1)?.publication?.uri ?? null;
+  const hostOf = (u: string | null) => { if (!u) return null; try { return new URL(u).host; } catch { return null; } };
+  const publishedAtOldAddress = publishedUri && cardUri && hostOf(publishedUri) !== hostOf(cardUri) ? publishedUri : null;
+  const plan: PublishPlan = planPublish({ draftState: draft?.state ?? null, errors, release: latest, draftChanged, addressMoved: !!publishedAtOldAddress, scopes });
 
   // ── stage ②: one button, the whole chain ─────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<string>('');
@@ -188,7 +194,7 @@ export function AgentCardFlow({
     }
   }, [plan, delegation, detail.resource.cardResourceId, latest, bindingUri, sa, signHashFor, onReload]);
 
-  const live = liveStage({ plan, release: latest, cardUri, lastVerdict });
+  const live = liveStage({ plan, release: latest, cardUri, lastVerdict, publishedAtOldAddress });
   const waitingOnSomeoneElse = plan.kind === 'ready' && plan.stopAt !== null && plan.runnable.length === 0;
 
   const listingsHref = `${basePath}/listing/ap-naming`;

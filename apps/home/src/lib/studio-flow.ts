@@ -72,12 +72,16 @@ export function planPublish(input: {
   release: Pick<A2AAgentCardReleaseV1, 'state'> | null;
   /** The draft moved past the latest release, so publishing means a NEW version. */
   draftChanged: boolean;
+  /** The live version was published at a DIFFERENT address than the one this agent answers at now (a zone
+   *  move). Nothing in the card changed, but what the world was told is out of date — so publishing is the
+   *  fix, and without this there is no way to ask for it. */
+  addressMoved?: boolean;
   scopes: readonly string[];
 }): PublishPlan {
   if (input.errors > 0) {
     return { kind: 'blocked', fixCount: input.errors, line: `Fix ${input.errors} thing${input.errors === 1 ? '' : 's'} in the description first.` };
   }
-  const fresh = input.draftChanged || !input.release || TERMINAL.has(input.release.state);
+  const fresh = input.draftChanged || input.addressMoved === true || !input.release || TERMINAL.has(input.release.state);
   if (!fresh && input.release?.state === 'published') return { kind: 'live' };
   const steps = publishSequence(input.release, { fresh });
   let stopAt: { step: PublishStepId; line: string } | null = null;
@@ -120,12 +124,26 @@ export function liveStage(input: {
   cardUri: string | null;
   /** The last publish/verify verdict already in the user's words (`publicationVerdict`). */
   lastVerdict: { title: string } | null;
+  /** Where the LIVE version was published, when that is not where the agent answers now. */
+  publishedAtOldAddress?: string | null;
 }): StageStatus & { explain: string } {
   const where = input.cardUri ? input.cardUri.replace('/.well-known/agent-card.json', '') : 'its public address';
   const explain = 'Publishing does not list the agent anywhere — it makes the description available at its address. Listing is step ③.';
   const how = `Publishing puts a signed copy of this description at ${where} — the address other agents use to find and talk to it.`;
   if (!input.cardUri) {
     return { tone: 'muted', status: 'Needs a name first', body: 'This agent has no public name yet, so there is nowhere on the web to publish its card. Give it a name (Manage → Naming); the address follows from the name.', action: null, explain };
+  }
+  if (input.publishedAtOldAddress && input.cardUri) {
+    const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+    const oldHost = hostOf(input.publishedAtOldAddress);
+    const newHost = hostOf(input.cardUri);
+    return {
+      tone: 'warn',
+      status: 'Published at an old address',
+      body: `The live copy sits at ${oldHost}, but this agent now answers at ${newHost}. Publishing again puts it where the agent actually is — and anywhere you have listed it can then be pointed at the new address.`,
+      action: { id: 'republish', label: 'Publish at the new address' },
+      explain,
+    };
   }
   if (input.plan.kind === 'live') {
     const when = input.release?.publication?.publishedAt ? new Date(input.release.publication.publishedAt).toLocaleString() : null;
