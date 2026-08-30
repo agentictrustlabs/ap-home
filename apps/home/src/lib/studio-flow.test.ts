@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cardRowView, describeStage, publicEndpoints, problemsFrom, servedInterfacesFrom, onlyAddressProblems, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
-import { listingCatalog, listingRow, lossSentence, listingCopySamples, studioTabs } from './studio-listings';
+import { listingCatalog, listingRow, lossSentence, listingCopySamples, recordRows, recordVerdictLine, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
 const ALL = ['agent.card.read', 'agent.card.draft', 'agent.card.validate', 'agent.card.approve', 'agent.card.sign', 'agent.card.publish'];
@@ -177,6 +177,26 @@ describe('§9.4 — the landing never speaks our vocabulary', () => {
     const all = [...landingCopySamples(), ...listingCopySamples(), ...Object.values(BINDING_PROMPT), ...Object.values(PUBLISH_PHRASE)];
     expect(all.length).toBeGreaterThan(40);
     for (const s of all) for (const w of FORBIDDEN_ON_LANDING) expect(s.toLowerCase(), `"${s}" contains "${w}"`).not.toContain(w);
+  });
+});
+
+describe('recordRows — what the public record actually says', () => {
+  it('renders the naming records a person can check, with plain labels', () => {
+    const rows = recordRows('ap-naming', { addr: '0xabc', displayName: 'Northern Colorado Field', agentKind: 'service', a2aEndpoint: 'https://ncf-workspace.faithnet.ai/api/a2a', cardUri: 'https://ncf-workspace.faithnet.ai/.well-known/agent-card.json', cardDigest: '0xdead', empty: '' });
+    expect(rows.map((r) => r.label)).toEqual(['Points at', 'Shown as', 'Kind', 'Where it answers', 'Card address', 'Card fingerprint']);
+    expect(rows[1]!.value).toBe('Northern Colorado Field');
+    expect(recordRows('ap-naming', null)).toEqual([]);
+  });
+  it('renders a registry entry, with the status word rather than its number', () => {
+    const rows = recordRows('ap-registry', { subjectAgent: '0xabc', status: 1, cardHash: '0x1', bindingProofHash: '0x2', expiresAt: 0 });
+    expect(rows.map((r) => `${r.label}=${r.value}`)).toEqual(['Entry for=0xabc', 'Status=Active', 'Card fingerprint=0x1', 'Proof=0x2']);
+    expect(recordRows('ap-registry', { status: 3 })[0]!.value).toBe('Withdrawn');
+  });
+  it('says whether the live record still matches what was published', () => {
+    expect(recordVerdictLine(true, null, 'Your name record')).toContain('says exactly what was published');
+    const off = recordVerdictLine(false, 'a2aEndpoint: on-chain https://old ≠ artifact https://new', 'Your name record');
+    expect(off).toContain('says something different');
+    expect(off).toContain('Write it again');
   });
 });
 

@@ -165,3 +165,47 @@ export function studioTabs(input: {
   tabs.push({ id: 'history', label: 'History', suffix: '/history', status: '', tone: 'muted' });
   return tabs;
 }
+
+// ── what the public record actually says ─────────────────────────────────────────────────────────────────
+// A steward asked to see the listing and got our bookkeeping — state, target version, receipt id, artifact
+// digest — instead of the record itself (2026-08-30). `binding.verify` already READS the live record from the
+// chain; this turns what it read into rows a person can check against what they expected.
+
+export interface RecordRow { label: string; value: string; hint?: string }
+
+const NAMING_FIELDS: Array<{ key: string; label: string; hint?: string }> = [
+  { key: 'addr', label: 'Points at', hint: 'The agent this name resolves to.' },
+  { key: 'displayName', label: 'Shown as' },
+  { key: 'agentKind', label: 'Kind' },
+  { key: 'a2aEndpoint', label: 'Where it answers' },
+  { key: 'cardUri', label: 'Card address' },
+  { key: 'cardDigest', label: 'Card fingerprint', hint: 'Proves the card served there is the one that was published.' },
+  { key: 'metadataUri', label: 'Profile' },
+  { key: 'siteUrl', label: 'Website' },
+  { key: 'description', label: 'Description' },
+];
+
+const ENTRY_STATUS: Record<number, string> = { 0: 'No entry', 1: 'Active', 2: 'Suspended', 3: 'Withdrawn' };
+
+/** `observed` is what the chain returned — the naming records, or the registry entry. */
+export function recordRows(family: StudioFamily, observed: unknown): RecordRow[] {
+  if (!observed || typeof observed !== 'object') return [];
+  const o = observed as Record<string, unknown>;
+  if (family === 'ap-naming') {
+    return NAMING_FIELDS.filter((f) => typeof o[f.key] === 'string' && o[f.key])
+      .map((f) => ({ label: f.label, value: String(o[f.key]), ...(f.hint ? { hint: f.hint } : {}) }));
+  }
+  const rows: RecordRow[] = [];
+  if (typeof o.subjectAgent === 'string') rows.push({ label: 'Entry for', value: o.subjectAgent, hint: 'The agent this entry describes.' });
+  if (typeof o.status === 'number') rows.push({ label: 'Status', value: ENTRY_STATUS[o.status] ?? `Unknown (${o.status})` });
+  if (typeof o.cardHash === 'string') rows.push({ label: 'Card fingerprint', value: o.cardHash, hint: 'Ties the entry to one exact published card.' });
+  if (typeof o.bindingProofHash === 'string') rows.push({ label: 'Proof', value: o.bindingProofHash, hint: 'The agent signed this entry itself.' });
+  if (typeof o.expiresAt === 'number' && o.expiresAt > 0) rows.push({ label: 'Expires', value: new Date(o.expiresAt * 1000).toLocaleString() });
+  return rows;
+}
+
+/** One sentence on whether the live record still matches what was published. */
+export function recordVerdictLine(ok: boolean, detail: string | null, title: string): string {
+  if (ok) return `Checked just now — ${title.toLowerCase()} says exactly what was published.`;
+  return `Checked just now — ${title.toLowerCase()} says something different from what was published${detail ? `: ${detail}` : ''}. Write it again to bring it back in line.`;
+}

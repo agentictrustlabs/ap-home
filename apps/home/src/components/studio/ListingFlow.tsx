@@ -3,7 +3,7 @@
 // appears — its name record, the directory — and each one gets its own screen rather than a row in a stack,
 // because there will eventually be many and each has its own status, its own history and its own gate.
 // The screen answers three questions in order: what is this place, where do I stand with it, what do I press.
-import { useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { BusyButton } from '../shared/BusyButton';
 import { CONTRACTS } from '../../lib/chain';
@@ -17,6 +17,7 @@ import {
   planProjectionPublication,
   previewProjection,
   requestProjectionApproval,
+  verifyBinding,
   type CardDetail,
   type DelegationWire,
   type StoredProjection,
@@ -24,7 +25,7 @@ import {
 } from '../../studio-client';
 import type { SignHash } from '../../connect-client';
 import { studioErrorSentence } from '../../lib/studio-view';
-import { LISTING_PHRASE, listingCatalog, listingRow, lossSentence } from '../../lib/studio-listings';
+import { LISTING_PHRASE, listingCatalog, listingRow, lossSentence, recordRows, recordVerdictLine, type RecordRow } from '../../lib/studio-listings';
 import { Banner, ErrorLine, LiveRegion } from './ui';
 import { Stage, TONE_COLOR, typedNameOf } from './parts';
 import { notifyCardChanged } from './useStudio';
@@ -57,6 +58,24 @@ export function ListingFlow({
   const [error, setError] = useState<string | null>(null);
   const [loss, setLoss] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [record, setRecord] = useState<{ rows: RecordRow[]; verdict: string } | null>(null);
+
+  // What the public record ACTUALLY says, read from the chain (`binding.verify` observes it), not what we
+  // believe we wrote. A steward checking a listing wants the record, not our bookkeeping.
+  const readRecord = useCallback(async () => {
+    const bindingId = projection?.instance.lastBinding?.bindingId;
+    if (!bindingId) return;
+    setReading(true); setError(null);
+    try {
+      const res = await verifyBinding(delegation, bindingId);
+      setRecord({ rows: recordRows(family, res.verdict.observed), verdict: recordVerdictLine(res.verdict.ok, res.verdict.detail, descriptor.title) });
+    } catch (e) {
+      setError(studioErrorSentence(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReading(false);
+    }
+  }, [projection, delegation, family, descriptor.title]);
 
   const run = useCallback(async () => {
     if (!published) return;
@@ -126,22 +145,39 @@ export function ListingFlow({
               {row.button.label}
             </BusyButton>
           )}
-          {row.button?.id === 'open' && (
-            <button type="button" className="btn-ghost" onClick={() => setDetailsOpen((o) => !o)}>
-              {detailsOpen ? 'Hide what it says' : 'See what it says'}
-            </button>
+          {projection?.instance.lastBinding && (
+            <BusyButton busy={reading} busyLabel="Reading the record…" className="btn-ghost" onClick={() => { if (record) setRecord(null); else void readRecord(); }}>
+              {record ? 'Hide what it says' : 'See what it says'}
+            </BusyButton>
           )}
           {row.secondary && (
             <BusyButton busy={busy} busyLabel={phase || 'Working…'} className="btn-ghost" onClick={() => void run()}>
               {row.secondary.label}
             </BusyButton>
           )}
-          {projection && row.button?.id !== 'open' && (
+          {projection && (
             <button type="button" className="btn-ghost" onClick={() => setDetailsOpen((o) => !o)}>
-              {detailsOpen ? 'Hide details' : 'Details'}
+              {detailsOpen ? 'Hide technical detail' : 'Technical detail'}
             </button>
           )}
         </div>
+        {record && (
+          <div style={{ marginTop: '.6rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem' }}>
+            <p className="manage-card-blurb" style={{ margin: '0 0 .4rem' }}>{record.verdict}</p>
+            {record.rows.length === 0 ? (
+              <p className="manage-card-blurb" style={{ margin: 0 }}>The record is empty.</p>
+            ) : (
+              <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '.25rem .7rem', margin: 0, fontSize: '.78rem' }}>
+                {record.rows.map((r) => (
+                  <Fragment key={r.label}>
+                    <dt style={{ color: 'var(--c-g500)' }} title={r.hint}>{r.label}</dt>
+                    <dd style={{ margin: 0, wordBreak: 'break-all' }}>{r.value}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+            )}
+          </div>
+        )}
         {projection && detailsOpen && (
           <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '.15rem .6rem', fontSize: '.7rem', margin: '.5rem 0 0', wordBreak: 'break-all' }}>
             <dt>State</dt><dd style={{ margin: 0 }}>{projection.instance.state}{projection.instance.stateReason ? ` — ${projection.instance.stateReason}` : ''}</dd>
