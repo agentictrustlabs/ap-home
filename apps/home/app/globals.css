@@ -1295,8 +1295,26 @@
          Below 1024px the three-pane editor stacks: section nav on top, form, then the inspector —
          the same responsive move the portal's other dense settings pages make. */
       .studio-panes { grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(280px, 320px); }
+      .studio-sections { position: sticky; top: 1rem; }
+      .studio-sections-title {
+        margin: 0 0 .3rem; padding: 0 .55rem; font-size: .68rem; font-weight: 700;
+        letter-spacing: .04em; text-transform: uppercase; color: var(--c-g500, #6b7280);
+      }
+      /* Below 1024px the three panes stack, and an eight-item vertical section list becomes a wall of
+         headings before the first field. Design §3.1: the nav becomes a horizontal scroll strip. */
       @media (max-width: 1024px) {
         .studio-panes { grid-template-columns: 1fr !important; }
+        .studio-sections { position: static; }
+        .studio-sections-title { display: none; }
+        .studio-section-list {
+          display: flex !important; gap: .3rem !important; overflow-x: auto; padding-bottom: .3rem;
+          scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+        }
+        .studio-section-list > li { flex: none; }
+        .studio-section-list button {
+          white-space: nowrap; border: 1px solid var(--c-g200) !important; border-radius: 999px !important;
+          padding: .35rem .7rem !important; min-height: 36px !important;
+        }
       }
       /* Visually hidden, still announced (the stepper's "current step" and multi-step signing labels). */
       .sr-only {

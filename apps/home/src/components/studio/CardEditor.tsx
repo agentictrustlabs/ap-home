@@ -57,6 +57,7 @@ export function CardEditor({
   initialPointer,
   initialDiagnostic,
   staleBanner,
+  releasesHref,
 }: {
   delegation: DelegationWire;
   detail: CardDetail;
@@ -67,11 +68,16 @@ export function CardEditor({
   initialPointer?: string | null;
   initialDiagnostic?: string | null;
   staleBanner?: boolean;
+  /** Where the release flow lives — the editor's only "what next" (design §6). */
+  releasesHref?: string;
 }) {
   const draft = detail.draft;
   const [sectionId, setSectionId] = useState<CardEditorSectionV1['id']>('identity');
   const [focusPointer, setFocusPointer] = useState<string | null>(initialPointer ?? null);
   const [diagnostics, setDiagnostics] = useState<ProjectionDiagnosticV1[]>([]);
+  const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
+  /** The DRAFT's own lifecycle state (spec 347 §3) — `validated` is the only state a release may be cut from. */
+  const draftState = detail.draft?.state ?? null;
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,11 +324,37 @@ export function CardEditor({
       )}
       <ErrorLine error={error} />
 
+      {/* Orientation: what this page is, where the draft stands, and the one next action. Without it the
+          editor opens on a toolbar and a list of section names, which reads as a table of contents. */}
+      <div className="manage-card" style={{ marginBottom: '.7rem' }}>
+        <p className="manage-card-blurb" style={{ margin: 0 }}>
+          This is the card other agents fetch to learn what <b>{draft.card.name || 'this agent'}</b> does and how to reach it. Fields are
+          inherited from this agent&apos;s profile, names and running service — <b>override only what must differ</b>. Editing changes
+          nothing in public: a card goes live only when you release, sign and publish it.
+        </p>
+        <p className="manage-card-blurb" style={{ margin: '.35rem 0 0' }}>
+          <b>Now:</b>{' '}
+          {errorCount > 0
+            ? `${errorCount} problem${errorCount === 1 ? '' : 's'} to fix — see Validation in the inspector.`
+            : draftState === 'validated'
+              ? 'This draft is validated and ready to release.'
+              : 'Edit any section, then validate the draft.'}
+          {draftState === 'validated' && errorCount === 0 && releasesHref && (
+            <>
+              {' '}
+              <a href={releasesHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>
+                Go to Releases &amp; Audit to publish →
+              </a>
+            </>
+          )}
+        </p>
+      </div>
+
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '.7rem', alignItems: 'center' }}>
         <BusyButton
           busy={validating}
           busyLabel="Validating…"
-          className="btn-ghost"
+          className={draftState === 'validated' && errorCount === 0 ? 'btn-ghost' : 'btn-primary'}
           disabled={!gateForOp(scopes, 'card.validate').allowed}
           title={gateForOp(scopes, 'card.validate').reason}
           onClick={() => void runValidate()}
@@ -368,8 +400,9 @@ export function CardEditor({
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 200px) minmax(0, 1fr) minmax(280px, 320px)', gap: '1rem', alignItems: 'start' }} className="studio-panes">
-        <nav aria-label="Card sections" style={{ position: 'sticky', top: '1rem' }}>
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '.15rem' }}>
+        <nav aria-label="Card sections" className="studio-sections">
+          <p className="studio-sections-title">Card sections</p>
+          <ul className="studio-section-list" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '.15rem' }}>
             {A2A_CARD_EDITOR_MANIFEST.sections.map((s) => {
               const status = sectionStatus(s, draft.fieldBindings, diagnostics);
               return (

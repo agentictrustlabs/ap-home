@@ -214,6 +214,7 @@ function EditorBody({
           initialPointer={pointer}
           initialDiagnostic={diagnostic}
           staleBanner={stale === '1' || detail.draft?.state === 'stale'}
+          releasesHref={`${base}/${cardId}/releases`}
         />
       )}
       {tab === 'projections' && (

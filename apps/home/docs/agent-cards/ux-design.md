@@ -206,8 +206,11 @@ fields) ships without a component edit. Section nav shows a small dot per sectio
 amber (has an override or unresolved diagnostic), red (has an error-severity diagnostic) — so a steward scans
 eight words and knows where to look.
 
-Below 1024px viewport: inspector collapses to a bottom sheet toggled by a "Details" button per field row;
-section nav collapses to a horizontal scroll strip at top (same responsive pattern the portal already uses
+Below 1024px viewport (SHIPPED as CSS in `app/globals.css`: `.studio-sections` / `.studio-section-list`):
+section nav collapses to a horizontal scroll strip at top; the inspector stacks below the form (the per-row
+"Details" bottom sheet is still open work). Above the panes sits an orientation block naming what the card is
+for, where the draft stands, and the single next action — without it the page opens on a toolbar and eight
+section names, which reads as a table of contents (same responsive pattern the portal already uses
 for its dense settings pages).
 
 ### 3.2 Field row anatomy
