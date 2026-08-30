@@ -11,7 +11,7 @@
 // access we parse the Host header ourselves.
 
 import { apAuthorityExtension } from '@agenticprimitives/a2a';
-import { AgentNamingClient, isAgentTld, parseAgentName, InvalidNameError } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, allAgentTlds, isAgentTld, parseAgentName, InvalidNameError } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
 /** The TLD names are claimed under. `alice` → `alice.impact`. (Deployment convention — the
@@ -52,6 +52,18 @@ export function agentNameForLabel(label: string): string {
  * Anything else (apex, deeper nesting, an unknown type level) → null. The type level is a projection of the
  * suffix and is NEVER authority — `resolveTyped` re-validates the suffix against the on-chain record.
  */
+/** `<label>-<type>` → the typed name it projects, or null when the label carries no known type suffix. */
+function typedFromLabel(rest: string): { label: string; name: string } | null {
+  for (const tld of allAgentTlds()) {
+    const suffix = `-${tld}`;
+    if (rest.endsWith(suffix) && rest.length > suffix.length) {
+      const label = rest.slice(0, -suffix.length);
+      return { label: `${label}.${tld}`, name: `${label}.${tld}` };
+    }
+  }
+  return null;
+}
+
 export function parseTypedAgentHost(hostname: string | undefined, baseDomain: string, parent: string = AGENT_NAME_PARENT): { label: string; name: string } | null {
   if (!hostname) return null;
   const host = (hostname.split(':')[0] ?? '').toLowerCase();
@@ -59,7 +71,17 @@ export function parseTypedAgentHost(hostname: string | undefined, baseDomain: st
   if (host === base || !host.endsWith('.' + base)) return null;
   const rest = host.slice(0, host.length - base.length - 1);
   const parts = rest.split('.');
-  if (parts.length === 1 && parts[0]) return { label: parts[0], name: `${parts[0]}.${parent}` };
+  if (parts.length === 1 && parts[0]) {
+    // spec 346 §5 (2026-08-30): a typed agent is ONE label, `<label>-<type>`, so the zone's existing
+    // `*.<zone>` wildcard and its certificate cover every agent. The type is read back off the label's
+    // last `-<type>` suffix; a bare label is a person/legacy name resolved against the ordered roots.
+    const typed = typedFromLabel(parts[0]);
+    if (typed) return typed;
+    return { label: parts[0], name: `${parts[0]}.${parent}` };
+  }
+  // MIGRATION: the dotted form `<label>.<type>.<base>` was the convention until 2026-08-30 and is still
+  // served, because cards published under it carry that URL in signed bytes. Nothing emits it any more
+  // (`hostForName` below); drop this arm once those releases are superseded.
   if (parts.length === 2 && parts[0] && isAgentTld(parts[1]!)) return { label: `${parts[0]}.${parts[1]}`, name: `${parts[0]}.${parts[1]}` };
   return null;
 }
@@ -75,7 +97,7 @@ export function hostForName(name: string, baseDomain: string, parents: readonly 
   if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
   const [label, tld] = parts as [string, string];
   if (parents.includes(tld)) return `${label}.${baseDomain}`;
-  if (isAgentTld(tld)) return `${label}.${tld}.${baseDomain}`;
+  if (isAgentTld(tld)) return `${label}-${tld}.${baseDomain}`;
   return null;
 }
 

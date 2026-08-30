@@ -19,6 +19,7 @@ import {
   buildA2aAgentCard,
   parseAgentSubdomain,
   parseTypedAgentHost,
+  hostForName,
   agentNameForHandle,
   agentNameForLabel,
   withConsultSkill,
@@ -196,5 +197,26 @@ describe('typed hosts and handles (spec 346)', () => {
     expect(agentNameForHandle('svc.richcanvas.org')).toBeNull();
     expect(agentNameForHandle('alice.ai')).toBeNull();
     expect(agentNameForHandle('')).toBeNull();
+  });
+});
+
+describe('typed hosts are one label and reverse cleanly (spec 346 §5, 2026-08-30)', () => {
+  const base = 'faithnet.io';
+  it('reads the type back off the label suffix', () => {
+    expect(parseTypedAgentHost('fort-morgan-household-church.faithnet.io', base, 'me')).toEqual({ label: 'fort-morgan-household.church', name: 'fort-morgan-household.church' });
+    expect(parseTypedAgentHost('northern-colorado-field-workspace.faithnet.io', base, 'me')).toEqual({ label: 'northern-colorado-field.workspace', name: 'northern-colorado-field.workspace' });
+  });
+  it('a bare label is still a person/legacy name against the ordered roots', () => {
+    expect(parseTypedAgentHost('alice.faithnet.io', base, 'me')).toEqual({ label: 'alice', name: 'alice.me' });
+  });
+  it('still serves the dotted hosts published before the change', () => {
+    expect(parseTypedAgentHost('northern-colorado-field.workspace.faithnet.io', base, 'me')).toEqual({ label: 'northern-colorado-field.workspace', name: 'northern-colorado-field.workspace' });
+  });
+  it('round-trips hostForName → parseTypedAgentHost for every typed suffix', () => {
+    for (const name of ['x.team', 'x.svc', 'x.workspace', 'x.treasury', 'x.registry', 'x.church', 'x.circle', 'x.org']) {
+      const host = hostForName(name, base, ['me', 'impact'])!;
+      expect(host.split('.').length).toBe(3); // one label under the zone
+      expect(parseTypedAgentHost(host, base, 'me')?.name).toBe(name);
+    }
   });
 });

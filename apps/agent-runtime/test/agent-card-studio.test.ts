@@ -154,7 +154,9 @@ describe('the RELEASED_CARDS key is one key', () => {
     expect(studioReleasedCardKey('0xABC')).toBe('released-card:0xabc');
   });
   it('projects a typed name onto the deployment zone', () => {
-    expect(hostForName('acme.svc', 'impact-agent.io', ['me', 'impact'])).toBe('acme.svc.impact-agent.io');
+    // spec 346 §5: one DNS label, type folded in with a hyphen, so `*.<zone>` covers every agent.
+    expect(hostForName('acme.svc', 'impact-agent.io', ['me', 'impact'])).toBe('acme-svc.impact-agent.io');
+    expect(hostForName('fort-morgan-household.church', 'faithnet.io', ['me', 'impact'])).toBe('fort-morgan-household-church.faithnet.io');
     expect(hostForName('alice.impact', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
     expect(hostForName('alice.me', 'impact-agent.io', ['me', 'impact'])).toBe('alice.impact-agent.io');
     expect(hostForName('x.y.z', 'impact-agent.io')).toBeNull();
