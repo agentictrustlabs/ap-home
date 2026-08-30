@@ -668,6 +668,12 @@ async function derivePasskeyRpIdHash(): Promise<Hex> {
   return ('0x' + arr.map((b) => b.toString(16).padStart(2, '0')).join('')) as Hex;
 }
 
+/** On-chain `isCustodian` read — may THIS address sign for `sa`? Used to say, before a click, that an on-chain
+ *  step needs the agent's custodian rather than failing with AA24 after it (spec 347 §9 separation of duties). */
+export async function isCustodianOf(sa: Address, candidate: Address): Promise<boolean> {
+  try { return await agentAccountClient().isCustodian(sa, candidate); } catch { return false; }
+}
+
 function agentAccountClient(): AgentAccountClient {
   return new AgentAccountClient({
     rpcUrl: DEFAULT_RPC_URL,

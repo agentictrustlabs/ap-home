@@ -61,6 +61,9 @@ export function listingRow(input: {
   published: { releaseId: string; signedContentDigest?: string } | null;
   scopes: readonly string[];
   losses?: readonly { category: string; severity: string; sourcePointer?: string }[];
+  /** May this person's signer act for the agent's account on chain? `false` = definitely not (a steward who is
+   *  not a custodian); `null` = unknowable from here, let the chain decide. */
+  custodian?: boolean | null;
 }): ListingRow {
   const d = input.descriptor;
   const base = { family: d.family, title: d.title, purpose: d.purpose, projection: input.projection, loss: lossSentence(d.title, input.losses ?? []) };
@@ -68,14 +71,17 @@ export function listingRow(input: {
   const canList = gateForOp(input.scopes, 'projection.preview').allowed && gateForOp(input.scopes, 'projection.approve').allowed && gateForPublish(input.scopes, d.family).allowed;
   const p = input.projection;
   const listed = !!p?.instance.lastPublication;
+  const NEEDS_CUSTODIAN = "Needs this agent's custodian to sign — you steward it but don't hold its keys. Ask whoever custodies it (Access shows who) to list it.";
   if (!listed) {
     if (!canList) return { ...base, state: 'missing-role', line: `Needs someone with listing rights for ${d.title.toLowerCase()}.`, button: null };
+    if (input.custodian === false) return { ...base, state: 'missing-role', line: NEEDS_CUSTODIAN, button: null };
     return { ...base, state: 'not-listed', line: 'Not listed', button: { id: 'list', label: 'List it' } };
   }
   const current = p!.selectedCard?.releaseId === input.published.releaseId && !['drifted', 'stale', 'failed'].includes(p!.instance.state);
   const when = new Date(p!.instance.lastPublication!.publishedAt).toLocaleString();
   if (current) return { ...base, state: 'listed', line: `Listed ✓ · updated ${when}`, button: { id: 'open', label: 'Open' }, loss: null };
   if (!canList) return { ...base, state: 'missing-role', line: `Listed, but shows an older version of the card. Needs someone with listing rights to update it.`, button: null };
+  if (input.custodian === false) return { ...base, state: 'missing-role', line: `Listed, but shows an older version of the card. ${NEEDS_CUSTODIAN}`, button: null };
   return { ...base, state: 'out-of-date', line: 'Listed, but shows an older version of the card.', button: { id: 'update', label: 'Update listing' } };
 }
 

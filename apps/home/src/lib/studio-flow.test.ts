@@ -78,6 +78,13 @@ describe('listings — projections in the user\'s words', () => {
     expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r1' }, scopes: LISTER })).toMatchObject({ state: 'listed', button: { label: 'Open' } });
     expect(listingRow({ descriptor: cat['ap-naming'], projection: listed, published: { releaseId: 'r2' }, scopes: LISTER })).toMatchObject({ state: 'out-of-date', button: { label: 'Update listing' } });
     expect(listingRow({ descriptor: cat['ap-naming'], projection: null, published: { releaseId: 'r1' }, scopes: [] })).toMatchObject({ state: 'missing-role', button: null });
+    // A steward who does not custody the agent: the row says so BEFORE the click, instead of AA24 after it.
+    const steward = listingRow({ descriptor: cat['ap-naming'], projection: null, published: { releaseId: 'r1' }, scopes: LISTER, custodian: false });
+    expect(steward.state).toBe('missing-role');
+    expect(steward.line).toContain("custodian");
+    expect(steward.button).toBeNull();
+    // Unknowable (wallet home) → the attempt is allowed and the chain decides.
+    expect(listingRow({ descriptor: cat['ap-naming'], projection: null, published: { releaseId: 'r1' }, scopes: LISTER, custodian: null }).button).toEqual({ id: 'list', label: 'List it' });
   });
   it('summarises a loss in one sentence, never as a count headline', () => {
     expect(lossSentence('Faithnet directory', [{ category: 'truncated', severity: 'warning', sourcePointer: '/skills/3' }, { category: 'truncated', severity: 'warning', sourcePointer: '/skills/4' }], 5)).toBe("Faithnet directory can't show 2 of your 5 skills — it will list the other 3.");

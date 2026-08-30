@@ -48,7 +48,7 @@ import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
 import { ReleaseStepper } from './ReleaseStepper';
 import { Banner, Chip, ErrorLine, LiveRegion, inputStyle } from './ui';
-import { notifyCardChanged } from './useStudio';
+import { notifyCardChanged, useCanSignFor } from './useStudio';
 
 function decodeKid(protectedHeader: string): string {
   const json = atob(protectedHeader.replace(/-/g, '+').replace(/_/g, '/'));
@@ -115,6 +115,9 @@ export function Overview({
   staleBanner?: boolean;
 }) {
   const [editing, setEditing] = useUrlFlag('edit');
+  // Stewardship runs the Studio; only a CUSTODIAN can sign for the agent's account on chain (listings, the
+  // optional binding). Known before any click so the page never offers an act that will be refused.
+  const canSign = useCanSignFor(sa);
   const [editorDiagnostic, setEditorDiagnostic] = useState<string | null>(initialDiagnostic ?? null);
   const [editorPointer, setEditorPointer] = useState<string | null>(initialPointer ?? null);
   useEffect(() => { if (initialDiagnostic || initialPointer) setEditing(true); }, [initialDiagnostic, initialPointer, setEditing]);
@@ -142,7 +145,10 @@ export function Overview({
   const latest = detail.releases.length > 0 ? detail.releases[detail.releases.length - 1]! : null;
   const published = detail.releases.filter((r) => r.state === 'published').at(-1) ?? null;
   const draftChanged = !!draft && (!latest || draft.basedOnReleaseId !== latest.releaseId);
-  const cardUri = useMemo(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }), [agentName]);
+  // The typed name (`accelerate.team`) is what hosts and records are built from; `agentName` may be an org's
+  // display label ("Accelerate"). When the card's name was inherited from naming, the card carries the typed one.
+  const typedName = draft?.fieldBindings['/name']?.source.kind === 'agent-naming' && draft.card.name ? draft.card.name : agentName;
+  const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }), [typedName]);
 
   const describe = describeStage({ draftState: draft?.state ?? null, errors, checked: !!validation, skillCount: draft?.card.skills.length ?? 0, name: draft?.card.name ?? agentName });
   const plan: PublishPlan = planPublish({ draftState: draft?.state ?? null, errors, release: latest, draftChanged, scopes });
@@ -178,7 +184,7 @@ export function Overview({
           const key = await newCardSigningKey();
           const prepared = await signReleaseLocally(release, key);
           let sig: ReleaseSignature = prepared;
-          if (bindingUri.trim()) {
+          if (bindingUri.trim() && canSign !== false) {
             const choice = await askBinding();
             setBindingAsk(null);
             if (choice === 'sign') {
@@ -214,7 +220,7 @@ export function Overview({
   const waitingOnSomeoneElse = plan.kind === 'ready' && plan.stopAt !== null && plan.runnable.length === 0;
 
   // ── stage ③: listings ────────────────────────────────────────────────────────────────────────────────
-  const catalog = useMemo(() => listingCatalog({ brand: whitelabel.brand.name, agentName }), [agentName]);
+  const catalog = useMemo(() => listingCatalog({ brand: whitelabel.brand.name, agentName: typedName }), [typedName]);
   const [listingBusy, setListingBusy] = useState<StudioFamily | null>(null);
   const [listingPhase, setListingPhase] = useState('');
   const [listingLoss, setListingLoss] = useState<Partial<Record<StudioFamily, string | null>>>({});
@@ -222,7 +228,7 @@ export function Overview({
   const [detailsOpen, setDetailsOpen] = useState<Partial<Record<StudioFamily, boolean>>>({});
   const byFamily = useMemo(() => Object.fromEntries(projections.map((p) => [p.family, p])) as Partial<Record<StudioFamily, StoredProjection>>, [projections]);
   const rows: ListingRow[] = (['ap-naming', 'ap-registry'] as StudioFamily[]).map((f) =>
-    listingRow({ descriptor: catalog[f], projection: byFamily[f] ?? null, published: published ? { releaseId: published.releaseId, signedContentDigest: published.signedContentDigest } : null, scopes }),
+    listingRow({ descriptor: catalog[f], projection: byFamily[f] ?? null, published: published ? { releaseId: published.releaseId, signedContentDigest: published.signedContentDigest } : null, scopes, custodian: canSign }),
   );
   const directoryConfigured = !!AGENT_REGISTRY_URN && !!CONTRACTS.agentRegistryBase;
 
@@ -356,7 +362,8 @@ export function Overview({
         <p className="manage-card-blurb" style={{ margin: '0 0 .5rem' }}>
           Where <b>{name}</b> appears so agents and people can find it. Each place needs one listing; you can update it whenever the card changes.
         </p>
-        {agentName && <p className="manage-card-blurb" style={{ margin: '0 0 .5rem', color: TONE_COLOR.good }}>Your name <b>{agentName}</b> resolves to this agent ✓</p>}
+        {typedName && <p className="manage-card-blurb" style={{ margin: '0 0 .5rem', color: TONE_COLOR.good }}>Your name <b>{typedName}</b> resolves to this agent ✓</p>}
+        {canSign === false && published && <Banner tone="muted">You steward this agent but don&rsquo;t hold its keys, so listings need its custodian. Everything above the line — the description and publishing — is yours to do.</Banner>}
         <div style={{ display: 'grid', gap: '.5rem' }}>
           {rows.map((row) => {
             const notSetUp = row.family === 'ap-registry' && !directoryConfigured;

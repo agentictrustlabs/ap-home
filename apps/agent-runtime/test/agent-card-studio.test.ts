@@ -502,7 +502,7 @@ describe('projections: AP naming preview → plan → approve → record', () =>
     const plan = await ok<{ plan: PublicationPlanV1; contractCalls: PlannedContractCallV1[]; signatureRequests: unknown[] }>(studio.run(as(STEWARD), 'projection.planPublication', { instanceId: id, ...mutation() }));
     expect(plan.plan.target).toMatchObject({ family: 'ap-naming', registry: REGISTRY, network: `eip155:${CHAIN_ID}` });
     expect(plan.plan.operations[0]!.kind).toBe('name-record-write');
-    // addr, agentKind, displayName, a2aEndpoint, metadataHash, cardDigest, cardUri (no metadataUri — profile unanchored)
+    // addr, agentKind, a2aEndpoint, metadataHash, cardDigest, cardUri (no metadataUri — profile unanchored; displayName never defaulted)
     expect(plan.contractCalls).toHaveLength(7);
     expect(plan.contractCalls.every((c) => c.to === RESOLVER && c.value === '0' && c.chainId === CHAIN_ID)).toBe(true);
     expect(plan.signatureRequests).toEqual([]);

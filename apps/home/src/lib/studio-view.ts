@@ -812,6 +812,9 @@ export function publicationVerdict(receipt: { verificationResult: string; uri?: 
  *  (`agent_has_no_host`); showing them raw makes a dead end out of a fixable situation. */
 export function studioErrorSentence(codeOrMessage: string): string {
   const c = codeOrMessage.trim();
+  if (/userop_reverted|inner userOp reverted|publication execute failed/i.test(c)) {
+    return "Your agent's account rejected the write to the chain, so nothing was recorded. This usually means the account needs a different signer or more than one approval for this kind of change — check who custodies this agent under Access, then try again.";
+  }
   switch (c) {
     case 'agent_has_no_host':
     case 'the agent has no name, so no well-known host to publish at':

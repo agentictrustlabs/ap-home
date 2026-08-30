@@ -8,6 +8,8 @@ import type { StudioScope } from '@agenticprimitives/home';
 import { useSession, type Session } from '../../context/session';
 import { AGENTS_CHANGED_EVENT, useManagedAgents } from '../portal/ManagedAgents';
 import { listMyOrgs, type MyOrg } from '../../connect-client';
+import { isCustodianOf } from '../../connect-client';
+import { isDemoCustodyHome } from '../../lib/persona-custody';
 import { agentClassOf } from '../../lib/agent-class';
 import { resolveVia, signHashFor } from '../../home/onboarding';
 import type { SignHash } from '../../connect-client';
@@ -111,6 +113,44 @@ export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAg
   }, [session, profile?.credential, sa]);
 
   return { session, loaded, sa, name: svc?.name ?? org?.orgName ?? '', delegation, relationship, scopes, signHashFor: sign };
+}
+
+/**
+ * Can the person's SIGNER act for this managed agent's account on chain? Stewardship (the delegation the Studio
+ * runs on) lets a person draft, sign and publish the CARD — vault and JWS work. Writing a name record or a
+ * registry entry is a userOp on the managed agent's account and needs one of ITS custodians. The two are
+ * different authorities (spec 347 §9): the Home says which one a step needs BEFORE the click, instead of an
+ * "AA24 signature error" after it. `null` = cannot be known from here (a wallet home whose signer isn't cached),
+ * in which case the attempt is allowed and the chain decides.
+ */
+export function useCanSignFor(sa: Address | null): boolean | null {
+  const { session, agentAddress } = useSession();
+  const [can, setCan] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!sa || !session) return;
+    let cancelled = false;
+    (async () => {
+      const candidates: Address[] = [];
+      if (agentAddress) candidates.push(agentAddress);
+      try {
+        if (await isDemoCustodyHome(session.token)) {
+          const r = await fetch('/connect/demo-personas');
+          const j = (await r.json()) as { personas?: Array<{ sa: string; custodian?: string }> };
+          const me = (j.personas ?? []).find((p) => agentAddress && p.sa.toLowerCase() === agentAddress.toLowerCase());
+          if (me?.custodian) candidates.push(me.custodian as Address);
+        } else {
+          if (!cancelled) setCan(null); // a wallet/KMS home: the signer isn't knowable without a prompt — let the chain decide
+          if (!agentAddress) return;
+        }
+      } catch { /* fall through to the SA-only check */ }
+      for (const c of candidates) {
+        if (await isCustodianOf(sa, c)) { if (!cancelled) setCan(true); return; }
+      }
+      if (!cancelled) setCan(false);
+    })();
+    return () => { cancelled = true; };
+  }, [sa, session, agentAddress]);
+  return can;
 }
 
 export interface CardsState {
