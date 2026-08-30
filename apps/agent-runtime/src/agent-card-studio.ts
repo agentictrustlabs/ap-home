@@ -1210,9 +1210,19 @@ export class AgentCardStudio {
       ...(typeof args.planTtlSeconds === 'number' ? { planTtlSeconds: args.planTtlSeconds } : {}),
       ...(args.costCeiling && typeof args.costCeiling === 'object' ? { costCeiling: args.costCeiling as PublisherContext['costCeiling'] } : {}),
     };
-    const plan = stored.family === 'ap-naming'
-      ? buildApNamingPublicationPlan(result.artifact as ApNamingArtifactV1, ctx)
-      : buildApRegistryPublicationPlan(result.artifact as ApRegistryArtifactV1, ctx, { mode: optStr(args.mode) === 'renew' ? 'renew' : 'register' });
+    // REGISTER or RE-POINT is decided by what is on chain, never by the caller's optimism: `registerEntry`
+    // reverts `EntryExists`, so an existing listing publishing a newer card failed on chain with nothing
+    // recorded (2026-08-30). One read answers it (spec 346 §7's update path).
+    let plan: PublicationPlanV1;
+    if (stored.family === 'ap-naming') {
+      plan = buildApNamingPublicationPlan(result.artifact as ApNamingArtifactV1, ctx);
+    } else {
+      const a = result.artifact as ApRegistryArtifactV1;
+      const asked = optStr(args.mode);
+      const onChain = await this.deps.sources.registryEntry({ registry: a.registry, registryId: urnToBytes32(a.entry.registryId), entryId: urnToBytes32(a.entry.id) }).catch(() => null);
+      const mode = asked === 'renew' ? 'renew' : onChain && onChain.status !== 0 ? 'update' : 'register';
+      plan = buildApRegistryPublicationPlan(a, ctx, { mode });
+    }
     const { calls, signatureRequests } = await this.contractCallsFor(stored.family, plan, result.artifact);
     const storedPlan: StoredPlanV1 = { plan, contractCalls: calls, signatureRequests, artifactRecord: STUDIO_KEYS.artifact(instanceId, artifactDigest), createdBy: caller.principal };
     await this.appendOnly(STUDIO_KEYS.plan(instanceId, plan.planId), storedPlan);
