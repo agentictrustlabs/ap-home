@@ -9,7 +9,7 @@ import Link from 'next/link';
 // two-pane pattern has to design its narrow branch or the pattern deletes function.
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
-import type { NavGroup, NavItem, SettingsGroup } from './nav';
+import type { NavGroup, NavItem, PaneId, SettingsGroup } from './nav';
 import { MenuIcon, XIcon } from '../shared/Icons';
 
 function DrawerItem({ item, active, onGo }: { item: NavItem; active: boolean; onGo: () => void }) {
@@ -30,8 +30,15 @@ function DrawerItem({ item, active, onGo }: { item: NavItem; active: boolean; on
 }
 
 export function PortalBottomNav({
-  groups, tabs, settings, workspaceName,
-}: { groups: NavGroup[]; tabs: NavItem[]; settings?: SettingsGroup[]; workspaceName?: string }) {
+  groups, tabs, panes, workspaceName,
+}: {
+  groups: NavGroup[];
+  tabs: NavItem[];
+  /** Every pane this workspace can show. The drawer lists them ALL, one after another — there is no
+   *  second column on a phone, so a pane that is not in the drawer is a surface with no way in. */
+  panes?: Partial<Record<PaneId, SettingsGroup[]>>;
+  workspaceName?: string;
+}) {
   const pathname = usePathname();
   const [drawer, setDrawer] = useState(false);
 
@@ -64,27 +71,34 @@ export function PortalBottomNav({
             <div className="nav-group" key={g.id ?? g.heading ?? `g${i}`}>
               {/* In the drawer every area is simply open: there is no second pane to defer to, and a
                   collapsed section inside a sheet you already opened is a second door for nothing. */}
-              {g.heading && g.items.length > 1 && <div className="nav-group-heading">{g.heading}</div>}
+              {g.heading && <div className="nav-group-heading">{g.heading}</div>}
               {g.items.map((item) => (
                 <DrawerItem key={item.id} item={item} active={pathname === item.href} onGo={() => setDrawer(false)} />
               ))}
             </div>
           ))}
-          {!!settings?.length && (
-            <>
-              <div className="nav-group region-start">
-                <div className="nav-group-heading">Settings{workspaceName ? ` · ${workspaceName}` : ''}</div>
-              </div>
-              {settings.map((g) => (
-                <div className="nav-group" key={g.heading}>
-                  <div className="nav-group-heading">{g.heading}</div>
-                  {g.items.map((item) => (
-                    <DrawerItem key={item.id} item={item} active={pathname === item.href} onGo={() => setDrawer(false)} />
-                  ))}
+          {(['stewardship', 'settings'] as const).map((paneId) => {
+            const pane = panes?.[paneId] ?? [];
+            if (!pane.length) return null;
+            return (
+              <div key={paneId}>
+                <div className="nav-group region-start">
+                  <div className="nav-group-heading">
+                    {paneId === 'stewardship' ? 'Stewardship' : 'Settings'}
+                    {workspaceName ? ` · ${workspaceName}` : ''}
+                  </div>
                 </div>
-              ))}
-            </>
-          )}
+                {pane.map((g) => (
+                  <div className="nav-group" key={g.heading}>
+                    <div className="nav-group-heading">{g.heading}</div>
+                    {g.items.map((item) => (
+                      <DrawerItem key={item.id} item={item} active={pathname === item.href} onGo={() => setDrawer(false)} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </>

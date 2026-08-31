@@ -17,16 +17,18 @@ export interface NavItem {
   Icon: IconComponent;
   status: 'live' | 'soon';
   badge?: number;
+  /** This row opens a SECOND PANE beside the nav rather than being a destination in itself. One
+   *  grammar for every second level: a right caret, a pane, and the row lit for the whole section. */
+  opensPane?: PaneId;
 }
+
+/** The sections that open a pane. Both are lists too long to hang under a heading in a 240px column,
+ *  and both are somewhere you go to work on a set of things rather than a single page. */
+export type PaneId = 'stewardship' | 'settings';
 export interface NavGroup {
-  /** Stable key for the remembered open/closed state; required when `collapsible`. */
   id?: string;
   heading?: string;
   items: NavItem[];
-  /** spec 348 §5 — a named AREA collapses; the top band never does. */
-  collapsible?: boolean;
-  /** Whether it starts open when the current route is not inside it. Stewardship starts closed. */
-  defaultOpen?: boolean;
   /** Draws the ONE hairline that separates "where you take part" from "what it holds and how it is set
    *  up". Uniform 20px gaps between every group carried no grouping information — they just made the
    *  list sparse. */
@@ -35,8 +37,7 @@ export interface NavGroup {
   isExit?: boolean;
 }
 
-/** spec 348 §2.3 — the Settings pane's groups. Same shape as a nav group, rendered in the second pane
- *  rather than the sidebar, so `collapsible` never applies: the pane is already the disclosure. */
+/** A pane's groups. Same shape as a nav group, rendered in the second column. */
 export type SettingsGroup = { heading: string; items: NavItem[] };
 
 
@@ -48,11 +49,16 @@ export type SettingsGroup = { heading: string; items: NavItem[] };
  * Manage for an org and Discovery for a person, a service had no Library because nobody wired one, and
  * `Manage` had become the bucket for nine unrelated things. The shape is now:
  *
- *   top band (4, never collapsible) · Work · Stewardship ▸ · Settings → · Records ▸ · Attestations ▸
+ *   top band (4) · Work · ─── · Stewardship → · Records · Attestations · Settings →
  *
  * The test for the top band: you go there to WATCH or TAKE PART. Everything you go to in order to change
- * how the agent behaves is Settings, which is a second pane (`buildSettingsPane`), not an area — twelve
- * items in a sidebar accordion is a list you scroll past, not a place you navigate.
+ * how the agent behaves is Settings.
+ *
+ * ONE grammar for every second level (2026-08-31): a section too long to hang under a heading in a 240px
+ * column opens a PANE beside the nav — a right caret, the row lit for the whole section, the pane's items
+ * as real URLs. Stewardship and Settings both work that way. There is deliberately no accordion: two
+ * disclosure patterns in one column meant the same visual said two things, and the collapsed headings
+ * cost vertical space to show nothing.
  *
  * Account-level surfaces (Security, Connected, Your apps, Network) are NOT here: they are about the
  * signed-in person and the deployment, not the agent in this workspace, and live in the topbar's user
@@ -119,41 +125,61 @@ export function buildNav(
 
   // ── Stewardship (§2.2): what this agent stewards FOR someone. A service is stewarded, it does not
   //    steward. Collapsed by default — it is a directory, not a destination. ─────────────────────────
-  if (active.kind !== 'service') {
-    const stewardItems: NavItem[] = isPerson
-      ? [
-          { id: 'organizations', label: 'Organizations', href: '/organizations', Icon: BuildingIcon, status: 'live' },
-          { id: 'treasuries', label: 'Treasuries', href: '/treasuries', Icon: LandmarkIcon, status: 'live' },
-          { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
-          { id: 'workspaces', label: 'Workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' },
-        ]
-      : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
-    groups.push({ id: 'stewardship', heading: 'Stewardship', items: stewardItems, collapsible: true, defaultOpen: false, startsRegion: true });
-  }
-
   // ── Records + Attestations: their own areas (§2.4/§2.5). ──────────────────────────────────────────
   // Records and Attestations hold ONE item each today, so they render as plain rows (the sidebar folds
   // any area with fewer than two children). The item carries the AREA's noun — `All records` only ever
   // existed to disambiguate from a heading directly above it. When W4 lands the per-family split they
   // become real areas again with no change here.
-  groups.push({ id: 'records', heading: 'Records', items: [
+  groups.push({ items: [
     { id: 'records-all', label: 'Records', href: href('records'), Icon: DatabaseIcon, status: 'live' },
-  ], collapsible: true, defaultOpen: false, ...(active.kind === 'service' ? { startsRegion: true } : {}) });
+  ], startsRegion: true });
   // Attestations: person-only today. A managed agent CAN sign statements, so the area applies in
   // principle — but none has an agent-scoped page yet, and §5 says an empty area renders nothing.
   if (isPerson) {
-    groups.push({ id: 'attestations', heading: 'Attestations', items: [
+    groups.push({ items: [
       { id: 'attestations-all', label: 'Attestations', href: '/attestations', Icon: AwardIcon, status: 'live' },
-    ], collapsible: true, defaultOpen: false });
+    ] });
   }
 
-  // ── Settings LAST (§2.3): it is where you go to change how the agent behaves, not part of the daily
-  //    path through it. Everything above is somewhere you work; this is the door you take when you want
-  //    to alter the thing you were working in — so it sits at the bottom, under the day-to-day.
-  groups.push({ items: [{ id: 'settings', label: 'Settings', href: href('settings'), Icon: SettingsIcon, status: 'live' }] });
+  // ── Stewardship, then Settings — the two PANES are neighbours at the bottom, so the one second-level
+  //    grammar reads as one band: what this agent holds for other people, then how it is set up.
+  if (active.kind !== 'service') {
+    const first = stewardshipPane(active)[0]?.items[0];
+    if (first) {
+      groups.push({ items: [{ id: 'stewardship', label: 'Stewardship', href: first.href, Icon: BuildingIcon, status: 'live', opensPane: 'stewardship' }] });
+    }
+  }
+
+  // Settings LAST: everything above is somewhere you work; this is the door you take when you want to
+  // alter the thing you were working in.
+  groups.push({ items: [{ id: 'settings', label: 'Settings', href: href('settings'), Icon: SettingsIcon, status: 'live', opensPane: 'settings' }] });
 
   if (!isPerson) groups.push(backHome);
   return groups.filter((g) => g.items.length > 0);
+}
+
+/** spec 348 §2.2 — what this agent stewards FOR someone, in a pane of its own. A service is stewarded;
+ *  it does not steward, so it has none. */
+export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): SettingsGroup[] {
+  if (active.kind === 'service') return [];
+  const items: NavItem[] = active.kind === 'person'
+    ? [
+        { id: 'organizations', label: 'Organizations', href: '/organizations', Icon: BuildingIcon, status: 'live' },
+        { id: 'treasuries', label: 'Treasuries', href: '/treasuries', Icon: LandmarkIcon, status: 'live' },
+        { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
+        { id: 'workspaces', label: 'Workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' },
+      ]
+    : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
+  return [{ heading: 'You steward', items }];
+}
+
+/** The groups a given pane shows — one entry point, so the sidebar never branches on which pane. */
+export function paneGroups(
+  pane: PaneId,
+  active: WorkspaceScope = { kind: 'person' },
+  orgRelationship: 'steward' | 'member' = 'steward',
+): SettingsGroup[] {
+  return pane === 'stewardship' ? stewardshipPane(active) : buildSettingsPane(active, orgRelationship);
 }
 
 /**

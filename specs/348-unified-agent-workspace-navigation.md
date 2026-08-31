@@ -79,10 +79,11 @@ Spec 334's coordination surface: person `My Work`, org `Work`. A participation s
 the top band rather than in Settings — but outside the four, which stay four. Absent for service agents,
 which have no coordination surface today.
 
-### 2.2 Stewardship (person + organization only — collapsible, **collapsed by default**)
+### 2.2 Stewardship (person + organization only — a PANE, like Settings)
 
 What this agent stewards *on behalf of someone*. A service agent has none: it is stewarded, it does not
-steward. Collapsed by default because it is a directory, not a destination — most sessions never open it.
+steward. It opens a pane rather than expanding in place — the same second-level grammar Settings uses,
+because two disclosure patterns in one 240px column is one too many.
 
 | Item | Person | Organization |
 | --- | --- | --- |
@@ -202,7 +203,18 @@ dismiss. The visual grammar that replaces it: **left caret = expands in place ·
 pane · SMALL-CAPS = a static label, and nothing interactive uses it.**
 
 **Settings sits LAST in the main nav** (amended 2026-08-31): everything above it is somewhere you work;
-Settings is the door you take when you want to change the thing you were working in.
+Settings is the door you take when you want to change the thing you were working in. **Stewardship sits
+directly above it**, because it is the other pane — the two second-level sections are neighbours, so the
+one grammar reads as one band: what this agent holds for other people, then how it is set up.
+
+**Amended 2026-08-31 (owner) — Stewardship is a PANE too, and there is no accordion.** §2.2 originally
+made Stewardship a collapsible area. Having both patterns in one column meant the same small-caps heading
+said two different things ("click to expand here" and "a label you cannot click"), and collapsed headings
+cost vertical space to show nothing. Both second-level sections now open a pane, so the grammar is one
+line long: **a row with a right caret opens a pane beside the nav; small-caps uppercase is a static label
+and nothing interactive uses it.** `NavGroup.collapsible` / `defaultOpen` are removed; a row that opens a
+pane carries `opensPane`, and its href points at the pane's first item so clicking it always lands
+somewhere real.
 
 ### 2.4 Records (all classes — collapsible, closed by default)
 

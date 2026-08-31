@@ -9,7 +9,7 @@ import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
-import { buildNav, buildSettingsPane, bottomNav } from './nav';
+import { buildNav, paneGroups, bottomNav } from './nav';
 import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
@@ -36,7 +36,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
   }, active, rel, workspaceName);
-  const settings = buildSettingsPane(active, rel);
+  const panes = { stewardship: paneGroups('stewardship', active, rel), settings: paneGroups('settings', active, rel) };
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
   // decision, not a locked door), but it must SAY why it is missing from everywhere else.
@@ -45,7 +45,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} />
       <div className="portal-body">
-        <PortalSidebar groups={groups} settings={settings} workspaceName={workspaceName} />
+        <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} />
         <main className="portal-main">
           {orgStatus !== 'active' && active.kind === 'org' && (
             <div
@@ -64,7 +64,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
           {children}
         </main>
       </div>
-      <PortalBottomNav groups={groups} tabs={tabs} settings={settings} workspaceName={workspaceName} />
+      <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />
     </div>
   );
 }

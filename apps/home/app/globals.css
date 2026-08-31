@@ -981,34 +981,9 @@
          rather than as two of three columns. */
       .portal-sidebar-wrap { display: flex; min-height: 0; border-right: 1px solid var(--color-border); }
 
-      /* An AREA TOGGLE is a control, so it looks like the other controls in this column — not like the
-         pane's static labels. It also has to undo the bare `button {}` element rule above, which
-         centres, enlarges and bolds it; that rule is why three dead headings out-shouted the live items
-         and why they looked randomly indented (they were CENTRED, and the strings differ in length). */
-      .nav-area-toggle {
-        display: flex; align-items: center; gap: .65rem; width: 100%;
-        min-height: 44px; padding: .55rem .75rem; margin: 0;
-        border: 0; border-left: 3px solid transparent; border-radius: var(--radius-8);
-        background: none; box-shadow: none; cursor: pointer;
-        font-family: inherit; font-size: .9rem; font-weight: 500; line-height: 1.6;
-        letter-spacing: normal; text-transform: none;
-        color: var(--color-text-body); text-align: left;
-        justify-content: flex-start;
-        transition: background .15s ease, color .15s ease;
-      }
-      .nav-area-toggle:hover { background: var(--color-surface); color: var(--color-text-primary); }
-      .nav-area-toggle:focus-visible { outline: 2px solid var(--color-amber-700); outline-offset: -2px; }
-      .nav-area-toggle[aria-expanded="true"] { color: var(--color-text-primary); font-weight: 600; }
-      .nav-caret { flex: 0 0 18px; color: var(--color-text-muted); transition: transform .12s ease; }
-      .nav-area-toggle[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
-      /* Children hang off a rail starting under the caret — containment without a big step. */
-      .nav-area-items {
-        display: flex; flex-direction: column; gap: 2px;
-        margin: 2px 0 0 1.5rem; padding-left: .35rem;
-        border-left: 1px solid var(--color-border);
-      }
-
-      /* A RIGHT caret means "opens the pane beside this", against the left caret's "expands in place". */
+      /* A right caret means "this row opens the pane beside it" — the ONE second-level grammar. The
+         accordion that used to live here is gone: two disclosure patterns in one column meant the same
+         small-caps heading said both "click to expand" and "a label you cannot click". */
       .nav-caret-right { margin-left: auto; color: var(--color-text-faint); flex: 0 0 16px; }
       .nav-item-pane.active .nav-caret-right { color: var(--color-amber-600); }
       /* The active Settings row becomes the mouth of the pane: same fill, square right edge, no gap. */

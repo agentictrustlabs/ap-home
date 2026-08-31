@@ -13,7 +13,7 @@
  * the fix is to delete the exception, not to loosen the test.
  */
 import { describe, it, expect } from 'vitest';
-import { buildNav, buildSettingsPane, buildUserMenu, type NavGroup } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, type NavGroup } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const ORG = '0xe26157068af46629691e2ab19726bf61476e6b6c';
@@ -23,37 +23,28 @@ const ORG_SCOPE = { kind: 'org', org: ORG } as const;
 const SVC_SCOPE = { kind: 'service', agent: SVC } as const;
 
 const labels = (g: NavGroup[]): string[] => g.flatMap((x) => x.items.map((i) => i.label));
-const area = (g: NavGroup[], heading: string) => g.find((x) => x.heading === heading);
 const TOP = ['Overview', 'Messages', 'Activities', 'Library'];
 
 describe('the top band is the same four for every class', () => {
   for (const [name, scope] of [['person', PERSON], ['org', ORG_SCOPE], ['service', SVC_SCOPE]] as const) {
-    it(`${name}: Overview · Messages · Activities · Library, in that order, never collapsible`, () => {
+    it(`${name}: Overview · Messages · Activities · Library, in that order, and none of them a pane`, () => {
       const first = buildNav(whitelabel, {}, scope)[0]!;
       expect(first.items.map((i) => i.label)).toEqual(TOP);
-      expect(first.collapsible).toBeFalsy();
+      expect(first.items.some((i) => i.opensPane)).toBe(false);
     });
   }
 });
 
 describe('areas are present or absent as a whole — never rearranged', () => {
   it('Stewardship is for agents that steward: person and org, not a service', () => {
-    expect(area(buildNav(whitelabel, {}, PERSON), 'Stewardship')).toBeTruthy();
-    expect(area(buildNav(whitelabel, {}, ORG_SCOPE), 'Stewardship')).toBeTruthy();
-    expect(area(buildNav(whitelabel, {}, SVC_SCOPE), 'Stewardship')).toBeUndefined();
+    expect(labels(buildNav(whitelabel, {}, PERSON))).toContain('Stewardship');
+    expect(labels(buildNav(whitelabel, {}, ORG_SCOPE))).toContain('Stewardship');
+    expect(labels(buildNav(whitelabel, {}, SVC_SCOPE))).not.toContain('Stewardship');
+    expect(paneGroups('stewardship', SVC_SCOPE)).toEqual([]);
   });
 
-  it('Stewardship starts COLLAPSED — it is a directory, not a destination', () => {
-    const s = area(buildNav(whitelabel, {}, PERSON), 'Stewardship')!;
-    expect(s.collapsible).toBe(true);
-    expect(s.defaultOpen).toBe(false);
-    expect(s.id).toBeTruthy(); // it must have a key to remember its state under
-  });
-
-  it('Records is an area for every class', () => {
-    for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
-      expect(area(buildNav(whitelabel, {}, scope), 'Records')?.collapsible).toBe(true);
-    }
+  it('Records and Attestations are plain rows for every class that has them', () => {
+    for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) expect(labels(buildNav(whitelabel, {}, scope))).toContain('Records');
   });
 
   it('Work is a main-nav item for person and org, absent for a service', () => {
@@ -61,12 +52,37 @@ describe('areas are present or absent as a whole — never rearranged', () => {
     expect(labels(buildNav(whitelabel, {}, ORG_SCOPE))).toContain('Work');
     expect(labels(buildNav(whitelabel, {}, SVC_SCOPE))).not.toContain('Work');
   });
+});
 
-  it('Settings is ONE main-nav item, never an area — the pane is the disclosure', () => {
+describe('ONE grammar for every second level: a row that opens a pane', () => {
+  // The first build had two — collapsible areas AND a pane — so the same small-caps heading meant both
+  // "click to expand here" and "a label you cannot click". Now: exactly the rows that open panes carry
+  // `opensPane`, nothing collapses in place, and no group in the main nav has a heading at all.
+  const items = (scope: Parameters<typeof buildNav>[2]) => buildNav(whitelabel, {}, scope).flatMap((g) => g.items);
+
+  it('exactly Stewardship and Settings open panes', () => {
+    expect(items(PERSON).filter((i) => i.opensPane).map((i) => i.label)).toEqual(['Stewardship', 'Settings']);
+    expect(items(SVC_SCOPE).filter((i) => i.opensPane).map((i) => i.label)).toEqual(['Settings']);
+  });
+
+  it('a pane row points INTO its pane, so clicking it lands somewhere real', () => {
+    for (const scope of [PERSON, ORG_SCOPE]) {
+      const row = items(scope).find((i) => i.opensPane === 'stewardship')!;
+      const first = paneGroups('stewardship', scope)[0]!.items[0]!;
+      expect(row.href).toBe(first.href);
+    }
+  });
+
+  it('no main-nav group carries a heading — small-caps is a pane label and nothing else', () => {
     for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
-      const g = buildNav(whitelabel, {}, scope);
-      expect(labels(g)).toContain('Settings');
-      expect(area(g, 'Settings')).toBeUndefined();
+      expect(buildNav(whitelabel, {}, scope).filter((g) => g.heading)).toEqual([]);
+    }
+  });
+
+  it('Stewardship sits directly above Settings — the two panes are neighbours', () => {
+    for (const scope of [PERSON, ORG_SCOPE]) {
+      const l = items(scope).map((i) => i.label);
+      expect(l.indexOf('Settings') - l.indexOf('Stewardship')).toBe(1);
     }
   });
 });
@@ -91,7 +107,6 @@ describe('the shape after the 2026-08-31 design review', () => {
     // It also existed for org/service and not person, so every row shifted when you switched context.
     const org = buildNav(whitelabel, {}, ORG_SCOPE, 'steward', 'alice-home-church');
     expect(org.some((g) => (g.heading ?? '').includes('alice'))).toBe(false);
-    expect(org[0]!.heading).toBeUndefined();
   });
 
   it('a one-item area names itself, so the row reads as the destination', () => {
@@ -173,13 +188,12 @@ describe('the Settings pane', () => {
 
 describe('membership is not widened by any of this (spec 318)', () => {
   it('an org member gets participation only — no Settings, no Stewardship, no Records', () => {
-    const member = buildNav(whitelabel, {}, ORG_SCOPE, 'member');
-    const l = labels(member);
+    const l = labels(buildNav(whitelabel, {}, ORG_SCOPE, 'member'));
     expect(l).toContain('Discussions');
     expect(l).toContain('Work');
     expect(l).not.toContain('Settings');
-    expect(area(member, 'Stewardship')).toBeUndefined();
-    expect(area(member, 'Records')).toBeUndefined();
+    expect(l).not.toContain('Stewardship');
+    expect(l).not.toContain('Records');
     expect(buildSettingsPane(ORG_SCOPE, 'member')).toEqual([]);
   });
 });
