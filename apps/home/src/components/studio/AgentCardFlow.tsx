@@ -53,6 +53,7 @@ const SERVING_TITLE: Record<'nothing' | 'this' | 'older' | 'elsewhere', string> 
   elsewhere: 'These are where it should be served — the saved copy is elsewhere',
 };
 import { readNameRecords, writeNameProperties } from '../../lib/name-properties';
+import { cardContentDigest } from '@agenticprimitives/agent-profile/a2a';
 import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, saveState, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
@@ -110,7 +111,24 @@ export function AgentCardFlow({
   const errors = validation?.errors ?? 0;
   const latest = detail.releases.length > 0 ? detail.releases[detail.releases.length - 1]! : null;
   const published = detail.releases.filter((r) => r.state === 'published').at(-1) ?? null;
-  const draftChanged = !!draft && (!latest || draft.basedOnReleaseId !== latest.releaseId);
+  // Is what is on screen different from what was last released? Compare the CONTENT.
+  //
+  // This used to compare `draft.basedOnReleaseId` against the latest release id — which does not move
+  // when you edit the description. So after a first save, every later edit left `basedOnReleaseId`
+  // pointing at that same release, `draftChanged` stayed false, the plan short-circuited to "live", and
+  // the Save button never appeared: you could type into the card and have no way to save it.
+  //
+  // `cardContentDigest` is the same canonicalisation a release is cut with (JCS + sha256), so this is
+  // exactly the question the status asks — is the world reading what I am looking at? A missing digest
+  // counts as CHANGED: offering a save that turns out to be a no-op is a smaller failure than hiding it.
+  const draftChanged = !!draft && (() => {
+    if (!latest) return true;
+    try {
+      return cardContentDigest(draft.card) !== latest.unsignedContentDigest;
+    } catch {
+      return true;
+    }
+  })();
   const typedName = typedNameOf(detail, agentName);
   const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }), [typedName]);
 
