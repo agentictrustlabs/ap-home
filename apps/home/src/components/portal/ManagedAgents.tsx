@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
@@ -45,7 +45,12 @@ const KIND_LABEL: Record<AgentKind, string> = {
  *  workspace pages) reloads when this fires — dispatch after any mutation that changes an agent's
  *  identity surface (naming, creating), so dropdowns update without a page refresh. */
 export const AGENTS_CHANGED_EVENT = 'ap:agents-changed';
-export const notifyAgentsChanged = (): void => { window.dispatchEvent(new Event(AGENTS_CHANGED_EVENT)); };
+export const notifyAgentsChanged = (): void => {
+  // Any writer that announces a change also drops the shared `/connect/related-orgs` payload, so a
+  // caller outside connect-client (org lifecycle, enrolment, discussions) can't be served a stale list.
+  invalidateRelatedOrgs();
+  window.dispatchEvent(new Event(AGENTS_CHANGED_EVENT));
+};
 
 /** Shared loader for the member's managed agents — one read path (MAM-D7).
  *
@@ -58,7 +63,7 @@ export function useManagedAgents(token: string | null, surface: OrgSurface = 'wo
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
-    const bump = (): void => setReloadKey((k) => k + 1);
+    const bump = (): void => { invalidateRelatedOrgs(); setReloadKey((k) => k + 1); };
     window.addEventListener(AGENTS_CHANGED_EVENT, bump);
     return () => window.removeEventListener(AGENTS_CHANGED_EVENT, bump);
   }, []);

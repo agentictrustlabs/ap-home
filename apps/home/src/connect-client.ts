@@ -1553,6 +1553,7 @@ export async function createManagedAgent(
       proofHash,
     }),
   });
+  invalidateRelatedOrgs(); // this write changed the person's agents — the shared read must not serve the old payload
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
@@ -1610,6 +1611,7 @@ export async function nameManagedAgent(
     // Only orgName changes; the server MERGES so kind/parent/stewardshipDelegation are preserved.
     body: JSON.stringify({ person: input.person, orgAgent: input.agent, orgName: claim.name, kind: input.kind, parent: input.parent }),
   });
+  invalidateRelatedOrgs(); // this write changed the person's agents — the shared read must not serve the old payload
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `named on-chain (${claim.name}) but vault save failed: ${e.error ?? save.status}` };
@@ -1680,6 +1682,7 @@ async function createManagedAgentSocial(
       stewardshipDelegation: b.stewardshipDelegation, proofHash, custody: b.custodyDescriptor,
     }),
   });
+  invalidateRelatedOrgs(); // this write changed the person's agents — the shared read must not serve the old payload
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `agent deployed${name ? ` (${name})` : ''} but saving the link failed: ${e.error ?? save.status}` };
@@ -1722,6 +1725,7 @@ async function nameManagedAgentSocial(
     headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify({ person: input.person, orgAgent: input.agent, orgName: b.name, kind: input.kind, parent: input.parent }),
   });
+  invalidateRelatedOrgs(); // this write changed the person's agents — the shared read must not serve the old payload
   if (!save.ok) {
     const e = (await save.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: `named on-chain (${b.name}) but vault save failed: ${e.error ?? save.status}` };
@@ -1754,15 +1758,53 @@ export async function resolveTreasuryByConvention(memberName: string | undefined
   }
 }
 
+/** ONE in-flight read of `/connect/related-orgs`, shared by every caller.
+ *
+ *  Two projections (`listMyOrgs` and `listManagedAgents`) read the SAME payload, and a single page
+ *  mounts several components that each want it — the card page fired THREE identical requests and the
+ *  server answered them one after another, so the page's own data did not start loading for 3.4s.
+ *
+ *  This is a cache, not a fallback (ADR-0013): it holds the canonical answer from the one read path, it
+ *  never substitutes a different mechanism, and a failed read is never cached — the next caller retries.
+ *  Writes invalidate it directly (below), so correctness does not depend on a UI event firing. */
+const RELATED_ORGS_TTL_MS = 10_000;
+type RelatedOrgsBody = { orgs?: Array<Record<string, unknown>> };
+let relatedOrgsCache: { token: string; at: number; body: RelatedOrgsBody } | null = null;
+let relatedOrgsInFlight: { token: string; p: Promise<RelatedOrgsBody> } | null = null;
+
+/** Drop the shared payload — call after ANY write that changes the person's agents. */
+export function invalidateRelatedOrgs(): void {
+  relatedOrgsCache = null;
+  relatedOrgsInFlight = null;
+}
+
+async function readRelatedOrgs(token: string): Promise<RelatedOrgsBody> {
+  const fresh = relatedOrgsCache;
+  if (fresh && fresh.token === token && Date.now() - fresh.at < RELATED_ORGS_TTL_MS) return fresh.body;
+  const flying = relatedOrgsInFlight;
+  if (flying && flying.token === token) return flying.p;
+  const p = (async (): Promise<RelatedOrgsBody> => {
+    const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error(`related-orgs failed (HTTP ${r.status})`);
+    return (await r.json().catch(() => ({}))) as RelatedOrgsBody;
+  })();
+  relatedOrgsInFlight = { token, p };
+  try {
+    const body = await p;
+    relatedOrgsCache = { token, at: Date.now(), body };
+    return body;
+  } finally {
+    if (relatedOrgsInFlight?.p === p) relatedOrgsInFlight = null;
+  }
+}
+
 /** List the member's managed agents (all kinds) from their home vault — one read path
  *  (the same /connect/related-orgs the orgs view already uses, MAM-D7).
  *
  *  spec 342 — lifecycle-filtered at the read boundary, and the filter CASCADES: an org-treasury
  *  whose parent org is hidden goes with it, so a deleted org can't reappear as a parent label. */
 export async function listManagedAgents(sessionToken: string, surface: OrgSurface = 'working'): Promise<ManagedAgent[]> {
-  const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${sessionToken}` } });
-  if (!r.ok) return [];
-  const b = (await r.json().catch(() => ({}))) as {
+  const b = (await readRelatedOrgs(sessionToken).catch(() => ({}))) as {
     orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }>;
   };
   const rows = (b.orgs ?? []).map((o) => ({
@@ -2708,9 +2750,7 @@ export async function saveSkillClaims(token: string, skills: SkillClaim[]): Prom
  *  (the organizations list, where they can be reactivated), 'any' filters nothing (a workspace
  *  page addressed by SA, and the Settings section itself). */
 export async function listMyOrgs(token: string, surface: OrgSurface = 'working'): Promise<MyOrg[]> {
-  const r = await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } });
-  if (!r.ok) return [];
-  const b = (await r.json().catch(() => ({}))) as { orgs?: MyOrg[] };
+  const b = (await readRelatedOrgs(token).catch(() => ({}))) as { orgs?: MyOrg[] };
   return filterMyOrgsByLifecycle(b.orgs ?? [], surface);
 }
 

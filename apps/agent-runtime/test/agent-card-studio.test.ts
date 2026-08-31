@@ -67,6 +67,8 @@ function liveCard(): Record<string, unknown> {
 
 interface World {
   vault: Map<string, unknown>;
+  /** Every batch the Studio issued — a read op that fans out one-by-one shows up here as many entries. */
+  batchReads: string[][];
   kv: Map<string, string>;
   chainRecords: AgentNameRecords;
   erc1271Ok: boolean;
@@ -77,12 +79,16 @@ interface World {
 }
 
 function makeWorld(): World {
-  return { vault: new Map(), kv: new Map(), chainRecords: {}, erc1271Ok: true, audit: createMemoryAuditSink(), clock: Date.parse('2026-08-30T12:00:00.000Z') };
+  return { vault: new Map(), batchReads: [], kv: new Map(), chainRecords: {}, erc1271Ok: true, audit: createMemoryAuditSink(), clock: Date.parse('2026-08-30T12:00:00.000Z') };
 }
 
 function deps(w: World, opts: { sod?: 'strict' | 'off'; kv?: boolean } = {}): StudioDeps {
   const vault: StudioVault = {
     async get<T>(rt: string) { return (w.vault.has(rt) ? structuredClone(w.vault.get(rt)) : null) as T | null; },
+    async getMany(rts: readonly string[]) {
+      w.batchReads.push([...rts]);
+      return Object.fromEntries(rts.map((rt) => [rt, w.vault.has(rt) ? structuredClone(w.vault.get(rt)) : null]));
+    },
     async set(rt, data) { w.vault.set(rt, structuredClone(data)); },
     async list() { return [...w.vault.keys()].map((record_type) => ({ record_type })); },
   };
@@ -308,6 +314,33 @@ describe('cards: create → patch → validate → release', () => {
     const req = await studio.run(as(STEWARD), 'release.requestApproval', { cardResourceId: card, releaseId: r2.release.releaseId, ...mutation() });
     expect(req.status).toBe(200);
     expect(w.vault.has(STUDIO_KEYS.release(card, r2.release.releaseId))).toBe(true);
+  });
+});
+
+describe('reads cost a bounded number of vault round-trips', () => {
+  // The Studio's reads are the Home's slowest calls: every hop is a cross-worker request that re-resolves
+  // the person's vault key. A fan-out of one-key-at-a-time `get`s is what made the card page take seconds,
+  // so the shape of these reads is pinned here — N releases must NOT mean N round-trips.
+  let w: World;
+  let studio: AgentCardStudio;
+  beforeEach(() => { w = makeWorld(); studio = new AgentCardStudio(deps(w)); });
+
+  it('card.get reads the index+meta together, then the draft and EVERY release in one batch', async () => {
+    const created = await ok<{ resource: A2AAgentCardResourceV1 }>(studio.run(as(STEWARD), 'card.create', mutation()));
+    const card = created.resource.cardResourceId;
+    for (let i = 0; i < 3; i++) await ok(studio.run(as(STEWARD), 'card.createRelease', { cardResourceId: card, ...mutation() }));
+    w.batchReads = [];
+    const got = await ok<{ releases: unknown[] }>(studio.run(as(STEWARD), 'card.get', { cardResourceId: card }));
+    expect(got.releases.length).toBe(3);
+    expect(w.batchReads.length).toBe(2);                 // index+meta, then draft+releases — not 5
+    expect(w.batchReads[1]!.length).toBe(4);             // one hop carrying the draft and all 3 releases
+  });
+
+  it('card.list reads every card in ONE batch, however many there are', async () => {
+    for (let i = 0; i < 4; i++) await ok(studio.run(as(STEWARD), 'card.create', { environment: 'staging', ...mutation() }));
+    w.batchReads = [];
+    await ok(studio.run(as(STEWARD), 'card.list', {}));
+    expect(w.batchReads.length).toBe(1);
   });
 });
 

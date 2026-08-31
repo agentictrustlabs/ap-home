@@ -110,6 +110,10 @@ import { buildEvent, type AuditSink } from '@agenticprimitives/audit';
 /** The managed agent's vault, already scoped by the delegation the caller presented (demo-mcp enforces it). */
 export interface StudioVault {
   get<T = unknown>(recordType: string): Promise<T | null>;
+  /** Batch multi-get (VL-W2 `get_vault_records`) — ONE round-trip for many records of the SAME owner.
+   *  A fan-out of `get` was N cross-worker hops, each re-resolving the vault key; this resolves it once.
+   *  Missing records come back `null`, exactly as `get` reports them — absence is an answer, not an error. */
+  getMany(recordTypes: readonly string[]): Promise<Record<string, unknown | null>>;
   set(recordType: string, data: unknown): Promise<void>;
   list(): Promise<Array<{ record_type: string; updated_at?: string }>>;
 }
@@ -564,6 +568,13 @@ export class AgentCardStudio {
 
   // ── cards ──
 
+  /** Typed batch read in key order; `null` for anything the vault does not hold. */
+  private async getMany<T>(keys: readonly string[]): Promise<Array<T | null>> {
+    if (keys.length === 0) return [];
+    const got = await this.deps.vault.getMany(keys);
+    return keys.map((k) => (got[k] ?? null) as T | null);
+  }
+
   private async loadIndex(): Promise<A2AAgentCardResourceV1[]> {
     const idx = await this.deps.vault.get<{ v: 1; resources: A2AAgentCardResourceV1[] }>(STUDIO_KEYS.cardIndex());
     return idx?.resources ?? [];
@@ -606,9 +617,19 @@ export class AgentCardStudio {
 
   private async cardList(): Promise<Record<string, unknown>> {
     const resources = await this.loadIndex();
-    const cards = await Promise.all(resources.map(async (resource) => {
-      const [draft, meta] = await Promise.all([this.deps.vault.get<A2AAgentCardDraftV1>(STUDIO_KEYS.draft(resource.cardResourceId)), this.deps.vault.get<CardMetaV1>(STUDIO_KEYS.meta(resource.cardResourceId))]);
-      const latest = resource.latestReleaseId ? await this.deps.vault.get<A2AAgentCardReleaseV1>(STUDIO_KEYS.release(resource.cardResourceId, resource.latestReleaseId)) : null;
+    // ONE batch for every card's draft + meta + latest release (was 3 hops PER card, serially fanned out).
+    const keys = resources.flatMap((r) => [
+      STUDIO_KEYS.draft(r.cardResourceId),
+      STUDIO_KEYS.meta(r.cardResourceId),
+      ...(r.latestReleaseId ? [STUDIO_KEYS.release(r.cardResourceId, r.latestReleaseId)] : []),
+    ]);
+    const got = await this.deps.vault.getMany(keys);
+    const cards = resources.map((resource) => {
+      const draft = (got[STUDIO_KEYS.draft(resource.cardResourceId)] ?? null) as A2AAgentCardDraftV1 | null;
+      const meta = (got[STUDIO_KEYS.meta(resource.cardResourceId)] ?? null) as CardMetaV1 | null;
+      const latest = resource.latestReleaseId
+        ? ((got[STUDIO_KEYS.release(resource.cardResourceId, resource.latestReleaseId)] ?? null) as A2AAgentCardReleaseV1 | null)
+        : null;
       return {
         resource,
         draftState: draft?.state ?? null,
@@ -616,15 +637,27 @@ export class AgentCardStudio {
         latestRelease: latest ? { releaseId: latest.releaseId, state: latest.state, releaseNumber: latest.releaseNumber, unsignedContentDigest: latest.unsignedContentDigest, signedContentDigest: latest.signedContentDigest ?? null } : null,
         servedReleaseId: meta?.servedReleaseId ?? null,
       };
-    }));
+    });
     return { cards };
   }
 
   private async cardGet(cardResourceId: string): Promise<Record<string, unknown>> {
-    const { resource, meta } = await this.loadResource(cardResourceId);
-    const draft = await this.deps.vault.get<A2AAgentCardDraftV1>(STUDIO_KEYS.draft(cardResourceId));
-    const releases = (await Promise.all(meta.releaseIds.map((id) => this.deps.vault.get<A2AAgentCardReleaseV1>(STUDIO_KEYS.release(cardResourceId, id))))).filter((r): r is A2AAgentCardReleaseV1 => !!r);
-    return { resource, draft, releases, meta };
+    // Both keys are known before the first read, so the index and the meta ride in ONE batch.
+    const [idx, metaRaw] = await this.getMany<{ v: 1; resources: A2AAgentCardResourceV1[] } | CardMetaV1>([
+      STUDIO_KEYS.cardIndex(),
+      STUDIO_KEYS.meta(cardResourceId),
+    ]);
+    const resource = ((idx as { resources?: A2AAgentCardResourceV1[] } | null)?.resources ?? []).find((r) => r.cardResourceId === cardResourceId);
+    if (!resource) throw new StudioError(404, 'card_not_found');
+    const meta = metaRaw as CardMetaV1 | null;
+    if (!meta) throw new StudioError(500, 'card_meta_missing', `agent-cards:${cardResourceId}:meta is missing`);
+    // ONE batch for the draft AND every release: this page's slowest read was N+2 sequential vault hops.
+    const [draft, ...rest] = await this.getMany<A2AAgentCardDraftV1 | A2AAgentCardReleaseV1>([
+      STUDIO_KEYS.draft(cardResourceId),
+      ...meta.releaseIds.map((id) => STUDIO_KEYS.release(cardResourceId, id)),
+    ]);
+    const releases = rest.filter((r): r is A2AAgentCardReleaseV1 => !!r);
+    return { resource, draft: (draft as A2AAgentCardDraftV1 | null) ?? null, releases, meta };
   }
 
   private async cardCreate(caller: StudioCaller, kind: 'human' | 'service-agent', args: Record<string, unknown>, m: StudioMutationV1): Promise<Record<string, unknown>> {
@@ -1040,7 +1073,7 @@ export class AgentCardStudio {
 
   private async projectionList(): Promise<Record<string, unknown>> {
     const ids = await this.loadProjectionIndex();
-    const projections = (await Promise.all(ids.map((id) => this.deps.vault.get<StoredProjectionV1>(STUDIO_KEYS.projection(id))))).filter((p): p is StoredProjectionV1 => !!p);
+    const projections = (await this.getMany<StoredProjectionV1>(ids.map((id) => STUDIO_KEYS.projection(id)))).filter((p): p is StoredProjectionV1 => !!p);
     return { projections: projections.map((p) => ({ instance: p.instance, family: p.family, selectedCard: p.selectedCard ?? null, planIds: p.planIds, receiptIds: p.receiptIds })) };
   }
 
@@ -1359,7 +1392,7 @@ export class AgentCardStudio {
   private async loadBindings(): Promise<ExternalIdentityBindingV1[]> {
     const idx = await this.deps.vault.get<{ v: 1; bindingIds: string[] }>(STUDIO_KEYS.bindingIndex());
     const ids = idx?.bindingIds ?? [];
-    return (await Promise.all(ids.map((id) => this.deps.vault.get<ExternalIdentityBindingV1>(STUDIO_KEYS.binding(id))))).filter((b): b is ExternalIdentityBindingV1 => !!b);
+    return (await this.getMany<ExternalIdentityBindingV1>(ids.map((id) => STUDIO_KEYS.binding(id)))).filter((b): b is ExternalIdentityBindingV1 => !!b);
   }
 
   private async upsertBinding(agent: Address, family: 'ap-naming' | 'ap-registry', verdict: { ok: boolean; registry: string; externalId: string; detail?: string }, artifactDigest: Sha256, now: string): Promise<ExternalIdentityBindingV1> {

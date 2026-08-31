@@ -1128,7 +1128,7 @@ app.post('/agent-cards/:op', async (c) => {
   if (!sod) return c.json({ ok: false, error: 'bad_config', detail: 'SEPARATION_OF_DUTIES must be strict|off' }, 500);
   if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'bad_config', detail: 'AGENT_NAME_REGISTRY is not configured' }, 500);
   const delegation = body.delegation;
-  const mcp = async (toolName: 'get_vault_record' | 'set_vault_record' | 'list_vault_record', toolArgs?: Record<string, unknown>) => {
+  const mcp = async (toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record', toolArgs?: Record<string, unknown>) => {
     const resp = await callMcpToolWithProof({ env: c.env, toolName, delegation, toolArgs });
     const j = (await resp.json().catch(() => null)) as Record<string, unknown> | null;
     if (!resp.ok || !j || j.ok !== true) throw new Error(`vault ${toolName} failed (HTTP ${resp.status})${j?.error ? `: ${String(j.error)}` : ''}`);
@@ -1138,6 +1138,18 @@ app.post('/agent-cards/:op', async (c) => {
   const deps: StudioDeps = {
     vault: {
       get: async <T,>(recordType: string) => ((await mcp('get_vault_record', { recordType })).data ?? null) as T | null,
+      // VL-W2 batch: one cross-worker hop for N records instead of N, and the per-person vault key is
+      // resolved once for the whole batch. Same authorization — demo-mcp re-runs the scope gate per record.
+      getMany: async (recordTypes: readonly string[]) => {
+        if (recordTypes.length === 0) return {};
+        const j = await mcp('get_vault_records', { recordTypes: [...recordTypes] });
+        // demo-mcp maps recordType -> data directly, and OMITS a record the delegation scoped out.
+        // An omitted key and a stored null are both "no answer" — exactly what `get` reports (ADR-0013).
+        const records = (j.records ?? {}) as Record<string, unknown>;
+        const out: Record<string, unknown | null> = {};
+        for (const k of recordTypes) out[k] = records[k] ?? null;
+        return out;
+      },
       set: async (recordType, data) => { await mcp('set_vault_record', { recordType, data }); },
       list: async () => ((await mcp('list_vault_record')).records ?? []) as Array<{ record_type: string; updated_at?: string }>,
     },
