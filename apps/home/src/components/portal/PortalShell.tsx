@@ -9,7 +9,7 @@ import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
-import { buildNav, bottomNav } from './nav';
+import { buildNav, buildSettingsPane, bottomNav } from './nav';
 import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
@@ -36,6 +36,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
   }, active, rel, workspaceName);
+  const settings = buildSettingsPane(active, rel);
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
   // decision, not a locked door), but it must SAY why it is missing from everywhere else.
@@ -44,7 +45,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} />
       <div className="portal-body">
-        <PortalSidebar groups={groups} />
+        <PortalSidebar groups={groups} settings={settings} />
         <main className="portal-main">
           {orgStatus !== 'active' && active.kind === 'org' && (
             <div
@@ -57,7 +58,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
             >
               This organization is <b>{STATUS_LABEL[orgStatus].toLowerCase()}</b> — hidden from the rest of your
               home. Its records, address and delegations are untouched. Change that under{' '}
-              <a href={orgHref(active.org, 'settings')}>Manage → Settings</a>.
+              <a href={orgHref(active.org, 'status')}>Settings → Status</a>.
             </div>
           )}
           {children}

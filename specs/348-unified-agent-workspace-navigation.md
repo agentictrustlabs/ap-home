@@ -73,6 +73,12 @@ Everything you go to in order to *change how the agent behaves* is Settings.
 `Activity` (singular, spec 310) becomes the content of **Activities**. The rename is deliberate: the band
 is a place, and a place reads better in the plural beside Messages and Library.
 
+### 2.1b Work (person + organization — a main-nav item, not an area)
+
+Spec 334's coordination surface: person `My Work`, org `Work`. A participation surface, so it sits with
+the top band rather than in Settings — but outside the four, which stay four. Absent for service agents,
+which have no coordination surface today.
+
 ### 2.2 Stewardship (person + organization only — collapsible, **collapsed by default**)
 
 What this agent stewards *on behalf of someone*. A service agent has none: it is stewarded, it does not
@@ -105,7 +111,8 @@ usable: you always know which agent's settings you are in, and one click leaves.
 │ Activities    │  Naming            │                          │
 │ Library       │  Agent Card        │   the selected setting   │
 │               │  Registry          │                          │
-│ Stewardship ▸ │  Trust graph       │                          │
+│ Work          │  Trust graph       │                          │
+│ Stewardship ▸ │                    │                          │
 │ ▸ Settings    │                    │                          │
 │ Records     ▸ │ BEHAVIOUR          │                          │
 │ Attestations▸ │  Ask               │                          │
@@ -202,9 +209,22 @@ items inside it.
 | Records | ✅ | ✅ | ✅ |
 | Attestations | ✅ | ✅ | ✅ |
 
-Inside the Settings pane, one item varies by class — **Members** is org-only. Everything else is present
-for all three; an item with nothing to show says so on its own page rather than vanishing from the pane,
-because a settings list that changes shape per agent is a settings list you cannot learn.
+Inside the Settings pane, four items vary by class. Each is grounded in a surface that does or does not
+exist — never in making a list shorter — and an item that would 404 or duplicate another is worse than one
+that is honestly absent:
+
+| Pane item | Person | Org | Service | Why |
+| --- | --- | --- | --- | --- |
+| **Members** | ✕ | ✅ | ✕ | only an organization has members |
+| **Status** | ✕ | ✅ | ✕ | spec 342's lifecycle is an org concept |
+| **Access** | ✕ | ✅ | ✅ | a person's access is Security, in the user menu (§4) |
+| **Ask** | ✅ | ✅ | ✕ | a service's Playbook IS what it answers as — `Ask` would be a second name for one page |
+| **Discussion replies** | ✅ | ✕ | ✕ | an org's discussion behaviour is its assistant; a service takes part in none |
+| **Visibility** | ✅ | ✕ | ✕ | spec 338 §20 has no agent-scoped surface yet — **a gap, not a decision** |
+
+The last row is the only one that is a to-do rather than a fact about the class. Likewise
+**Attestations** is a person-only AREA today for the same reason: a managed agent can sign statements,
+but no agent-scoped page reads them yet.
 
 A `✕` means **the area is absent**, not that its items moved. An org-class agent of subtype `.team` /
 `.church` / `.circle` gets the org column; a `.svc` / `.workspace` / `.treasury` / `.registry` gets the
@@ -261,11 +281,11 @@ which is exactly the confusion ADR-0010 exists to prevent.
 
 | Wave | Content | Done when |
 | --- | --- | --- |
-| **W1** | `buildNav` emits the new shape for all three classes; areas gain `collapsible` + `defaultOpen`; **Settings becomes a pane** (main-nav item + grouped second pane, drill-down under `sm`); nav test extended to pin the shape and the pane's groups per class | the three navs are shape-identical by test |
-| **W2** | Top band completed: Activities + Library for org and service; `Activity` → `Activities` | all four top items resolve for all three classes |
-| **W3** | The Settings splits: `Agent` → Ask/Discussion replies/Playbook; `Card & Projections` → Agent Card/Registry/Naming; `Metadata` folded into Profile + Naming; A2A endpoint moves into Naming; org `Members`/`Access`/`Settings`→`Status` move into the pane | no route renders a surface that another route also owns |
-| **W4** | Stewardship area (person + org); Records and Attestations as areas | — |
-| **W5** | User menu: Security, Connected, Your apps, Network, Identity; removed from the left nav | the left nav contains only agent-scoped surfaces |
+| **W1** ✅ | `buildNav` emits the new shape for all three classes; areas gain `collapsible`/`defaultOpen`; **Settings is a pane**; Stewardship, Records, Attestations areas; user menu; two gates — shape per class, and **every nav href resolves to a real route** | shipped 2026-08-31 |
+| **W2** ✅ | Top band completed: Activities + Library for org and service; `Activity` → `Activities`, agent-scoped by filtering the one control plane | shipped 2026-08-31 |
+| **W3** ◑ | Splits: `Agent` → Ask/Discussion replies/Playbook ✅; org lifecycle `Settings` → `Status` ✅; `Card & Projections` → Agent Card/Registry/**Naming** ◑ (the pane addresses them separately; the ap-naming projection and the A2A endpoint have NOT yet moved into the Naming editor); `Metadata` → Profile + Naming ◑ (person Profile is vault-only; the published tiers still live on the Metadata page) | no route renders a surface another route also owns |
+| **W4** | The remaining per-class gaps: agent-scoped Visibility, agent-scoped Attestations, per-family Records | the §3 table's last row is empty |
+| **W5** | `/you` reduced to the identity rows the user menu points at; `Metadata` route retired once W3 lands | — |
 
 Each wave leaves the app shippable. W3 is the only one that moves stored data surfaces; it moves
 *editors*, not records — no vault key changes, no re-projection.
@@ -274,11 +294,11 @@ Each wave leaves the app shippable. W3 is the only one that moves stored data su
 
 These change what gets built and are NOT decided here.
 
-**8.1 — Where does Work go?** Spec 334's coordination surface (person `My Work`, org `Work`) is not in the
-requested top four. It is a participation surface, so it does not belong in Settings. Options: (a) a fifth
-top item — breaks "four items, always"; (b) inside **Activities** as a tab — commitments and audit
-timeline are different things; (c) its own area. **Recommendation: (c)**, a `Work` area for person + org,
-because it has sub-surfaces (requests, endeavors, board) that an area can hold and a tab cannot.
+**8.1 — RESOLVED (2026-08-31).** `Work` is a main-nav item, directly under the top band and above
+Stewardship — not inside Activities and not inside Settings. It is a participation surface (you go there
+to take part), and the top band stays four, so it sits beside the band rather than in it. Person and
+organization only: a service agent has no coordination surface today, and an always-empty item teaches
+nothing (§5's empty rule).
 
 **8.2 — RESOLVED (2026-08-31).** The org-only surfaces go into the Settings pane's *People & access*
 group: `Members` · `Access` · `Status`. The draft proposed a separate `Organization` area on the reasoning

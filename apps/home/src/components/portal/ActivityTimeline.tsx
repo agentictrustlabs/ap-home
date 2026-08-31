@@ -1,16 +1,16 @@
 'use client';
-// Activity — the Home's control-plane timeline (spec 310 W4/W5): every
+// Activities — the Home's control-plane timeline (spec 310 W4/W5): every
 // grant/revoke, agent lifecycle, inbox decision, and Home rotation, each row
 // backed by an audit entry (`auditRef`). Plus the portable managed-agents
 // projection (ManagedAgentEntryV1) over the spec 275 tree. Projections render
 // authority — the on-chain / vault records stay canonical.
 import { useEffect, useState } from 'react';
 import type { HomeControlEventV1, ManagedAgentEntryV1 } from '@agenticprimitives/home';
-import { useSession } from '../../../src/context/session';
-import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { useManagedAgents } from '../../../src/components/portal/ManagedAgents';
-import { listControlEvents, toManagedAgentEntry } from '../../../src/home/control-plane';
-import { AddressChip } from '../../../src/components/shared/AddressChip';
+import { useSession } from '../../context/session';
+import { SectionShell } from '../../components/portal/SectionShell';
+import { useManagedAgents } from '../../components/portal/ManagedAgents';
+import { listControlEvents, toManagedAgentEntry } from '../../home/control-plane';
+import { AddressChip } from '../../components/shared/AddressChip';
 
 const EVENT_COPY: Record<HomeControlEventV1['eventType'], string> = {
   'grant-issued': 'Delegation granted',
@@ -28,7 +28,11 @@ const EVENT_COPY: Record<HomeControlEventV1['eventType'], string> = {
   'binding-revoked': 'External binding revoked',
 };
 
-export default function ActivityPage() {
+/** spec 348 §2.1 — `agent` scopes the timeline to events ABOUT one managed agent, for an org's or a
+ *  service's Activities. The events are the person's Home control plane either way (there is one control
+ *  plane, not one per agent); scoping filters it to the rows that name this agent, so a workspace's
+ *  Activities is a true subset of yours rather than a separate, thinner feed. */
+export function ActivityTimeline({ agent }: { agent?: string } = {}) {
   const { session, agentAddress } = useSession();
   const [events, setEvents] = useState<HomeControlEventV1[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -47,22 +51,32 @@ export default function ActivityPage() {
     ? agents.map((a) => toManagedAgentEntry(a, agentAddress))
     : [];
 
+  // An event is "about" an agent when it acted as it, or when any of its refs names it. Matching on the
+  // raw address covers both the bare form and the CAIP-10 the actor carries.
+  const needle = agent?.toLowerCase();
+  const shown = needle
+    ? events.filter((e) => JSON.stringify([e.actor, e.refs]).toLowerCase().includes(needle))
+    : events;
+
   return (
     <SectionShell
-      title="Activity"
-      description="Your control-plane timeline: what changed, when, and the audit reference behind it. The on-chain and vault records stay canonical."
+      title="Activities"
+      description={agent
+        ? 'What changed for this agent, when, and the audit reference behind it — the rows of your control-plane timeline that name it. The on-chain and vault records stay canonical.'
+        : 'Your control-plane timeline: what changed, when, and the audit reference behind it. The on-chain and vault records stay canonical.'}
     >
       <div className="dash-section">
         <h2>Timeline</h2>
         {!loaded ? (
           <p className="manage-card-blurb">Loading…</p>
-        ) : events.length === 0 ? (
+        ) : shown.length === 0 ? (
           <p className="manage-card-blurb">
-            Nothing recorded yet. Publishing your Home manifest, deciding an inbox request, revoking a
-            delegation, or adding an agent all land here.
+            {agent
+              ? 'Nothing recorded for this agent yet. Releasing a card, publishing a projection, issuing a grant or changing its lifecycle all land here.'
+              : 'Nothing recorded yet. Publishing your Home manifest, deciding an inbox request, revoking a delegation, or adding an agent all land here.'}
           </p>
         ) : (
-          events.map((e) => (
+          shown.map((e) => (
             <div key={e.auditRef} style={{ padding: '0.6rem 0', borderBottom: '1px solid var(--color-border)' }}>
               <b>{EVENT_COPY[e.eventType]}</b>
               <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
@@ -105,3 +119,4 @@ export default function ActivityPage() {
     </SectionShell>
   );
 }
+

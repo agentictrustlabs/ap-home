@@ -108,7 +108,15 @@ interface ConsultOrgRow {
   orgRole: string | null;
 }
 
-export function AgentTab() {
+/** Which stored tab id each left item renders. The ids are legacy state keys; the LABELS moved to the
+ *  nav (`Ask` / `Discussion replies` / `Playbook`) and the ids stay put. */
+const ONLY_TAB = { ask: 'message-bot', discussion: 'discussions', playbook: 'skill-md' } as const;
+
+/** spec 348 §2.3 — the three panels are three unrelated configurations, and each is now its own left
+ *  item rather than a sub-tab. `only` renders one of them with no tab strip; omitting it keeps the
+ *  original three-tab page, which nothing routes to any more but which is still the whole thing in one
+ *  place if a surface ever wants it. */
+export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } = {}) {
   const { session, agentAddress, agentName, profile: homeProfile } = useSession();
   const delivery = useMessagingDelivery();
 
@@ -576,7 +584,9 @@ export function AgentTab() {
         {agentAddress && <> · <code style={{ fontSize: '0.78rem' }}>{shortId(agentAddress)}</code></>}
       </p>
       {error && <p role="alert" style={{ color: 'var(--color-danger)', margin: '0 0 0.75rem', fontSize: '0.82rem' }}>{error}</p>}
-      <Tabs tabs={tabs} aria-label="Agent settings" />
+      {only
+        ? tabs.find((t) => t.id === ONLY_TAB[only])?.content
+        : <Tabs tabs={tabs} aria-label="Agent settings" />}
     </div>
   );
 }

@@ -27,7 +27,10 @@ const sectionTitleSty: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 
 
 interface TopicRow { descriptor: { id: string }; title: string; assistant?: unknown }
 
-export function OrgAgentSection({ orgSa }: { orgSa: string }) {
+/** spec 348 §2.3 — `only` renders one configuration with no tab strip, so Ask and Playbook are their own
+ *  left items. An org has no separate Discussion-replies panel: its discussion behaviour IS the
+ *  assistant, so that item is absent from an org's pane rather than pointing at a duplicate. */
+export function OrgAgentSection({ orgSa, only }: { orgSa: string; only?: 'ask' | 'playbook' }) {
   const { session, profile: homeProfile } = useSession();
   const communityId = orgSa.toLowerCase();
   const authed = useMemo(
@@ -304,7 +307,9 @@ export function OrgAgentSection({ orgSa }: { orgSa: string }) {
         every reply. Steward-managed.
       </p>
       {error && <p role="alert" style={{ color: 'var(--color-danger)', margin: '0 0 0.75rem', fontSize: '0.82rem' }}>{error}</p>}
-      <Tabs tabs={tabs} aria-label="Organization agent settings" />
+      {only
+        ? tabs.find((t) => t.id === (only === 'playbook' ? 'playbook' : 'manage-bot'))?.content
+        : <Tabs tabs={tabs} aria-label="Organization agent settings" />}
     </SectionShell>
   );
 }

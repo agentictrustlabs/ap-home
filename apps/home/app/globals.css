@@ -972,6 +972,12 @@
 
       /* Sidebar (desktop) */
       .portal-sidebar { display: none; }
+      /* spec 348 §2.3 — the Settings pane: a second column to the right of the main nav, shown only
+         while you are inside it. Hidden with the sidebar below 768px, where the drill-down applies. */
+      .portal-settings-pane { display: none; }
+      .portal-sidebar-wrap { min-height: 0; }
+      .nav-group-toggle:hover { color: var(--color-text-body); }
+      .nav-group-toggle:focus-visible { outline: 2px solid var(--color-primary, #b45309); outline-offset: 2px; border-radius: var(--radius-8); }
       .nav-group { display: flex; flex-direction: column; gap: 2px; padding: .25rem 0; }
       .nav-group + .nav-group { margin-top: .75rem; }
       .nav-group-heading { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-faint); padding: .35rem .75rem .15rem; }
@@ -1087,6 +1093,13 @@
       /* ── Responsive: sidebar on desktop, bottom-nav on mobile ────────── */
       @media (min-width: 768px) {
         .portal-sidebar { display: flex; flex-direction: column; flex: 0 0 var(--sidebar-w); width: var(--sidebar-w); padding: 1rem .75rem; border-right: 1px solid var(--color-border); background: var(--color-surface-sunken); position: sticky; top: var(--topbar-h); align-self: flex-start; height: calc(100dvh - var(--topbar-h)); overflow-y: auto; }
+        .portal-settings-pane {
+          display: flex; flex-direction: column; flex: 0 0 var(--settings-pane-w, 13.5rem);
+          width: var(--settings-pane-w, 13.5rem); padding: 1rem .75rem;
+          border-right: 1px solid var(--color-border); background: var(--color-surface);
+          position: sticky; top: var(--topbar-h); align-self: flex-start;
+          height: calc(100dvh - var(--topbar-h)); overflow-y: auto;
+        }
         .portal-bottomnav { display: none; }
         .portal-main { padding: 2rem 2rem 3rem; }
       }

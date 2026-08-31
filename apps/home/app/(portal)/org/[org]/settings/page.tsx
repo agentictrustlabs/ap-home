@@ -1,7 +1,5 @@
-'use client';
-import { use } from 'react';
-import { OrgSettingsSection } from '../../../../../src/components/portal/settings/org-manage';
-export default function OrgSettingsPage({ params }: { params: Promise<{ org: string }> }) {
-  const { org } = use(params);
-  return <OrgSettingsSection orgSa={org} />;
+import { redirect } from 'next/navigation';
+export default async function OrgSettingsIndex({ params }: { params: Promise<{ org: string }> }) {
+  const { org } = await params;
+  redirect(`/org/${org}/profile`);
 }

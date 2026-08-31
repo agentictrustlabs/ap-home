@@ -31,3 +31,12 @@ export function serviceHref(agent: string, page?: string): string {
   const base = `/service/${encodeURIComponent(agent)}`;
   return page ? `${base}/${page}` : base;
 }
+
+/** spec 348 — a page in the ACTIVE workspace, whichever class it is. The person's workspace is the
+ *  portal root, so their pages are top-level; an org's and a service's carry the SA. One helper, so a
+ *  nav item is written once and not three times with a class branch around it. */
+export function workspaceHref(active: WorkspaceScope, page: string): string {
+  if (active.kind === 'org') return orgHref(active.org, page);
+  if (active.kind === 'service') return serviceHref(active.agent, page);
+  return `/${page}`;
+}
