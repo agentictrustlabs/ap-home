@@ -86,7 +86,7 @@ export function ServiceAccessSection({ agent }: { agent: string }) {
 
 /**
  * The agent's PLAYBOOK — the SKILL.md projection its own discussion turn runs under (spec 327 §4b).
- * For a workspace coordinator this is what answers Field's Ask: field-a2a only seeds a default when
+ * For a workspace agent this is what answers Field's Ask: field-a2a only seeds a default when
  * the agent has none; what a custodian or steward writes here is the agent's voice from then on.
  * Same steward-gated pass-through the organization page uses (`/connect/channels` →
  * `channels.assistantSkill.get/put` → the agent's InteractionsDO); the DO verifies the wire.
@@ -143,7 +143,7 @@ export function ServicePlaybookSection({ agent }: { agent: string }) {
       </SectionShell>
     );
   }
-  const what = svc.kind === 'workspace' ? 'workspace coordinator' : svc.kind === 'team' ? 'team' : 'service';
+  const what = svc.kind === 'workspace' ? 'workspace agent' : svc.kind === 'team' ? 'team' : 'service';
   return (
     <SectionShell title="Playbook">
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>

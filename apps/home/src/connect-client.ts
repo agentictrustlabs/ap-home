@@ -395,11 +395,11 @@ async function declareTypeCalls(sa: Address, tld: string, serviceRole?: string):
 
 /** spec 346 — the typed suffix an app-level kind claims under, IF this deployment lists it as claimable;
  *  otherwise `undefined` = the legacy parent. Kinds map DOWN to a derived type (ADR-0046/0061): org, circle and
- *  church are Organizations; team → Team; workspace → WorkspaceCoordinator; both treasuries → Treasury. */
+ *  church are Organizations; team → Team; workspace → WorkspaceAgent; both treasuries → Treasury. */
 export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serviceRole?: string } | undefined {
   const map: Record<string, { tld: string; serviceRole?: string }> = {
     person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, team: { tld: 'team' },
-    workspace: { tld: 'workspace', serviceRole: 'workspace-coordinator' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
+    workspace: { tld: 'workspace', serviceRole: 'workspace' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
   };
   const t = map[kind];
   return t && CLAIMABLE_TLDS.includes(t.tld) ? t : undefined;
