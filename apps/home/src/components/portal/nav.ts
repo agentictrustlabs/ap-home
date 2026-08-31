@@ -91,15 +91,30 @@ export function buildNav(
           // spec 347 §9 / ADR-0062 — the A2A Agent Card & Projection Studio. An identity-and-presentation
           // concern, so it sits beside Profile and Agent, ahead of the data/authority surfaces.
           { id: 'org-card', label: 'Card & Projections', href: orgHref(a, 'card'), Icon: IdCardIcon, status: 'live' },
+          // The same three tiers a person and a workspace have, read for this org.
+          { id: 'org-metadata', label: 'Metadata', href: orgHref(a, 'metadata'), Icon: TagIcon, status: 'live' },
           { id: 'org-members', label: 'Members', href: orgHref(a, 'members'), Icon: UserIcon, status: 'live' },
           { id: 'org-records', label: 'Records', href: orgHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'org-access', label: 'Access', href: orgHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
-          { id: 'org-trust-graph', label: 'Trust graph', href: orgHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
           { id: 'org-treasury', label: 'Treasury', href: orgHref(a, 'treasury'), Icon: LandmarkIcon, status: 'live' },
           // spec 342 — the org's lifecycle: activate / deactivate / delete. Last in the band because
           // it is where an organization is put aside, and steward-only by construction (the Manage
           // band never renders for members, and the write needs the stewardship delegation anyway).
           { id: 'org-settings', label: 'Settings', href: orgHref(a, 'settings'), Icon: SettingsIcon, status: 'live' },
+        ],
+      },
+      // Discovery: how this organization is found and described — the same band the person and workspace
+      // navs have. An org is a Smart Agent (ADR-0046), so the questions do not change with the class.
+      // Trust graph MOVED here out of Manage: it answers "who trusts this", which is a discovery question,
+      // and having it in a different band per class was the only reason the three navs disagreed.
+      {
+        heading: 'Discovery',
+        items: [
+          { id: 'org-registry', label: 'Registry', href: orgHref(a, 'registry'), Icon: DatabaseIcon, status: 'live' },
+          { id: 'org-naming', label: 'Naming', href: orgHref(a, 'naming'), Icon: TagIcon, status: 'live' },
+          { id: 'org-capabilities', label: 'Capabilities', href: orgHref(a, 'capabilities'), Icon: AwardIcon, status: 'live' },
+          { id: 'org-trust-graph', label: 'Trust graph', href: orgHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
+          { id: 'org-network', label: 'Network', href: orgHref(a, 'network'), Icon: GlobeIcon, status: 'live' },
         ],
       },
       backHome,
