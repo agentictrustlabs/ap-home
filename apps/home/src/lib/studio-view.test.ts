@@ -497,4 +497,20 @@ describe('cardUriForName — one DNS label (spec 346 §5)', () => {
     expect(cardUriForName('alice.me', opts)).toBe('https://alice.faithnet.io/.well-known/agent-card.json');
     expect(cardUriForName('', opts)).toBeNull();
   });
+
+  // The estate mid-migration: the LEGACY root is still `nameParent`, and `.me` is served alongside it.
+  // The single-root version got this wrong in production — `nathan.me` became `nathan-me.<zone>`, a host
+  // nothing answers on — because it only ever compared against `nameParent`. demo-a2a's `hostForName`
+  // has always matched the whole ordered list, and these two MUST agree.
+  const migrating = { nameParent: 'impact', nameParents: ['me', 'impact'], a2aDomain: 'faithnet.ai' };
+  it('drops EITHER person root while an estate serves both', () => {
+    expect(cardUriForName('nathan.me', migrating)).toBe('https://nathan.faithnet.ai/.well-known/agent-card.json');
+    expect(cardUriForName('rich-google.impact', migrating)).toBe('https://rich-google.faithnet.ai/.well-known/agent-card.json');
+  });
+
+  it('still hyphenates a typed suffix — a root list is not a licence to drop types', () => {
+    expect(cardUriForName('northern-colorado-field.workspace', migrating))
+      .toBe('https://northern-colorado-field-workspace.faithnet.ai/.well-known/agent-card.json');
+    expect(cardUriForName('alice-home.church', migrating)).toBe('https://alice-home-church.faithnet.ai/.well-known/agent-card.json');
+  });
 });

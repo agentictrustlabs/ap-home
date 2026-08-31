@@ -41,7 +41,7 @@ import {
 import type { SignHash } from '../../connect-client';
 import { cardUriForName, publicationVerdict, studioErrorSentence, type PublicationVerdict } from '../../lib/studio-view';
 import { CHAIN_ID } from '../../lib/chain';
-import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
+import { A2A_DOMAIN, AGENT_NAME_PARENT, AGENT_NAME_PARENTS } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
 import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
@@ -102,7 +102,7 @@ export function AgentCardFlow({
   const published = detail.releases.filter((r) => r.state === 'published').at(-1) ?? null;
   const draftChanged = !!draft && (!latest || draft.basedOnReleaseId !== latest.releaseId);
   const typedName = typedNameOf(detail, agentName);
-  const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }), [typedName]);
+  const cardUri = useMemo(() => cardUriForName(typedName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }), [typedName]);
 
   const problems = problemsFrom(validation?.diagnostics ?? []);
   const served = servedInterfacesFrom(validation?.diagnostics ?? []);

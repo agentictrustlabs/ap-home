@@ -30,7 +30,7 @@ import {
   type SignHash,
 } from '../../studio-client';
 import { CHAIN_ID } from '../../lib/chain';
-import { A2A_DOMAIN, AGENT_NAME_PARENT } from '../../lib/domain';
+import { A2A_DOMAIN, AGENT_NAME_PARENT, AGENT_NAME_PARENTS } from '../../lib/domain';
 import { cardUriForName, editForksNewDraft, gateForOp, publicationVerdict, studioErrorSentence, stepperSteps, STEP_OP, type PublicationVerdict, type StepId } from '../../lib/studio-view';
 import { ReleaseDiffPanel } from './Inspector';
 import { Banner, Chip, Digest, ErrorLine, LiveRegion, inputStyle } from './ui';
@@ -116,7 +116,7 @@ export function ReleaseStepper({
   const [error, setError] = useState<string | null>(null);
   const [confirmRelease, setConfirmRelease] = useState(false);
   const [signOpen, setSignOpen] = useState(!!autoExpand);
-  const [cardUri, setCardUri] = useState(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, a2aDomain: A2A_DOMAIN }) ?? '');
+  const [cardUri, setCardUri] = useState(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }) ?? '');
   const [revokeReason, setRevokeReason] = useState('');
   const [publishNote, setPublishNote] = useState<PublicationVerdict | null>(null);
   /** Publishing needs a public host, which comes from the agent's NAME. Checked before the button, so a
