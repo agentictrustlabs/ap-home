@@ -1,9 +1,17 @@
-// The Card & Projections LANDING, as pure logic (flow-redesign.md §2–§4, §7, §9). Three ordered stages —
-// Describe → Make it live → List it — each with one status sentence and one primary action. `[Publish]` runs
-// the whole release chain as a single busy action; this module decides which ops run, in which order, what
-// the button says while they run, and where the chain must STOP because a different person has to act or a
-// real decision is needed. No React, no I/O: every sentence a steward reads on the landing is assembled here
-// so a test can prove the main path never uses our vocabulary (§9.4).
+// The Agent Card page, as pure logic (flow-redesign.md §2–§4, §7, §9).
+//
+// The page is one thing: this agent's card. You edit the description and you SAVE it, and the two public
+// addresses then serve what you saved. `[Save]` runs the whole release chain — validate, freeze, approve,
+// sign, put it at the address, check what the address returns — as a single busy action, because those are
+// steps in making a save trustworthy, not six things a person set out to do.
+//
+// It used to read as "① Describe → ② Make it live" with a promised "step ③" for listing. That was true
+// when this page also owned the listings as tabs; they are their own left-nav destinations now, so ③
+// pointed at nothing and the numbering implied a sequence with a missing end (owner, 2026-08-31).
+//
+// This module decides which ops run, in which order, what the button says while they run, and where the
+// chain must STOP because a different person has to act. No React, no I/O: every sentence a steward reads
+// is assembled here so a test can prove the main path never uses our vocabulary (§9.4).
 import type { A2AAgentCardReleaseV1, CardDraftState, CardReleaseState } from '@agenticprimitives/agent-profile/a2a';
 import { diagnosticView, gateForOp, type StudioOp } from './studio-view';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
@@ -15,12 +23,12 @@ export type PublishStepId = 'create-release' | 'request-approval' | 'approve' | 
 /** What the busy button says during each step — the user's words, not the state machine's. */
 export const PUBLISH_PHRASE: Record<'check' | PublishStepId, string> = {
   check: 'Checking the description…',
-  'create-release': 'Freezing this version…',
-  'request-approval': 'Freezing this version…',
-  approve: 'Freezing this version…',
+  'create-release': 'Saving…',
+  'request-approval': 'Saving…',
+  approve: 'Saving…',
   sign: 'Signing it…',
-  publish: 'Publishing…',
-  verify: "Confirming it's live…",
+  publish: 'Putting it at the address…',
+  verify: 'Checking what the address serves…',
 };
 
 const STEP_OP: Record<PublishStepId, StudioOp> = {
@@ -38,8 +46,8 @@ const WAITING_LINE: Record<PublishStepId, string> = {
   'request-approval': 'Waiting for someone who can edit this card.',
   approve: 'Waiting for someone with approval rights.',
   sign: 'Waiting for someone with signing rights.',
-  publish: 'Waiting for someone with publishing rights.',
-  verify: 'Waiting for someone with publishing rights.',
+  publish: 'Waiting for someone who can put this at its public address.',
+  verify: 'Waiting for someone who can put this at its public address.',
 };
 
 const TERMINAL: ReadonlySet<CardReleaseState> = new Set(['superseded', 'deprecated', 'revoked']);
@@ -116,53 +124,97 @@ export function describeStage(input: { draftState: CardDraftState | null; errors
   return { tone: 'good', status: 'Ready to publish ✓', body: what, action: { id: 'edit', label: 'Edit description' } };
 }
 
-// ── stage ② Make it live ─────────────────────────────────────────────────────────────────────────────────
+// ── saving ───────────────────────────────────────────────────────────────────────────────────────────────
+// This page used to read as two numbered stages — "① Describe your agent" then "② Make it live" — and
+// promised a "step ③" for listing. Both were true when the card page also owned the listings as tabs.
+// They are their own left-nav destinations now, so ③ pointed at nothing and the numbering implied a
+// sequence with a missing end.
+//
+// What is actually happening is simpler, and the owner named it: you EDIT the card and you SAVE it, and
+// the two public addresses then serve what you saved. Signing is part of saving, not a stage of its own —
+// the signature is how a save is made trustworthy, not a separate thing the person set out to do.
+//
+// So there is one status here, and it answers one question: is what the world can read the same as what
+// is on this screen?
 
-export function liveStage(input: {
+export type SaveState = StageStatus & {
+  /** The one line under the status that says what saving does and does not do. */
+  explain: string;
+  /** What the public addresses are serving RIGHT NOW, relative to what is on screen. */
+  serving: 'nothing' | 'this' | 'older' | 'elsewhere';
+};
+
+export function saveState(input: {
   plan: PublishPlan;
   release: Pick<A2AAgentCardReleaseV1, 'state' | 'publication'> | null;
   cardUri: string | null;
-  /** The last publish/verify verdict already in the user's words (`publicationVerdict`). */
+  /** The last save verdict already in the user's words (`publicationVerdict`). */
   lastVerdict: { title: string } | null;
-  /** Where the LIVE version was published, when that is not where the agent answers now. */
+  /** The live copy sits at a DIFFERENT address than the one this agent answers at now (a zone move). */
   publishedAtOldAddress?: string | null;
-}): StageStatus & { explain: string } {
-  const where = input.cardUri ? input.cardUri.replace('/.well-known/agent-card.json', '') : 'its public address';
-  const explain = 'Publishing does not list the agent anywhere — it makes the description available at its address. Listing is step ③.';
-  const how = `Publishing puts a signed copy of this description at ${where} — the address other agents use to find and talk to it.`;
+}): SaveState {
+  const explain = 'Saving signs this description and puts it at the addresses below. It does not list the agent in any directory — that is Registry.';
+
   if (!input.cardUri) {
-    return { tone: 'muted', status: 'Needs a name first', body: 'This agent has no public name yet, so there is nowhere on the web to publish its card. Give it a name (Manage → Naming); the address follows from the name.', action: null, explain };
+    return {
+      tone: 'muted',
+      status: 'Needs a name first',
+      body: 'This agent has no public name yet, so there is nowhere to serve its card from — the address comes from the name. Give it one under Naming, then save.',
+      action: null,
+      explain,
+      serving: 'nothing',
+    };
   }
-  if (input.publishedAtOldAddress && input.cardUri) {
-    const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
-    const oldHost = hostOf(input.publishedAtOldAddress);
-    const newHost = hostOf(input.cardUri);
+
+  if (input.publishedAtOldAddress) {
+    const host = (u: string) => { try { return new URL(u).host; } catch { return u; } };
     return {
       tone: 'warn',
-      status: 'Published at an old address',
-      body: `The live copy sits at ${oldHost}, but this agent now answers at ${newHost}. Publishing again puts it where the agent actually is — and anywhere you have listed it can then be pointed at the new address.`,
-      action: { id: 'republish', label: 'Publish at the new address' },
+      status: 'Saved at an old address',
+      body: `What is saved sits at ${host(input.publishedAtOldAddress)}, but this agent now answers at ${host(input.cardUri)}. Saving again moves it to where the agent actually is.`,
+      action: { id: 'republish', label: 'Save at the new address' },
       explain,
+      serving: 'elsewhere',
     };
   }
+
   if (input.plan.kind === 'live') {
-    const when = input.release?.publication?.publishedAt ? new Date(input.release.publication.publishedAt).toLocaleString() : null;
+    const at = input.release?.publication?.publishedAt;
+    const when = at ? new Date(at).toLocaleString() : null;
     return {
       tone: 'good',
-      status: 'Live ✓',
-      body: input.lastVerdict ? input.lastVerdict.title : `Serving at ${where}${when ? ` since ${when}` : ''}.`,
-      action: { id: 'open', label: 'Open' },
+      status: 'Saved ✓',
+      body: input.lastVerdict
+        ? input.lastVerdict.title
+        : `The addresses below are serving this description${when ? `, saved ${when}` : ''}.`,
+      action: null,
       explain,
+      serving: 'this',
     };
   }
-  if (input.plan.kind === 'blocked') return { tone: 'warn', status: 'Not published yet', body: how, action: null, explain };
-  const republish = !!input.release && input.release.state === 'published';
+
+  const saved = !!input.release && input.release.state === 'published';
+  if (input.plan.kind === 'blocked') {
+    return {
+      tone: 'warn',
+      status: saved ? 'Unsaved changes' : 'Not saved yet',
+      body: saved
+        ? 'Fix what is flagged above and save — until then the addresses keep serving the last saved version.'
+        : 'Fix what is flagged above, then save to put this description at the addresses below.',
+      action: null,
+      explain,
+      serving: saved ? 'older' : 'nothing',
+    };
+  }
   return {
     tone: 'muted',
-    status: republish ? 'A newer version is ready' : 'Not published yet',
-    body: republish ? 'The description changed since the live version. Publish again to update what other agents see.' : how,
-    action: { id: republish ? 'republish' : 'publish', label: republish ? 'Publish the update' : 'Publish' },
+    status: saved ? 'Unsaved changes' : 'Not saved yet',
+    body: saved
+      ? 'This description has changed since it was last saved. The addresses below still serve the previous version.'
+      : 'Nothing is being served yet. Saving signs this description and puts it at the addresses below, so other agents can read it.',
+    action: { id: saved ? 'republish' : 'publish', label: saved ? 'Save changes' : 'Save' },
     explain,
+    serving: saved ? 'older' : 'nothing',
   };
 }
 
@@ -321,8 +373,8 @@ export function landingCopySamples(): string[] {
     { kind: 'ready', steps: ALL_STEPS, runnable: [], stopAt: { step: 'approve', line: WAITING_LINE.approve }, asksForBinding: false },
   ];
   for (const plan of plans) {
-    r(liveStage({ plan, release: { state: 'published', publication: { uri: 'https://x.example/.well-known/agent-card.json', publishedAt: '2026-08-30T00:00:00Z' } }, cardUri: 'https://x.example/.well-known/agent-card.json', lastVerdict: null }));
-    r(liveStage({ plan, release: null, cardUri: null, lastVerdict: null }));
+    r(saveState({ plan, release: { state: 'published', publication: { uri: 'https://x.example/.well-known/agent-card.json', publishedAt: '2026-08-30T00:00:00Z' } }, cardUri: 'https://x.example/.well-known/agent-card.json', lastVerdict: null }));
+    r(saveState({ plan, release: null, cardUri: null, lastVerdict: null }));
     if (plan.kind === 'blocked') out.push(plan.line);
     if (plan.kind === 'ready' && plan.stopAt) out.push(plan.stopAt.line);
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cardRowView, describeStage, publicEndpoints, problemsFrom, servedInterfacesFrom, onlyAddressProblems, liveStage, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
+import type { PublishPlan } from './studio-flow';
+import { cardRowView, describeStage, publicEndpoints, problemsFrom, servedInterfacesFrom, onlyAddressProblems, saveState, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
 import { listingCatalog, listingRow, lossSentence, listingCopySamples, recordRows, recordVerdictLine, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
@@ -42,36 +43,56 @@ describe('planPublish — one button, the whole chain, stops only where it must'
   });
 });
 
-describe('a live card whose address moved can be published again', () => {
+describe('saveState — is the world reading what I am looking at?', () => {
+  // The page used to read as "① Describe" then "② Make it live", and promised a "step ③" for listing.
+  // That was true when this page also owned the listings as tabs; they are their own destinations now,
+  // so ③ pointed at nothing. What is actually happening is: you edit, you save, the addresses serve it.
   const uri = 'https://ncf-workspace.faithnet.ai/.well-known/agent-card.json';
-  it('planPublish treats a moved address like an edit — a fresh version', () => {
-    const p = planPublish({ draftState: 'validated', errors: 0, release: { state: 'published' }, draftChanged: false, addressMoved: true, scopes: ALL });
-    expect(p.kind).toBe('ready');
-    if (p.kind === 'ready') expect(p.steps[0]).toBe('create-release');
-    expect(planPublish({ draftState: 'validated', errors: 0, release: { state: 'published' }, draftChanged: false, addressMoved: false, scopes: ALL }).kind).toBe('live');
-  });
-  it('says where it sits, where the agent is, and offers the fix', () => {
-    const v = liveStage({ plan: { kind: 'ready', steps: [], runnable: [], stopAt: null, asksForBinding: false }, release: { state: 'published' }, cardUri: uri, lastVerdict: null, publishedAtOldAddress: 'https://ncf.workspace.faithnet.io/.well-known/agent-card.json' });
-    expect(v).toMatchObject({ tone: 'warn', status: 'Published at an old address', action: { label: 'Publish at the new address' } });
+  const ready: PublishPlan = { kind: 'ready', steps: [], runnable: ['publish'], stopAt: null, asksForBinding: false };
+
+  it('a zone move is "saved at an old address", and names both hosts', () => {
+    const v = saveState({ plan: ready, release: { state: 'published' }, cardUri: uri, lastVerdict: null, publishedAtOldAddress: 'https://ncf.workspace.faithnet.io/.well-known/agent-card.json' });
+    expect(v.status).toBe('Saved at an old address');
     expect(v.body).toContain('ncf.workspace.faithnet.io');
     expect(v.body).toContain('ncf-workspace.faithnet.ai');
+    expect(v.action).toEqual({ id: 'republish', label: 'Save at the new address' });
+    expect(v.serving).toBe('elsewhere');
   });
-});
 
-describe('stage copy', () => {
-  it('describe: problems → Show me; unchecked → review or publish as is; clean → ready', () => {
-    expect(describeStage({ draftState: 'draft', errors: 3, checked: true, skillCount: 0, name: 'x' })).toMatchObject({ status: '3 things to fix', action: { id: 'show-problems' } });
-    expect(describeStage({ draftState: 'draft', errors: 0, checked: false, skillCount: 2, name: 'x' }).body).toContain('Review it, or publish as is');
-    expect(describeStage({ draftState: 'validated', errors: 0, checked: true, skillCount: 1, name: 'x' }).status).toBe('Ready to publish ✓');
+  it('offers no action once what is saved IS what is on screen', () => {
+    const v = saveState({ plan: { kind: 'live' }, release: { state: 'published', publication: { uri, publishedAt: '2026-08-30T12:00:00Z' } }, cardUri: uri, lastVerdict: null });
+    expect(v).toMatchObject({ status: 'Saved ✓', action: null, serving: 'this' });
   });
-  it('live: needs a name → says so; live → Open; changed → Publish the update', () => {
-    const uri = 'https://alice.faithnet.ai/.well-known/agent-card.json';
-    expect(liveStage({ plan: { kind: 'live' }, release: { state: 'published', publication: { uri, publishedAt: '2026-08-30T12:00:00Z' } }, cardUri: uri, lastVerdict: null })).toMatchObject({ status: 'Live ✓', action: { id: 'open' } });
-    expect(liveStage({ plan: { kind: 'live' }, release: null, cardUri: null, lastVerdict: null }).status).toBe('Needs a name first');
-    const ready = { kind: 'ready' as const, steps: [], runnable: [], stopAt: null, asksForBinding: false };
-    expect(liveStage({ plan: ready, release: { state: 'published' }, cardUri: uri, lastVerdict: null }).action).toEqual({ id: 'republish', label: 'Publish the update' });
-    expect(liveStage({ plan: ready, release: null, cardUri: uri, lastVerdict: null }).action).toEqual({ id: 'publish', label: 'Publish' });
-    expect(liveStage({ plan: ready, release: null, cardUri: uri, lastVerdict: null }).explain).toContain('Listing is step ③');
+
+  it('says a name is needed before there is anywhere to serve from', () => {
+    const v = saveState({ plan: { kind: 'live' }, release: null, cardUri: null, lastVerdict: null });
+    expect(v.status).toBe('Needs a name first');
+    expect(v.serving).toBe('nothing');
+  });
+
+  it('distinguishes never-saved from changed-since-saved, because the addresses differ', () => {
+    const fresh = saveState({ plan: ready, release: null, cardUri: uri, lastVerdict: null });
+    expect(fresh).toMatchObject({ status: 'Not saved yet', action: { id: 'publish', label: 'Save' }, serving: 'nothing' });
+
+    const changed = saveState({ plan: ready, release: { state: 'published' }, cardUri: uri, lastVerdict: null });
+    expect(changed).toMatchObject({ status: 'Unsaved changes', action: { id: 'republish', label: 'Save changes' }, serving: 'older' });
+    expect(changed.body).toContain('previous version');
+  });
+
+  it('offers no save while something is blocking, but still says what is being served', () => {
+    const blocked: PublishPlan = { kind: 'blocked', fixCount: 2, line: 'Fix 2 things in the description first.' };
+    expect(saveState({ plan: blocked, release: { state: 'published' }, cardUri: uri, lastVerdict: null })).toMatchObject({ action: null, serving: 'older' });
+    expect(saveState({ plan: blocked, release: null, cardUri: uri, lastVerdict: null }).serving).toBe('nothing');
+  });
+
+  it('never promises a numbered step that does not exist', () => {
+    const v = saveState({ plan: ready, release: null, cardUri: uri, lastVerdict: null });
+    for (const s of [v.body, v.explain, v.status]) {
+      expect(s).not.toContain('③');
+      expect(s.toLowerCase()).not.toContain('next tab');
+    }
+    // and it says where listing actually lives
+    expect(v.explain).toContain('Registry');
   });
 });
 

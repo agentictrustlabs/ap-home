@@ -177,6 +177,7 @@ function EditorBody({
   ctx: ReturnType<typeof useStudioAgent> & { delegation: NonNullable<ReturnType<typeof useStudioAgent>['delegation']>; sa: `0x${string}` };
 }) {
   const state = useCardDetail(ctx.delegation, cardId);
+  const { cards } = useCards(ctx.delegation);
   const canSign = useCanSignFor(ctx.sa);
   // Deep-link params are read once and cleared from the URL (design §1.3).
   const pointer = useOneShotParam('pointer');
@@ -208,14 +209,22 @@ function EditorBody({
     brand: whitelabel.brand.name,
     agentName: typedName,
     published: published ? { releaseId: published.releaseId } : null,
-    cardStatus: { status: published ? 'Live ✓' : cardStatus.status, tone: published ? 'good' : cardStatus.tone },
+    cardStatus: { status: published ? 'Saved ✓' : cardStatus.status, tone: published ? 'good' : cardStatus.tone },
     projections: state.projections,
     scopes: ctx.scopes,
     custodian: canSign,
   });
 
+  // "All cards" only says something when there ARE others: an agent usually has one card, and a button
+  // back to a one-row list reads as a place you have not been rather than a way back. `cards` here is the
+  // list this editor was opened from — Agent Card in the left nav lands on it.
+  const otherCards = cards.length > 1;
+
   return (
-    <SectionShell title={title} actions={<a className="btn-ghost" href={base}>All cards</a>}>
+    <SectionShell
+      title={title}
+      actions={otherCards ? <Link className="btn-ghost" href={base} prefetch={false}>Other cards</Link> : undefined}
+    >
       <Tabs tabs={tabs} base={base} cardId={cardId} active={tab} />
       {tab === 'card' && (
         <AgentCardFlow

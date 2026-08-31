@@ -44,8 +44,16 @@ import { cardUriForName, publicationVerdict, studioErrorSentence, type Publicati
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT, AGENT_NAME_PARENTS } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
+
+/** The address panel's heading answers one question: is the world reading what I am looking at? */
+const SERVING_TITLE: Record<'nothing' | 'this' | 'older' | 'elsewhere', string> = {
+  nothing: 'These addresses will serve it once you save',
+  this: 'These addresses are serving it',
+  older: 'These addresses are serving the previous version',
+  elsewhere: 'These are where it should be served — the saved copy is elsewhere',
+};
 import { readNameRecords, writeNameProperties } from '../../lib/name-properties';
-import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
+import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, saveState, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
 import { ReleaseStepper } from './ReleaseStepper';
@@ -222,11 +230,13 @@ export function AgentCardFlow({
     }
   }, [plan, delegation, detail.resource.cardResourceId, latest, bindingUri, sa, signHashFor, onReload]);
 
-  const live = liveStage({ plan, release: latest, cardUri, lastVerdict, publishedAtOldAddress });
+  const save = saveState({ plan, release: latest, cardUri, lastVerdict, publishedAtOldAddress });
   const waitingOnSomeoneElse = plan.kind === 'ready' && plan.stopAt !== null && plan.runnable.length === 0;
 
   // Naming and Registry are left-nav destinations now, not tabs of this page (spec 348 §2.3).
   const registryHref = basePath.replace(/\/card(\/[^/]*)?$/, '/registry');
+  const listedInRegistry = projections.some((p) => p.family === 'ap-registry' && !!p.instance.lastPublication);
+
   const [inspectorOpen, setInspectorOpen] = useState(!!initialPanel);
   const [panel, setPanel] = useState<PanelId>(initialPanel ?? (A2A_CARD_EDITOR_MANIFEST.inspectorPanels[0] as PanelId));
   if (editing) {
@@ -258,11 +268,11 @@ export function AgentCardFlow({
     <div>
       <LiveRegion message={phase} />
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-        This is what other agents see when they look <b>{name}</b> up. Describe it, then make it live at its
-        public address. Listing it where agents search is the next tab.
+        This is what other agents read when they look <b>{name}</b> up. Edit it, save it, and the addresses
+        below serve what you saved.
       </p>
 
-      <Stage n="①" title="Describe your agent" status={{ tone: describe.tone, text: checking ? 'Checking…' : describe.status }}>
+      <Stage title="The description" status={{ tone: describe.tone, text: checking ? 'Checking…' : describe.status }}>
         <p className="manage-card-blurb" style={{ margin: '0 0 .4rem' }}>{describe.body}</p>
         {description && <p style={{ fontSize: '.85rem', margin: '0 0 .5rem', color: 'var(--c-g700)' }}>&ldquo;{description.length > 180 ? `${description.slice(0, 180)}…` : description}&rdquo;</p>}
         {problems.length > 0 && (
@@ -306,9 +316,9 @@ export function AgentCardFlow({
         </div>
       </Stage>
 
-      <Stage n="②" title="Make it live" status={{ tone: live.tone, text: live.status }} dimmed={plan.kind === 'blocked' || !cardUri}>
-        <p className="manage-card-blurb" style={{ margin: '0 0 .35rem' }}>{live.body}</p>
-        <p className="manage-card-blurb" style={{ margin: '0 0 .5rem', fontSize: '.72rem' }}>{live.explain}</p>
+      <Stage title="Saving" status={{ tone: save.tone, text: save.status }} dimmed={!cardUri}>
+        <p className="manage-card-blurb" style={{ margin: '0 0 .35rem' }}>{save.body}</p>
+        <p className="manage-card-blurb" style={{ margin: '0 0 .5rem', fontSize: '.72rem' }}>{save.explain}</p>
         <ErrorLine error={error} />
         {waitingOnSomeoneElse && plan.kind === 'ready' && plan.stopAt && (
           <>
@@ -329,22 +339,24 @@ export function AgentCardFlow({
           </div>
         )}
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          {(live.action?.id === 'publish' || live.action?.id === 'republish') && !waitingOnSomeoneElse && (
-            <BusyButton busy={busy === 'publish'} busyLabel={phase || 'Publishing…'} className="btn-primary" disabled={plan.kind !== 'ready'} onClick={() => void runPublish()}>
-              {live.action.label}
+          {(save.action?.id === 'publish' || save.action?.id === 'republish') && !waitingOnSomeoneElse && (
+            <BusyButton busy={busy === 'publish'} busyLabel={phase || 'Saving…'} className="btn-primary" disabled={plan.kind !== 'ready'} onClick={() => void runPublish()}>
+              {save.action.label}
             </BusyButton>
           )}
           {plan.kind === 'blocked' && (
             <>
-              <button type="button" className="btn-primary" disabled title={plan.line}>Publish</button>
+              <button type="button" className="btn-primary" disabled title={plan.line}>Save</button>
               <span className="manage-card-blurb">{plan.line}</span>
               <button type="button" className="btn-ghost" onClick={() => { setEditorPointer(problems[0]?.pointer ?? null); setEditing(true); }}>Open the editor</button>
             </>
           )}
         </div>
-        {plan.kind === 'live' && (
+        {cardUri && (
           <div style={{ marginTop: '.6rem', display: 'grid', gap: '.4rem' }}>
-            <span className="manage-card-blurb" style={{ margin: 0, fontWeight: 700 }}>What this address serves</span>
+            {/* Shown whenever there IS an address, not only once something is saved: knowing WHERE this
+                will be served, and that nothing is there yet, is the point of the panel. */}
+            <span className="manage-card-blurb" style={{ margin: 0, fontWeight: 700 }}>{SERVING_TITLE[save.serving]}</span>
             {publicEndpoints(cardUri).map((e) => (
               <div key={e.id} style={{ border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.5rem .6rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.6rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
@@ -354,9 +366,13 @@ export function AgentCardFlow({
                   </a>
                 </div>
                 <p className="manage-card-blurb" style={{ margin: '.1rem 0 .3rem' }}>{e.what}</p>
-                <a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-primary)', fontWeight: 600 }}>
-                  {e.url} ↗
-                </a>
+                {save.serving === 'nothing' ? (
+                  <span style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-g500)' }}>{e.url}</span>
+                ) : (
+                  <a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: '.72rem', wordBreak: 'break-all', color: 'var(--c-primary)', fontWeight: 600 }}>
+                    {e.url} ↗
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -367,11 +383,12 @@ export function AgentCardFlow({
         <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }} role="status">{endpointNote}</p>
       )}
 
-      {plan.kind === 'live' && (
+      {/* Saving serves the card at its address; being FOUND by search is a listing, which is a different
+          thing in a different place. Offered only while it is undone — a nudge that outlives the task is
+          noise. */}
+      {plan.kind === 'live' && !listedInRegistry && (
         <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-          {/* Naming is a left-nav item now, and publishing already pointed the name at this card, so the
-              remaining step is the directory — the one listing nothing does for you. */}
-          Published, and your name points here. Now list it where agents and people search —{' '}
+          Saved. To be findable by search as well, list this agent —{' '}
           <Link href={registryHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>go to Registry →</Link>
         </p>
       )}
