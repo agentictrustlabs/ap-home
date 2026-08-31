@@ -127,8 +127,27 @@ export function buildNav(
           // spec 347 §9 / ADR-0062 — same Studio, same card resources; a card belongs to the AGENT, not to
           // the workspace kind it is viewed from.
           { id: 'service-card', label: 'Card & Projections', href: serviceHref(a, 'card'), Icon: IdCardIcon, status: 'live' },
+          // Metadata: the same three tiers a person has (vault / name records / SA profile), read for THIS
+          // agent. A service agent has no PII tier — the page says so rather than showing an empty one.
+          { id: 'service-metadata', label: 'Metadata', href: serviceHref(a, 'metadata'), Icon: TagIcon, status: 'live' },
           { id: 'service-records', label: 'Records', href: serviceHref(a, 'records'), Icon: DatabaseIcon, status: 'live' },
           { id: 'service-access', label: 'Access', href: serviceHref(a, 'access'), Icon: ShieldIcon, status: 'live' },
+        ],
+      },
+      // Discovery: how this agent is found and described — the same band the person nav has, read for
+      // THIS agent. A workspace is discovered exactly like any other Smart Agent (ADR-0046: it is one),
+      // so the questions are the same: is it registered, what is it named, what can it do, who trusts it,
+      // and is the substrate it answers on up.
+      {
+        heading: 'Discovery',
+        items: [
+          { id: 'service-registry', label: 'Registry', href: serviceHref(a, 'registry'), Icon: DatabaseIcon, status: 'live' },
+          { id: 'service-naming', label: 'Naming', href: serviceHref(a, 'naming'), Icon: TagIcon, status: 'live' },
+          // Label is the canonical term; the route key stays `skills` in the person nav for legacy
+          // reasons, but a NEW route has no legacy to carry (ADR-0051 prose/key split).
+          { id: 'service-capabilities', label: 'Capabilities', href: serviceHref(a, 'capabilities'), Icon: AwardIcon, status: 'live' },
+          { id: 'service-trust-graph', label: 'Trust graph', href: serviceHref(a, 'trust-graph'), Icon: ShieldIcon, status: 'live' },
+          { id: 'service-network', label: 'Network', href: serviceHref(a, 'network'), Icon: GlobeIcon, status: 'live' },
         ],
       },
       backHome,

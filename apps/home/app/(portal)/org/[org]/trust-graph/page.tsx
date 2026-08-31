@@ -25,7 +25,7 @@ export default function OrgTrustGraphPage({ params }: { params: Promise<{ org: s
     );
   }
 
-  const orgRel = live.orgs.find((o) => lc(o.agent) === lc(org));
+  const orgRel = live.agents.find((o) => lc(o.agent) === lc(org));
   if (!orgRel) {
     return (
       <SectionShell title="Trust graph">
@@ -40,7 +40,7 @@ export default function OrgTrustGraphPage({ params }: { params: Promise<{ org: s
   return (
     <SectionShell title={`${orgRel.name ?? 'Organization'} — trust graph`}>
       <ClassExplainer />
-      <GraphCard live={live} focusOrg={org} />
+      <GraphCard live={live} focusAgent={org} />
       <p style={{ fontSize: '.78rem', marginTop: '.9rem', color: 'var(--color-text-faint)' }}>
         Centered on <strong>{orgRel.name ?? org}</strong> — your other organizations are dimmed for
         context. Org-internal edges (members, service agents, partner assertions) bind live from

@@ -38,7 +38,7 @@ export default function TrustGraphPage() {
   }
 
   // Connected but no org relationships yet — it's just the custodian + person SA.
-  if (live.orgs.length === 0) {
+  if (live.agents.length === 0) {
     return (
       <SectionShell title="Trust graph">
         <div className="manage-card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>

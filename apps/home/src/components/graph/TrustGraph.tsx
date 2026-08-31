@@ -24,7 +24,11 @@ import {
 import { useSession } from '../../context/session';
 import { useManagedAgents } from '../portal/ManagedAgents';
 import { nameLabel } from '../../lib/domain';
-import { agentClassOf } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf, serviceRoleOf } from '../../lib/agent-class';
+
+/** The word under an agent's node: its subclass when that says more than the class does. */
+const kindWordOf = (kind: Parameters<typeof agentClassOf>[0]): string =>
+  agentClassOf(kind) === 'org' ? orgKindWordOf(kind) : serviceRoleOf(kind);
 import {
   buildPersonGraphLive,
   CUSTODIAN_ID,
@@ -50,9 +54,15 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
       name: agentName ? nameLabel(agentName) : 'You',
       agentName: agentName ?? shortAddr(agentAddress),
       personSA: agentAddress,
-      orgs: agents
-        .filter((a) => agentClassOf(a.kind) === 'org')
-        .map((o) => ({ agent: o.agent, name: o.name ? nameLabel(o.name) : null, relationship: o.relationship })),
+      // EVERY managed agent, both classes. Filtering to org-class here is what kept workspaces,
+      // treasuries and registry agents out of the graph entirely.
+      agents: agents.map((o) => ({
+        agent: o.agent,
+        name: o.name ? nameLabel(o.name) : null,
+        cls: agentClassOf(o.kind),
+        kindWord: kindWordOf(o.kind),
+        relationship: o.relationship,
+      })),
     };
   }, [phase, agentAddress, agentName, agents]);
   return { live, loaded };
@@ -82,10 +92,10 @@ export function ClassExplainer() {
 }
 
 /** The graph canvas card — React Flow needs a fixed-height positioned parent. */
-export function GraphCard({ live, focusOrg }: { live: LivePerson; focusOrg?: string }) {
+export function GraphCard({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
   return (
     <div className="manage-card" style={{ height: 'min(72vh, 720px)', overflow: 'hidden', padding: 0 }}>
-      <TrustGraph live={live} focusOrg={focusOrg} />
+      <TrustGraph live={live} focusAgent={focusAgent} />
     </div>
   );
 }
@@ -134,11 +144,11 @@ function TrustNode({ data, selected }: NodeProps<Node<NodeData>>) {
 
 const nodeTypes = { trust: TrustNode };
 
-export default function TrustGraph({ live, focusOrg }: { live: LivePerson; focusOrg?: string }) {
+export default function TrustGraph({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   // LIVE only — the graph is rebuilt whenever the managed-agent tree (or the org focus) changes.
-  const g = useMemo(() => buildPersonGraphLive(live, { focusOrg }), [live, focusOrg]);
+  const g = useMemo(() => buildPersonGraphLive(live, { focusAgent }), [live, focusAgent]);
 
   const nodes: Node<NodeData>[] = g.nodes.map((n) => ({
     id: n.id,

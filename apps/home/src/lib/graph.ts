@@ -91,18 +91,31 @@ export interface LivePerson {
   agentName: string;
   /** the person SA address — the graph's own id for the person node. */
   personSA: string;
-  orgs: {
+  /** Every agent this person holds a relationship with — organizations AND services.
+   *
+   *  This was `orgs` and was built from an org-class-only filter, which meant a workspace, treasury or
+   *  registry agent — things a person very much stewards — simply did not exist in their trust graph.
+   *  The graph's whole claim is "who holds keys vs who granted authority"; silently dropping a class of
+   *  agent made it answer that question wrongly, not partially. */
+  agents: {
     agent: string;
     name: string | null;
+    /** ADR-0046 class — decides the node kind and its sub-label. Typed as the whole closed trichotomy
+     *  rather than narrowed to two: `agentClassOf` returns an `AgentType`, and widening the field is
+     *  honest where a cast would just be asserting that today's kind list never yields a person. */
+    cls: GNodeKind & ('person' | 'org' | 'service');
+    /** The subclass word to show (team / church / circle / treasury / workspace …), when it says more
+     *  than the class does. */
+    kindWord?: string;
     /** spec 318 — 'steward' (custodial, default) draws a stewardship edge;
      *  'member' (authority-only) draws a membership edge instead. */
     relationship?: 'steward' | 'member';
   }[];
 }
 
-export function buildPersonGraphLive(p: LivePerson, opts?: { focusOrg?: string }): GView {
+export function buildPersonGraphLive(p: LivePerson, opts?: { focusAgent?: string }): GView {
   const personId = p.personSA;
-  const focusOrg = opts?.focusOrg?.toLowerCase();
+  const focusAgent = opts?.focusAgent?.toLowerCase();
   // The connected human custodian sits ABOVE the person SA they control — visually
   // off the agent-to-agent plane where all the authority edges live.
   const nodes: GNode[] = [
@@ -110,23 +123,24 @@ export function buildPersonGraphLive(p: LivePerson, opts?: { focusOrg?: string }
     {
       id: personId,
       position: { x: 70, y: 360 },
-      data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, focus: !focusOrg },
+      data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, focus: !focusAgent },
     },
   ];
-  const ys = spread(p.orgs.length, 360, 230);
-  p.orgs.forEach((o, i) => {
-    const isFocus = !!focusOrg && o.agent.toLowerCase() === focusOrg;
+  const ys = spread(p.agents.length, 360, 230);
+  p.agents.forEach((o, i) => {
+    const isFocus = !!focusAgent && o.agent.toLowerCase() === focusAgent;
+    const word = o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
     nodes.push({
       id: o.agent,
       position: { x: 430, y: ys[i]! },
       data: {
         refId: o.agent,
-        kind: 'org',
+        kind: o.cls,
         name: o.name || shortAddr(o.agent),
-        sub: o.relationship === 'member' ? 'organization · member' : 'organization',
+        sub: o.relationship === 'member' ? `${word} · member` : word,
         focus: isFocus,
-        // On an org-scoped view, siblings stay for context but fade back.
-        dim: !!focusOrg && !isFocus,
+        // On an agent-scoped view, siblings stay for context but fade back.
+        dim: !!focusAgent && !isFocus,
       },
     });
   });
@@ -134,7 +148,7 @@ export function buildPersonGraphLive(p: LivePerson, opts?: { focusOrg?: string }
     // The custody/control edge: the connected human → their person Smart Agent.
     // The ONLY edge crossing the human↔agent boundary; never between two agents.
     { id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1 },
-    ...p.orgs.map((o): GEdge => {
+    ...p.agents.map((o): GEdge => {
       const member = o.relationship === 'member';
       return {
         id: `e:${member ? 'member' : 'stew'}-${o.agent}`,
@@ -143,7 +157,7 @@ export function buildPersonGraphLive(p: LivePerson, opts?: { focusOrg?: string }
         kind: member ? 'membership' : 'stewardship',
         label: member ? 'member of' : 'stewards',
         weight: member ? 0.5 : 0.8,
-        dim: !!focusOrg && o.agent.toLowerCase() !== focusOrg,
+        dim: !!focusAgent && o.agent.toLowerCase() !== focusAgent,
       };
     }),
   ];
