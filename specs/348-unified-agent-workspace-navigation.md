@@ -8,7 +8,8 @@
 (capability is the canonical noun) · [ADR-0062](../docs/architecture/decisions/0062-agent-card-projection-publication-binding.md)
 (card / projection / publication / binding are four distinct things)
 **Depends on:** spec 315 (workspace routing), spec 328 (agent config UX v2), spec 334 (coordination work
-surface), spec 338 §20 (visibility), spec 346 (typed naming), spec 347 (Agent Card & Projection Studio)
+surface), spec 338 §20 (visibility), spec 342 (org lifecycle), spec 346 (typed naming), spec 347 (Agent
+Card & Projection Studio)
 **Applies to:** `apps/demo-sso-next` only. No package changes. The nav is app-layer white-label
 composition (ADR-0021) — this spec constrains its SHAPE, never its vocabulary.
 
@@ -47,14 +48,16 @@ PRESENCE OR ABSENCE OF A WHOLE AREA — never a different arrangement of the sam
 An agent workspace's left nav is an ordered list of **areas**. Every area is one of:
 
 - **the top band** — no heading, never collapsible, always four items;
-- a **named area** — a heading, collapsible, remembering its own open/closed state.
+- a **named area** — a heading, collapsible, remembering its own open/closed state;
+- **Settings** — one item in the main nav that opens a **second pane to its right** (§2.3). It is not an
+  area with a heading, because it is not a list of four things: it is a workspace of its own.
 
 The four top items are the same four for a person, an organization and a service agent, because they
 answer the four questions you can ask of any agent: *what is it, who is talking to it, what has it done,
 what does it hold.*
 
 **The test for whether something belongs in the top band:** it is a place you go to *watch or participate*.
-Everything you go to in order to *change how the agent behaves* is Setup.
+Everything you go to in order to *change how the agent behaves* is Settings.
 
 ## 2. The bands, in order
 
@@ -83,30 +86,83 @@ steward. Collapsed by default because it is a directory, not a destination — m
 | **Workspaces** | app workspaces they hold | workspaces the org holds |
 
 Each item lists agents and links INTO that agent's own workspace. It never edits them: a treasury's own
-Setup is reached by switching to the treasury.
+Settings are reached by switching to the treasury.
 
-### 2.3 Setup (all classes — collapsible, closed by default)
+### 2.3 Settings (all classes — a SECOND PANE, not an area)
 
-Everything that changes how the agent behaves or how it is described. Nine items, same order everywhere;
-a class shows the ones that apply and hides the rest.
+Everything that changes how the agent behaves, how it is described, and who is inside it. This is the one
+band that does not fit the collapsible-area pattern: an organization's Settings holds twelve items, and a
+twelve-item accordion inside a sidebar is a list you scroll past, not a place you navigate.
+
+**So Settings is a single main-nav item that opens a second pane to the right of the main nav** — the
+master/detail pattern (macOS System Settings, GitHub repo settings). The main nav stays visible and stays
+usable: you always know which agent's settings you are in, and one click leaves.
+
+```
+┌───────────────┬────────────────────┬──────────────────────────┐
+│ Overview      │ IDENTITY & PRESENCE│                          │
+│ Messages      │  Profile           │                          │
+│ Activities    │  Naming            │                          │
+│ Library       │  Agent Card        │   the selected setting   │
+│               │  Registry          │                          │
+│ Stewardship ▸ │  Trust graph       │                          │
+│ ▸ Settings    │                    │                          │
+│ Records     ▸ │ BEHAVIOUR          │                          │
+│ Attestations▸ │  Ask               │                          │
+│               │  Discussion replies│                          │
+│               │  Skills            │                          │
+│               │  Playbook          │                          │
+│               │                    │                          │
+│               │ PEOPLE & ACCESS    │                          │
+│               │  Members  (org)    │                          │
+│               │  Access            │                          │
+│               │  Status            │                          │
+└───────────────┴────────────────────┴──────────────────────────┘
+```
+
+The pane is **grouped**, because a flat list of twelve is the same problem in a wider column:
+
+| Group | Items | What the group means |
+| --- | --- | --- |
+| **Identity & presence** | Profile · Naming · Agent Card · Registry · Trust graph | who this agent is and how the world finds it |
+| **Behaviour** | Ask · Discussion replies · Skills · Playbook | what it does when addressed |
+| **People & access** | Members *(org)* · Access · Status | who else is inside it, and whether it is running |
+
+Where each item comes from:
 
 | Item | What it owns | Assembled from |
 | --- | --- | --- |
 | **Profile** | Who this agent is — **vault data only** | `/you` PersonalInfoPanel; `/metadata` tier 1; org `/profile` |
 | **Naming** | Its name, its name records, and where it answers | `/naming` + `/metadata` tiers 2–3 + the **A2A endpoint** from the card editor + the **ap-naming projection** from the Studio |
-| **Ask** | The assistant that answers when addressed | `Agent → Assistant` sub-tab |
-| **Discussion** | How it behaves in discussions | `Agent → Discussions` sub-tab |
-| **Skills** | Its declared capabilities | `/skills`, service/org `capabilities` |
-| **Playbook** | `apguide:AgentSkillPackage` | `Agent → Playbook` sub-tab |
 | **Agent Card** | The signed A2A card | Studio, card flow only |
 | **Registry** | Its listing in the discovery registry | Studio ap-registry projection + `/registry` |
 | **Trust graph** | Who holds keys, who granted authority | `/trust-graph` |
+| **Ask** | The assistant that answers when addressed | `Agent → Assistant` sub-tab |
+| **Discussion replies** | How it behaves in discussions | `Agent → Discussions` sub-tab |
+| **Skills** | Its declared capabilities | `/skills`, service/org `capabilities` |
+| **Playbook** | `apguide:AgentSkillPackage` | `Agent → Playbook` sub-tab |
+| **Members** *(org only)* | Who belongs to this organization | org `/members` |
+| **Access** | What this agent has granted, and to whom | org/service `/access` |
+| **Status** | Whether the agent is active — activate / deactivate / delete | org `/settings` (spec 342) |
+
+**Two renames, both forced by this section, both deliberate:**
+
+- **`Setup` → `Settings`.** "Setup" says *first-time configuration*, and nothing here is first-time: you
+  return to change a name, a reply, a listing. Settings is what it is.
+- **`Settings` (the org lifecycle page) → `Status`.** The old name now collides with the pane's, and
+  `Status` is the more honest label anyway: spec 342's page answers *is this organization active*, not
+  *how is it configured*.
+
+And one collision resolved structurally rather than by wording: the top band's **Discussions** is where
+you take part; Settings' item is where you configure the replies. They now live in different panes, but
+different panes are not enough when the words differ by one letter — so the settings item is
+**Discussion replies**, which says what it edits.
 
 **§2.3 is the load-bearing change.** Three of today's pages are split by *what they are*, not by what
 screen they happened to live on:
 
-- **`Agent` splits into Ask · Discussion · Playbook.** They were horizontal sub-tabs of one page; they are
-  three unrelated configurations and each earns a left item.
+- **`Agent` splits into Ask · Discussion replies · Playbook.** They were horizontal sub-tabs of one page;
+  they are three unrelated configurations and each earns its own item.
 - **`Card & Projections` splits into Agent Card · Registry · Naming.** ADR-0062 says a card, a projection
   and a publication are different things; the nav should say so too. The card flow stays under Agent Card;
   the ap-registry projection moves to Registry; the ap-naming projection moves to Naming — **which is
@@ -120,9 +176,15 @@ The rule that makes this stick: **the A2A endpoint is a name record.** It was se
 because the card needs it, but it is published under the name and read by resolution. It belongs where the
 name is.
 
+**Pane behaviour.** The pane opens on the Settings item and stays open for every route beneath it, so
+moving between settings costs one click, not two. On a narrow viewport it is a drill-down: the pane
+replaces the main nav and carries a back affordance to it. It is a `<nav>` landmark of its own, and the
+Settings item is its disclosure control — expanded state reflected on the control, focus moved into the
+pane on open, `Escape` returns to the main nav.
+
 ### 2.4 Records (all classes — collapsible, closed by default)
 
-The agent's own vault records. Its own area rather than a Setup item because reading what is stored is not
+The agent's own vault records. Its own area rather than a Settings item because reading what is stored is not
 configuration, and because the area expands to per-family entries as families are added.
 
 ### 2.5 Attestations (all classes — collapsible, closed by default)
@@ -136,17 +198,20 @@ items inside it.
 | --- | --- | --- | --- |
 | Top band (4) | ✅ | ✅ | ✅ |
 | Stewardship | ✅ | ✅ | ✕ |
-| Setup | ✅ | ✅ | ✅ |
+| Settings (pane) | ✅ | ✅ | ✅ |
 | Records | ✅ | ✅ | ✅ |
 | Attestations | ✅ | ✅ | ✅ |
-| *Organization* (§8.2, open) | ✕ | ✅ | ✕ |
+
+Inside the Settings pane, one item varies by class — **Members** is org-only. Everything else is present
+for all three; an item with nothing to show says so on its own page rather than vanishing from the pane,
+because a settings list that changes shape per agent is a settings list you cannot learn.
 
 A `✕` means **the area is absent**, not that its items moved. An org-class agent of subtype `.team` /
 `.church` / `.circle` gets the org column; a `.svc` / `.workspace` / `.treasury` / `.registry` gets the
 service column (ADR-0046 — the suffix names the derived type, the CLASS decides the nav).
 
 A **member** of an organization (spec 318, authority-only) keeps today's behaviour: participation surfaces
-only, no Setup, no Stewardship, no Records. Adding areas must never widen what membership grants.
+only, no Settings, no Stewardship, no Records. Adding areas must never widen what membership grants.
 
 ## 4. The user menu (upper right)
 
@@ -161,7 +226,7 @@ person and the deployment. They leave the left nav for the identity chip's dropd
 | **Network** | `/network` — deployed substrate status |
 | *Identity* | the `Identity` group currently at the bottom of `/you` |
 
-**Why Network belongs here and not in Setup:** it is one substrate for every agent (§2 of the
+**Why Network belongs here and not in Settings:** it is one substrate for every agent (§2 of the
 2026-08-31 Discovery work established this — the panel is deliberately shared). A per-agent nav item for a
 non-per-agent fact invents a distinction that does not exist.
 
@@ -172,10 +237,12 @@ which is exactly the confusion ADR-0010 exists to prevent.
 
 ## 5. Collapse behaviour
 
-- Every named area is collapsible. The top band is not.
-- Defaults: **Stewardship collapsed**; Setup, Records, Attestations collapsed; the area containing the
+- Every named area is collapsible. The top band is not. Settings is not an area — it is a pane (§2.3).
+- Defaults: **Stewardship collapsed**; Records and Attestations collapsed; the area containing the
   current route is **always expanded on load**, whatever the stored state.
-- Open/closed is per-area, per-viewer, remembered in `localStorage`. It is a convenience, never
+- The Settings pane is open whenever the current route is a settings route, and closed otherwise. It has
+  no remembered state: it is where you are, not a preference.
+- Area open/closed is per-area, per-viewer, remembered in `localStorage`. It is a convenience, never
   authority — a lost preference costs one click.
 - An area with zero visible items renders nothing at all (no empty heading).
 
@@ -194,9 +261,9 @@ which is exactly the confusion ADR-0010 exists to prevent.
 
 | Wave | Content | Done when |
 | --- | --- | --- |
-| **W1** | `buildNav` emits the new shape for all three classes; areas gain `collapsible` + `defaultOpen`; nav test extended to pin the shape per class | the three navs are shape-identical by test |
+| **W1** | `buildNav` emits the new shape for all three classes; areas gain `collapsible` + `defaultOpen`; **Settings becomes a pane** (main-nav item + grouped second pane, drill-down under `sm`); nav test extended to pin the shape and the pane's groups per class | the three navs are shape-identical by test |
 | **W2** | Top band completed: Activities + Library for org and service; `Activity` → `Activities` | all four top items resolve for all three classes |
-| **W3** | The Setup splits: `Agent` → Ask/Discussion/Playbook; `Card & Projections` → Agent Card/Registry/Naming; `Metadata` folded into Profile + Naming; A2A endpoint moves into Naming | no route renders a surface that another route also owns |
+| **W3** | The Settings splits: `Agent` → Ask/Discussion replies/Playbook; `Card & Projections` → Agent Card/Registry/Naming; `Metadata` folded into Profile + Naming; A2A endpoint moves into Naming; org `Members`/`Access`/`Settings`→`Status` move into the pane | no route renders a surface that another route also owns |
 | **W4** | Stewardship area (person + org); Records and Attestations as areas | — |
 | **W5** | User menu: Security, Connected, Your apps, Network, Identity; removed from the left nav | the left nav contains only agent-scoped surfaces |
 
@@ -208,21 +275,23 @@ Each wave leaves the app shippable. W3 is the only one that moves stored data su
 These change what gets built and are NOT decided here.
 
 **8.1 — Where does Work go?** Spec 334's coordination surface (person `My Work`, org `Work`) is not in the
-requested top four. It is a participation surface, so it does not belong in Setup. Options: (a) a fifth
+requested top four. It is a participation surface, so it does not belong in Settings. Options: (a) a fifth
 top item — breaks "four items, always"; (b) inside **Activities** as a tab — commitments and audit
 timeline are different things; (c) its own area. **Recommendation: (c)**, a `Work` area for person + org,
 because it has sub-surfaces (requests, endeavors, board) that an area can hold and a tab cannot.
 
-**8.2 — Where do the org-only surfaces go?** `Members`, `Access` and `Settings` are org-class and
-unmentioned. **Recommendation:** an `Organization` area (§3 matrix row), holding Members · Access ·
-Settings. Not Setup: Setup is about how the agent behaves, and membership is about who else is inside it.
-`Treasury` moves to Stewardship per §2.2.
+**8.2 — RESOLVED (2026-08-31).** The org-only surfaces go into the Settings pane's *People & access*
+group: `Members` · `Access` · `Status`. The draft proposed a separate `Organization` area on the reasoning
+that membership is not behaviour; that reasoning does not survive the pane — once Settings is a workspace
+of its own rather than a sidebar accordion, "who is inside this org" sits beside "how it replies" without
+crowding anything, and a second area for three items would be the same list one click further away.
+`Treasury` still moves to Stewardship per §2.2, because a treasury is an agent you steward, not a setting.
 
 **8.3 — Where does Visibility go?** Spec 338 §20 gives four independent choices (naming / listing /
-resolution / inbound). Two of the four are Naming and Registry. **Recommendation:** fold Visibility INTO
-Naming and Registry rather than keep a fifth place that overlaps both — but this needs a check against
-spec 338's insistence that the four stay independent, since a nav that splits them across two items may
-teach that they are coupled.
+resolution / inbound). Two of the four are Naming and Registry. **Recommendation:** keep it as its own
+item in the pane's *Identity & presence* group rather than folding it into Naming and Registry — the pane
+has room, and spec 338 is explicit that the four choices stay independent. Splitting them across two
+items would teach that naming and listing are coupled, which is the one thing that spec forbids.
 
 **8.4 — Does `Your apps` belong in the user menu or stay a workspace surface?** It is a person-scoped
 developer surface, so the menu fits; but it is also the only *creation* surface being moved there.
@@ -236,7 +305,7 @@ W4 also lands the per-family split; otherwise keep them as plain items until it 
 agent has ever signed one, an always-empty area teaches nothing. **Recommendation:** render the area only
 when the agent has at least one, consistent with §5's empty-area rule.
 
-**8.7 — Org `Discussions` vs Setup `Discussion`.** The org's top-band Discussions is where you *take part*;
-Setup's Discussion is where you configure how the agent behaves in them. Same word, two surfaces, one
-letter apart. **Recommendation: rename the Setup item** (e.g. `Discussion replies`) — a nav that
-distinguishes two things by pluralisation is a nav that will be misread.
+**8.7 — RESOLVED (2026-08-31).** `Discussions` stays in the top band (where you take part); the settings
+item is **`Discussion replies`** (what it edits). The pane separates them structurally, but two panes are
+not enough on their own — a nav that distinguishes two surfaces by pluralisation will be misread wherever
+they sit.
