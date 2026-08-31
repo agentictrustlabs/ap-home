@@ -13,12 +13,11 @@ import { AgentNamingEditor } from '../../../src/components/portal/discovery/Agen
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
-import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../src/lib/name-properties';
 import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding';
 import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
-import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, infoBannerSty, badgeStyle, modalOverlaySty, shortAddr } from '../../../src/components/portal/theme';
+import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, shortAddr } from '../../../src/components/portal/theme';
 
 const BADGE = badgeStyle('ok');
 const NEUTRAL = badgeStyle('neutral');
@@ -49,10 +48,11 @@ export default function NamingPage() {
   const [rows, setRows] = useState<NameRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editFor, setEditFor] = useState<NameRow | null>(null);
-  const [propsFor, setPropsFor] = useState<NameRow | null>(null);
   // The connected home is deployed but NAMELESS (spec 257 name-deferral, e.g. Google onboarding) → offer
   // the nameless→named transition right here. Publishing a connection is a SEPARATE opt-in choice.
   const isNameless = !!agentAddress && agentDeployed && !agentName;
+  /** THIS agent's row out of the naming service — the page is about one name now, not a roster. */
+  const own = rows?.find((r) => r.subjectAgent.toLowerCase() === (agentAddress ?? '').toLowerCase()) ?? null;
 
   const load = useCallback(async () => {
     setRows(null); setErr(null);
@@ -73,26 +73,19 @@ export default function NamingPage() {
 
   return (
     <SectionShell
-      title="Naming Service"
-      description="Manage the names you steward. Publish an opt-in connection record so you can re-connect to your agent by name on a new device — you choose what's shared."
+      title="Naming"
+      description="Your public name, and what it says about you to anyone who looks it up."
     >
-      {/* Nameless → named transition (spec 257/280). Deployed-but-unnamed home: claim a name, then
-          optionally publish a connection — all from here. */}
+      {/* Nameless → named (spec 257/280): claim a name, and everything below becomes available. */}
       {isNameless && agentAddress && (
         <ClaimNameCard
           agent={agentAddress}
           via={memberVia}
           token={session?.token ?? null}
           onNamed={() => {
-            // Spec 280: publishing a connection record (the public name→credential reverse mapping) is
-            // an OPT-IN, owner-authorized, NEVER-automatic action. Claiming a name does NOT prompt it —
-            // the freshly-named agent simply appears below with an OPTIONAL "Publish connection" button
-            // the member can use later by choice.
-            //
             // The claim is MINED, but the server's reverse-resolve can lag the RPC read replica — a
-            // single immediate refresh raced it and lost (header stayed "Your portal" until a manual
-            // reload). Poll until the name resolves (bounded), then commit the profile + nudge every
-            // agents dropdown (topbar switcher included).
+            // single immediate refresh raced it and lost. Poll until the name resolves (bounded), then
+            // commit the profile + nudge every agents dropdown (topbar switcher included).
             void (async () => {
               for (let i = 0; i < 10; i++) {
                 const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null;
@@ -107,9 +100,11 @@ export default function NamingPage() {
         />
       )}
 
-      {/* Named state — say it loudly (the silent list read as "did the claim work?"). One card, with
-          direct paths to BOTH public-metadata surfaces: name properties (node-keyed records on the
-          naming service, spec 314) and the agent profile (SA-keyed, /profile). */}
+      {/* This page is about THIS agent's name. The roster of every named agent you steward used to live
+          here; each of those agents has its own Naming page now, reached from Stewardship — a list of
+          other agents on your own naming page was a second way to manage things this page does not own.
+          The tier essay and the "All metadata →" link went with it: the tiers are the sections below, in
+          the order you meet them, and the page they linked to no longer exists. */}
       {!isNameless && agentName && (
         <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-sage-500, #059669)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.6rem', alignItems: 'center' }}>
@@ -120,55 +115,28 @@ export default function NamingPage() {
                 {nameLabel(agentName)}.{CONNECT_DOMAIN}{agentAddress ? ` · ${shortAddr(agentAddress)}` : ''}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              {(() => {
-                const own = rows?.find((r) => r.subjectAgent.toLowerCase() === (agentAddress ?? '').toLowerCase());
-                return own ? <button style={btnSty} onClick={() => setPropsFor(own)}>Name properties</button> : null;
-              })()}
-              <a href="/metadata" style={{ fontSize: '.82rem' }}>All metadata →</a>
-            </div>
+            {own && (
+              <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={own.connectionKind ? BADGE : NEUTRAL}>
+                  {own.connectionKind ? `● sign-in by name: ${own.connectionKind}` : 'sign-in by name not published'}
+                </span>
+                <button style={btnSty} onClick={() => setEditFor(own)}>{own.connectionKind ? 'Change' : 'Publish'}</button>
+              </div>
+            )}
           </div>
-          {/* Metadata tiers (docs/architecture/agent-metadata-tiers.md): say plainly what lives where. */}
           <p style={{ fontSize: '.74rem', color: 'var(--color-text-faint)', margin: '.55rem 0 0' }}>
-            <strong>Name properties</strong> are public under this name — anyone can read them. Your personal
-            details stay <strong>private in your vault</strong> and are shared only via delegations you grant.
-            (A third tier — raw on-chain ERC-4337 account metadata — is public and system-managed; the home
-            rarely touches it.)
+            Everything on this page is <strong>public</strong> — it is what your name tells the world. Your
+            personal details stay private in your vault (Profile) and are shared only through a delegation
+            you grant.
           </p>
         </div>
       )}
 
-      <div style={{ ...infoBannerSty, marginBottom: '1.1rem', fontSize: '.82rem' }}>
-        <strong>Connection records are public.</strong> They live on the public naming service so a returning person can
-        discover how to connect — there is no private way to do this (you have no credential yet at that point). Publishing
-        the <strong>kind</strong> (wallet / passkey / Google / YouVersion) is enough to connect; publishing your
-        <strong> address</strong> is an optional convenience that pre-selects your wallet account and is visible to anyone.
-      </div>
+      {err && <div style={cardSty}><b style={errorText}>Error</b> <span style={mutedText}>{err}</span></div>}
 
-      {err ? <div style={cardSty}><b style={errorText}>Error</b> <span style={mutedText}>{err}</span></div>
-        : !rows ? <p style={mutedText}>Loading the names you steward…</p>
-        : rows.length === 0 ? <p style={mutedText}>No named agents under your stewardship yet.</p>
-        : (
-          <div style={{ display: 'grid', gap: '.7rem' }}>
-            {rows.map((r) => (
-              <div key={r.subjectAgent} style={cardSty}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>
-                  <div>
-                    <strong>{r.name}</strong>
-                    <div style={{ ...mono, fontSize: '.74rem', ...mutedText, marginTop: '.2rem' }}>{shortAddr(r.subjectAgent)}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
-                    {r.connectionKind
-                      ? <span style={BADGE}>● connect: {r.connectionKind}{r.connectionAddress ? ` · ${shortAddr(r.connectionAddress)}` : ''}</span>
-                      : <span style={NEUTRAL}>no connection published</span>}
-                    <button style={btnSty} onClick={() => setPropsFor(r)}>Properties</button>
-                    <button style={btnPrimarySty} onClick={() => setEditFor(r)}>{r.connectionKind ? 'Update' : 'Publish connection'}</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* The records published under this name (including the A2A endpoint), the card projection that
+          writes them, and the read-only account profile. */}
+      {!isNameless && <AgentNamingEditor kind="person" agent="" />}
 
       {editFor && (
         <PublishPanel
@@ -180,124 +148,7 @@ export default function NamingPage() {
           onDone={() => { setEditFor(null); void load(); }}
         />
       )}
-
-      {propsFor && (
-        <PropertiesPanel
-          row={propsFor}
-          via={memberVia}
-          token={session?.token ?? null}
-          onClose={() => setPropsFor(null)}
-        />
-      )}
-          {/* spec 348 §2.3 — the records published under this name, the card projection that writes
-          them, and the read-only account profile. They were three separate screens. */}
-      <AgentNamingEditor kind="person" agent="" />
     </SectionShell>
-  );
-}
-
-/** SHACL property manager (spec 314 W3). Edits the ontology-registered naming records — the same
- *  attribute store the discovery indexer projects into the knowledge base. Validation happens twice:
- *  the TS mirror (`encodeRecords`) before any prompt, and the on-chain `OntologyTermRegistry` at write.
- *  One batched, sponsored userOp by the name's own SA; the KB re-indexes within seconds. */
-function PropertiesPanel({ row, via: viaStr, token, onClose }: {
-  row: NameRow; via: string; token: string | null; onClose: () => void;
-}) {
-  const vl = viaStr.toLowerCase();
-  const via: Via = vl === 'wallet' ? 'wallet' : vl === 'google' ? 'google' : vl === 'youversion' ? 'youversion' : vl === 'email' ? 'email' : vl === 'phone' ? 'phone' : 'passkey';
-  const [current, setCurrent] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
-  const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
-  const [system, setSystem] = useState<{ addr?: string; agentKind?: string }>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void readNameRecords(row.name!)
-      .then((r) => {
-        if (cancelled) return;
-        const cur: Partial<Record<EditablePropKey, string>> = {};
-        for (const { key } of EDITABLE_PROPS) { const v = r[key]; if (typeof v === 'string') cur[key] = v; }
-        setCurrent(cur);
-        setDraft(cur);
-        setSystem({ addr: r.addr, agentKind: r.agentKind });
-      })
-      .catch((e) => { if (!cancelled) setError(String((e as Error)?.message ?? e)); });
-    return () => { cancelled = true; };
-  }, [row.name]);
-
-  const changes: Partial<Record<EditablePropKey, string>> = {};
-  if (current) {
-    for (const { key } of EDITABLE_PROPS) {
-      const d = (draft[key] ?? '').trim();
-      const c = (current[key] ?? '').trim();
-      if (d !== c) changes[key] = d;
-    }
-  }
-  const dirty = Object.keys(changes).length > 0;
-
-  const save = async () => {
-    setBusy(true); setError(null);
-    try {
-      const signHash = await signHashFor(via, row.subjectAgent, token ? { token } : undefined);
-      const res = await writeNameProperties(row.subjectAgent, row.name!, changes, signHash);
-      if (res.ok) setDone(true);
-      else setError(res.error);
-    } catch (e) { setError(String((e as Error)?.message ?? e)); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <div role="dialog" aria-modal="true" style={modalOverlaySty} onClick={busy ? undefined : onClose}>
-      <div style={{ ...cardSty, maxWidth: 600, width: '100%', padding: '1.5rem', boxShadow: 'var(--shadow-modal)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0, marginBottom: '.4rem' }}>Properties of {row.name}</h3>
-        <p style={{ fontSize: '.82rem', color: 'var(--color-text-body)', marginTop: 0 }}>
-          <strong>Public under this name — anyone can read these.</strong> They are the SHACL-registered
-          records on the naming service (validated against the on-chain ontology, indexed into the knowledge
-          base within seconds): what you choose to publish about yourself in the context of {row.name}. Your
-          personal details are a different tier — they stay private in your vault.
-        </p>
-        {done ? (
-          <>
-            <p style={{ fontSize: '.9rem', color: 'var(--color-sage-700)' }}><strong>Saved ✓</strong> — the knowledge base is re-indexing {row.name}.</p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}><button style={btnPrimarySty} onClick={onClose}>Done</button></div>
-          </>
-        ) : !current && !error ? (
-          <p style={mutedText}>Reading current records…</p>
-        ) : (
-          <>
-            {current && (
-              <div style={{ display: 'grid', gap: '.7rem', margin: '.8rem 0' }}>
-                {EDITABLE_PROPS.map(({ key, label, hint }) => (
-                  <label key={key} style={{ display: 'grid', gap: '.2rem', fontSize: '.82rem', color: 'var(--color-text-body)' }}>
-                    <span style={{ fontWeight: 700 }}>{label}</span>
-                    <input
-                      value={draft[key] ?? ''}
-                      onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
-                      placeholder={hint}
-                      style={inputSty}
-                    />
-                  </label>
-                ))}
-                <div style={{ fontSize: '.76rem', ...mutedText }}>
-                  System records (managed by their own ceremonies):{' '}
-                  <span style={mono}>addr {system.addr ? shortAddr(system.addr) : '—'}</span>
-                  {' · '}<span style={mono}>agentKind {system.agentKind ?? '—'}</span>
-                </div>
-              </div>
-            )}
-            {error && <p style={{ fontSize: '.82rem', ...errorText }}>{error}</p>}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1rem' }}>
-              <button style={btnSty} onClick={onClose} disabled={busy}>Cancel</button>
-              <button style={btnPrimarySty} onClick={save} disabled={busy || !dirty || !current}>
-                {busy ? 'Signing…' : `Sign & save${dirty ? ` (${Object.keys(changes).length})` : ''}`}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
   );
 }
 

@@ -45,9 +45,14 @@ export function PortalSidebar({
 }) {
   const pathname = usePathname();
   const isActive = (href: string): boolean => pathname === href;
+  // A pane item stays lit — and its pane stays OPEN — for everything BENEATH it. The Agent Card item is
+  // `…/card`, and editing one is `…/card/<id>`: on exact equality the pane closed the moment you opened
+  // a card, which is exactly when you most need the way back. Segment-aware so `/profile` never matches
+  // `/profiles`.
+  const isWithin = (href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
 
   const openPane = (Object.keys(panes ?? {}) as PaneId[]).find((id) =>
-    (panes?.[id] ?? []).some((g) => g.items.some((i) => isActive(i.href))),
+    (panes?.[id] ?? []).some((g) => g.items.some((i) => isWithin(i.href))),
   );
   const openGroups = openPane ? panes![openPane]! : null;
   const PANE_TITLE: Record<PaneId, string> = { stewardship: 'Stewardship', settings: 'Settings' };
@@ -86,7 +91,7 @@ export function PortalSidebar({
           {openGroups.map((g) => (
             <div className="nav-group" key={g.heading}>
               <div className="nav-group-heading">{g.heading}</div>
-              {g.items.map((item) => <Item key={item.id} item={item} active={isActive(item.href)} />)}
+              {g.items.map((item) => <Item key={item.id} item={item} active={isWithin(item.href)} />)}
             </div>
           ))}
         </nav>

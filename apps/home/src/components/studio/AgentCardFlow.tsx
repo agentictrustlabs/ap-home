@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 // The Card & Projections LANDING (flow-redesign.md): three ordered stages, one primary action each. The state
 // machine, the two signatures, the projections — all still real, all still enforced by the service — but the
 // steward drives a job ("make my agent findable and reachable"), not our lifecycle. Pure decisions live in
@@ -43,6 +44,7 @@ import { cardUriForName, publicationVerdict, studioErrorSentence, type Publicati
 import { CHAIN_ID } from '../../lib/chain';
 import { A2A_DOMAIN, AGENT_NAME_PARENT, AGENT_NAME_PARENTS } from '../../lib/domain';
 import { Stage, TONE_COLOR, decodeKid, typedNameOf, useUrlFlag } from './parts';
+import { readNameRecords, writeNameProperties } from '../../lib/name-properties';
 import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, liveStage, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
@@ -108,6 +110,8 @@ export function AgentCardFlow({
   const served = servedInterfacesFrom(validation?.diagnostics ?? []);
   const addressOnly = onlyAddressProblems(validation?.diagnostics ?? []);
   const [fixing, setFixing] = useState(false);
+  /** What happened to the name's endpoint on the last publish — said here, because it happened here. */
+  const [endpointNote, setEndpointNote] = useState<string | null>(null);
   const useServedAddress = useCallback(async () => {
     if (!draft || served.length === 0) return;
     setFixing(true); setError(null);
@@ -141,6 +145,30 @@ export function AgentCardFlow({
   useEffect(() => { if (cardUri) setBindingUri(cardUri); }, [cardUri]);
 
   const askBinding = () => new Promise<'sign' | 'skip'>((resolve) => setBindingAsk({ resolve }));
+
+  /** Write the card's address into the name record's `a2aEndpoint` when the name has none.
+   *
+   *  Best-effort by design: the card IS published by the time this runs, and a name-record write is a
+   *  separate on-chain op that can fail for reasons nothing to do with the card (no name yet, no
+   *  custodian for this agent's account). Failing it must not report the publish as failed — it reports
+   *  itself, and Naming is where the endpoint is edited if this could not set it.
+   */
+  const adoptEndpointIfUnset = useCallback(async (): Promise<void> => {
+    if (!typedName || !cardUri) return;
+    try {
+      const records = await readNameRecords(typedName);
+      if ((records.a2aEndpoint ?? '').trim()) return;              // already set — never overwrite
+      const fromCard = (draft?.card.supportedInterfaces ?? []).find((i) => i.url)?.url;
+      const endpoint = fromCard ?? cardUri.replace('/.well-known/agent-card.json', '/api/a2a');
+      const signHash = await signHashFor();
+      const out = await writeNameProperties(sa, typedName, { a2aEndpoint: endpoint }, signHash);
+      setEndpointNote(out.ok
+        ? `Your name now points at ${endpoint} — other agents can reach this one by name.`
+        : `Published, but your name still has no endpoint (${out.error}). You can set it under Naming.`);
+    } catch (e) {
+      setEndpointNote(`Published, but your name still has no endpoint (${e instanceof Error ? e.message : String(e)}). You can set it under Naming.`);
+    }
+  }, [typedName, cardUri, draft, sa, signHashFor]);
 
   const runPublish = useCallback(async () => {
     if (plan.kind !== 'ready') return;
@@ -197,7 +225,8 @@ export function AgentCardFlow({
   const live = liveStage({ plan, release: latest, cardUri, lastVerdict, publishedAtOldAddress });
   const waitingOnSomeoneElse = plan.kind === 'ready' && plan.stopAt !== null && plan.runnable.length === 0;
 
-  const listingsHref = `${basePath}/listing/ap-naming`;
+  // Naming and Registry are left-nav destinations now, not tabs of this page (spec 348 §2.3).
+  const registryHref = basePath.replace(/\/card(\/[^/]*)?$/, '/registry');
   const [inspectorOpen, setInspectorOpen] = useState(!!initialPanel);
   const [panel, setPanel] = useState<PanelId>(initialPanel ?? (A2A_CARD_EDITOR_MANIFEST.inspectorPanels[0] as PanelId));
   if (editing) {
@@ -334,10 +363,16 @@ export function AgentCardFlow({
         )}
       </Stage>
 
+      {endpointNote && (
+        <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }} role="status">{endpointNote}</p>
+      )}
+
       {plan.kind === 'live' && (
         <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-          Published. Now list it where agents and people search —{' '}
-          <a href={listingsHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>go to Your name record →</a>
+          {/* Naming is a left-nav item now, and publishing already pointed the name at this card, so the
+              remaining step is the directory — the one listing nothing does for you. */}
+          Published, and your name points here. Now list it where agents and people search —{' '}
+          <Link href={registryHref} style={{ color: 'var(--c-primary)', fontWeight: 600 }}>go to Registry →</Link>
         </p>
       )}
 

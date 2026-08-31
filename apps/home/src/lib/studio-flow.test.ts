@@ -200,31 +200,52 @@ describe('recordRows — what the public record actually says', () => {
   });
 });
 
-describe('studioTabs — Agent Card first, one tab per place, each carrying its own status', () => {
+describe('studioTabs — the card and its history, nothing else', () => {
   const base = { brand: 'Faithnet', agentName: 'alice.me', cardStatus: { status: 'Ready to publish ✓', tone: 'good' as const }, scopes: ['agent.projection.preview', 'agent.projection.approve', 'agent.projection.publish:ap-naming', 'agent.projection.publish:ap-registry'], projections: [] };
-  it('gates every listing on the card before it exists', () => {
-    const tabs = studioTabs({ ...base, published: null });
-    expect(tabs.map((t) => t.label)).toEqual(['Agent Card', 'Your name record', 'Faithnet directory', 'History']);
-    expect(tabs[0]!.suffix).toBe('');
-    expect(tabs[1]!.suffix).toBe('/listing/ap-naming');
-    expect(tabs.slice(1, 3).map((t) => t.status)).toEqual(['Card first', 'Card first']);
+
+  it('offers NO listing tabs — Naming and Registry are left-nav items now', () => {
+    // They were tabs here until they became their own destinations (spec 348 §2.3). Keeping them would
+    // be a second door to one surface, and would make the card page look like a hub for two things it
+    // does not own: a card is a document about the agent, a projection is what a target is told about it.
+    const tabs = studioTabs({ ...base, published: { releaseId: 'r1' } });
+    expect(tabs.map((t) => t.label)).toEqual(['Agent Card', 'History']);
+    expect(tabs.map((t) => t.suffix)).toEqual(['', '/history']);
   });
-  it('shows Not listed once the card is live, and Listed ✓ when it is done', () => {
-    expect(studioTabs({ ...base, published: { releaseId: 'r1' } })[1]!.status).toBe('Not listed');
-    const listed = [{ family: 'ap-naming' as const, instance: { lastPublication: {}, state: 'published' }, selectedCard: { releaseId: 'r1' } }];
-    const tabs = studioTabs({ ...base, published: { releaseId: 'r1' }, projections: listed });
-    expect(tabs[1]).toMatchObject({ status: 'Listed ✓', tone: 'good' });
-    expect(studioTabs({ ...base, published: { releaseId: 'r2' }, projections: listed })[1]).toMatchObject({ status: 'Out of date', tone: 'warn' });
+
+  it('the card tab carries the card status it was given', () => {
+    expect(studioTabs({ ...base, published: null })[0]).toMatchObject({ status: 'Ready to publish ✓', tone: 'good' });
   });
-  it('says when a listing needs someone else rather than offering it', () => {
-    expect(studioTabs({ ...base, published: { releaseId: 'r1' }, custodian: false })[1]!.status).toBe('Needs someone else');
-    expect(studioTabs({ ...base, published: { releaseId: 'r1' }, scopes: [] })[1]!.status).toBe('Needs someone else');
-  });
+
   it('never speaks our vocabulary', () => {
     for (const t of studioTabs({ ...base, published: { releaseId: 'r1' } })) {
       for (const w of ['projection', 'release', 'digest', 'adapter', 'artifact']) {
         expect(`${t.label} ${t.status}`.toLowerCase()).not.toContain(w);
       }
     }
+  });
+});
+
+describe('listingRow — the listing STATES still matter, they just are not tabs', () => {
+  // The state derivation moved out of the tab strip, not out of the product: Naming and Registry each
+  // render one of these rows. Coverage follows the logic to where it lives.
+  const cat = listingCatalog({ brand: 'Faithnet', agentName: 'alice.me' });
+  const scopes = ['agent.projection.preview', 'agent.projection.approve', 'agent.projection.publish:ap-naming'];
+  const row = (o: Record<string, unknown>) =>
+    listingRow({ descriptor: cat['ap-naming'], projection: null, published: null, scopes, ...o } as never);
+
+  it('gates the listing on the card existing first', () => {
+    expect(row({}).state).toBe('needs-card');
+  });
+
+  it('is "not listed" once the card is live, and "listed" when it is done', () => {
+    expect(row({ published: { releaseId: 'r1' } }).state).toBe('not-listed');
+    const listed = { family: 'ap-naming', instance: { lastPublication: {}, state: 'published' }, selectedCard: { releaseId: 'r1' } };
+    expect(row({ published: { releaseId: 'r1' }, projection: listed }).state).toBe('listed');
+    expect(row({ published: { releaseId: 'r2' }, projection: listed }).state).toBe('out-of-date');
+  });
+
+  it('says when it needs someone else rather than offering the action', () => {
+    expect(row({ published: { releaseId: 'r1' }, custodian: false }).state).toBe('missing-role');
+    expect(row({ published: { releaseId: 'r1' }, scopes: [] }).state).toBe('missing-role');
   });
 });

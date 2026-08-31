@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 // The Studio's route bodies, shared by BOTH workspace kinds (design §1.2). A card resource belongs to the
 // AGENT, not to which workspace it happens to be viewed from — so the org routes and the service routes
 // import the same sections and there is zero duplicated logic between them.
@@ -27,20 +28,25 @@ function panelParam(value: string | null): PanelId | null {
   return value && INSPECTOR_PANEL_IDS.has(value) ? (value as PanelId) : null;
 }
 
-const TITLE = 'Card & Projections';
+// The page is the CARD. The two projections it used to carry as tabs are their own left-nav items now
+// (Naming and Registry), so repeating them here offered a second way into the same surface and made the
+// card look like a hub for things it does not own (ADR-0062: a card, a projection and a publication are
+// three different things).
+const TITLE = 'Agent Card';
 
 const TAB_TONE: Record<'good' | 'warn' | 'muted', string> = { good: 'var(--color-sage-700, #3f6b4a)', warn: 'var(--c-warn, #b45309)', muted: 'var(--c-g500, #6b7280)' };
 
-/** Ordered tabs: Agent Card, then one per place the agent can be listed, then History. Each carries its own
- *  status, so the strip answers "where am I, and what still needs doing" without opening anything. */
+/** The card and its History. Listing tabs left this strip when Naming and Registry became left-nav items.
+ *  next/link, not <a>: a bare anchor here reloaded the whole app to move between two tabs of one page. */
 function Tabs({ tabs, base, cardId, active }: { tabs: ReturnType<typeof studioTabs>; base: string; cardId: string; active: string }) {
   const href = `${base}/${encodeURIComponent(cardId)}`;
   return (
     <nav aria-label="Card sections" style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', margin: '0 0 .9rem' }}>
       {tabs.map((t) => (
-        <a
+        <Link
           key={t.id}
           href={`${href}${t.suffix}`}
+          prefetch={false}
           aria-current={t.id === active ? 'page' : undefined}
           style={{
             display: 'grid', gap: '.1rem', textDecoration: 'none', padding: '.4rem .7rem', minHeight: 44,
@@ -51,7 +57,7 @@ function Tabs({ tabs, base, cardId, active }: { tabs: ReturnType<typeof studioTa
         >
           <span style={{ fontSize: '.78rem', fontWeight: t.id === active ? 700 : 500 }}>{t.label}</span>
           {t.status && <span style={{ fontSize: '.66rem', color: t.id === active ? 'var(--c-primary)' : TAB_TONE[t.tone] }}>{t.status}</span>}
-        </a>
+        </Link>
       ))}
     </nav>
   );

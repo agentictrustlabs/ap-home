@@ -86,6 +86,16 @@ describe('every nav item resolves to a real route', () => {
     expect(dead).toEqual([]);
   });
 
+  it('a pane item\'s route has children, so the pane can stay open beneath it', () => {
+    // The Agent Card item is `…/card` and editing one is `…/card/<id>`. The sidebar keeps the pane open
+    // for everything beneath a pane item, which only works if these really are parent routes.
+    for (const [, scope] of SCOPES) {
+      const card = buildSettingsPane(scope).flatMap((g) => g.items).find((i) => i.label === 'Agent Card')!;
+      expect(resolves(card.href)).toBe(true);
+      expect(resolves(`${card.href}/card-abc123`)).toBe(true);
+    }
+  });
+
   it('the user menu', () => {
     const dead = buildUserMenu(whitelabel).filter((i) => !resolves(i.href)).map((i) => `${i.label} → ${i.href}`);
     expect(dead).toEqual([]);
