@@ -20,17 +20,24 @@ export type SaProfileMeta = Partial<Record<(typeof SA_PROFILE_KEYS)[number]['key
 
 export async function readSaProfileMeta(sa: Address): Promise<SaProfileMeta> {
   const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+  // One round trip per property, awaited in a loop, cost ~150ms EACH — six properties meant the better
+  // part of a second of pure waiting on a page that already loads cards and name records. The reads are
+  // independent, so they go together; a property that fails still reads as unset, exactly as before.
+  const values = await Promise.all(
+    SA_PROFILE_KEYS.map(({ key }) =>
+      pc
+        .readContract({
+          address: CONTRACTS.agentProfileResolver,
+          abi: agentProfileResolverAbi,
+          functionName: 'getStringProperty',
+          args: [sa, keccak256(toBytes(`atl:${key}`))],
+        })
+        .catch(() => '') as Promise<string>,
+    ),
+  );
   const out: SaProfileMeta = {};
-  for (const { key } of SA_PROFILE_KEYS) {
-    const v = (await pc
-      .readContract({
-        address: CONTRACTS.agentProfileResolver,
-        abi: agentProfileResolverAbi,
-        functionName: 'getStringProperty',
-        args: [sa, keccak256(toBytes(`atl:${key}`))],
-      })
-      .catch(() => '')) as string;
-    if (v) out[key] = v;
-  }
+  SA_PROFILE_KEYS.forEach(({ key }, i) => {
+    if (values[i]) out[key] = values[i];
+  });
   return out;
 }

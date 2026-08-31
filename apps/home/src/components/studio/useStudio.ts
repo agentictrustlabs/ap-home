@@ -255,7 +255,10 @@ export function useCardDetail(delegation: DelegationWire | null, cardResourceId:
   const tick = useChangeTick();
 
   useEffect(() => {
-    if (!delegation) {
+    // No delegation, or no card named yet (Naming resolves the primary card first and passes '' until it
+    // has one): there is nothing to ask for. Asking anyway spent a whole delegation-authorized round trip
+    // to be told the empty string is not a card.
+    if (!delegation || !cardResourceId) {
       setLoaded(true);
       return;
     }
