@@ -14,6 +14,7 @@ import { agentClassOf } from '../../lib/agent-class';
 import { resolveVia, signHashFor } from '../../home/onboarding';
 import type { SignHash } from '../../connect-client';
 import { studioScopesFor } from '../../lib/studio-view';
+import { ensureStudioSelfGrant } from '../../lib/studio-self-grant';
 import {
   getCardPage,
   listCards,
@@ -52,7 +53,11 @@ function useChangeTick(): number {
   return tick;
 }
 
-export type StudioScopeKind = 'org' | 'service';
+/** Which class of Smart Agent's Studio this is (ADR-0046's closed trichotomy). The typed suffixes map
+ *  DOWN to these: `.team`/`.church`/`.circle` are org-class, `.svc`/`.workspace`/`.treasury`/`.registry`
+ *  are service-class, `.me` is the person. A card belongs to the AGENT, so the Studio is the same in all
+ *  three — only how the agent and its authority are resolved differs. */
+export type StudioScopeKind = 'person' | 'org' | 'service';
 
 export interface StudioAgent {
   session: Session | null;
@@ -60,9 +65,13 @@ export interface StudioAgent {
   /** The managed agent's Smart Agent address — the canonical identifier (ADR-0010). */
   sa: Address | null;
   name: string;
-  /** The stewardship wire (delegator = the managed agent, delegate = the person). */
+  /** The authority this Studio runs on: the stewardship wire (delegator = the managed agent, delegate =
+   *  the person) for an org or service, and the person's own self vault grant when they ARE the agent. */
   delegation: DelegationWire | null;
-  relationship: 'steward' | 'member';
+  relationship: 'steward' | 'member' | 'self';
+  /** Set when the person's own grant could not be established — the screen says so instead of
+   *  rendering an empty Studio that looks like "you have no cards". */
+  authorityError: string | null;
   /** RENDER-only scope picture; the service re-checks every op. */
   scopes: StudioScope[];
   /** The person's custody signer for THIS agent's SA (routed by credential, never raw `session.via`). */
@@ -71,10 +80,13 @@ export interface StudioAgent {
 
 /** Resolve the managed agent + its stewardship delegation for either workspace kind. */
 export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAgent {
-  const { session, profile } = useSession();
+  const { session, profile, agentAddress } = useSession();
   const token = session?.token ?? null;
   const { agents, loaded: agentsLoaded } = useManagedAgents(kind === 'service' ? token : null, 'any');
   const [orgs, setOrgs] = useState<MyOrg[] | null>(null);
+  const [selfGrant, setSelfGrant] = useState<DelegationWire | null>(null);
+  const [selfLoaded, setSelfLoaded] = useState(false);
+  const [authorityError, setAuthorityError] = useState<string | null>(null);
 
   useEffect(() => {
     if (kind !== 'org' || !token) return;
@@ -93,11 +105,17 @@ export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAg
 
   const svc = kind === 'service' ? agents.find((a) => agentClassOf(a.kind) === 'service' && lc(a.agent) === lc(address)) : undefined;
   const org = kind === 'org' ? orgs?.find((o) => lc(o.orgAgent) === lc(address)) : undefined;
+  // The person's Studio is their own, and only ever their own: a person can steward another agent, but
+  // they cannot hold a second person's card. The person route carries no address (there is exactly one
+  // person here — the signed-in one), so an empty `address` means "me"; a non-empty one must still match.
+  const isSelf = kind === 'person' && !!agentAddress && (address === '' || lc(agentAddress) === lc(address));
 
-  const sa = (svc?.agent ?? org?.orgAgent ?? null) as Address | null;
-  const delegation = ((svc?.stewardshipDelegation as DelegationWire | undefined) ?? org?.stewardshipDelegation ?? null) ?? null;
-  const relationship = (svc?.relationship ?? org?.relationship ?? 'steward') as 'steward' | 'member';
-  const loaded = kind === 'service' ? agentsLoaded : orgs !== null;
+  const sa = (kind === 'person' ? (isSelf ? (agentAddress as Address) : null) : (svc?.agent ?? org?.orgAgent ?? null)) as Address | null;
+  const delegation = kind === 'person'
+    ? selfGrant
+    : (((svc?.stewardshipDelegation as DelegationWire | undefined) ?? org?.stewardshipDelegation ?? null) ?? null);
+  const relationship = kind === 'person' ? 'self' : ((svc?.relationship ?? org?.relationship ?? 'steward') as 'steward' | 'member');
+  const loaded = kind === 'person' ? selfLoaded : kind === 'service' ? agentsLoaded : orgs !== null;
 
   const scopes = useMemo(
     () => (delegation ? studioScopesFor({ principalKind: 'human', relationship }) : []),
@@ -111,7 +129,28 @@ export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAg
     return signHashFor(resolveVia(profile?.credential, session.via), sa, { token: session.token });
   }, [session, profile?.credential, sa]);
 
-  return { session, loaded, sa, name: svc?.name ?? org?.orgName ?? '', delegation, relationship, scopes, signHashFor: sign };
+  // The person's grant: stored if it exists, otherwise ONE signature, once. Deliberately after `sign`
+  // is defined — it is the same credential-routed signer every other Studio step uses.
+  useEffect(() => {
+    if (kind !== 'person') return;
+    if (!session || !isSelf || !agentAddress) { setSelfLoaded(true); return; }
+    let cancelled = false;
+    setAuthorityError(null);
+    void (async () => {
+      try {
+        // `sign` RESOLVES to the signer (it picks the credential first), so it is awaited, not passed.
+        const g = await ensureStudioSelfGrant({ personSA: agentAddress as Address, token: session.token, signHash: await sign() });
+        if (!cancelled) { setSelfGrant(g); setSelfLoaded(true); }
+      } catch (e) {
+        if (cancelled) return;
+        setAuthorityError(e instanceof Error ? e.message : String(e));
+        setSelfLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kind, session, isSelf, agentAddress, sign]);
+
+  return { session, loaded, sa, name: kind === 'person' ? (profile?.name ?? '') : (svc?.name ?? org?.orgName ?? ''), delegation, relationship, scopes, authorityError, signHashFor: sign };
 }
 
 /**

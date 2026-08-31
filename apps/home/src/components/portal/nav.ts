@@ -187,6 +187,10 @@ export function buildNav(
     manage.push({ id: 'agent', label: 'Agent', href: '/agent', Icon: BotIcon, status: 'live' });
     // Unified metadata editor (docs/architecture/agent-metadata-tiers.md): all three tiers, one page.
     manage.push({ id: 'metadata', label: 'Metadata', href: '/metadata', Icon: TagIcon, status: 'live' });
+    // spec 347 §9 / ADR-0062 — the person's OWN Agent Card & Projection Studio. Same position in the band
+    // as the org and service navs give it (beside Profile and Agent): a card is an identity-and-
+    // presentation concern, and a person is an agent like any other (ADR-0046).
+    manage.push({ id: 'person-card', label: 'Card & Projections', href: '/card', Icon: IdCardIcon, status: 'live' });
     // Records: what's in YOUR vault (the person's own analog of the org Records page).
     manage.push({ id: 'records', label: 'Records', href: '/records', Icon: DatabaseIcon, status: 'live' });
     // Visibility (spec 338 §20): who can find this agent — naming/listing/resolution/inbound as four

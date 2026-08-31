@@ -58,6 +58,9 @@ function Tabs({ tabs, base, cardId, active }: { tabs: ReturnType<typeof studioTa
 }
 
 export function studioBasePath(kind: StudioScopeKind, agent: string): string {
+  // The person's own workspace is the portal root, so their Studio is `/card` — no address in the path,
+  // because there is only ever one person here and it is the one signed in.
+  if (kind === 'person') return '/card';
   return kind === 'org' ? orgHref(agent, 'card') : serviceHref(agent, 'card');
 }
 
@@ -78,16 +81,26 @@ function Guarded({
   if (!ctx.sa) {
     return (
       <SectionShell title={title}>
-        <p className="manage-card-blurb">You don&rsquo;t manage an agent at this address.</p>
+        <p className="manage-card-blurb">
+          {kind === 'person'
+            ? 'Your agent isn’t set up yet — finish your profile first, and your card lives here.'
+            : 'You don’t manage an agent at this address.'}
+        </p>
       </SectionShell>
     );
   }
   if (!ctx.delegation) {
+    // A person and a managed agent fail for different reasons and deserve different sentences: the
+    // person's authority is their OWN grant (spec 345), which they can retry; a managed agent's is a
+    // stewardship delegation, which they either hold or do not.
     return (
       <SectionShell title={title}>
         <p className="manage-card-blurb">
-          No stewardship delegation on this agent — the Studio talks to the agent&rsquo;s own service under that
-          delegation, so there is nothing it can read or write from here.
+          {kind === 'person'
+            ? ctx.authorityError
+              ? `Couldn’t set up access to your own card records: ${ctx.authorityError}`
+              : 'Confirm with your device to let this page read and write your own card records.'
+            : 'No stewardship delegation on this agent — the Studio talks to the agent’s own service under that delegation, so there is nothing it can read or write from here.'}
         </p>
       </SectionShell>
     );
