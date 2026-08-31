@@ -19,7 +19,13 @@ const tierBadge = (bg: string, fg: string, text: string) => (
   <span style={{ fontSize: '.68rem', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '.15rem .5rem', borderRadius: 999, background: bg, color: fg }}>{text}</span>
 );
 
-export function AgentMetadataTiers({ agent, name, cls }: { agent: Address; name: string | null; cls: 'org' | 'service' }) {
+/** The PUBLISHED tiers of an agent's metadata, rendered under the name they are published with (spec 348
+ *  §2.3). They used to sit on a `Metadata` page beside the vault tier, which put three unrelated things
+ *  together because all three are "metadata" — the vault tier is now Profile, and these two live here,
+ *  where the name being published is on screen.
+ *
+ *  `cls` is kept for the copy: an organization is not a person, and neither is a service. */
+export function PublishedMetadataPanels({ agent, name, cls }: { agent: Address; name: string | null; cls: 'org' | 'service' | 'person' }) {
   const { session, profile } = useSession();
   const [records, setRecords] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
   const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
@@ -61,22 +67,6 @@ export function AgentMetadataTiers({ agent, name, cls }: { agent: Address; name:
     <>
       <div style={cardSty}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', marginBottom: '.4rem' }}>
-          <h3 style={{ margin: 0 }}>Private details</h3>
-          {tierBadge('var(--c-g100)', 'var(--c-g500)', 'vault')}
-        </div>
-        <p style={{ ...mutedText, fontSize: '.82rem', margin: 0 }}>
-          Not applicable to {cls === 'org' ? 'an organization' : 'a service agent'} — this tier holds a
-          PERSON&rsquo;s PII, and{' '}
-          {cls === 'org'
-            ? 'an organization is not a person; its members are, and each of them holds their own'
-            : 'a service agent has none'}
-          . This agent&rsquo;s private working records live in its own vault, reached through its stewardship
-          delegation (Manage &rarr; Records), not here.
-        </p>
-      </div>
-
-      <div style={{ ...cardSty, marginTop: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', marginBottom: '.4rem' }}>
           <h3 style={{ margin: 0 }}>Name records</h3>
           {tierBadge('#fef3c7', '#92400e', 'public by choice')}
         </div>
@@ -87,7 +77,10 @@ export function AgentMetadataTiers({ agent, name, cls }: { agent: Address; name:
         ) : (
           <>
             <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
-              Published under <code style={mono}>{name}</code>. Anyone who resolves the name reads these.
+              Published under <code style={mono}>{name}</code>. Anyone who resolves the name reads these —
+              including the <b>A2A endpoint</b>, which is where other agents actually send messages. It used
+              to be set inside the card editor because the card needs it; it is a name record, so it is
+              edited here, with the name it belongs to.
             </p>
             {EDITABLE_PROPS.map(({ key, label, hint }) => (
               <div key={key} style={{ marginBottom: '.7rem' }}>

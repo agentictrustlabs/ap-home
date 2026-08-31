@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
+import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
@@ -188,6 +189,9 @@ export default function NamingPage() {
           onClose={() => setPropsFor(null)}
         />
       )}
+          {/* spec 348 §2.3 — the records published under this name, the card projection that writes
+          them, and the read-only account profile. They were three separate screens. */}
+      <AgentNamingEditor kind="person" agent="" />
     </SectionShell>
   );
 }
