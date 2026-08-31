@@ -184,10 +184,25 @@ because the card needs it, but it is published under the name and read by resolu
 name is.
 
 **Pane behaviour.** The pane opens on the Settings item and stays open for every route beneath it, so
-moving between settings costs one click, not two. On a narrow viewport it is a drill-down: the pane
-replaces the main nav and carries a back affordance to it. It is a `<nav>` landmark of its own, and the
-Settings item is its disclosure control — expanded state reflected on the control, focus moved into the
-pane on open, `Escape` returns to the main nav.
+moving between settings costs one click, not two. On a narrow viewport both nav columns are hidden and
+the **drawer** carries the settings groups — a two-pane pattern has to design its narrow branch or the
+pattern deletes function (the first build shipped without it, and eleven settings surfaces were reachable
+on a phone only by typing a URL).
+
+The pane is its own `<nav aria-label="Settings for <name>">` landmark, and it carries a header naming the
+agent — not for orientation but for **disclosure**: a person's pane and an org's are near-identical lists,
+but the org's writes go to that organization's vault under a stewardship delegation, and which vault you
+are about to write to belongs on the screen.
+
+**Amended 2026-08-31 (design review).** The Settings item is a LINK that changes the URL, not a
+disclosure control: it is marked `aria-current="true"` while you are anywhere inside the section, and
+carries a right-pointing caret. `aria-expanded` on a navigating link makes assistive tech announce
+"collapsed" and expect in-place expansion, focus already moves on navigation, and `Escape` has nothing to
+dismiss. The visual grammar that replaces it: **left caret = expands in place · right caret = opens the
+pane · SMALL-CAPS = a static label, and nothing interactive uses it.**
+
+**Settings sits LAST in the main nav** (amended 2026-08-31): everything above it is somewhere you work;
+Settings is the door you take when you want to change the thing you were working in.
 
 ### 2.4 Records (all classes — collapsible, closed by default)
 

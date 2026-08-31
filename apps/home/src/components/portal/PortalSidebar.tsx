@@ -1,16 +1,23 @@
 'use client';
-// Desktop left sidebar (≥768px) — spec 348.
+// Desktop left sidebar (≥768px) — spec 348, redesigned after the 2026-08-31 UX review.
 //
-// Two things live here now: the main nav (areas, some collapsible) and the SETTINGS PANE, a second
-// column that opens to the right of the main nav when the current route is a settings route. The pane is
-// not an accordion because an organization's settings hold twelve items, and a twelve-item accordion in
-// a sidebar is a list you scroll past, not a place you navigate.
+// Two columns: the main nav, and the SETTINGS PANE that opens beside it while you are inside settings.
 //
-// Active item = amber left border + tint. Coming-soon items stay navigable (`<a aria-disabled>`) so the
-// member can see what is planned — never removed from the tab order.
+// THE VISUAL GRAMMAR, because two of these looked identical before and meant different things:
+//   • a ROW with a LEFT caret  → expands in place (an area);
+//   • a ROW with a RIGHT caret → opens the pane beside it (Settings);
+//   • SMALL-CAPS UPPERCASE     → a static label, and now ONLY in the pane. Nothing interactive uses it.
+// The area toggles used to be styled as `.nav-group-heading` on a <button>, which the bare `button {}`
+// element rule then centred, enlarged and bolded — so three dead headings out-shouted the live items
+// above them. They are rows now, and they own their class rather than borrowing a label's.
+//
+// Every item is a next/link, NOT a bare <a>: an anchor in the App Router is a full document load, so
+// clicking any nav item tore down the app and re-ran session bootstrap and every page fetch from cold.
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { NavGroup, NavItem, SettingsGroup } from './nav';
+import { ChevronRightIcon } from '../shared/Icons';
 
 const OPEN_KEY = 'ap.nav.open';
 
@@ -34,57 +41,86 @@ function useAreaState(): [Record<string, boolean>, (id: string, open: boolean) =
   return [open, set];
 }
 
-function Item({ item, active }: { item: NavItem; active: boolean }) {
+function Item({ item, active, variant }: { item: NavItem; active: boolean; variant?: 'pane' }) {
   return (
-    <a
+    <Link
       href={item.href}
-      className={`nav-item${active ? ' active' : ''}${item.status === 'soon' ? ' soon' : ''}`}
-      aria-current={active ? 'page' : undefined}
-      aria-disabled={item.status === 'soon' ? 'true' : undefined}
+      prefetch={false}
+      className={`nav-item${active ? ' active' : ''}${item.status === 'soon' ? ' soon' : ''}${variant === 'pane' ? ' nav-item-pane' : ''}`}
+      // `page` is the exact page; `true` is "the current one within a set" — Settings is active for its
+      // whole section, and it is not the page you are looking at.
+      aria-current={active ? (variant === 'pane' ? 'true' : 'page') : undefined}
     >
       <item.Icon size={18} />
       <span className="nav-item-label">{item.label}</span>
       {item.badge ? <span className="nav-item-badge" aria-label={`${item.badge} new`}>{item.badge}</span> : null}
       {item.status === 'soon' && <span className="nav-item-soon">soon</span>}
-    </a>
+      {variant === 'pane' && <ChevronRightIcon size={16} className="nav-caret-right" aria-hidden />}
+    </Link>
   );
 }
 
-export function PortalSidebar({ groups, settings }: { groups: NavGroup[]; settings?: SettingsGroup[] }) {
+export function PortalSidebar({
+  groups, settings, workspaceName,
+}: { groups: NavGroup[]; settings?: SettingsGroup[]; workspaceName?: string }) {
   const pathname = usePathname();
   const [openState, setOpen] = useAreaState();
   const isActive = (href: string): boolean => pathname === href;
-  // The pane is open when you are in it — it is where you are, not a preference (§5).
+  // The pane is open when you are in it — it is where you are, not a preference.
   const settingsOpen = !!settings?.length && settings.some((g) => g.items.some((i) => isActive(i.href)));
 
   return (
-    <div className="portal-sidebar-wrap" style={{ display: 'flex', minHeight: 0 }}>
+    <div className="portal-sidebar-wrap">
       <nav className="portal-sidebar" aria-label="Portal navigation">
         {groups.map((g, i) => {
           const holdsCurrent = g.items.some((it) => isActive(it.href));
-          // The area containing the current route is always expanded, whatever the stored state.
-          const expanded = !g.collapsible || holdsCurrent || (openState[g.id ?? ''] ?? g.defaultOpen ?? true);
+          // An area with fewer than two children is a heading with extra clicks — render it as a plain
+          // row. This reverses itself for free when an area grows (spec §8.5).
+          const asArea = g.collapsible && g.items.length > 1;
+          const expanded = !asArea || holdsCurrent || (openState[g.id ?? ''] ?? g.defaultOpen ?? true);
+          const cls = `nav-group${g.startsRegion ? ' region-start' : ''}${g.isExit ? ' region-exit' : ''}`;
           return (
-            <div className="nav-group" key={g.id ?? g.heading ?? `g${i}`}>
-              {g.heading && (g.collapsible ? (
-                <button
-                  type="button"
-                  className="nav-group-heading nav-group-toggle"
-                  aria-expanded={expanded}
-                  onClick={() => setOpen(g.id ?? g.heading!, !expanded)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '.35rem', width: '100%', background: 'none', border: 0, cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left' }}
-                >
-                  <span aria-hidden style={{ display: 'inline-block', transition: 'transform .12s', transform: expanded ? 'rotate(90deg)' : 'none' }}>›</span>
-                  {g.heading}
-                </button>
-              ) : <div className="nav-group-heading">{g.heading}</div>)}
-              {expanded && g.items.map((item) => <Item key={item.id} item={item} active={isActive(item.href)} />)}
+            <div className={cls} key={g.id ?? g.heading ?? `g${i}`}>
+              {asArea ? (
+                <>
+                  <button
+                    type="button"
+                    className="nav-area-toggle"
+                    aria-expanded={expanded}
+                    onClick={() => setOpen(g.id ?? g.heading!, !expanded)}
+                  >
+                    <ChevronRightIcon size={16} className="nav-caret" aria-hidden />
+                    <span className="nav-item-label">{g.heading}</span>
+                  </button>
+                  {expanded && (
+                    <div className="nav-area-items">
+                      {g.items.map((item) => <Item key={item.id} item={item} active={isActive(item.href)} />)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                g.items.map((item) => (
+                  <Item
+                    key={item.id}
+                    item={item}
+                    active={item.id === 'settings' ? settingsOpen || isActive(item.href) : isActive(item.href)}
+                    variant={item.id === 'settings' ? 'pane' : undefined}
+                  />
+                ))
+              )}
             </div>
           );
         })}
       </nav>
       {settingsOpen && (
-        <nav className="portal-settings-pane" aria-label="Settings">
+        <nav className="portal-settings-pane" aria-label={workspaceName ? `Settings for ${workspaceName}` : 'Settings'}>
+          {/* The header is DISCLOSURE, not decoration: a person's pane and an org's are near-identical
+              lists, but the org's writes go to that organization's vault under your stewardship
+              delegation. Which vault you are about to write to should be on this screen. */}
+          <div className="pane-head">
+            <span className="pane-head-eyebrow">Settings</span>
+            <span className="pane-head-name" title={workspaceName}>{workspaceName ?? 'Your agent'}</span>
+          </div>
           {settings!.map((g) => (
             <div className="nav-group" key={g.heading}>
               <div className="nav-group-heading">{g.heading}</div>

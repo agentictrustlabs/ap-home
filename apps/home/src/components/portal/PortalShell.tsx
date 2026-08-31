@@ -45,7 +45,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} />
       <div className="portal-body">
-        <PortalSidebar groups={groups} settings={settings} />
+        <PortalSidebar groups={groups} settings={settings} workspaceName={workspaceName} />
         <main className="portal-main">
           {orgStatus !== 'active' && active.kind === 'org' && (
             <div
@@ -64,7 +64,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
           {children}
         </main>
       </div>
-      <PortalBottomNav groups={groups} tabs={tabs} />
+      <PortalBottomNav groups={groups} tabs={tabs} settings={settings} workspaceName={workspaceName} />
     </div>
   );
 }

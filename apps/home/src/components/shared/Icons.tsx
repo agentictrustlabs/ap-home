@@ -75,6 +75,9 @@ export const ExternalLinkIcon: IconComponent = (p) => (
   <Svg {...p}><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></Svg>
 );
 export const ChevronDownIcon: IconComponent = (p) => (<Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>);
+// The nav's caret. A `›` text glyph renders thin and optically off-centre at 16px and cannot be
+// colour-tokened cleanly; this rotates to point down when its area is expanded.
+export const ChevronRightIcon: IconComponent = (p) => (<Svg {...p}><path d="m9 6 6 6-6 6" /></Svg>);
 export const MenuIcon: IconComponent = (p) => (<Svg {...p}><path d="M4 6h16M4 12h16M4 18h16" /></Svg>);
 export const XIcon: IconComponent = (p) => (<Svg {...p}><path d="M18 6 6 18M6 6l12 12" /></Svg>);
 export const CheckIcon: IconComponent = (p) => (<Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>);

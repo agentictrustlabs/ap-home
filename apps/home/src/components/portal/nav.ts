@@ -27,6 +27,12 @@ export interface NavGroup {
   collapsible?: boolean;
   /** Whether it starts open when the current route is not inside it. Stewardship starts closed. */
   defaultOpen?: boolean;
+  /** Draws the ONE hairline that separates "where you take part" from "what it holds and how it is set
+   *  up". Uniform 20px gaps between every group carried no grouping information — they just made the
+   *  list sparse. */
+  startsRegion?: boolean;
+  /** An exit, not a region: space above it, no line. */
+  isExit?: boolean;
 }
 
 /** spec 348 §2.3 — the Settings pane's groups. Same shape as a nav group, rendered in the second pane
@@ -67,13 +73,17 @@ export function buildNav(
   const href = (page: string): string => workspaceHref(active, page);
   const backHome: NavGroup = {
     items: [{ id: 'back-home', label: 'Back to your home', href: '/', Icon: HomeIcon, status: 'live' }],
+    isExit: true,
   };
 
   // ── the top band: the same four questions of any agent ────────────────────────────────────────────
   //    what is it · who is talking to it · what has it done · what does it hold
   const overviewHref = isPerson ? '/' : active.kind === 'service' ? serviceHref(active.agent) : orgHref(active.org, 'overview');
+  // No context heading: it rendered `alice-home-church` as `ALICE-HOME-CHURCH` (a user-supplied name run
+  // through a label style), and existed for org/service but not person — so every row shifted 27px when
+  // you switched workspace. The topbar switcher already says whose workspace this is, and the Settings
+  // pane header repeats it where it is load-bearing (you are about to write to that agent's vault).
   const top: NavGroup = {
-    ...(isPerson ? {} : { heading: workspaceName ?? (active.kind === 'org' ? 'Organization' : 'Service') }),
     items: [
       { id: 'overview', label: 'Overview', href: overviewHref, Icon: isPerson ? HomeIcon : active.kind === 'org' ? BuildingIcon : LandmarkIcon, status: 'live' },
       { id: 'messages', label: 'Messages', href: href('messages'), Icon: ChatIcon, status: 'live', ...(badges.inbox ? { badge: badges.inbox } : {}) },
@@ -118,23 +128,29 @@ export function buildNav(
           { id: 'workspaces', label: 'Workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' },
         ]
       : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
-    groups.push({ id: 'stewardship', heading: 'Stewardship', items: stewardItems, collapsible: true, defaultOpen: false });
+    groups.push({ id: 'stewardship', heading: 'Stewardship', items: stewardItems, collapsible: true, defaultOpen: false, startsRegion: true });
   }
 
-  // ── Settings: ONE item that opens the second pane (§2.3). ─────────────────────────────────────────
-  groups.push({ items: [{ id: 'settings', label: 'Settings', href: href('settings'), Icon: SettingsIcon, status: 'live' }] });
-
   // ── Records + Attestations: their own areas (§2.4/§2.5). ──────────────────────────────────────────
+  // Records and Attestations hold ONE item each today, so they render as plain rows (the sidebar folds
+  // any area with fewer than two children). The item carries the AREA's noun — `All records` only ever
+  // existed to disambiguate from a heading directly above it. When W4 lands the per-family split they
+  // become real areas again with no change here.
   groups.push({ id: 'records', heading: 'Records', items: [
-    { id: 'records-all', label: 'All records', href: href('records'), Icon: DatabaseIcon, status: 'live' },
-  ], collapsible: true, defaultOpen: false });
+    { id: 'records-all', label: 'Records', href: href('records'), Icon: DatabaseIcon, status: 'live' },
+  ], collapsible: true, defaultOpen: false, ...(active.kind === 'service' ? { startsRegion: true } : {}) });
   // Attestations: person-only today. A managed agent CAN sign statements, so the area applies in
   // principle — but none has an agent-scoped page yet, and §5 says an empty area renders nothing.
   if (isPerson) {
     groups.push({ id: 'attestations', heading: 'Attestations', items: [
-      { id: 'attestations-all', label: 'Signed statements', href: '/attestations', Icon: AwardIcon, status: 'live' },
+      { id: 'attestations-all', label: 'Attestations', href: '/attestations', Icon: AwardIcon, status: 'live' },
     ], collapsible: true, defaultOpen: false });
   }
+
+  // ── Settings LAST (§2.3): it is where you go to change how the agent behaves, not part of the daily
+  //    path through it. Everything above is somewhere you work; this is the door you take when you want
+  //    to alter the thing you were working in — so it sits at the bottom, under the day-to-day.
+  groups.push({ items: [{ id: 'settings', label: 'Settings', href: href('settings'), Icon: SettingsIcon, status: 'live' }] });
 
   if (!isPerson) groups.push(backHome);
   return groups.filter((g) => g.items.length > 0);

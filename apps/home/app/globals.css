@@ -45,6 +45,8 @@
         --grad-hero: radial-gradient(ellipse at 50% 110%, rgba(245,158,11,.18) 0%, rgba(217,119,6,.10) 38%, rgba(251,191,36,.06) 62%, transparent 80%);
         /* Portal shell metrics */
         --sidebar-w: 240px; --topbar-h: 56px; --portal-max: 880px;
+        /* Declared here, not only as a var() fallback, so the narrow-desktop override below takes. */
+        --settings-pane-w: 208px;
       }
 
       /* ── Reset & base ──────────────────────────────────────────────── */
@@ -971,18 +973,74 @@
       .portal-main { flex: 1; min-width: 0; padding: 1.5rem 1rem calc(var(--topbar-h) + 1.5rem); }
 
       /* Sidebar (desktop) */
-      .portal-sidebar { display: none; }
+      .portal-sidebar { display: none; border-right: 0; }
       /* spec 348 §2.3 — the Settings pane: a second column to the right of the main nav, shown only
-         while you are inside it. Hidden with the sidebar below 768px, where the drill-down applies. */
+         while you are inside it. Below 768px the drawer carries these groups instead. */
       .portal-settings-pane { display: none; }
-      .portal-sidebar-wrap { min-height: 0; }
-      .nav-group-toggle:hover { color: var(--color-text-body); }
-      .nav-group-toggle:focus-visible { outline: 2px solid var(--color-primary, #b45309); outline-offset: 2px; border-radius: var(--radius-8); }
-      .nav-group { display: flex; flex-direction: column; gap: 2px; padding: .25rem 0; }
-      .nav-group + .nav-group { margin-top: .75rem; }
-      .nav-group-heading { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-faint); padding: .35rem .75rem .15rem; }
+      /* ONE border around both nav columns, so they read as one navigation region with two levels
+         rather than as two of three columns. */
+      .portal-sidebar-wrap { display: flex; min-height: 0; border-right: 1px solid var(--color-border); }
+
+      /* An AREA TOGGLE is a control, so it looks like the other controls in this column — not like the
+         pane's static labels. It also has to undo the bare `button {}` element rule above, which
+         centres, enlarges and bolds it; that rule is why three dead headings out-shouted the live items
+         and why they looked randomly indented (they were CENTRED, and the strings differ in length). */
+      .nav-area-toggle {
+        display: flex; align-items: center; gap: .65rem; width: 100%;
+        min-height: 44px; padding: .55rem .75rem; margin: 0;
+        border: 0; border-left: 3px solid transparent; border-radius: var(--radius-8);
+        background: none; box-shadow: none; cursor: pointer;
+        font-family: inherit; font-size: .9rem; font-weight: 500; line-height: 1.6;
+        letter-spacing: normal; text-transform: none;
+        color: var(--color-text-body); text-align: left;
+        justify-content: flex-start;
+        transition: background .15s ease, color .15s ease;
+      }
+      .nav-area-toggle:hover { background: var(--color-surface); color: var(--color-text-primary); }
+      .nav-area-toggle:focus-visible { outline: 2px solid var(--color-amber-700); outline-offset: -2px; }
+      .nav-area-toggle[aria-expanded="true"] { color: var(--color-text-primary); font-weight: 600; }
+      .nav-caret { flex: 0 0 18px; color: var(--color-text-muted); transition: transform .12s ease; }
+      .nav-area-toggle[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
+      /* Children hang off a rail starting under the caret — containment without a big step. */
+      .nav-area-items {
+        display: flex; flex-direction: column; gap: 2px;
+        margin: 2px 0 0 1.5rem; padding-left: .35rem;
+        border-left: 1px solid var(--color-border);
+      }
+
+      /* A RIGHT caret means "opens the pane beside this", against the left caret's "expands in place". */
+      .nav-caret-right { margin-left: auto; color: var(--color-text-faint); flex: 0 0 16px; }
+      .nav-item-pane.active .nav-caret-right { color: var(--color-amber-600); }
+      /* The active Settings row becomes the mouth of the pane: same fill, square right edge, no gap. */
+      .nav-item-pane.active {
+        background: var(--color-surface-raised);
+        color: var(--color-amber-700); font-weight: 700;
+        border-left-color: var(--color-amber-500);
+        margin-right: -.75rem; padding-right: 1.5rem;
+        border-top-right-radius: 0; border-bottom-right-radius: 0;
+      }
+
+      .pane-head { padding: .25rem .75rem .75rem; margin-bottom: .5rem;
+                   border-bottom: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 1px; }
+      .pane-head-eyebrow { font-size: .68rem; font-weight: 800; text-transform: uppercase;
+                           letter-spacing: .08em; color: var(--color-text-muted); }
+      .pane-head-name { font-size: .95rem; font-weight: 700; color: var(--color-text-primary);
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* The item is flush to the column edge, so the focus ring is inset or it is clipped. */
+      .nav-item:focus-visible { outline: 2px solid var(--color-amber-700); outline-offset: -2px; }
+      .nav-group { display: flex; flex-direction: column; gap: 2px; padding: 0; }
+      .nav-group + .nav-group { margin-top: 2px; }
+      /* Exactly ONE hairline: it separates where you take part from what the agent holds and how it is
+         set up. Uniform gaps everywhere carried no grouping information and only made the list sparse. */
+      .nav-group.region-start { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--color-border); }
+      .nav-group.region-exit { margin-top: 1rem; }
+      .portal-settings-pane .nav-group + .nav-group { margin-top: 1rem; }
+      /* Small-caps is now ONLY the pane's static labels. --color-text-faint was 2.6:1 on white (fails AA). */
+      .nav-group-heading { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-muted); padding: .35rem .75rem .15rem; }
       .nav-item {
         display: flex; align-items: center; gap: .65rem; padding: .55rem .75rem; border-radius: var(--radius-8);
+        min-height: 44px;
         color: var(--color-text-body); font-size: .9rem; font-weight: 500; text-decoration: none;
         border-left: 3px solid transparent; transition: background .15s ease, color .15s ease, transform .1s ease;
       }
@@ -1094,14 +1152,26 @@
       @media (min-width: 768px) {
         .portal-sidebar { display: flex; flex-direction: column; flex: 0 0 var(--sidebar-w); width: var(--sidebar-w); padding: 1rem .75rem; border-right: 1px solid var(--color-border); background: var(--color-surface-sunken); position: sticky; top: var(--topbar-h); align-self: flex-start; height: calc(100dvh - var(--topbar-h)); overflow-y: auto; }
         .portal-settings-pane {
-          display: flex; flex-direction: column; flex: 0 0 var(--settings-pane-w, 13.5rem);
-          width: var(--settings-pane-w, 13.5rem); padding: 1rem .75rem;
-          border-right: 1px solid var(--color-border); background: var(--color-surface);
+          display: flex; flex-direction: column; flex: 0 0 var(--settings-pane-w);
+          width: var(--settings-pane-w); padding: 1rem .75rem;
+          /* One step lighter than the sidebar and NOT white: white made it read as part of the content,
+             which is why the two columns felt unrelated. */
+          border-right: 0; background: var(--color-surface-raised);
           position: sticky; top: var(--topbar-h); align-self: flex-start;
           height: calc(100dvh - var(--topbar-h)); overflow-y: auto;
         }
         .portal-bottomnav { display: none; }
         .portal-main { padding: 2rem 2rem 3rem; }
+        /* `--portal-max` was declared and never used: explanatory paragraphs ran the full 920px, about
+           150 characters a line. Cards keep the full width; prose gets a measure. */
+        .portal-main > * { max-width: 1040px; }
+        .portal-main p { max-width: 70ch; }
+      }
+      /* Two nav columns at 1024 would leave ~510px of content. Both narrow; the longest labels still
+         fit — `Discussion replies` ~173px in the pane, `Back to your home` ~175px in the sidebar. */
+      @media (min-width: 768px) and (max-width: 1199px) {
+        :root { --sidebar-w: 208px; --settings-pane-w: 192px; }
+        .portal-main { padding: 1.5rem 1.25rem 3rem; }
       }
       @media (max-width: 559px) {
         .manage-grid { grid-template-columns: 1fr; }

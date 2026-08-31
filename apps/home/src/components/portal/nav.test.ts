@@ -71,6 +71,40 @@ describe('areas are present or absent as a whole — never rearranged', () => {
   });
 });
 
+describe('the shape after the 2026-08-31 design review', () => {
+  it('Settings is LAST — it is the door you take to change the thing you were working in', () => {
+    for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
+      const g = buildNav(whitelabel, {}, scope);
+      // (a non-person workspace ends with the "Back to your home" exit)
+      const meaningful = g.filter((x) => !x.isExit);
+      expect(meaningful[meaningful.length - 1]!.items.map((i) => i.label)).toEqual(['Settings']);
+    }
+  });
+
+  it('carries exactly ONE region divider — more than one carries no information', () => {
+    for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
+      expect(buildNav(whitelabel, {}, scope).filter((g) => g.startsRegion)).toHaveLength(1);
+    }
+  });
+
+  it('no group heads the nav with the workspace NAME — it uppercased a user-supplied string', () => {
+    // It also existed for org/service and not person, so every row shifted when you switched context.
+    const org = buildNav(whitelabel, {}, ORG_SCOPE, 'steward', 'alice-home-church');
+    expect(org.some((g) => (g.heading ?? '').includes('alice'))).toBe(false);
+    expect(org[0]!.heading).toBeUndefined();
+  });
+
+  it('a one-item area names itself, so the row reads as the destination', () => {
+    // Records and Attestations hold one item each today; the sidebar folds them to plain rows, so the
+    // item has to carry the area's noun rather than a disambiguator for a heading that is not rendered.
+    const l = labels(buildNav(whitelabel, {}, PERSON));
+    expect(l).toContain('Records');
+    expect(l).toContain('Attestations');
+    expect(l).not.toContain('All records');
+    expect(l).not.toContain('Signed statements');
+  });
+});
+
 describe('account surfaces left the workspace nav for the user menu', () => {
   it('no class shows Security, Connected, Your apps or Network in the left nav', () => {
     for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
