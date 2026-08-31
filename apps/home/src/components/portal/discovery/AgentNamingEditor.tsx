@@ -11,22 +11,29 @@
 // The projection writes name records, so it is run from the same page. What stays in the Studio is the
 // CARD — a card is a document about the agent; a projection is what one target is told about it
 // (ADR-0062), and they are not the same thing.
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { useCardDetail, useCards, useCanSignFor, useStudioAgent, type StudioScopeKind } from '../../studio/useStudio';
-import { studioBasePath } from '../../studio/CardStudio';
-import { ListingFlow } from '../../studio/ListingFlow';
-import { PublishedMetadataPanels } from './AgentMetadataTiers';
-import { mutedText } from '../theme';
+import { useCardDetail, useCards, useStudioAgent, type StudioScopeKind } from '../../studio/useStudio';
+import { publishProjection } from '../../studio/publish-projection';
+import { AccountProfilePanel } from './AgentMetadataTiers';
+import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../lib/name-properties';
+import { BusyButton } from '../../shared/BusyButton';
+import { cardSty, inputSty, mono, mutedText, errorText } from '../theme';
 
 /**
- * The card projection that writes this agent's name records, for the agent's PRIMARY card.
+ * ONE editor for what this name says on chain — and one Save.
  *
- * Naming asks about one name, so it shows one card's projection — the primary. A managed agent with
- * several cards (staging, a second environment) still reaches the others through the Studio; putting a
- * card picker here would make Naming a card surface, which is the collapse this page exists to undo.
+ * This screen used to carry two writers for one record: the card projection had its own button and its
+ * own status ("Listed, but shows an older version of the card"), and the name-record editor had another
+ * ("No changes"). Both write the same on-chain record for the same name, so they could contradict each
+ * other on screen, and the person was asked to understand a distinction that is ours, not theirs.
+ *
+ * There is one record, so there is one Save. Under it, two writes still happen because the fields have
+ * different provenance — the card-derived ones (display name, A2A endpoint, card address and digest) go
+ * through the projection, which is what keeps the card's signature and the record tied together; the
+ * hand-written ones are a direct property write. Which of those runs depends on what actually changed.
  */
-function NamingProjection({ kind, agent }: { kind: StudioScopeKind; agent: string }) {
+function NameRecordSection({ kind, agent }: { kind: StudioScopeKind; agent: string }) {
   const ctx = useStudioAgent(kind, agent);
   const { cards, loaded: cardsLoaded } = useCards(ctx.delegation);
   const primary = useMemo(
@@ -35,37 +42,124 @@ function NamingProjection({ kind, agent }: { kind: StudioScopeKind; agent: strin
   );
   const cardId = primary?.resource.cardResourceId ?? '';
   const state = useCardDetail(ctx.delegation, cardId);
-  const canSign = useCanSignFor(ctx.sa);
+  const published = state.detail?.releases.filter((r) => r.state === 'published').at(-1) ?? null;
 
-  if (!ctx.delegation || !ctx.sa) return null;
-  if (!cardsLoaded) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Checking what your card publishes here…</p>;
-  if (!primary) {
+  const [records, setRecords] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
+  const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
+  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const name = ctx.name || null;
+  const load = useCallback(async () => {
+    if (!name) { setRecords({}); return; }
+    const r = await readNameRecords(name).catch(() => ({} as Record<string, string | undefined>));
+    const only: Partial<Record<EditablePropKey, string>> = {};
+    for (const { key } of EDITABLE_PROPS) only[key] = (r as Record<string, string | undefined>)[key] ?? '';
+    setRecords(only); setDraft(only);
+  }, [name]);
+  useEffect(() => { void load(); }, [load]);
+
+  const edited = records ? EDITABLE_PROPS.filter(({ key }) => (draft[key] ?? '') !== (records[key] ?? '')) : [];
+  // The card carries fields this record is supposed to mirror. "Moved" means the published card is not
+  // the one this record was last written from — either it was never written, or a newer card replaced the
+  // one it names. Saving then re-runs the projection, which is the whole of "point my name at my card",
+  // with no second button for it.
+  const naming = state.projections.find((p) => p.family === 'ap-naming') ?? null;
+  const cardMoved = !!published
+    && (!naming?.instance.lastPublication || naming.selectedCard?.releaseId !== published.releaseId);
+  const pending = edited.length + (cardMoved ? 1 : 0);
+
+  const save = (): void => {
+    setBusy(true); setError(null); setNote(null);
+    void (async () => {
+      try {
+        if (!name || !ctx.delegation || !ctx.sa) return;
+        if (cardMoved && published) {
+          await publishProjection({
+            family: 'ap-naming',
+            delegation: ctx.delegation,
+            sa: ctx.sa as Address,
+            cardResourceId: cardId,
+            releaseId: published.releaseId,
+            signHashFor: ctx.signHashFor,
+            newMutation: () => ({ idempotencyKey: crypto.randomUUID(), correlationId: crypto.randomUUID() }),
+            onPhase: (ph) => setPhase(PHASE[ph]),
+          });
+        }
+        if (edited.length > 0) {
+          setPhase('Writing to the naming service…');
+          const changes: Partial<Record<EditablePropKey, string>> = {};
+          for (const { key } of edited) changes[key] = draft[key] ?? '';
+          const signHash = await ctx.signHashFor();
+          const out = await writeNameProperties(ctx.sa as Address, name, changes, signHash);
+          if (!out.ok) { setError(out.error); return; }
+        }
+        setNote('Saved. Anyone who resolves this name reads this.');
+        await load();
+        state.reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false); setPhase('');
+      }
+    })();
+  };
+
+  if (!name) {
     return (
-      <p style={{ ...mutedText, fontSize: '.82rem' }}>
-        No agent card yet, so nothing is published to this name from one. A card describes what this agent
-        is and how to reach it; making one is the first step in <b>Agent Card</b>.
-      </p>
+      <div style={cardSty}>
+        <p style={{ ...mutedText, fontSize: '.82rem', margin: 0 }}>
+          This agent has no name yet, so there is no record to write. Claim one above and this becomes
+          what the name tells the world.
+        </p>
+      </div>
     );
   }
-  if (!state.loaded) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Loading the card…</p>;
-  if (!state.detail) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Couldn&rsquo;t read the card just now.</p>;
+  if (records === null || !cardsLoaded) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Reading the naming service…</p>;
 
   return (
-    <ListingFlow
-      family="ap-naming"
-      delegation={ctx.delegation}
-      detail={state.detail}
-      projections={state.projections}
-      scopes={ctx.scopes}
-      sa={ctx.sa}
-      agentName={ctx.name}
-      basePath={`${studioBasePath(kind, agent)}/${encodeURIComponent(cardId)}`}
-      canSign={canSign}
-      signHashFor={ctx.signHashFor}
-      onReload={state.reload}
-    />
+    <div style={cardSty}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', marginBottom: '.4rem' }}>
+        <h3 style={{ margin: 0 }}>What this name says</h3>
+        <span style={{ fontSize: '.68rem', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '.15rem .5rem', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>public</span>
+      </div>
+      <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
+        Written on chain under <code style={mono}>{name}</code>. Anyone who resolves the name reads these —
+        including the <b>A2A endpoint</b>, which is where other agents send messages.
+      </p>
+
+      {cardMoved && (
+        <p style={{ fontSize: '.82rem', margin: '0 0 .6rem', padding: '.5rem .6rem', borderRadius: 8, background: 'var(--c-primary-subtle, #fffbeb)' }}>
+          Your agent card has changed since this record was written. Saving points the name at the current
+          card as well as writing anything you edit below.
+        </p>
+      )}
+
+      {EDITABLE_PROPS.map(({ key, label, hint }) => (
+        <div key={key} style={{ marginBottom: '.7rem' }}>
+          <label htmlFor={`rec-${key}`} style={{ display: 'block', fontSize: '.8rem', fontWeight: 600 }}>{label}</label>
+          <span style={{ ...mutedText, fontSize: '.74rem' }}>{hint}</span>
+          <input id={`rec-${key}`} value={draft[key] ?? ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} style={{ ...inputSty, width: '100%' }} />
+        </div>
+      ))}
+
+      <BusyButton className="btn-primary" busy={busy} busyLabel={phase || 'Saving…'} disabled={pending === 0} onClick={save}>
+        {pending === 0 ? 'No changes to save' : 'Save to the naming service'}
+      </BusyButton>
+      {note && <p style={{ ...mutedText, fontSize: '.82rem', marginTop: '.5rem' }} role="status">{note}</p>}
+      {error && <p style={{ ...errorText, fontSize: '.82rem', marginTop: '.5rem' }}>{error}</p>}
+    </div>
   );
 }
+
+const PHASE: Record<'preparing' | 'custodian' | 'writing' | 'confirming', string> = {
+  preparing: 'Preparing…',
+  custodian: 'Waiting for your custodian…',
+  writing: 'Writing to the naming service…',
+  confirming: 'Confirming…',
+};
 
 /** The published half of Naming: the records under the name, the projection that writes them, and the
  *  read-only account profile. Each class renders its own "the name itself" section above this. */
@@ -76,14 +170,10 @@ export function AgentNamingEditor({ kind, agent }: { kind: StudioScopeKind; agen
   return (
     <>
       <div style={{ marginTop: '1.5rem' }}>
-        <h3 className="subhead">What your card publishes here</h3>
-        <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-          Pointing your name at your agent card, so anyone who looks the name up finds the card.
-        </p>
-        <NamingProjection kind={kind} agent={agent} />
+        <NameRecordSection kind={kind} agent={agent} />
       </div>
       <div style={{ marginTop: '1.5rem' }}>
-        <PublishedMetadataPanels agent={ctx.sa as Address} name={ctx.name || null} cls={cls} />
+        <AccountProfilePanel agent={ctx.sa as Address} />
       </div>
     </>
   );
