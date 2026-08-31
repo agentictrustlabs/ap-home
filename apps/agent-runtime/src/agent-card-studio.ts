@@ -256,7 +256,7 @@ export interface StoredApprovalV1 {
 }
 
 export type StudioOp =
-  | 'card.list' | 'card.create' | 'card.get' | 'card.patchDraft' | 'card.import' | 'card.validate' | 'card.createRelease' | 'card.wellKnown'
+  | 'card.list' | 'card.create' | 'card.get' | 'card.page' | 'card.patchDraft' | 'card.import' | 'card.validate' | 'card.createRelease' | 'card.wellKnown'
   | 'release.requestApproval' | 'release.approve' | 'release.sign' | 'release.publish' | 'release.verifyPublication'
   | 'release.deprecate' | 'release.revoke'
   | 'projection.list' | 'projection.configure' | 'projection.preview' | 'projection.planPublication'
@@ -264,7 +264,7 @@ export type StudioOp =
   | 'binding.list' | 'binding.verify';
 
 export const STUDIO_OPS: readonly StudioOp[] = [
-  'card.list', 'card.create', 'card.get', 'card.patchDraft', 'card.import', 'card.validate', 'card.createRelease', 'card.wellKnown',
+  'card.list', 'card.create', 'card.get', 'card.page', 'card.patchDraft', 'card.import', 'card.validate', 'card.createRelease', 'card.wellKnown',
   'release.requestApproval', 'release.approve', 'release.sign', 'release.publish', 'release.verifyPublication',
   'release.deprecate', 'release.revoke',
   'projection.list', 'projection.configure', 'projection.preview', 'projection.planPublication',
@@ -277,9 +277,11 @@ export function isStudioOp(s: string): s is StudioOp {
 }
 
 /** Which entitlement each op exercises (spec 347 §9). Publishing a projection is scoped per family at call time. */
-const OP_SCOPE: Record<Exclude<StudioOp, 'projection.recordPublication'>, StudioScope> = {
+const OP_SCOPE: Record<Exclude<StudioOp, 'projection.recordPublication'>, StudioScope | readonly StudioScope[]> = {
   'card.list': 'agent.card.read',
   'card.get': 'agent.card.read',
+  // A composite read holds the scopes of EVERY part it returns — never the weakest of them.
+  'card.page': ['agent.card.read', 'agent.projection.read'],
   'card.create': 'agent.card.draft',
   'card.patchDraft': 'agent.card.draft',
   'card.import': 'agent.card.import',
@@ -409,8 +411,11 @@ export class AgentCardStudio {
     if (!isStudioOp(op)) return { status: 404, body: { ok: false, error: 'unknown_op', detail: `no Studio op "${op}"` } };
     try {
       const auth = await this.scopesFor(caller);
-      const required: StudioScope = op === 'projection.recordPublication' ? projectionPublishScope(await this.familyOf(str(args.instanceId, 'instanceId'))) : OP_SCOPE[op];
-      if (!auth.scopes.includes(required)) {
+      const requiredSpec = op === 'projection.recordPublication' ? projectionPublishScope(await this.familyOf(str(args.instanceId, 'instanceId'))) : OP_SCOPE[op];
+      const requiredAll: readonly StudioScope[] = Array.isArray(requiredSpec) ? requiredSpec : [requiredSpec as StudioScope];
+      const missing = requiredAll.filter((sc) => !auth.scopes.includes(sc));
+      const required = missing[0] ?? requiredAll[0]!;
+      if (missing.length > 0) {
         await this.audit(op, caller, auth.kind, 'denied', { canonicalAgentId: caip10(this.deps.env.chainId, caller.agent), objectId: String(args.cardResourceId ?? args.instanceId ?? args.bindingId ?? ''), actor: caller.principal, correlationId: String((args.mutation as { correlationId?: string } | undefined)?.correlationId ?? 'none'), privacyClass: 'never-public' }, `scope ${required} not held (${auth.kind}, ${auth.relationship})`);
         throw new StudioError(403, 'scope_not_held', `${op} requires ${required}; a ${auth.kind} ${auth.relationship} does not hold it`);
       }
@@ -431,6 +436,7 @@ export class AgentCardStudio {
     switch (op) {
       case 'card.list': return this.cardList();
       case 'card.get': return this.cardGet(str(args.cardResourceId, 'cardResourceId'));
+      case 'card.page': return this.cardPage(str(args.cardResourceId, 'cardResourceId'));
       case 'card.create': return this.mutation(op, args, (m) => this.cardCreate(caller, kind, args, m));
       case 'card.patchDraft': return this.mutation(op, args, (m) => this.cardPatchDraft(caller, kind, args, m));
       case 'card.import': return this.mutation(op, args, (m) => this.cardImport(caller, kind, args, m));
@@ -658,6 +664,51 @@ export class AgentCardStudio {
     ]);
     const releases = rest.filter((r): r is A2AAgentCardReleaseV1 => !!r);
     return { resource, draft: (draft as A2AAgentCardDraftV1 | null) ?? null, releases, meta };
+  }
+
+  /** Everything ONE card screen shows, in TWO vault hops.
+   *
+   *  The screen used to be three ops — card.get + projection.list + binding.list — and each op is its own
+   *  request, its own delegation mint (a KMS signature) and its own pair of vault hops. That is three
+   *  authorizations for one screen, and the page waited on the slowest of them.
+   *
+   *  Every key here is knowable in two rounds: the three indexes and the card's meta are known before the
+   *  first read; everything else is named by what those return. So this is not a special case bolted on —
+   *  it is the same reads, ordered by what they depend on.
+   *
+   *  It is NOT a weaker door: `card.page` requires the scopes of all three parts (OP_SCOPE above), and
+   *  demo-mcp still gates every record against the delegation. A caller holding only one of the scopes is
+   *  refused here and must ask for the part it may have. */
+  private async cardPage(cardResourceId: string): Promise<Record<string, unknown>> {
+    const [idx, metaRaw, projIdx, bindIdx] = await this.getMany<unknown>([
+      STUDIO_KEYS.cardIndex(),
+      STUDIO_KEYS.meta(cardResourceId),
+      STUDIO_KEYS.projectionIndex(),
+      STUDIO_KEYS.bindingIndex(),
+    ]);
+    const resource = ((idx as { resources?: A2AAgentCardResourceV1[] } | null)?.resources ?? []).find((r) => r.cardResourceId === cardResourceId);
+    if (!resource) throw new StudioError(404, 'card_not_found');
+    const meta = metaRaw as CardMetaV1 | null;
+    if (!meta) throw new StudioError(500, 'card_meta_missing', `agent-cards:${cardResourceId}:meta is missing`);
+    const instanceIds = (projIdx as { instanceIds?: string[] } | null)?.instanceIds ?? [];
+    const bindingIds = (bindIdx as { bindingIds?: string[] } | null)?.bindingIds ?? [];
+
+    const releaseKeys = meta.releaseIds.map((id) => STUDIO_KEYS.release(cardResourceId, id));
+    const projectionKeys = instanceIds.map((id) => STUDIO_KEYS.projection(id));
+    const bindingKeys = bindingIds.map((id) => STUDIO_KEYS.binding(id));
+    const got = await this.deps.vault.getMany([STUDIO_KEYS.draft(cardResourceId), ...releaseKeys, ...projectionKeys, ...bindingKeys]);
+
+    const releases = releaseKeys.map((k) => got[k]).filter((r): r is A2AAgentCardReleaseV1 => !!r);
+    const projections = projectionKeys.map((k) => got[k]).filter((p): p is StoredProjectionV1 => !!p);
+    const bindings = bindingKeys.map((k) => got[k]).filter((b): b is ExternalIdentityBindingV1 => !!b);
+    return {
+      resource,
+      draft: (got[STUDIO_KEYS.draft(cardResourceId)] ?? null) as A2AAgentCardDraftV1 | null,
+      releases,
+      meta,
+      projections: projections.map((p) => ({ instance: p.instance, family: p.family, selectedCard: p.selectedCard ?? null, planIds: p.planIds, receiptIds: p.receiptIds })),
+      bindings,
+    };
   }
 
   private async cardCreate(caller: StudioCaller, kind: 'human' | 'service-agent', args: Record<string, unknown>, m: StudioMutationV1): Promise<Record<string, unknown>> {

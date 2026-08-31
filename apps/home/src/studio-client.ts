@@ -190,6 +190,21 @@ export async function getCard(d: DelegationWire, cardResourceId: string): Promis
   return studioCall<CardDetail>('card.get', d, { cardResourceId });
 }
 
+/** Everything one card screen shows, in ONE call.
+ *
+ *  The screen needs the card, its projections and its bindings together, and asking for them separately
+ *  cost three requests, three delegation mints and three pairs of vault hops — the page waited on the
+ *  slowest. `card.page` is the same reads under one authorization; it requires the scopes of all three
+ *  parts, so this is a cheaper route to the same data, never a wider one. */
+export interface CardPage extends CardDetail {
+  projections: StoredProjection[];
+  bindings: ExternalIdentityBindingV1[];
+}
+
+export async function getCardPage(d: DelegationWire, cardResourceId: string): Promise<CardPage> {
+  return studioCall<CardPage>('card.page', d, { cardResourceId });
+}
+
 /**
  * What the agent's public `/.well-known/agent-card.json` is serving RIGHT NOW — the operational endpoint,
  * not the draft. `source` says which plane answered: `released` = the published bytes, `live` = the runtime

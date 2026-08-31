@@ -336,6 +336,26 @@ describe('reads cost a bounded number of vault round-trips', () => {
     expect(w.batchReads[1]!.length).toBe(4);             // one hop carrying the draft and all 3 releases
   });
 
+  it('card.page answers the whole screen in TWO hops and returns what three ops used to', async () => {
+    const created = await ok<{ resource: A2AAgentCardResourceV1 }>(studio.run(as(STEWARD), 'card.create', mutation()));
+    const card = created.resource.cardResourceId;
+    await ok(studio.run(as(STEWARD), 'card.createRelease', { cardResourceId: card, ...mutation() }));
+    w.batchReads = [];
+    const page = await ok<{ resource: unknown; draft: unknown; releases: unknown[]; projections: unknown[]; bindings: unknown[] }>(
+      studio.run(as(STEWARD), 'card.page', { cardResourceId: card }),
+    );
+    expect(w.batchReads.length).toBe(2);   // the three indexes + meta, then everything they name
+    expect(page.releases.length).toBe(1);
+    expect(page.resource).toBeTruthy();
+    expect(Array.isArray(page.projections)).toBe(true);
+    expect(Array.isArray(page.bindings)).toBe(true);
+  });
+
+  it('card.page is 404 for a card that is not there, like card.get', async () => {
+    const r = await studio.run(as(STEWARD), 'card.page', { cardResourceId: 'card-nope' });
+    expect(r.status).toBe(404);
+  });
+
   it('card.list reads every card in ONE batch, however many there are', async () => {
     for (let i = 0; i < 4; i++) await ok(studio.run(as(STEWARD), 'card.create', { environment: 'staging', ...mutation() }));
     w.batchReads = [];

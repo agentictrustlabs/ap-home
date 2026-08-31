@@ -4473,6 +4473,73 @@ export async function callMcpToolBound(args: {
   });
 }
 
+/** A minted delegation token is a BUDGETED grant, not a one-shot: it carries a 300s TTL and
+ *  `usageLimit: 10`, and demo-mcp accounts every use against that budget in D1. We were nonetheless
+ *  minting a brand-new one for EVERY vault hop — and each mint costs a GCP KMS signature (~0.5s), so a
+ *  four-call page spent seconds signing tokens it already held.
+ *
+ *  This reuses a live token within its budget. What it does NOT reuse is the per-call invocation proof:
+ *  that one binds the exact operation and arguments (spec 287) and is still built fresh below, so
+ *  possession is proven per call and no authority is widened. The cache key is the WHOLE delegation plus
+ *  the session key, so a different grant — or a different signer — can never be served another's token.
+ *  Margins are deliberate: we spend at most 6 of the 10 uses and refresh a minute before expiry, so a
+ *  concurrent burst cannot push a token past a limit demo-mcp would (correctly) reject it for. */
+const MINTED_TOKEN_TTL_SECONDS = 300;
+const MINTED_TOKEN_USAGE_LIMIT = 10;
+const MINTED_TOKEN_SAFE_USES = 6;
+const MINTED_TOKEN_REFRESH_MARGIN_MS = 60_000;
+const mintedTokens = new Map<string, { token: string; expiresAt: number; uses: number }>();
+const mintsInFlight = new Map<string, Promise<string>>();
+
+export async function budgetedDelegationToken(args: {
+  delegation: IncomingDelegation;
+  signerAddress: Address;
+  signMessage: (message: string) => Promise<`0x${string}`>;
+  auditSink: ReturnType<typeof buildAuditSink>;
+  correlationId: string;
+}): Promise<string> {
+  const principal = args.delegation.delegator as Address;
+  const struct = toDelegationStruct(args.delegation);
+  // A delegation struct carries BigInts (salt, caveat terms); plain JSON.stringify THROWS on those, so
+  // the key is built with an explicit bigint encoding. The suffix keeps 1n distinct from the string "1".
+  const key = JSON.stringify(
+    [principal.toLowerCase(), args.signerAddress.toLowerCase(), struct],
+    (_k, v) => (typeof v === 'bigint' ? `${v.toString()}n` : (v as unknown)),
+  );
+  const now = Date.now();
+  const hit = mintedTokens.get(key);
+  if (hit && hit.uses < MINTED_TOKEN_SAFE_USES && hit.expiresAt - now > MINTED_TOKEN_REFRESH_MARGIN_MS) {
+    hit.uses += 1;
+    return hit.token;
+  }
+  const flying = mintsInFlight.get(key);
+  if (flying) return flying;   // concurrent hops share ONE mint instead of racing to sign
+  const p = (async (): Promise<string> => {
+    const { token } = await mintDelegationToken(
+      {
+        iss: 'demo-a2a',
+        aud: MCP_AUDIENCE,
+        sub: principal, // demo-mcp keys the record by the delegator (the principal SA)
+        delegation: struct,
+        sessionKeyAddress: args.signerAddress,
+        ttlSeconds: MINTED_TOKEN_TTL_SECONDS,
+        usageLimit: MINTED_TOKEN_USAGE_LIMIT,
+      },
+      args.signMessage,
+      { auditSink: args.auditSink, correlationId: args.correlationId },
+    );
+    if (mintedTokens.size > 200) mintedTokens.clear(); // an isolate is not a store; keep it bounded
+    mintedTokens.set(key, { token, expiresAt: Date.now() + MINTED_TOKEN_TTL_SECONDS * 1000, uses: 1 });
+    return token;
+  })();
+  mintsInFlight.set(key, p);
+  try {
+    return await p;
+  } finally {
+    mintsInFlight.delete(key);
+  }
+}
+
 /** CRIT-2 W3 (audit 2026-07-13) — SERVER-SIDE client-mint for the A2aTaskDO seams (orchestrate + FR-3.4
  *  entitlement-VC). There is no browser to sign a DEL-001 self-leaf here, so possession is proven with a
  *  per-call spec-287 `AgenticInvocationProofV1`: mint a token signed by a DO-held KMS session key (the
@@ -4492,19 +4559,13 @@ export async function callMcpToolWithProof(args: {
   if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign (invocation proof, W3)');
   const principal = args.delegation.delegator as Address;
   const toolArgs = args.toolArgs ?? {};
-  const { token } = await mintDelegationToken(
-    {
-      iss: 'demo-a2a',
-      aud: MCP_AUDIENCE,
-      sub: principal, // demo-mcp keys the record by the delegator (the principal SA)
-      delegation: toDelegationStruct(args.delegation),
-      sessionKeyAddress: signer.address as Address,
-      ttlSeconds: 300,
-      usageLimit: 10,
-    },
-    (msg) => signer.signMessage({ message: msg }),
-    { auditSink, correlationId },
-  );
+  const token = await budgetedDelegationToken({
+    delegation: args.delegation,
+    signerAddress: signer.address as Address,
+    signMessage: (message) => signer.signMessage({ message }),
+    auditSink,
+    correlationId,
+  });
   // The proof `args` MUST be the EXACT handler arg object demo-mcp reconstructs (`{ args: <toolArgs> }`) so
   // the argumentsHash matches after withDelegation strips the token/invocationProof envelope (spec 287).
   const now = Date.now();

@@ -15,8 +15,7 @@ import { resolveVia, signHashFor } from '../../home/onboarding';
 import type { SignHash } from '../../connect-client';
 import { studioScopesFor } from '../../lib/studio-view';
 import {
-  getCard,
-  listBindings,
+  getCardPage,
   listCards,
   listProjections,
   type CardDetail,
@@ -223,12 +222,10 @@ export function useCardDetail(delegation: DelegationWire | null, cardResourceId:
     }
     let cancelled = false;
     setError(null);
-    void Promise.all([
-      getCard(delegation, cardResourceId),
-      listProjections(delegation).catch(() => [] as StoredProjection[]),
-      listBindings(delegation).catch(() => [] as ExternalIdentityBindingV1[]),
-    ])
-      .then(([d, p, b]) => {
+    // ONE call for the whole screen (`card.page`). Three separate reads meant three delegation mints and
+    // three pairs of vault hops, and the screen waited on the slowest of them.
+    void getCardPage(delegation, cardResourceId)
+      .then(({ projections: p, bindings: b, ...d }) => {
         if (cancelled) return;
         setDetail(d);
         setProjections(p);
