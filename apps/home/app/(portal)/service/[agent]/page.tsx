@@ -49,9 +49,9 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
               <TreasuryCard
                 name={svc.name} address={svc.agent} sublabel={sublabel}
                 person={agentAddress} via={session.via} token={session.token} refreshKey={version} onFunded={reload}
+                // Naming happens under Naming — an Overview says what is true, it does not run ceremonies.
                 nameSlot={
-                  <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={agentAddress}
-                    token={session.token} via={session.via} onDone={reload} />
+                  <a className="manage-card-blurb" href={`/service/${svc.agent}/naming`}>Give it a name under Naming →</a>
                 }
               />
             </div>

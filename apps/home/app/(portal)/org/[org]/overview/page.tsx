@@ -2,16 +2,16 @@
 // Org workspace — Overview (spec 315). The URL carries the org SA; everything here is scoped to
 // that one organization: identity and its treasury, at a glance.
 //
-// It carries NO custodial ceremonies. It used to hold every one the org has — name it, create its
-// treasury, name that, fund it — so the first screen of a workspace was a stack of forms, and each of
-// those forms already existed on the page that owns it (Naming, Treasuries). Overview shows what is
-// true and points at where it is done.
+// It carries NO custodial ceremonies AND no treasury. It used to hold every ceremony the org has — name
+// it, create its treasury, name that, fund it — so the first screen of a workspace was a stack of forms,
+// each of which already existed on the page that owns it. Creating a treasury is a Stewardship decision
+// made on the Treasuries page; an organization's Overview is about the ORGANIZATION.
 import { use } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
 import {
-  useManagedAgents, BalanceLine,
+  useManagedAgents,
 } from '../../../../../src/components/portal/ManagedAgents';
 import { AddressChip } from '../../../../../src/components/shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../../../../../src/components/shared/Icons';
@@ -31,7 +31,6 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
 
   // Class, not kind: a team IS an organization (ADR-0046) and its workspace lives here too.
   const orgAgent = agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(org));
-  const treasury = agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
   const title = orgAgent?.name ? nameLabel(orgAgent.name) : 'Organization';
 
   return (
@@ -63,28 +62,6 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
                 It has no public name yet, so nothing can look it up.{' '}
                 <a href={`/org/${org}/naming`}>Give it one under Naming →</a>
               </p>
-            )}
-          </div>
-
-          <div className="manage-card">
-            <div className="manage-card-head">
-              <span className="manage-card-label"><LandmarkIcon size={16} /> {treasury ? (treasury.name || 'Unnamed treasury') : 'Treasury'}</span>
-              <span className="manage-card-badge">{treasury ? 'Org treasury' : 'Not yet'}</span>
-            </div>
-            {treasury ? (
-              <>
-                <div style={{ margin: '.45rem 0' }}><AddressChip address={treasury.agent as `0x${string}`} size="sm" /></div>
-                <p className="manage-card-blurb" style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem' }}>
-                  <BalanceLine address={treasury.agent} refreshKey={version} />
-                  <a href={EXPLORER + treasury.agent} target="_blank" rel="noreferrer">explorer ↗</a>
-                </p>
-                <p className="manage-card-blurb"><a href={`/org/${org}/treasury`}>Fund it or manage it →</a></p>
-              </>
-            ) : (
-              <>
-                <p className="manage-card-blurb">This organization&apos;s money agent — holds and moves its funds, separate from its identity.</p>
-                <p className="manage-card-blurb"><a href={`/org/${org}/treasury`}>Create one under Treasuries →</a></p>
-              </>
             )}
           </div>
         </div>

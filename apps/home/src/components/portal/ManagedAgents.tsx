@@ -1,6 +1,5 @@
 'use client';
 // spec 275 — the member's Smart-Agent tree, split across the portal's dedicated areas:
-//   /you          → PersonalTreasurySection (your personal money agent)
 //   /organizations→ OrganizationsManager   (orgs + each org's treasury)
 //   /treasuries   → TreasuriesRollup        (every treasury, personal + org)
 // Each agent is an on-chain SA with an EXACT name, custodied by the member's ROOT credential,
@@ -355,43 +354,6 @@ export function TreasuryCard({
 }
 
 // ── /you — your personal treasury ───────────────────────────────────────
-export function PersonalTreasurySection({ token, person, via }: { token: string | null; person: string | null; via: string }) {
-  const { agents, loaded, version, reload } = useManagedAgents(token);
-  if (!token || !person) return null;
-  const treasury = agents.find((a) => a.kind === 'person-treasury');
-
-  return (
-    <div className="dash-section" style={{ marginTop: '1.5rem' }}>
-      <h2>Your personal treasury</h2>
-      <p style={{ color: 'var(--c-g500, #64748b)', fontSize: '.9rem', marginTop: '-.4rem', marginBottom: '.8rem' }}>
-        A Smart Agent that holds and moves your funds, separate from your identity — on-chain, named, and
-        custodied by you.
-      </p>
-      {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
-      ) : treasury ? (
-        <div className="manage-grid">
-          <TreasuryCard name={treasury.name} address={treasury.agent}
-            person={person} via={via} token={token} refreshKey={version} onFunded={reload}
-            nameSlot={<NameAgentForm agent={treasury.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
-        </div>
-      ) : (
-        <div className="manage-grid">
-          <div className="manage-card">
-            <div className="manage-card-head">
-              <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
-              <span className="manage-card-label">Personal treasury</span>
-              <span className="manage-card-badge">Not yet</span>
-            </div>
-            <p className="manage-card-blurb">Create your money agent — it can hold funds and pay on your behalf, while your identity stays separate.</p>
-            <CreateAgentForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** spec 342 — the one place an inactive org is shown, so it is the one place it can be brought
  *  back. Writes the org's own `org.lifecycle` record over the stewardship delegation the tree row
  *  already carries; without that delegation there is nothing to present, so the row says so
