@@ -6,11 +6,9 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 import { jsonCors, preflight, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { qualifiedAgentName as fullName } from '../../src/lib/domain';
 
-function fullName(name: string): string {
-  const n = name.trim().toLowerCase();
-  return n.endsWith('.impact') ? n : `${n.replace(/\.+$/, '')}.impact`;
-}
+
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const raw = new URL(request.url).searchParams.get('name');

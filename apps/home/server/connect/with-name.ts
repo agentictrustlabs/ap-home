@@ -14,11 +14,9 @@ import type { CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { qualifiedAgentName as fullName } from '../../src/lib/domain';
 
-function fullName(name: string): string {
-  const n = name.trim().toLowerCase();
-  return n.endsWith('.impact') ? n : `${n.replace(/\.+$/, '')}.impact`;
-}
+
 
 const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as

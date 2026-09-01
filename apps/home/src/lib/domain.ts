@@ -112,6 +112,27 @@ export function nameLabel(name: string): string {
   );
 }
 
+/** A name as the naming service will be asked for it — already-qualified names UNCHANGED.
+ *
+ *  The two lookup routes each carried `n.endsWith('.impact') ? n : n + '.impact'`, which appended the
+ *  legacy parent to any name that did not already end in it. A typed name became `phone-6115.me.impact`,
+ *  resolved to nothing, and every typed home reported "No home named …" on its own subdomain and could
+ *  not sign in by name (2026-09-01). It also hardcoded the literal parent instead of this deployment's.
+ *
+ *  The grammar already knows the difference, so ask it: anything `parseAgentName` accepts — canonical
+ *  (`x.me`), scoped (`x.svc@y.org`) or legacy (`x.impact`, `x.demo.agent`) — is qualified and is used as
+ *  given. Only a BARE label takes this deployment's parent. A dotted string the grammar rejects is
+ *  returned untouched: it resolves to nothing, which is the honest answer for a malformed name and
+ *  better than inventing a third name out of it.
+ */
+export function qualifiedAgentName(raw: string): string {
+  const n = raw.trim().toLowerCase().replace(/\.+$/, '');
+  if (!n) return n;
+  const p = parsedOrNull(n);
+  if (p) return p.normalized;
+  return n.includes('.') ? n : `${n}.${AGENT_NAME_PARENT}`;
+}
+
 /** The root a NEW person claim goes under: `.me` once this deployment lists it as claimable, else the legacy parent. */
 export const NEW_PERSON_TLD: string = CLAIMABLE_TLDS.includes('me') ? 'me' : AGENT_NAME_PARENT;
 
