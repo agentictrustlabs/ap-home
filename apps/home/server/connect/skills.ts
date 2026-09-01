@@ -33,7 +33,28 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
-interface SkillRecord { label: string; skillId?: string; relation?: string; proficiency?: number; asserted: boolean; createdAt?: number }
+/**
+ * One entry in the owner's private capability record. `label` predates the vocabulary settling on
+ * "capability" (ADR-0051) and stays as the wire key so existing records keep loading; everything the
+ * profile projects — id, description, tags, examples — is carried alongside it.
+ */
+interface SkillRecord {
+  label: string;
+  skillId?: string;
+  relation?: string;
+  proficiency?: number;
+  asserted: boolean;
+  createdAt?: number;
+  /** Structured fields (ADR-0051): these are what `profile.capabilities[]` and the A2A card project. */
+  capabilityId?: string;
+  description?: string;
+  tags?: string[];
+  examples?: string[];
+}
+
+/** The record key. `skills.data` is the same record under its pre-ADR-0051 name — read for migration. */
+const CAPABILITY_KEY = 'capabilities.data';
+const LEGACY_CAPABILITY_KEY = 'skills.data';
 
 export const onRequestGet = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
@@ -43,7 +64,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // rebuildable cache. Read the DO first and reconcile the cache; fall to the cache only when the
   // plane isn't enabled (empty is an answer, ADR-0013 — not a second mechanism).
   const { readCapabilityRecord } = await import('../lib/capability-record');
-  const authoritative = await readCapabilityRecord<SkillRecord[]>(env, person, bearer, 'skills.data');
+  // Migration read (ADR-0013): the record moved key when the vocabulary settled. New key first; the old
+  // one only while the new is absent. A write always lands on the new key, so a record migrates the
+  // first time its owner saves.
+  let authoritative = await readCapabilityRecord<SkillRecord[]>(env, person, bearer, CAPABILITY_KEY);
+  if (!authoritative || authoritative.length === 0) {
+    authoritative = await readCapabilityRecord<SkillRecord[]>(env, person, bearer, LEGACY_CAPABILITY_KEY);
+  }
   if (Array.isArray(authoritative)) {
     await env.AUTH_CODES.put(`skills:${person}`, JSON.stringify(authoritative));
     return jsonCors({ skills: authoritative }, request);
@@ -69,12 +96,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       proficiency: typeof s.proficiency === 'number' ? Math.max(0, Math.min(10000, s.proficiency)) : undefined,
       asserted: s.asserted === true,
       createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
+      // Structured capability fields (ADR-0051). Bounded like every other field here — this record is
+      // owner-supplied and ends up projected onto a public card, so it is sanitised on the way IN.
+      ...(typeof s.capabilityId === 'string' && s.capabilityId.trim()
+        ? { capabilityId: s.capabilityId.trim().slice(0, 120) } : {}),
+      ...(typeof s.description === 'string' && s.description.trim()
+        ? { description: s.description.trim().slice(0, 400) } : {}),
+      ...(Array.isArray(s.tags)
+        ? { tags: s.tags.filter((t): t is string => typeof t === 'string' && !!t.trim()).slice(0, 12).map((t) => t.trim().slice(0, 40)) } : {}),
+      // ARD allows 2–5 representative queries; cap at 5 so a projection can never over-claim.
+      ...(Array.isArray(s.examples)
+        ? { examples: s.examples.filter((e): e is string => typeof e === 'string' && !!e.trim()).slice(0, 5).map((e) => e.trim().slice(0, 200)) } : {}),
     }));
   await env.AUTH_CODES.put(`skills:${person}`, JSON.stringify(clean));
   // spec 323 W2 — mirror into the authoritative vault record (best-effort; a person whose
   // interactions plane isn't enabled keeps the KV copy until their ceremony re-syncs it).
   const bearer = (request.headers.get('authorization') ?? '').slice(7);
   const { writeCapabilityRecord } = await import('../lib/capability-record');
-  await writeCapabilityRecord(env, person, bearer, 'skills.data', clean);
+  await writeCapabilityRecord(env, person, bearer, CAPABILITY_KEY, clean);
   return jsonCors({ ok: true, count: clean.length }, request);
 };

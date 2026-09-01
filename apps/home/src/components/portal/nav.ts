@@ -247,7 +247,7 @@ export function buildSettingsPane(
     ...(active.kind !== 'service' ? [{ id: 'set-ask', label: 'Ask', href: href('ask'), Icon: BotIcon, status: 'live' as const }] : []),
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
     ...(isPerson ? [{ id: 'set-discussion', label: 'Discussion replies', href: '/discussion-replies', Icon: HashIcon, status: 'live' as const }] : []),
-    { id: 'set-skills', label: 'Skills', href: href('capabilities'), Icon: AwardIcon, status: 'live' },
+    { id: 'set-capabilities', label: 'Capabilities', href: href('capabilities'), Icon: AwardIcon, status: 'live' },
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
   ];
   const access: NavItem[] = [

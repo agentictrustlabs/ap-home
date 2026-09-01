@@ -32,7 +32,7 @@ import {
   RELATIONSHIP_TYPE,
   type RelationshipType,
 } from '@agenticprimitives/agent-relationships';
-import type { Address, Hex } from '@agenticprimitives/types';
+import type { Address, Hex, AdvertisedCapabilityV1 } from '@agenticprimitives/types';
 import { getClient } from './lib/oidc-clients';
 import { fastPollMs } from './lib/fast-poll';
 import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from 'viem';
@@ -2890,7 +2890,43 @@ export const setSkills = setCapabilities;
 // The person's CAPABILITY RECORD — capability claim credentials living in their Connect-home vault (KV,
 // session-authorized) — never public. Each entry has an `asserted` flag; that subset's labels are what
 // `setSkills` publishes for discovery. `SkillClaim` / `asserted` are legacy names (ADR-0051 prose/key split).
-export interface SkillClaim { label: string; skillId?: string; relation?: string; proficiency?: number; asserted: boolean; createdAt?: number }
+export interface CapabilityClaim {
+  /** Human name. Kept as `label` because it is the record's wire key from before the rename. */
+  label: string;
+  skillId?: string;
+  relation?: string;
+  proficiency?: number;
+  /** Published for discovery: this entry's id goes on chain and its content onto the A2A card. */
+  asserted: boolean;
+  createdAt?: number;
+  /** Stable id — the SAME string that lands in `atl:capabilities`, ARD `capabilities[]` and card `skills[].id`. */
+  capabilityId?: string;
+  description?: string;
+  tags?: string[];
+  /** ARD representativeQueries. Only what the owner wrote — a projection must never invent these. */
+  examples?: string[];
+}
+
+/** @deprecated Renamed `CapabilityClaim` (ADR-0051). */
+export type SkillClaim = CapabilityClaim;
+
+/** The id an entry publishes under: an explicit one, else a slug of its name. */
+export function capabilityIdFor(c: Pick<CapabilityClaim, 'label' | 'capabilityId'>): string {
+  const explicit = c.capabilityId?.trim();
+  if (explicit) return explicit;
+  return c.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+/** The structured rows an owner has chosen to publish, in the shape the profile and card project. */
+export function advertisedCapabilitiesFrom(claims: CapabilityClaim[]): AdvertisedCapabilityV1[] {
+  return claims.filter((c) => c.asserted).map((c) => ({
+    id: capabilityIdFor(c),
+    name: c.label,
+    description: c.description?.trim() || c.label,
+    tags: c.tags?.filter(Boolean) ?? [],
+    ...(c.examples?.length ? { examples: c.examples.filter(Boolean) } : {}),
+  }));
+}
 
 /** Read the person's private capability record from the home vault (session token). */
 export async function listSkillClaims(token: string): Promise<SkillClaim[]> {

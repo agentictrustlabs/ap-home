@@ -206,7 +206,10 @@ describe('the Settings pane', () => {
 
   it('carries the shared identity items everywhere', () => {
     for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
-      for (const item of ['Profile', 'Naming', 'Agent Card', 'Registry', 'Trust graph', 'Skills', 'Playbook']) {
+      // 'Capabilities' is what the agent can DO; 'Playbook' is the SKILL.md procedural package. They were
+      // both called some form of "skill" before ADR-0051, which is exactly the collision being removed —
+      // so this list asserts both names survive, separately.
+      for (const item of ['Profile', 'Naming', 'Agent Card', 'Registry', 'Trust graph', 'Capabilities', 'Playbook']) {
         expect(items(scope)).toContain(item);
       }
     }
