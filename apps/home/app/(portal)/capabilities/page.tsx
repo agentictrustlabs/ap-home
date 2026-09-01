@@ -90,12 +90,12 @@ export default function CapabilitiesPage() {
   return (
     <SectionShell
       title="What this agent can do"
-      description="Keep your capability record private, and publish a chosen subset for discovery so others can find you when what they need matches what you can do."
+      description="Pick from the shared catalog of capability definitions, keep your record private, and publish a chosen subset. Every agent claiming a capability claims the SAME id — which is what makes matching possible at all."
     >
       <div style={{ ...infoBannerSty, marginBottom: '1.1rem', fontSize: '.82rem' }}>
-        Your capability record is <strong>private</strong> (held in your agent's vault). Mark an entry <strong>Published</strong> to
-        publish it for discovery — only published capabilities become a public facet of your Smart Agent. Same for a person,
-        organization, or service/treasury agent.
+        Capabilities come from a <strong>shared catalog</strong>, so every agent claiming one claims the same id — that is what
+        lets anyone match on it. Your record stays <strong>private</strong> in your agent's vault; mark an entry
+        <strong>Published</strong> and only its <em>id</em> goes public, on chain and on your agent card.
       </div>
 
       {/* `endorsers && …` RENDERS THE 0. JSX skips false/null/undefined but prints the number 0, so an
@@ -111,8 +111,11 @@ export default function CapabilitiesPage() {
         </div>
       )}
 
+      {/* A NAME gates PUBLISHING, not the record. The whole page used to be replaced by "your home needs
+          a public name first", so a nameless agent could not even look at what it might claim — and the
+          record it was being denied is private and needs no name at all. The two tiers are the point:
+          keep the record, publish a subset. Only the publish button waits. */}
       {!agentAddress ? <p style={mutedText}>Sign in to manage what your agent can do.</p>
-        : !agentName ? <p style={mutedText}>Your home needs a public name first (Naming Service tab) before you can publish capabilities for discovery.</p>
         : loading ? <p style={mutedText}>Loading your capability record…</p>
         : (
           <AgentCapabilitiesEditor
@@ -122,6 +125,7 @@ export default function CapabilitiesPage() {
             busy={busy}
             onSaveRecord={savePrivate}
             onPublish={publishPublic}
+            {...(agentName ? {} : { disabledReason: 'Publishing needs a public name — give this agent one under Identity → Naming. Your record is private and works without one.' })}
           />
         )}
     </SectionShell>
