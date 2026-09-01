@@ -14,7 +14,7 @@ import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/l
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
 import { signHashFor, resolveVia, type Via } from '../../../src/home/onboarding';
-import { nameLabel, CONNECT_DOMAIN } from '../../../src/lib/domain';
+import { nameLabel, CONNECT_DOMAIN, NEW_PERSON_TLD } from '../../../src/lib/domain';
 import type { Address } from '@agenticprimitives/types';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, shortAddr } from '../../../src/components/portal/theme';
@@ -285,7 +285,17 @@ function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Vi
             />
             <button style={btnPrimarySty} onClick={claim} disabled={!label}>Claim name</button>
           </div>
-          {label && <p style={{ ...mono, fontSize: '.78rem', ...mutedText, marginTop: '.4rem' }}>→ {label}.{CONNECT_DOMAIN}</p>}
+          {/* Both facts, labelled. This showed only `<label>.<connect domain>` — the URL your home lives
+              at — beside a button that claims a NAME. The two differ (`phone-6112.me` vs
+              `phone-6112.faithnet.me`), so the preview was answering a question the card had not asked
+              and hiding the one it had. The root is the deployment's person root, which is what the claim
+              will actually use. */}
+          {label && (
+            <p style={{ fontSize: '.78rem', ...mutedText, marginTop: '.4rem', display: 'grid', gap: '.1rem' }}>
+              <span>Name: <b style={mono as React.CSSProperties}>{label}.{NEW_PERSON_TLD}</b></span>
+              <span>Home: <b style={mono as React.CSSProperties}>{label}.{CONNECT_DOMAIN}</b></span>
+            </p>
+          )}
           {err && <p style={{ fontSize: '.82rem', ...errorText, marginTop: '.4rem' }}>{err}</p>}
           <p style={{ fontSize: '.78rem', color: 'var(--color-text-faint)', marginTop: '.5rem' }}>After naming, you can publish an opt-in connection record so you can sign back in by name.</p>
         </>

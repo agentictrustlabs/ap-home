@@ -435,13 +435,23 @@ export interface TypedClaimOpts {
  *  revert the whole userOp → a 500 the founding flow can't recover from. We detect the existing claim and
  *  return it as a NO-OP success instead — the home keeps its established name (one mechanism, ADR-0013: a
  *  positive `claimedBy` read IS the answer; we don't attempt-then-handle-the-revert). */
+/** The root a PERSON's name is claimed under on this deployment — `.me` where the typed roots exist,
+ *  the legacy parent otherwise. It is the DEFAULT rather than a parameter every caller must remember,
+ *  because forgetting it is silent: the claim succeeds, under the wrong root, and the agent ends up with
+ *  no derived type (spec 346) — which only surfaces much later as "declare its type before projecting".
+ *  Three of the four person-claim call sites had forgotten it. */
+function personClaimRoot(): TypedClaimOpts {
+  return CLAIMABLE_TLDS.includes('me') ? { tld: 'me' } : {};
+}
+
 export async function claimName(
   agent: Address,
   signHash: SignHash,
   base: string,
   onStep?: (s: string) => void,
   minNonce?: bigint,
-  typed: TypedClaimOpts = {},
+  /** Defaults to this deployment's PERSON root; a managed agent passes its own via `typedTldForKind`. */
+  typed: TypedClaimOpts = personClaimRoot(),
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const sub = subregistryForTld(typed.tld);
   if (!sub.ok) return { ok: false, error: sub.error };
