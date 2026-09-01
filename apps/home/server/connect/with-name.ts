@@ -78,7 +78,17 @@ const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response>
     const cKey = `pkchallenge:${body.challenge}`;
     if (!(await env.AUTH_CODES.get(cKey))) return json({ error: 'unknown or expired challenge' }, 400);
     await env.AUTH_CODES.delete(cKey);
-    if (!(await accounts.isValidSignature(agent, body.challenge as Hex, body.signature as Hex))) {
+    const verdict = await accounts.verifySignature(agent, body.challenge as Hex, body.signature as Hex);
+    if (verdict.unavailable) {
+      // The chain did not answer. Reporting that as "not a custodian" accuses a credential that may be
+      // perfectly good, and sends the member off replacing passkeys to fix an RPC outage. 503, not 403 —
+      // this is not a decision about them (ADR-0013: an unavailable answer is not a negative one).
+      return json(
+        { error: 'could not check that passkey against the network right now', detail: `chain read failed: ${verdict.unavailable}. Nothing is wrong with your passkey — try again in a moment.` },
+        503,
+      );
+    }
+    if (!verdict.valid) {
       // AUTHORIZATION IS THE LINE ABOVE and nothing below changes it — these reads only choose the
       // sentence. `isValidSignature` returning false covered three unrelated situations under one
       // message ("that passkey is not a custodian"), which reads as "your passkey is wrong" even when
@@ -86,8 +96,8 @@ const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response>
       // whose add-userOp did not land, since the discoverable picker offers it anyway (2026-09-01).
       // The digest is CLIENT-SUPPLIED and is used here for wording only, never to grant.
       const [registered, count] = await Promise.all([
-        body.credentialIdDigest ? accounts.hasPasskey(agent, body.credentialIdDigest as Hex).catch(() => null) : Promise.resolve(null),
-        accounts.passkeyCount(agent).catch(() => null),
+        body.credentialIdDigest ? accounts.hasPasskey(agent, body.credentialIdDigest as Hex) : Promise.resolve(null),
+        accounts.passkeyCount(agent),
       ]);
       const detail =
         registered === false
