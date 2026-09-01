@@ -527,6 +527,14 @@ interface InnerOpResult {
   revertReason?: `0x${string}`;
 }
 
+/** The callGasLimit packed into a signed userOp's `accountGasLimits` (low 128 bits) — reported beside
+ *  actualGasUsed so a gas failure can be READ rather than inferred. */
+function unpackedCallGasLimit(op: { accountGasLimits?: unknown }): string | null {
+  const packed = typeof op.accountGasLimits === 'string' ? op.accountGasLimits : null;
+  if (!packed || packed.length < 66) return null;
+  try { return BigInt('0x' + packed.slice(34)).toString(); } catch { return null; }
+}
+
 function detectInnerOpFailure(
   receipt: {
     logs?: ReadonlyArray<{ address?: string; topics?: ReadonlyArray<string>; data?: string }>;
@@ -539,11 +547,12 @@ function detectInnerOpFailure(
   // `indexed sender`) and/or userOpHash (topic1) to restrict matching to
   // our op only.
   filter?: { sender?: `0x${string}`; userOpHash?: `0x${string}` },
-): InnerOpResult & { sendersSeen?: string[] } {
+): InnerOpResult & { sendersSeen?: string[]; matched?: boolean; actualGasUsed?: bigint } {
   const logs = receipt.logs ?? [];
   let success = true;
   let revertReason: `0x${string}` | undefined;
   let matchedAny = false;
+  let actualGasUsed: bigint | undefined;
   const sendersSeen: string[] = [];
   const wantSender = filter?.sender?.toLowerCase();
   const wantHash = filter?.userOpHash?.toLowerCase();
@@ -575,6 +584,9 @@ function detectInnerOpFailure(
         // word 0 = nonce, word 1 = success (00..0 if false, 00..1 if true)
         const successWord = d.slice(2 + 64, 2 + 64 * 2);
         if (BigInt('0x' + successWord) === 0n) success = false;
+        // word 3 = actualGasUsed. A failure with NO revert reason is almost always out of gas, and the
+        // number is the evidence for saying so — reporting it turns a guess into a reading.
+        if (d.length >= 2 + 64 * 4) actualGasUsed = BigInt('0x' + d.slice(2 + 64 * 3, 2 + 64 * 4));
       }
     } else if (topic0 === USER_OP_REVERT_REASON_TOPIC) {
       if (filter && !matchesFilter(log.topics)) continue;
@@ -598,9 +610,9 @@ function detectInnerOpFailure(
   // hash points at the bundler tx, not our op). Without a filter, legacy
   // behavior: assume success unless we saw a 0-success word.
   if (filter && !matchedAny) {
-    return { ok: false, revertReason: undefined, sendersSeen };
+    return { ok: false, revertReason: undefined, sendersSeen, matched: false };
   }
-  return { ok: success, revertReason, sendersSeen };
+  return { ok: success, revertReason, sendersSeen, matched: true, ...(actualGasUsed !== undefined ? { actualGasUsed } : {}) };
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -2032,9 +2044,18 @@ app.post('/session/deploy/submit', async (c) => {
         {
           ok: false,
           error: 'userop_reverted',
+          // THREE different failures were reported with one sentence, and the sentence described only
+          // the rarest of them. "no UserOperationEvent for sender" was printed even when the event WAS
+          // found and said success=false — which sent debugging after a missing event that was present
+          // (2026-08-31). They are told apart now, and the gas figures are included because a failure
+          // with no revert reason is almost always the call running out of them.
           detail: inner.revertReason
             ? `inner userOp reverted with ${inner.revertReason}`
-            : 'inner userOp reverted (no UserOperationEvent for sender=' + signedUserOp.sender + ' — sendersSeen=' + JSON.stringify(inner.sendersSeen ?? []) + ' tx=' + receipt.transactionHash + ')',
+            : inner.matched === false
+              ? `this userOp is not in that transaction — no UserOperationEvent for sender=${signedUserOp.sender} (sendersSeen=${JSON.stringify(inner.sendersSeen ?? [])}, tx=${receipt.transactionHash})`
+              : `the call failed without a revert reason, which almost always means it ran out of gas`
+                + (inner.actualGasUsed !== undefined ? ` — it used ${inner.actualGasUsed.toString()} gas` : '')
+                + ` against a callGasLimit of ${unpackedCallGasLimit(signedUserOp) ?? 'unknown'} (tx=${receipt.transactionHash})`,
           transactionHash: receipt.transactionHash,
         },
         500,
@@ -2145,11 +2166,35 @@ app.post('/account/build-call-userop', async (c) => {
       };
     }
 
+    // SIZE THE CALL GAS TO THE CALL. The builder's 800k default was sized for the heaviest path it knew
+    // (a factory deploy, ~600-700k). A TYPED name claim is heavier: it registers the profile subject,
+    // declares `atl:agentType`, and claims the label — measured at ~1.08M on faithchain, against 302k for
+    // the untyped claim it replaced. Over the limit the inner call runs out of gas, the userOp fails, and
+    // the endpoint 500s with nothing on chain to point at.
+    //
+    // Estimating beats raising the constant: a verifying paymaster must hold deposit for maxCost, which is
+    // computed from the LIMITS, so a blanket 2M would raise the deposit every op needs in order to fix a
+    // few. If the estimate is unavailable the builder's default still applies — this sizes a call, it does
+    // not decide whether one is allowed.
+    let callGasLimit: bigint | undefined;
+    try {
+      const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+      const estimated = await pub.estimateGas({
+        account: c.env.ENTRY_POINT as Address,
+        to: body.sender,
+        data: body.callData,
+      });
+      callGasLimit = (estimated * 5n) / 4n;   // +25% headroom over the estimate
+    } catch {
+      /* not estimable (a call that would revert, a lagging replica) — the builder's default stands */
+    }
+
     const { userOp, userOpHash, sender } = await accountClient(c.env).buildCallUserOp({
       sender: body.sender,
       callData: body.callData,
       paymaster: c.env.PAYMASTER as Address,
       verifyingPaymaster,
+      ...(callGasLimit && callGasLimit > 800_000n ? { callGasLimit } : {}),
     });
     return c.json({
       ok: true,
