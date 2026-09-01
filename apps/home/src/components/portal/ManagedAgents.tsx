@@ -9,7 +9,8 @@ import { useEffect, useState } from 'react';
 import { ExplorerLink } from '../shared/ExplorerLink';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { AGENT_NAME_PARENT } from '../../lib/domain';
+import { typedTldForKind, createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
@@ -234,7 +235,12 @@ export function CreateAgentForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={nameRequired ? 'name (required)' : 'name (optional)'} disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
+        {/* The suffix this agent will ACTUALLY be named under. It was hardcoded `.impact` — the legacy
+            root — while the claim already used the typed one for the kind (`typedTldForKind`), so the
+            form promised `.impact` and produced `.org`. Worse than cosmetic: the suffix names the derived
+            TYPE (spec 346), and `.impact` carries none, so the label said "this will not be listable"
+            about an agent that would be. */}
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
         <BusyButton busy={busy} busyLabel={step || 'Working…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void create(true)}>
@@ -297,7 +303,12 @@ export function NameAgentForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="name" disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.impact</span>
+        {/* The suffix this agent will ACTUALLY be named under. It was hardcoded `.impact` — the legacy
+            root — while the claim already used the typed one for the kind (`typedTldForKind`), so the
+            form promised `.impact` and produced `.org`. Worse than cosmetic: the suffix names the derived
+            TYPE (spec 346), and `.impact` carries none, so the label said "this will not be listable"
+            about an agent that would be. */}
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
         <BusyButton busy={busy} busyLabel={step || 'Naming…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
