@@ -59,6 +59,19 @@ export const CHAIN_NAME: string =
 
 export const CAIP2_NETWORK = `eip155:${CHAIN_ID}` as const;
 
+/**
+ * Where to look an address up on a block explorer, for THIS chain.
+ *
+ * Three components each declared their own `const EXPLORER = 'https://sepolia.basescan.org/address/'` —
+ * correct on Base Sepolia and wrong everywhere else, so on another chain every "explorer ↗" link sent a
+ * person to a scanner that has never heard of the address they clicked. Chain-derived here, overridable
+ * per deployment; empty when the chain has no explorer, and callers render no link rather than a broken
+ * one.
+ */
+export const EXPLORER: string =
+  process.env.NEXT_PUBLIC_EXPLORER_ADDRESS_BASE
+  ?? (CHAIN_ID === baseSepolia.id ? 'https://sepolia.basescan.org/address/' : '');
+
 const DEPLOYED: DeploymentsDoc = INJECTED ?? (BASE_SEPOLIA as unknown as DeploymentsDoc);
 if (INJECTED && INJECTED.chainId != null && Number(INJECTED.chainId) !== CHAIN_ID) {
   throw new Error(`NEXT_PUBLIC_CONTRACTS_JSON is for chain ${INJECTED.chainId}, but CHAIN_ID is ${CHAIN_ID}`);

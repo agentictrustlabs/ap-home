@@ -2,6 +2,7 @@
 // Your home (dashboard) at `/` — a map of what you steward + how you keep it secure. The gate
 // guarantees an authed session here. Renders from the stewardship domain model.
 import { useSession } from '../../src/context/session';
+import { ExplorerLink } from '../../src/components/shared/ExplorerLink';
 import { whitelabel } from '../../src/whitelabel/config';
 import { stewardedThings } from '../../src/home/stewardship';
 import { AddressChip } from '../../src/components/shared/AddressChip';
@@ -24,7 +25,7 @@ const STEWARD_ICON: Record<string, typeof BuildingIcon> = {
 };
 
 export default function HomeDashboard() {
-  const { agentName, agentAddress, session } = useSession();
+  const { agentName, agentAddress, session, profile } = useSession();
   const things = stewardedThings();
   const avatarUrl = useAvatar(agentAddress ? personAvatarKey(agentAddress) : null);
 
@@ -54,7 +55,16 @@ export default function HomeDashboard() {
             </div>
           </div>
           {agentAddress && <AddressChip address={agentAddress} />}
-          <a className="btn-ghost" href="/you">View your home →</a>
+          {/* The access level and the explorer link used to live on a separate /you page. That page said
+              nothing this card does not, so it is gone — but these two facts came with it, and dropping
+              them silently would have been a quiet loss rather than a simplification. */}
+          <p className="manage-card-blurb" style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', margin: '.2rem 0 0' }}>
+            <span>Access: <b>{profile?.access === 'standard' ? 'Standard' : 'Full access'}</b></span>
+            {agentAddress && <ExplorerLink address={agentAddress} label="explorer ↗" />}
+          </p>
+          {/* This IS your home, so "view your home" led nowhere. The useful link is where the details
+              behind this card are edited. */}
+          <a className="btn-ghost" href="/profile">Edit your profile →</a>
         </div>
       </section>
 

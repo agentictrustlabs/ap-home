@@ -5,6 +5,7 @@
 //   • Membership  (you→org)   → read YOUR member record the org is entitled to see.
 // All MCP access goes through demo-a2a; no data is copied into the home.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { ExplorerLink } from '../shared/ExplorerLink';
 import { decodeAbiParameters } from 'viem';
 import type { Address } from '@agenticprimitives/types';
 import { listMyReceivedDelegations, revokeGrantedDelegation, type MyOrg, type ReceivedDelegation } from '../../connect-client';
@@ -30,7 +31,6 @@ interface OrgProfile {
   location?: string;
 }
 
-const EXPLORER = 'https://sepolia.basescan.org/address/';
 const ROOT_AUTHORITY = '0x0000000000000000000000000000000000000000000000000000000000000000';
 const short = (h?: string) => (h && h.length > 14 ? `${h.slice(0, 8)}…${h.slice(-6)}` : h ?? '—');
 
@@ -463,7 +463,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
         <Fact label="Name"><code>{org.orgName || '—'}</code></Fact>
         <Fact label="Address">
           <AddressChip address={org.orgAgent} size="sm" withName />{' '}
-          <a href={EXPLORER + org.orgAgent} target="_blank" rel="noreferrer">explorer ↗</a>
+          <ExplorerLink address={org.orgAgent} label="explorer ↗" />
         </Fact>
         <Fact label="Kind">{purposeLabel(org.purpose)}</Fact>
         <Fact label="Created for">{org.requestedBy || '—'}</Fact>

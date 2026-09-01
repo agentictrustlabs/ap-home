@@ -7,6 +7,7 @@
 // each of which already existed on the page that owns it. Creating a treasury is a Stewardship decision
 // made on the Treasuries page; an organization's Overview is about the ORGANIZATION.
 import { use } from 'react';
+import { ExplorerLink } from '../../../../../src/components/shared/ExplorerLink';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
@@ -18,7 +19,6 @@ import { BuildingIcon, LandmarkIcon } from '../../../../../src/components/shared
 import { nameLabel } from '../../../../../src/lib/domain';
 import { agentClassOf, orgKindWordOf } from '../../../../../src/lib/agent-class';
 
-const EXPLORER = 'https://sepolia.basescan.org/address/';
 const lc = (s: string) => s.toLowerCase();
 
 export default function OrgOverviewPage({ params }: { params: Promise<{ org: string }> }) {
@@ -55,7 +55,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
             <div style={{ margin: '.45rem 0' }}><AddressChip address={orgAgent.agent as `0x${string}`} size="sm" /></div>
             <p className="manage-card-blurb">
               Its own on-chain Smart Agent, custodied by you.{' '}
-              <a href={EXPLORER + orgAgent.agent} target="_blank" rel="noreferrer">explorer ↗</a>
+              <ExplorerLink address={orgAgent.agent} label="explorer ↗" />
             </p>
             {!orgAgent.name && (
               <p className="manage-card-blurb">

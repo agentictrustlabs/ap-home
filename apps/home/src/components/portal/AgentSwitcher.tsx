@@ -123,7 +123,7 @@ export function AgentSwitcher() {
           title={personLabel}
           sub="person · your home"
           activeRow={active.kind === 'person'}
-          onClick={() => go('/you')}
+          onClick={() => go('/')}
         />
 
         {orgs.length > 0 && heading('Organizations you steward')}

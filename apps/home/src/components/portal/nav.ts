@@ -260,7 +260,7 @@ export function buildSettingsPane(
  *  agent in this workspace. Network is here rather than per-agent because it is one substrate for every
  *  agent, and a per-agent item for a non-per-agent fact invents a distinction that does not exist. */
 export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
-  const items: NavItem[] = [{ id: 'you', label: 'Your profile', href: '/you', Icon: UserIcon, status: 'live' }];
+  const items: NavItem[] = [{ id: 'you', label: 'Your profile', href: '/profile', Icon: UserIcon, status: 'live' }];
   if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   if (wl.services.connectedApps) {
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });

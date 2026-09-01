@@ -176,7 +176,7 @@ export default function WeaSignPage() {
           {request && (
             <a href={request.returnUrl} style={cancelLinkStyle}>Cancel and return to {request.appLabel}</a>
           )}
-          {!request && <a href="/you" style={cancelLinkStyle}>Back</a>}
+          {!request && <a href="/" style={cancelLinkStyle}>Back</a>}
         </div>
       </form>
     </SectionShell>

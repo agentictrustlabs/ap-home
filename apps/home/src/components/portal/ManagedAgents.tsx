@@ -6,6 +6,7 @@
 // created in one gasless prompt. Links are PRIVATE vault credentials (ADR-0025), read back from
 // the same /connect/related-orgs vault (MAM-D7) via listManagedAgents.
 import { useEffect, useState } from 'react';
+import { ExplorerLink } from '../shared/ExplorerLink';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, type AgentKind, type ManagedAgent } from '../../connect-client';
@@ -27,7 +28,6 @@ const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
-const EXPLORER = 'https://sepolia.basescan.org/address/';
 const lc = (s: string) => s.toLowerCase();
 
 const KIND_LABEL: Record<AgentKind, string> = {
@@ -332,7 +332,7 @@ export function TreasuryCard({
       <div style={{ margin: '.45rem 0' }}><AddressChip address={address as `0x${string}`} size="sm" /></div>
       <p className="manage-card-blurb" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem' }}>
         <BalanceLine address={address} refreshKey={refreshKey} />
-        <a href={EXPLORER + address} target="_blank" rel="noreferrer">explorer ↗</a>
+        <ExplorerLink address={address} label="explorer ↗" />
       </p>
       {!name && nameSlot}
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
@@ -436,7 +436,7 @@ export function OrganizationsManager({
                 </div>
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
                 <p className="manage-card-blurb">
-                  Custodied by you. <a href={EXPLORER + org.agent} target="_blank" rel="noreferrer">explorer ↗</a>
+                  Custodied by you. <ExplorerLink address={org.agent} label="explorer ↗" />
                   {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
                 {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}

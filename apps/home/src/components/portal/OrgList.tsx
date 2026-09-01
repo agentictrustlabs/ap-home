@@ -3,12 +3,12 @@
 // ADR-0025). The person↔org link lives at the home, never as a public on-chain edge; apps
 // only see what the person delegates. Used by /you and /organizations.
 import { useEffect, useState } from 'react';
+import { ExplorerLink } from '../shared/ExplorerLink';
 import { listMyOrgs, type MyOrg } from '../../connect-client';
 import { vaultListWithDelegation, vaultReadWithDelegation, type VaultRecordRef } from '../../lib/vault-client';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon } from '../shared/Icons';
 
-const EXPLORER = 'https://sepolia.basescan.org/address/';
 
 export function purposeLabel(p: string): string {
   if (p === 'jp-adopter-org') return 'Adopter org';
@@ -138,10 +138,10 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
               <div style={{ margin: '.45rem 0' }}><AddressChip address={o.orgAgent} size="sm" /></div>
               <p className="manage-card-blurb">
                 {o.relationship === 'member' ? (
-                  <>You belong to this organization as a member (no custody). <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a></>
+                  <>You belong to this organization as a member (no custody). <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>
                 ) : (
                   <>Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
-                  delegation. <a href={EXPLORER + o.orgAgent} target="_blank" rel="noreferrer">View on explorer ↗</a></>
+                  delegation. <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>
                 )}
               </p>
               {onSelect ? (
