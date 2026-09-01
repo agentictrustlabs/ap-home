@@ -18,6 +18,8 @@ import { publishProjection } from '../../studio/publish-projection';
 import { AccountProfilePanel } from './AgentMetadataTiers';
 import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../lib/name-properties';
 import { BusyButton } from '../../shared/BusyButton';
+import { NameAgentForm, useManagedAgents } from '../ManagedAgents';
+import { useSession } from '../../../context/session';
 import { reverseAgentName } from '../../../lib/reverse-name';
 import { cardSty, inputSty, mono, mutedText, errorText } from '../theme';
 
@@ -45,6 +47,10 @@ function NameRecordSection({ kind, agent }: { kind: StudioScopeKind; agent: stri
   const state = useCardDetail(ctx.delegation, cardId);
   const published = state.detail?.releases.filter((r) => r.state === 'published').at(-1) ?? null;
 
+  /** The managed-agent row supplies what naming a NEW name needs: its kind and its parent. */
+  const { agents } = useManagedAgents(ctx.session?.token ?? null, 'any');
+  const { agentAddress: personSA } = useSession();
+  const managed = agents.find((a) => a.agent.toLowerCase() === (ctx.sa ?? '').toLowerCase()) ?? null;
   const [records, setRecords] = useState<Partial<Record<EditablePropKey, string>> | null>(null);
   const [draft, setDraft] = useState<Partial<Record<EditablePropKey, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -125,12 +131,25 @@ function NameRecordSection({ kind, agent }: { kind: StudioScopeKind; agent: stri
 
   if (!nameLoaded) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Reading the naming service…</p>;
   if (!name) {
+    // Naming an unnamed agent belongs HERE, on the page about its name — it used to live only on the
+    // org Overview, mixed in with creating a treasury, so the one page about naming could not name.
     return (
       <div style={cardSty}>
-        <p style={{ ...mutedText, fontSize: '.82rem', margin: 0 }}>
-          Nothing resolves to this agent yet, so there is no record to write. Give it a name and this
-          becomes what the name tells the world.
+        <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
+          Nothing in the naming service resolves to this agent yet. Give it a name and this becomes what
+          the name tells the world — and where other agents find it.
         </p>
+        {ctx.session && ctx.sa && managed && (
+          <NameAgentForm
+            agent={ctx.sa}
+            kind={managed.kind}
+            parent={managed.parent || personSA || ''}
+            person={personSA ?? ''}
+            token={ctx.session.token}
+            via={ctx.session.via}
+            onDone={() => { setNameLoaded(false); void reverseAgentName(ctx.sa as Address).then((n) => { setName(n); setNameLoaded(true); }); }}
+          />
+        )}
       </div>
     );
   }

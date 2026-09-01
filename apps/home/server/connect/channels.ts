@@ -251,8 +251,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors(r.body, request, r.status);
   }
   if (body?.action === 'post') {
+    // The steward proof travels with the write, as it does on every other branch here. Without it the
+    // DO's `communityPresence` sees no listing, no member-access grant and no stewardship, and refuses
+    // with "join this community first" — so a steward could read the topic, create it, and configure its
+    // assistant, but not post in it. `stewardship` was already computed above and simply not passed.
     const r = await callInteractions(env, communityId, 'channels.post', {
       session: who.token, channelId: body.channelId ?? '', bodyText: body.bodyText ?? '',
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }

@@ -1,13 +1,17 @@
 'use client';
 // Org workspace — Overview (spec 315). The URL carries the org SA; everything here is scoped to
-// that one organization: identity, naming, and its treasury. Actions reuse the spec 275 managed-
-// agent ceremonies (custodied by the connected person, gasless).
+// that one organization: identity and its treasury, at a glance.
+//
+// It carries NO custodial ceremonies. It used to hold every one the org has — name it, create its
+// treasury, name that, fund it — so the first screen of a workspace was a stack of forms, and each of
+// those forms already existed on the page that owns it (Naming, Treasuries). Overview shows what is
+// true and points at where it is done.
 import { use } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
 import {
-  useManagedAgents, NameAgentForm, CreateAgentForm, FundForm, BalanceLine,
+  useManagedAgents, BalanceLine,
 } from '../../../../../src/components/portal/ManagedAgents';
 import { AddressChip } from '../../../../../src/components/shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../../../../../src/components/shared/Icons';
@@ -40,6 +44,10 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
         </p>
       ) : (
         <div className="manage-grid">
+          {/* Overview SHOWS this organization; it does not operate on it. It used to carry every
+              custodial ceremony the org has — name it, create its treasury, name that, fund it — so the
+              first screen of a workspace was a form stack, and the same forms existed again on the pages
+              that own them. Each card now says what is true and points at where that is done. */}
           <div className="manage-card">
             <div className="manage-card-head">
               <span className="manage-card-label"><BuildingIcon size={16} /> {orgAgent.name || 'Unnamed organization'}</span>
@@ -51,8 +59,10 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
               <a href={EXPLORER + orgAgent.agent} target="_blank" rel="noreferrer">explorer ↗</a>
             </p>
             {!orgAgent.name && (
-              <NameAgentForm agent={orgAgent.agent} kind="org" parent={agentAddress} person={agentAddress}
-                token={session.token} via={session.via} onDone={reload} />
+              <p className="manage-card-blurb">
+                It has no public name yet, so nothing can look it up.{' '}
+                <a href={`/org/${org}/naming`}>Give it one under Naming →</a>
+              </p>
             )}
           </div>
 
@@ -68,17 +78,12 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
                   <BalanceLine address={treasury.agent} refreshKey={version} />
                   <a href={EXPLORER + treasury.agent} target="_blank" rel="noreferrer">explorer ↗</a>
                 </p>
-                {!treasury.name && (
-                  <NameAgentForm agent={treasury.agent} kind="org-treasury" parent={orgAgent.agent} person={agentAddress}
-                    token={session.token} via={session.via} onDone={reload} />
-                )}
-                <FundForm treasury={treasury.agent} person={agentAddress} via={session.via} token={session.token} onDone={reload} />
+                <p className="manage-card-blurb"><a href={`/org/${org}/treasury`}>Fund it or manage it →</a></p>
               </>
             ) : (
               <>
                 <p className="manage-card-blurb">This organization&apos;s money agent — holds and moves its funds, separate from its identity.</p>
-                <CreateAgentForm kind="org-treasury" parent={orgAgent.agent} person={agentAddress}
-                  token={session.token} via={session.via} onDone={reload} cta="Create org treasury" />
+                <p className="manage-card-blurb"><a href={`/org/${org}/treasury`}>Create one under Treasuries →</a></p>
               </>
             )}
           </div>
