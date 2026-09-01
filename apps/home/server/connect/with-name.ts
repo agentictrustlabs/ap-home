@@ -79,7 +79,21 @@ const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response>
     if (!(await env.AUTH_CODES.get(cKey))) return json({ error: 'unknown or expired challenge' }, 400);
     await env.AUTH_CODES.delete(cKey);
     if (!(await accounts.isValidSignature(agent, body.challenge as Hex, body.signature as Hex))) {
-      return json({ error: `that passkey is not a custodian of ${name}` }, 403);
+      // AUTHORIZATION IS THE LINE ABOVE and nothing below changes it — these reads only choose the
+      // sentence. `isValidSignature` returning false covered three unrelated situations under one
+      // message ("that passkey is not a custodian"), which reads as "your passkey is wrong" even when
+      // the credential is simply one this account never registered — the common case after a create
+      // whose add-userOp did not land, since the discoverable picker offers it anyway (2026-09-01).
+      // The digest is CLIENT-SUPPLIED and is used here for wording only, never to grant.
+      const [registered, count] = await Promise.all([
+        body.credentialIdDigest ? accounts.hasPasskey(agent, body.credentialIdDigest as Hex).catch(() => null) : Promise.resolve(null),
+        accounts.passkeyCount(agent).catch(() => null),
+      ]);
+      const detail =
+        registered === false
+          ? `The passkey you used is not one of the ${count ?? 'registered'} registered on ${name}. It exists on this device but was never added to the account — sign in with the credential that opened this home (email, phone or wallet), then add this passkey from Settings.`
+          : `The signature was rejected on chain. If your device skipped its PIN or biometric check, use a phone passkey instead.`;
+      return json({ error: `that passkey is not a custodian of ${name}`, detail }, 403);
     }
     principal = { kind: 'passkey', id: body.credentialIdDigest, assurance: 'onchain-confirmed', role: 'custody-grade' };
   }

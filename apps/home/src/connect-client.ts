@@ -2543,9 +2543,11 @@ export async function connectWithName(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name, aud: AUD, ...proof }),
   });
-  const b = (await r.json()) as { status?: string; token?: string; name?: string; error?: string };
+  const b = (await r.json()) as { status?: string; token?: string; name?: string; error?: string; detail?: string };
   if (r.ok && b.status === 'issued' && b.token) return { ok: true, token: b.token, name: b.name };
-  return { ok: false, error: b.error ?? `connect failed (HTTP ${r.status})` };
+  // `detail` is where with-name says WHICH failure this is (an unregistered credential reads very
+  // differently from a rejected signature). Dropping it left the member with a verdict and no cause.
+  return { ok: false, error: [b.error, b.detail].filter(Boolean).join(' — ') || `connect failed (HTTP ${r.status})` };
 }
 
 // ── Guided ceremony steps (spec 230 part 2) ─────────────────────────
