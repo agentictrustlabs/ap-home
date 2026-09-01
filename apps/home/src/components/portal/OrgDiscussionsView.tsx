@@ -246,6 +246,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     } finally { setBusy(false); }
   }, [session, homeProfile?.credential, agentAddress, agentName, joinName, communityId, authed, load]);
 
+
+
   // spec 324 §7/§12 — a non-member REQUESTS to join (a MembershipApplication delivered to the org's inbox); a
   // steward approves/rejects from Members. The listing is published as a CONSEQUENCE of enrollment (join()
   // below), not the join mechanism itself.
@@ -497,6 +499,26 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     return linked || (!!me && memberAddresses.has(me));
   }, [memberAddresses, agentAddress, linked]);
 
+  /** A steward who is not in their own organization's directory is a state nobody chose — they created
+   *  or were given the org, and the listing simply was never published. Asking them to "add yourself as
+   *  member", every visit, is the app reporting its own bookkeeping as a task.
+   *
+   *  So we do it for them WHEN IT IS FREE. Publishing a listing is signed, and on a passkey or wallet
+   *  home that is a device prompt — firing one on page load would be a ceremony nobody asked for, which
+   *  is the rule this file already follows two lines into `join()` ("value steps ≠ signatures"). On a
+   *  KMS/social home the signature is server-side and invisible, so it just happens; anywhere else the
+   *  offer below stands and one click does it.
+   *
+   *  Attempted at most once per organization per mount: a failure must not become a signing loop. */
+  const autoJoined = useRef<string | null>(null);
+  useEffect(() => {
+    if (!steward || !member || youAreListed || busy) return;
+    if (!session || !agentAddress || autoJoined.current === communityId) return;
+    if (!isKmsVia(resolveVia(homeProfile?.credential, session.via))) return;
+    autoJoined.current = communityId;
+    void join();
+  }, [steward, member, youAreListed, busy, session, agentAddress, communityId, homeProfile?.credential, join]);
+
   // Prefill the self-add display name from the home's name once, when the CTA first applies.
   useEffect(() => {
     if (steward && member && !youAreListed && !joinName && agentName) setJoinName(agentName);
@@ -625,7 +647,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       {steward && member && !youAreListed && (
         <div className="chat-attention" style={{ marginBottom: '0.85rem' }}>
           <span style={{ fontSize: '0.85rem' }}>
-            <b>You steward this organization but aren&rsquo;t listed as a member.</b> Add yourself so members can see and message you here.
+            <b>Members can&rsquo;t see or message you here yet.</b> Add yourself to this organization&rsquo;s
+            directory — it takes one signature.
           </span>
           <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
             <input
@@ -636,7 +659,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               style={{ flex: 1 }}
             />
             <button type="button" className="btn-primary" style={{ width: 'auto', whiteSpace: 'nowrap' }} disabled={busy || !joinName.trim()} onClick={() => void join()}>
-              {busy ? 'Signing…' : 'Add yourself as member'}
+              {busy ? 'Signing…' : 'Add me'}
             </button>
           </div>
         </div>
