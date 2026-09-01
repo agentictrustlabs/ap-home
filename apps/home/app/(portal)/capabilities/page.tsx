@@ -98,7 +98,10 @@ export default function CapabilitiesPage() {
         organization, or service/treasury agent.
       </div>
 
-      {agentAddress && endorsers && endorsers > 0 && (
+      {/* `endorsers && …` RENDERS THE 0. JSX skips false/null/undefined but prints the number 0, so an
+          agent with no endorsements got a bare "0" floating above its capability list. Compare
+          explicitly. */}
+      {agentAddress && endorsers !== null && endorsers > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem', marginBottom: '1.1rem', fontSize: '.82rem', color: 'var(--color-sage-700)' }}>
           <span aria-hidden style={{ fontSize: '.9rem', lineHeight: 1 }}>✓</span>
           <span>
