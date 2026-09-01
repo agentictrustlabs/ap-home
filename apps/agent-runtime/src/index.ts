@@ -2177,6 +2177,10 @@ app.post('/account/build-call-userop', async (c) => {
     // few. If the estimate is unavailable the builder's default still applies — this sizes a call, it does
     // not decide whether one is allowed.
     let callGasLimit: bigint | undefined;
+    // Whether the limit was MEASURED or defaulted rides back in the response. A swallowed estimate is
+    // how a right-looking op silently keeps a limit too small for it, and the failure then shows up a
+    // block later as an unexplained revert — so say which one this is.
+    let gasBasis: 'estimated' | 'default' | 'estimate-failed' = 'default';
     try {
       const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
       const estimated = await pub.estimateGas({
@@ -2184,9 +2188,12 @@ app.post('/account/build-call-userop', async (c) => {
         to: body.sender,
         data: body.callData,
       });
-      callGasLimit = (estimated * 5n) / 4n;   // +25% headroom over the estimate
+      const sized = (estimated * 5n) / 4n;   // +25% headroom over the estimate
+      if (sized > 800_000n) { callGasLimit = sized; gasBasis = 'estimated'; }
     } catch {
-      /* not estimable (a call that would revert, a lagging replica) — the builder's default stands */
+      // Not estimable — a call that would revert anyway, or a lagging replica. The builder's default
+      // stands; it is a configured limit, not a second way of answering whether the call is allowed.
+      gasBasis = 'estimate-failed';
     }
 
     const { userOp, userOpHash, sender } = await accountClient(c.env).buildCallUserOp({
@@ -2194,12 +2201,13 @@ app.post('/account/build-call-userop', async (c) => {
       callData: body.callData,
       paymaster: c.env.PAYMASTER as Address,
       verifyingPaymaster,
-      ...(callGasLimit && callGasLimit > 800_000n ? { callGasLimit } : {}),
+      ...(callGasLimit ? { callGasLimit } : {}),
     });
     return c.json({
       ok: true,
       sender,
       userOpHash,
+      gasBasis,
       userOp: {
         ...userOp,
         nonce: userOp.nonce.toString(),
