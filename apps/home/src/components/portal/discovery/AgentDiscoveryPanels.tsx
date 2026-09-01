@@ -20,6 +20,7 @@ import { useSession } from '../../../context/session';
 import { loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../lib/registry';
 import { getSkills, setSkills, registerAgent, canCheckCustody } from '../../../connect-client';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
+import { reverseAgentName } from '../../../lib/reverse-name';
 import { badgeStyle, cardSty, mono, mutedText, errorText, shortAddr } from '../theme';
 import { BusyButton } from '../../shared/BusyButton';
 
@@ -112,6 +113,16 @@ export function AgentRegistryPanel({ agent, name }: { agent: Address; name: stri
 export function AgentNamingPanel({ agent, name }: { agent: Address; name: string | null }) {
   const { row } = useAgentRow(agent);
   const resolves = row ? lc(row.subjectAgent) === lc(agent) : null;
+  // The REGISTERED name, reverse-resolved from the chain. `name` is the workspace's display label, which
+  // for a workspace is a human phrase ("Northern Colorado Field") and not a name anything can resolve —
+  // showing it here read as though that phrase were the agent's name in the naming service.
+  const [onChain, setOnChain] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void reverseAgentName(agent).then((n) => { if (!cancelled) setOnChain(n); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [agent]);
+  const registered = onChain ?? row?.name ?? null;
   return (
     <div style={cardSty}>
       <h3 style={{ margin: '0 0 .5rem' }}>Name</h3>
@@ -120,9 +131,14 @@ export function AgentNamingPanel({ agent, name }: { agent: Address; name: string
         public handle; the address is the identity (ADR-0010) — a name is a facet of it, never the other
         way round.
       </p>
-      {name ? (
+      {registered ? (
         <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '.3rem .8rem', fontSize: '.84rem', margin: 0 }}>
-          <dt style={mutedText}>Name</dt><dd style={{ margin: 0 }}><strong>{name}</strong></dd>
+          <dt style={mutedText}>Name</dt><dd style={{ margin: 0 }}><strong>{registered}</strong></dd>
+          {name && name !== registered && (
+            <>
+              <dt style={mutedText}>Shown as</dt><dd style={{ margin: 0 }}>{name}</dd>
+            </>
+          )}
           <dt style={mutedText}>Resolves to</dt>
           <dd style={{ margin: 0 }}>
             <code style={mono}>{agent}</code>{' '}
@@ -131,8 +147,8 @@ export function AgentNamingPanel({ agent, name }: { agent: Address; name: string
         </dl>
       ) : (
         <p style={{ ...mutedText, fontSize: '.82rem' }}>
-          This agent has no name yet. It still has an identity — its address — but nothing can look it up
-          by a human-readable handle, and it has no public host to serve a card at.
+          Nothing in the naming service resolves to this agent yet. It still has an identity — its address
+          — but nothing can look it up by a handle, and it has no public host to serve a card at.
         </p>
       )}
     </div>

@@ -18,6 +18,7 @@ import { publishProjection } from '../../studio/publish-projection';
 import { AccountProfilePanel } from './AgentMetadataTiers';
 import { readNameRecords, writeNameProperties, EDITABLE_PROPS, type EditablePropKey } from '../../../lib/name-properties';
 import { BusyButton } from '../../shared/BusyButton';
+import { reverseAgentName } from '../../../lib/reverse-name';
 import { cardSty, inputSty, mono, mutedText, errorText } from '../theme';
 
 /**
@@ -51,7 +52,22 @@ function NameRecordSection({ kind, agent }: { kind: StudioScopeKind; agent: stri
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const name = ctx.name || null;
+  // THE NAME THIS RECORD LIVES UNDER, reverse-resolved from the chain — not the workspace's display
+  // label. `ctx.name` is whatever the managed-agent row calls this agent, which for a workspace is a
+  // human label ("Northern Colorado Field"). Reading records under that asks the naming service for a
+  // name nobody registered, so every field came back empty and the page reported that a named,
+  // registered agent had no naming entry.
+  const [name, setName] = useState<string | null>(null);
+  const [nameLoaded, setNameLoaded] = useState(false);
+  useEffect(() => {
+    if (!ctx.sa) return;
+    let cancelled = false;
+    void reverseAgentName(ctx.sa as Address)
+      .then((n) => { if (!cancelled) { setName(n); setNameLoaded(true); } })
+      .catch(() => { if (!cancelled) setNameLoaded(true); });
+    return () => { cancelled = true; };
+  }, [ctx.sa]);
+
   const load = useCallback(async () => {
     if (!name) { setRecords({}); return; }
     const r = await readNameRecords(name).catch(() => ({} as Record<string, string | undefined>));
@@ -107,12 +123,13 @@ function NameRecordSection({ kind, agent }: { kind: StudioScopeKind; agent: stri
     })();
   };
 
+  if (!nameLoaded) return <p style={{ ...mutedText, fontSize: '.82rem' }}>Reading the naming service…</p>;
   if (!name) {
     return (
       <div style={cardSty}>
         <p style={{ ...mutedText, fontSize: '.82rem', margin: 0 }}>
-          This agent has no name yet, so there is no record to write. Claim one above and this becomes
-          what the name tells the world.
+          Nothing resolves to this agent yet, so there is no record to write. Give it a name and this
+          becomes what the name tells the world.
         </p>
       </div>
     );
