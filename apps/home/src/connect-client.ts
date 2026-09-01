@@ -2798,20 +2798,43 @@ export async function setConnectionInfo(
   return { ok: true, txHash: res.txHash };
 }
 
-// ── Publish for discovery (spec 282) — the agent's OWN SA writes its `atl:skills` profile property ──
-/** `atl:skills` — the DECLARED CAPABILITY projection (capability-architecture.md §1); the key name and the
- *  derived predicate id are legacy and IMMUTABLE (live on-chain data), so only the prose says "capability".
- *  Mirrors AgentProfilePredicates.ATL_SKILLS. */
+// ── Publish for discovery — the agent's OWN SA writes its `atl:capabilities` profile property ──────
+/** LEGACY rail (ADR-0051). Read only, and only while `atl:capabilities` is empty. */
 const ATL_SKILLS: Hex = keccak256(toBytes('atl:skills'));
+/** The current rail: comma-joined capability ids. Mirrors AgentProfilePredicates.ATL_CAPABILITIES. */
+const ATL_CAPABILITIES: Hex = keccak256(toBytes('atl:capabilities'));
 
-/** Read the capabilities the agent currently PUBLISHES for discovery (comma-joined labels), to prefill the UI. */
-export async function getSkills(sa: Address): Promise<string[]> {
+async function readProfileString(sa: Address, predicate: Hex): Promise<string> {
+  const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+  return (await pc.readContract({
+    address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi,
+    functionName: 'getStringProperty', args: [sa, predicate],
+  })) as string;
+}
+
+/**
+ * The capability ids this agent publishes for discovery.
+ *
+ * ONE mechanism with a DOCUMENTED MIGRATION, not a fallback (ADR-0013). `atl:capabilities` is the rail;
+ * `atl:skills` is the same rail under its old name, and an agent that has not published since the rename
+ * still has its ids there. "New empty, old populated" is precisely the migration state — the question
+ * being asked is unchanged and only the storage key moved. It is NOT "try the good source, then a
+ * weaker one": both hold the same kind of value, written by the same owner, on the same contract.
+ *
+ * Writes only ever go to the new predicate, so an agent leaves this state the first time it publishes.
+ */
+export async function readAdvertisedCapabilityIds(sa: Address): Promise<string[]> {
+  const split = (v: string): string[] => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
   try {
-    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
-    const v = (await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [sa, ATL_SKILLS] })) as string;
-    return v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const current = split(await readProfileString(sa, ATL_CAPABILITIES));
+    if (current.length > 0) return current;
+    return split(await readProfileString(sa, ATL_SKILLS));
   } catch { return []; }
 }
+
+/** @deprecated Renamed `readAdvertisedCapabilityIds` (ADR-0051). */
+export const getSkills = readAdvertisedCapabilityIds;
+export const getCapabilities = readAdvertisedCapabilityIds;
 
 /** Publish capabilities for discovery (spec 282): the agent's own SA writes `atl:skills` on AgentProfileResolver
  *  (`onlyAgent` → msg.sender == SA via executeCall), signed by `signHash`, gasless. `setStringProperty`
@@ -2832,15 +2855,15 @@ export async function executeCalls(
   return executeCall(sa, signHash, buildExecuteBatchCallData(calls));
 }
 
-export async function setSkills(
+export async function setCapabilities(
   sa: Address,
   name: string,
-  skills: string[],
+  capabilityIds: string[],
   signHash: SignHash,
   opts: { displayName?: string } = {},
 ): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
   const resolver = CONTRACTS.agentProfileResolver;
-  const value = skills.map((s) => s.trim()).filter(Boolean).join(', ');
+  const value = capabilityIds.map((s) => s.trim()).filter(Boolean).join(', ');
   const calls: ContractCall[] = [];
   // onlyRegistered gate — register the profile first (in-batch) if the SA has no profile yet.
   let registered = false;
@@ -2851,12 +2874,17 @@ export async function setSkills(
   if (!registered) {
     calls.push(buildRegisterProfileCall({ profileResolver: resolver, agent: sa, displayName: opts.displayName ?? (name.split('.')[0] ?? '') }));
   }
-  calls.push({ to: resolver, value: 0n, data: encodeFunctionData({ abi: agentProfileResolverAbi, functionName: 'setStringProperty', args: [sa, ATL_SKILLS, value] }) });
+  // Writes go to the NEW predicate only. Never dual-write: two rails holding the same fact is how they
+  // drift, and the reader already handles an agent that has not moved yet.
+  calls.push({ to: resolver, value: 0n, data: encodeFunctionData({ abi: agentProfileResolverAbi, functionName: 'setStringProperty', args: [sa, ATL_CAPABILITIES, value] }) });
   const res = await executeCall(sa, signHash, buildExecuteBatchCallData(calls));
   if (!res.ok) return res;
-  requestReindex([sa]); // auto-index: project the asserted skills so the matcher ranks on them
+  requestReindex([sa]); // auto-index: project the published ids so the matcher ranks on them
   return { ok: true, txHash: res.txHash };
 }
+
+/** @deprecated Renamed `setCapabilities` (ADR-0051). */
+export const setSkills = setCapabilities;
 
 // ── Private skill-claim vault (spec 282 Phase 2b) — the PRIVATE tier ──────────────────────────────
 // The person's CAPABILITY RECORD — capability claim credentials living in their Connect-home vault (KV,

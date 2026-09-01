@@ -919,22 +919,41 @@ app.use('/mcp/*', gateAgenticData);
 app.use('/tools/*', gateAgenticData);
 app.use('/intent', gateAgenticData); // ADR-0044 — the first-party INTENT surface is agentic data; edge it too.
 
-/** spec 282 — the agent's PUBLICLY-ASSERTED skill labels (`atl:skills`), the set discovery ranks on.
- *  Best-effort read; absence → no labels (the card still serves). */
-async function readSkillLabels(env: Env, agent: Address): Promise<string> {
+const PROFILE_STRING_ABI = [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const;
+
+/**
+ * The agent's PUBLICLY-ASSERTED capability ids — what the card advertises and discovery ranks on.
+ *
+ * ONE mechanism with a DOCUMENTED MIGRATION, not a fallback (ADR-0051 / ADR-0013). `atl:capabilities` is
+ * the rail; `atl:skills` is the same rail under the name it had before the vocabulary settled, and an
+ * agent that has not published since still has its ids there. Same contract, same owner, same kind of
+ * value — only the key moved. Writes only ever go to the new predicate, so an agent leaves this state on
+ * its next publish.
+ *
+ * Best-effort: absence → no ids, and the card still serves.
+ */
+async function readAdvertisedCapabilityIds(env: Env, agent: Address): Promise<string> {
   if (!env.PROFILE_RESOLVER || !env.RPC_URL) return '';
-  try {
-    const client = createPublicClient({ transport: http(env.RPC_URL) });
+  const read = async (curie: string): Promise<string> => {
+    const client = createPublicClient({ transport: http(env.RPC_URL!) });
     return (await client.readContract({
       address: env.PROFILE_RESOLVER as Address,
-      abi: [{ type: 'function', name: 'getStringProperty', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'bytes32' }], outputs: [{ type: 'string' }] }] as const,
+      abi: PROFILE_STRING_ABI,
       functionName: 'getStringProperty',
-      args: [agent, keccak256(toBytes('atl:skills'))],
+      args: [agent, keccak256(toBytes(curie))],
     })) as string;
+  };
+  try {
+    const current = await read('atl:capabilities');
+    if (current.trim()) return current;
+    return await read('atl:skills');
   } catch {
-    return ''; // best-effort — serve the card without self-asserted skills
+    return ''; // best-effort — serve the card without self-asserted capabilities
   }
 }
+
+/** @deprecated Renamed `readAdvertisedCapabilityIds` (ADR-0051). */
+const readSkillLabels = readAdvertisedCapabilityIds;
 
 /** The LIVE card for a host context (ADR-0059 — the live-truth surface the Studio inherits from and the
  *  well-known publisher verifies against). One builder, used by the route AND the Studio. */
@@ -1066,7 +1085,7 @@ function studioSources(env: Env): StudioSources {
     // `atl:skills` labels are public by construction (the agent wrote them on chain at `setSkills` time —
     // that WAS the disclosure decision), so every label is an eligible public claim (spec 347 §5).
     publicSkillClaims: async (agent): Promise<PublicSkillClaimV1[]> =>
-      skillsFromLabels(await readSkillLabels(env, agent)).map((s) => ({ claimId: `atl:skills:${s.id}`, skillId: s.id, name: s.name, tags: s.tags ?? [], visibility: 'public', claimDigest: cardJcsDigest({ skillId: s.id, name: s.name }) })),
+      skillsFromLabels(await readSkillLabels(env, agent)).map((s) => ({ claimId: `atl:capabilities:${s.id}`, skillId: s.id, name: s.name, tags: s.tags ?? [], visibility: 'public', claimDigest: cardJcsDigest({ skillId: s.id, name: s.name }) })),
     nameRecords: (name) => naming().getRecords(name),
     nameResolver: async (node) => {
       const r = (await pub.readContract({ address: env.AGENT_NAME_REGISTRY as Address, abi: agentNameRegistryAbi, functionName: 'resolver', args: [node] })) as Address;
