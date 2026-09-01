@@ -33,7 +33,7 @@ import { HomeResolvedView } from './HomeResolvedView';
 import { RequiredNameGate } from './RequiredNameGate';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 
-interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null }
+interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null; passkeySigningAvailable?: boolean | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
 const CONNECTION_LABEL: Record<string, string> = { wallet: 'wallet', google: 'Google', youversion: 'YouVersion', passkey: 'passkey', email: 'email', phone: 'phone', multi: 'any of the below' };
 async function nameInfo(name: string): Promise<NameInfo> {
@@ -921,7 +921,15 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
 
   // Show the credentials this home ACTUALLY has (until name-info loads, show passkey+wallet).
   // Google stays available (a Google-custodied home re-derives via Google).
-  const showPasskey = info ? !!info.hasPasskey : true;
+  // A chain with no P-256 verifier (no RIP-7212 precompile at 0x100, no wired Solidity fallback) cannot
+  // verify ANY passkey: `staticcall` to an empty address succeeds with no returndata, so every assertion
+  // comes back "invalid" rather than reverting. An account there can HOLD registered passkeys — adding
+  // one is authorized by an existing ECDSA custodian — while none of them can ever sign. Offering the
+  // button anyway sent members round the ceremony repeatedly to be told their passkey "is not a
+  // custodian" (faithnet, 2026-09-01). `undefined`/`null` means the probe could not answer, and an
+  // unknown answer must not hide a method that may work.
+  const passkeyUnverifiable = info?.passkeySigningAvailable === false;
+  const showPasskey = info ? !!info.hasPasskey && !passkeyUnverifiable : true;
   const showWallet = info ? !!info.hasEoa : true;
   const onlyWallet = info ? !!info.hasEoa && !info.hasPasskey : false;
   const notFound = info ? info.exists === false : false;
@@ -1077,6 +1085,15 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
           )}
           {(socialKind === 'google' || socialFallback) && (
             <button className={socialKind === 'google' ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => continueWithGoogle(name)}>Continue with Google</button>
+          )}
+          {/* Say WHY the passkey buttons are absent. Silently dropping them from a home that HAS passkeys
+              reads as the home losing them; this is a property of the chain, and it is not the member's
+              to fix. */}
+          {info?.hasPasskey && passkeyUnverifiable && (
+            <p className="onboarding-hint" style={{ fontSize: '.8rem', color: '#475569' }}>
+              ↳ This home has a passkey, but the network it runs on cannot verify passkey signatures yet,
+              so passkey sign-in is unavailable here. Use the credential below that opened this home.
+            </p>
           )}
           {showPasskey && (
             <button className={socialKind && !passkeyFirst ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
