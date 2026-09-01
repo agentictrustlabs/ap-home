@@ -1667,22 +1667,39 @@ function accountClient(env: Env): AgentAccountClient {
 }
 
 function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {
-  // Pick the envelope-encryption backend by env:
-  // - If A2A_KMS_BACKEND=gcp-kms AND GCP_KMS_ENCRYPT_KEY_NAME is configured,
-  //   wrap session data keys with Cloud KMS Encrypt/Decrypt. Production-grade.
-  // - Otherwise fall back to local-aes (dev backend; fails fast when
-  //   NODE_ENV=production per its production guard).
-  const backend = ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
-  const keyCustody =
-    backend === 'gcp-kms' && env.GCP_KMS_ENCRYPT_KEY_NAME && env.GCP_SERVICE_ACCOUNT_JSON
-      ? buildKeyProvider({
-          backend: 'gcp-kms',
-          config: {
-            cryptoKeyName: env.GCP_KMS_ENCRYPT_KEY_NAME,
-            serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
-          },
-        })
-      : buildKeyProvider({ backend: 'local-aes' });
+  // The envelope-encryption backend for session data keys, by env.
+  //
+  // `agentic-kms` had NO BRANCH here. Setting it did not select AKCS — it fell through to the else and
+  // built `local-aes`, whose production guard then threw at the first envelope call. Fail-closed rather
+  // than fail-open, so nothing was ever weakened; but a deployment that had switched every other path
+  // to AKCS would find sessions broken for a reason the code did not state. A backend the env is allowed
+  // to name must be a backend this selector can build.
+  //
+  // The env is read from the WORKER binding first (`env.A2A_KMS_BACKEND`), not only `process.env`:
+  // Workers carry config on the env object, and reading just `process.env` made this selector see
+  // `undefined` where every other selector in this file sees the configured backend.
+  const backend = (env.A2A_KMS_BACKEND as KmsBackend | undefined)
+    ?? ((process.env.A2A_KMS_BACKEND as KmsBackend | undefined) || 'local-aes');
+  let keyCustody;
+  if (backend === 'agentic-kms') {
+    // No fallback: AKCS unreachable or unconfigured is an error, never a quiet downgrade (ADR-0013).
+    keyCustody = buildKeyProvider({
+      backend: 'agentic-kms',
+      agenticKms: agenticKmsConfig(env, { envelopePurpose: 'session-data-key' }),
+    });
+  } else if (backend === 'gcp-kms' && env.GCP_KMS_ENCRYPT_KEY_NAME && env.GCP_SERVICE_ACCOUNT_JSON) {
+    keyCustody = buildKeyProvider({
+      backend: 'gcp-kms',
+      config: {
+        cryptoKeyName: env.GCP_KMS_ENCRYPT_KEY_NAME,
+        serviceAccountJson: env.GCP_SERVICE_ACCOUNT_JSON,
+      },
+    });
+  } else {
+    // Dev backend; its production guard fails fast rather than silently protecting session keys with a
+    // local secret.
+    keyCustody = buildKeyProvider({ backend: 'local-aes' });
+  }
   // Shard per-user: idFromName(accountAddress) → isolated DO instance.
   const store = new DurableObjectSessionStore(env.SESSIONS, accountAddress);
   return new SessionManager({ keyCustody, store });
