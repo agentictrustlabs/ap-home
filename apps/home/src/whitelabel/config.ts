@@ -196,6 +196,10 @@ const faithImpact: WhiteLabelConfig = {
         'http://127.0.0.1:5175/',
         // faithnet universe (chain 34348) — only present when the deploy sets it; production's list is unchanged.
         ...(process.env.NEXT_PUBLIC_GATHER_ORIGIN ? [process.env.NEXT_PUBLIC_GATHER_ORIGIN] : []),
+        // churchglobalgather27 — sibling fork of gather27-web/gather27-a2a sharing this same Home
+        // (faithnet.me) for its connect flow. Fixed, known URL; present on every deploy, same as the
+        // two production defaults above.
+        'https://gather27-web-churchglobal.richardpedersen3.workers.dev/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
