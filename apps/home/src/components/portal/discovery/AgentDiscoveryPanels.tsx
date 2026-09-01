@@ -6,7 +6,7 @@
 // them for the agent named in the URL rather than for the signed-in person:
 //   Registry     — is it in the discovery knowledge base?
 //   Naming       — what is it called, and does that name resolve to it?
-//   Capabilities — what has it DECLARED it can do (the public `atl:skills` projection discovery ranks)?
+//   Capabilities — what has it DECLARED it can do (the public `atl:capabilities` record discovery ranks)?
 // Trust graph and Network are shared components: the graph is one graph seen from this agent's seat, and
 // the substrate is one substrate.
 //
@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../lib/registry';
-import { getSkills, setSkills } from '../../../connect-client';
+import { getCapabilities, setCapabilities } from '../../../connect-client';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { reverseAgentName } from '../../../lib/reverse-name';
 import { badgeStyle, cardSty, mono, mutedText, errorText, shortAddr } from '../theme';
@@ -101,14 +101,14 @@ export function AgentNamingPanel({ agent, name }: { agent: Address; name: string
 
 export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: string | null }) {
   const { session, profile } = useSession();
-  const [skills, setSkillList] = useState<string[] | null>(null);
+  const [capabilityIds, setCapabilityIds] = useState<string[] | null>(null);
   const [draft, setDraft] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const act = useAction();
 
   const load = useCallback(async () => {
-    const s = await getSkills(agent);
-    setSkillList(s); setDraft(s.join(', '));
+    const s = await getCapabilities(agent);
+    setCapabilityIds(s); setDraft(s.join(', '));
   }, [agent]);
   useEffect(() => { void load(); }, [load]);
 
@@ -118,8 +118,8 @@ export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: 
     const next = draft.split(',').map((x) => x.trim()).filter(Boolean);
     try {
       const signHash = await signHashFor(resolveVia(profile?.credential, session.via), agent, { token: session.token });
-      const res = await setSkills(agent, name, next, signHash);
-      if (res.ok) { setSkillList(next); setMsg('Published. Discovery ranks against this list.'); }
+      const res = await setCapabilities(agent, name, next, signHash);
+      if (res.ok) { setCapabilityIds(next); setMsg('Published. Discovery ranks against this list.'); }
       else setMsg(res.error);
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
   };
@@ -128,11 +128,11 @@ export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: 
     <div style={cardSty}>
       <h3 style={{ margin: '0 0 .5rem' }}>Declared capabilities</h3>
       <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
-        What this agent says it can do — the PUBLIC <code style={mono}>atl:skills</code> projection on its
+        What this agent says it can do — the PUBLIC <code style={mono}>atl:capabilities</code> record on its
         profile, which the discovery matcher ranks. Owner-signed and gasless; a custodian of this agent
         signs once.
       </p>
-      {skills === null ? <p style={mutedText}>Reading the profile…</p> : (
+      {capabilityIds === null ? <p style={mutedText}>Reading the profile…</p> : (
         <>
           <label htmlFor="agent-caps" style={{ ...mutedText, fontSize: '.78rem', display: 'block', marginBottom: '.3rem' }}>
             Comma-separated capability labels
@@ -145,7 +145,7 @@ export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: 
             style={{ width: '100%', padding: '.45rem .6rem', borderRadius: 8, border: '1px solid var(--c-g200)', font: 'inherit' }}
           />
           <div style={{ marginTop: '.7rem' }}>
-            <BusyButton className="btn-primary" busy={act.busy} busyLabel="Publishing…" onClick={act.run(save)} disabled={draft === (skills ?? []).join(', ')}>
+            <BusyButton className="btn-primary" busy={act.busy} busyLabel="Publishing…" onClick={act.run(save)} disabled={draft === (capabilityIds ?? []).join(', ')}>
               Publish capabilities
             </BusyButton>
           </div>

@@ -34,7 +34,7 @@ const MAX_UPLOAD_BYTES = 1_400_000;
 
 // Kind → the WORD the UI shows + its icon. Words carry meaning; icons aid scanning (paired, never alone).
 const KIND_META: Record<Kind, { label: string; plural: string; icon: IconName }> = {
-  skill: { label: 'Skill', plural: 'Skills', icon: 'skill' },
+  skill: { label: 'Playbook', plural: 'Playbooks', icon: 'skill' }, // SKILL.md package (ADR-0051)
   ttl: { label: 'Ontology', plural: 'Ontologies', icon: 'ontology' },
   'json-ld': { label: 'Record', plural: 'Records', icon: 'record' },
   image: { label: 'Image', plural: 'Images', icon: 'image' },

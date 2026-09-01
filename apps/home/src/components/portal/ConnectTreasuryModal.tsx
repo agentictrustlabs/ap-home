@@ -13,7 +13,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { namehash } from '@agenticprimitives/agent-naming';
 import { buildTreasuryScope, TREASURY_PROFILES, type TreasuryProfileId } from '@agenticprimitives/treasury-service-agent';
-import { executeCalls, setSkills } from '../../connect-client';
+import { executeCalls, setCapabilities } from '../../connect-client';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { issueScopedDelegation } from '../../lib/delegation';
 import { useRegisteredName } from '../../lib/reverse-name';
@@ -111,7 +111,7 @@ export function ConnectTreasuryModal({
           },
           issueHostDelegation: (caveats) => issueScopedDelegation(treasury as Address, hostDelegate as Address, caveats, signHash),
           publishSkills: async (skills) => {
-            const r = await setSkills(treasury as Address, name, skills, signHash);
+            const r = await setCapabilities(treasury as Address, name, skills, signHash);
             if (!r.ok) throw new Error(r.error);
             return { txHash: r.txHash };
           },

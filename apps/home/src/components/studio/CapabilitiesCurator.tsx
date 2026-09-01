@@ -1,7 +1,14 @@
 'use client';
-// `/skills` — CURATED from public capability claims and the surface catalog, never every claim (design §3.7).
-// A private / org-only claim never appears here at all: the absence IS the privacy boundary, so there is no
-// disabled row explaining that something private exists.
+// The card's ADVERTISED CAPABILITIES — what the agent can do (ADR-0051). A2A calls this `skills[]` on the
+// wire, and the raw-JSON pane is the one place a steward should see that word; here it is a capability.
+//
+// Read-mostly: the SOURCE is `profile.capabilities`, edited on the Capabilities page. This screen curates
+// — reorder, omit, override wording for THIS card — so the profile stays the one list and a card cannot
+// quietly become a second one. Entries inherited from the surface catalog or from public capability
+// claims are shown with their source, since "why is this on my card?" has three different answers.
+//
+// A private / org-only claim never appears here at all: the absence IS the privacy boundary, so there is
+// no disabled row explaining that something private exists.
 import { useState } from 'react';
 import type { A2AAgentSkillV1, FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
@@ -15,7 +22,7 @@ const SOURCE_TAG: Record<string, string> = {
   import: 'imported',
 };
 
-export function SkillsCurator({
+export function CapabilitiesCurator({
   skills,
   bindings,
   diagnostics,

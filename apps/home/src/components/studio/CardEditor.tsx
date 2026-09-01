@@ -28,7 +28,7 @@ import { gateForOp, sectionStatus } from '../../lib/studio-view';
 import { ChipListControl, ExtensionListControl, FieldShell, ReadonlyControl, SecurityRequirementsControl, TextControl, TriStateControl, useScrollToField } from './fields';
 import { InterfacesEditor } from './InterfacesEditor';
 import { SecuritySchemesEditor } from './SecuritySchemesEditor';
-import { SkillsCurator } from './SkillsCurator';
+import { CapabilitiesCurator } from './CapabilitiesCurator';
 import { Inspector, type PanelId } from './Inspector';
 import type { StewardProposalV1 } from './StewardProposals';
 import { Banner, ErrorLine, inputStyle } from './ui';
@@ -259,7 +259,7 @@ export function CardEditor({
         );
       case 'skill-list':
         return (
-          <SkillsCurator
+          <CapabilitiesCurator
             skills={Array.isArray(value) ? (value as A2AAgentSkillV1[]) : []}
             bindings={draft.fieldBindings}
             diagnostics={diags}
