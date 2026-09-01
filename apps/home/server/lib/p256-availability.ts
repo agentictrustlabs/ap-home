@@ -28,7 +28,13 @@ const VALID_VECTOR =
   'e37c08d0c8f32b0efbdd623afa9880ff5b4537325e9e464a226dc168be2574d5' +
   '37e85b05ae5d97170dd17a5efcfc3af28571b83b92a1bdea4aa2160fbc88594a';
 
-const cache = new Map<string, boolean>();
+// A chain can GAIN this precompile — faithnet did, mid-session — but it will not lose one. So `true` is
+// cached for good, while `false` expires: a stale negative locks every member out of a credential method
+// that now works, and it is the answer most likely to become wrong. (Observed: the fork went live and the
+// Home kept reporting "unavailable" from a warm instance's cache.)
+const POSITIVE = new Map<string, true>();
+const NEGATIVE_TTL_MS = 60_000;
+const NEGATIVE = new Map<string, number>();
 
 /**
  * True when this chain can verify a WebAuthn signature. `null` when the probe itself could not be
@@ -36,8 +42,9 @@ const cache = new Map<string, boolean>();
  * credential method (ADR-0013).
  */
 export async function passkeySigningAvailable(rpcUrl: string): Promise<boolean | null> {
-  const hit = cache.get(rpcUrl);
-  if (hit !== undefined) return hit;
+  if (POSITIVE.get(rpcUrl)) return true;
+  const negAt = NEGATIVE.get(rpcUrl);
+  if (negAt !== undefined && Date.now() - negAt < NEGATIVE_TTL_MS) return false;
   try {
     const res = await fetch(rpcUrl, {
       method: 'POST',
@@ -52,7 +59,7 @@ export async function passkeySigningAvailable(rpcUrl: string): Promise<boolean |
     // RIP-7212 answers a VALID signature with a 32-byte 1. Anything shorter (notably `0x`, what an
     // address with no code returns) means there is no verifier here.
     const ok = j.result.length >= 66 && BigInt(j.result) === 1n;
-    cache.set(rpcUrl, ok);
+    if (ok) { POSITIVE.set(rpcUrl, true); NEGATIVE.delete(rpcUrl); } else NEGATIVE.set(rpcUrl, Date.now());
     return ok;
   } catch {
     return null; // unknown — say nothing rather than hide a method that may work

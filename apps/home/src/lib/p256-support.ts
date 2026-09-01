@@ -29,12 +29,17 @@ export const PASSKEYS_UNVERIFIABLE_MESSAGE =
   'your agent. Use another credential (wallet, email, phone or Google) — nothing is wrong with your ' +
   'device.';
 
-let cached: boolean | null | undefined;
+// Cache `true` for the tab's life, but let `false` expire: a chain can GAIN this precompile (faithnet
+// did) and a stale negative would keep refusing to create a passkey that would now work.
+let positive = false;
+let negativeAt = 0;
+const NEGATIVE_TTL_MS = 60_000;
 
 /** `true` verifiable · `false` definitely not · `null` could not be determined.
  *  A failed probe is NOT a negative answer and must never block a credential that would work. */
 export async function passkeysVerifiableOnChain(): Promise<boolean | null> {
-  if (cached !== undefined) return cached;
+  if (positive) return true;
+  if (negativeAt && Date.now() - negativeAt < NEGATIVE_TTL_MS) return false;
   try {
     const res = await fetch(DEFAULT_RPC_URL, {
       method: 'POST',
@@ -46,8 +51,9 @@ export async function passkeysVerifiableOnChain(): Promise<boolean | null> {
     });
     const j = (await res.json()) as { result?: string };
     if (typeof j.result !== 'string') return null; // unknown: not cached, so a recovered RPC is picked up
-    cached = j.result.length >= 66 && BigInt(j.result) === 1n;
-    return cached;
+    const ok = j.result.length >= 66 && BigInt(j.result) === 1n;
+    if (ok) { positive = true; negativeAt = 0; } else negativeAt = Date.now();
+    return ok;
   } catch {
     return null;
   }

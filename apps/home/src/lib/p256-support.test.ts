@@ -74,3 +74,33 @@ describe('the guard sits at the one place credentials are minted', () => {
     expect(creates.length).toBe(1);
   });
 });
+
+describe('a negative answer expires, a positive one does not', () => {
+  it('re-probes after a false — a chain can GAIN the precompile', async () => {
+    // Faithnet gained it mid-session (2026-09-01) and the cached `false` kept the Home refusing to
+    // create passkeys that would by then have worked. A stale negative is the answer most likely to
+    // become wrong, and the most costly when it does.
+    vi.resetModules();
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ json: async () => ({ result: '0x' }) } as unknown as Response)
+      .mockResolvedValueOnce({ json: async () => ({ result: `0x${'0'.repeat(63)}1` }) } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const m = await import('./p256-support');
+    expect(await m.passkeysVerifiableOnChain()).toBe(false);
+    vi.advanceTimersByTime(61_000);
+    expect(await m.passkeysVerifiableOnChain()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not re-probe after a true — a chain does not lose one', async () => {
+    vi.resetModules();
+    const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ result: `0x${'0'.repeat(63)}1` }) } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const m = await import('./p256-support');
+    expect(await m.passkeysVerifiableOnChain()).toBe(true);
+    expect(await m.passkeysVerifiableOnChain()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
