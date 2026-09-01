@@ -44,25 +44,49 @@
   overflow-y: auto;
 }
 
+/* The filter belongs TO the header above it, so they share one block and one bottom border. It used to
+   sit in a bordered band of its own, which gave a search box the same visual weight as the section it
+   searches — the first thing your eye landed on was the way to look for a conversation, not the
+   conversations. It is quiet until you touch it. */
 .chat-rail-search {
-  padding: 0.65rem 0.75rem;
+  padding: 0 0.7rem 0.6rem;
   border-bottom: 1px solid var(--color-border);
 }
 
 .chat-rail-search input {
   width: 100%;
-  padding: 0.45rem 0.85rem;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  font-size: 0.875rem;
-  background: var(--color-surface);
+  padding: 0.35rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  color: var(--color-text-body);
+  background: var(--color-surface-sunken);
   outline: none;
+  transition: background .15s ease, border-color .15s ease;
 }
 
+.chat-rail-search input::placeholder { color: var(--color-text-faint); }
+
+.chat-rail-search input:hover { background: var(--color-surface); border-color: var(--color-border); }
+
 .chat-rail-search input:focus {
+  background: var(--color-surface);
   border-color: var(--color-amber-400);
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
 }
+
+/* Header actions sit with the compose button — small, quiet, and out of the title's way. */
+.chat-rail-action {
+  flex: none;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.chat-rail-action:hover { background: var(--color-surface); color: var(--color-text-body); }
 
 .chat-rail-list {
   flex: 1;
@@ -750,12 +774,12 @@
 
 /* ── Direct messages (Slack model): rail head + compose "To:" typeahead ─────────────────────────── */
 
+/* The header and the filter beneath it are ONE block: the border belongs to the pair, not to each. */
 .chat-rail-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
+  gap: 0.35rem;
+  padding: 0.7rem 0.7rem 0.5rem;
 }
 
 .chat-rail-head__title {

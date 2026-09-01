@@ -19,7 +19,9 @@ export function SectionShell({
   wide = false,
   children,
 }: {
-  title: string;
+  /** The page's own heading. Omit it when the CONTENT already names itself — a chat rail headed
+   *  "Direct messages" does not need a "Messages" title above it saying the same thing more faintly. */
+  title?: string;
   /** DEPRECATED (not rendered) — kept so existing callers don't break. */
   description?: string;
   /** Optional right-aligned header controls (e.g. an Edit button). */
@@ -36,14 +38,19 @@ export function SectionShell({
   children?: ReactNode;
 }) {
   return (
-    <section className={`section-shell${wide ? ' section-shell--wide' : ''}`} aria-labelledby="section-title">
-      <header
-        className="section-head"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', margin: '0 0 0.9rem', minHeight: 0 }}
-      >
-        <h1 id="section-title" style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, lineHeight: 1.2 }}>{title}</h1>
-        {actions && <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flex: 'none' }}>{actions}</div>}
-      </header>
+    <section
+      className={`section-shell${wide ? ' section-shell--wide' : ''}`}
+      {...(title ? { 'aria-labelledby': 'section-title' } : {})}
+    >
+      {(title || actions) && (
+        <header
+          className="section-head"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', margin: '0 0 0.9rem', minHeight: 0 }}
+        >
+          {title && <h1 id="section-title" style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, lineHeight: 1.2 }}>{title}</h1>}
+          {actions && <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flex: 'none' }}>{actions}</div>}
+        </header>
+      )}
       {header}
       {status === 'soon' && comingSoon ? (
         <>

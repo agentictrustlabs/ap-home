@@ -393,33 +393,10 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const recipientTitle = toRecipient?.title ?? '';
 
   return (
-    <SectionShell
-      title="Messages"
-      description="Direct messages and requests in one place"
-      actions={!targetAgent ? (
-        <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
-          {/* spec 334 §5 — posting a request is a first-class Home action; the
-              goal-first composer lives on My Work. */}
-          <a
-            href="/work"
-            className="ghost"
-            title="New request — describe a goal for a person or organization (My Work)"
-            style={{ textDecoration: 'none', fontSize: '0.8rem' }}
-          >
-            New request
-          </a>
-          <a
-            href="/agent"
-            className="ghost"
-            aria-label="Agent settings — message bot & playbook"
-            title="Agent settings (Manage → Agent) — message bot & playbook"
-            style={{ textDecoration: 'none' }}
-          >
-            🤖
-          </a>
-        </span>
-      ) : undefined}
-    >
+    // No page title: the rail already says "Direct messages" and the thread already names who you are
+    // talking to. A "Messages" heading above them repeated that, more faintly, and pushed the content
+    // down. The two page actions moved into the rail head, beside the compose button they belong with.
+    <SectionShell>
       <ApproveMessaging
         need={wireRequired}
         person={sendingAs ?? null}
@@ -479,15 +456,26 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
 
       <div className={`chat-shell${mobileThread && (activeKey || composing) ? ' chat-shell--thread-open' : ''}`}>
         <div className="chat-rail">
+          {/* One header block: the title, its actions, and the filter that acts on the list below it.
+              The filter used to sit in a bordered band of its own, which gave a search box the same
+              visual weight as the section it searches. */}
           <div className="chat-rail-head">
             <AvatarUpload
               name="You"
               imageUrl={selfAvatar}
-              size={30}
+              size={26}
               editable={!!agentAddress}
               onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
             />
             <span className="chat-rail-head__title">Direct messages</span>
+            {!targetAgent && (
+              <>
+                {/* spec 334 §5 — posting a request is a first-class Home action; the goal-first
+                    composer lives on My Work. */}
+                <a href="/work" className="chat-rail-action" title="New request — describe a goal for a person or organization (My Work)">Request</a>
+                <a href="/agent" className="chat-rail-action" aria-label="Agent settings — message bot and playbook" title="Agent settings — message bot & playbook">🤖</a>
+              </>
+            )}
             <button
               type="button"
               className={`chat-rail-compose${composing ? ' chat-rail-compose--active' : ''}`}
