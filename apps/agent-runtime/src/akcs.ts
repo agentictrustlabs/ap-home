@@ -59,3 +59,30 @@ export function agenticKmsConfig(
     ...(opts.chainId ? { chainId: opts.chainId } : {}),
   };
 }
+
+/**
+ * The custody-derivation options for THIS deployment — backend plus, on AKCS, the remote config.
+ *
+ * `deriveSubjectCustodian` defaults to `local-aes` when no backend is passed, and not one of demo-a2a's
+ * ten call sites passed one. So person custody (C_sub) was ALWAYS derived in-process by HKDF, whatever
+ * `A2A_KMS_BACKEND` said — flipping the env to `agentic-kms` would have moved the relayer and the
+ * envelopes and left the custody master exactly where it was. This makes the configured backend the one
+ * that decides.
+ *
+ * Fails closed on `agentic-kms` with missing AKCS config (`agenticKmsConfig` throws), because a custody
+ * key is the last thing that should quietly downgrade (ADR-0013).
+ */
+export function custodyDerivationOpts(
+  env: AkcsEnv & { A2A_CUSTODY_KMS_BACKEND?: string },
+): { backend: KmsBackend; agenticKms?: AgenticKmsConfig } {
+  // A deployment may pin custody separately from the rest (a staged cutover moves one at a time);
+  // absent that, custody follows the deployment's backend.
+  const raw = env.A2A_CUSTODY_KMS_BACKEND?.trim() || env.A2A_KMS_BACKEND?.trim();
+  const backend = (raw || 'local-aes') as KmsBackend;
+  return {
+    backend,
+    ...(backend === 'agentic-kms'
+      ? { agenticKms: agenticKmsConfig(env, { envelopePurpose: 'oidc-custodian' }) }
+      : {}),
+  };
+}

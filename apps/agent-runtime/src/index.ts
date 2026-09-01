@@ -88,7 +88,7 @@ import {
   type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
-import { isAgenticKms, agenticKmsConfig } from './akcs';
+import { isAgenticKms, agenticKmsConfig, custodyDerivationOpts } from './akcs';
 import type { BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import {
   composeSinks,
@@ -2708,7 +2708,7 @@ app.post('/custody/oidc/resolve', async (c) => {
   if (!body?.iss || !body?.sub) return c.json({ ok: false, error: 'iss + sub required' }, 400);
   const rotation = typeof body.rotation === 'number' && body.rotation >= 0 ? body.rotation : 0;
   try {
-    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { rotation });
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(c.env), rotation });
     const agent = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     const drift = await assertSubjectSaStable(c.env, body.iss, body.sub, agent);
     if (drift) return c.json({ ok: false, error: 'custody_root_changed', detail: drift }, 409);
@@ -2746,6 +2746,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -2864,6 +2865,7 @@ app.post('/custody/oidc/bootstrap', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -3048,6 +3050,7 @@ async function recoverCustodian(
   const gate = await verifyCustodySession(args.ownerSession, gateCfg);
   if (!gate.ok) return { ok: false, error: gate.error, status: gate.status };
   const { cSub, sign } = await deriveSubjectCustodian(gate.subject, env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(env),
     auditSink: buildAuditSink(env),
     rotation: descriptor.custody.rotation,
   });
@@ -3116,6 +3119,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation,
     });
@@ -3349,6 +3353,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -3460,6 +3465,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -3526,6 +3532,7 @@ app.post('/custody/oidc/sign', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
@@ -3568,6 +3575,7 @@ app.post('/custody/oidc/custodian', async (c) => {
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
   try {
     const { cSub } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -3630,6 +3638,7 @@ app.post('/custody/oidc/sign-site-delegation', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation,
     });
@@ -3711,6 +3720,7 @@ app.post('/custody/oidc/activate-vault', async (c) => {
 
   try {
     const { cSub, sign } = await deriveSubjectCustodian(gate.subject, c.env.A2A_CUSTODY_ROOT_KEY, {
+      ...custodyDerivationOpts(c.env),
       auditSink: buildAuditSink(c.env),
       rotation: gate.rotation,
     });
@@ -3867,7 +3877,7 @@ app.post('/custody/youversion/store-token', async (c) => {
     return c.json({ ok: false, error: 'iss + sub + access_token + appKey required' }, 400);
   }
   try {
-    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { rotation: 0 });
+    const { cSub } = await deriveSubjectCustodian({ iss: body.iss, sub: body.sub }, c.env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(c.env), rotation: 0 });
     const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     await storeFederatedToken(
       c.env, sa, { access: body.access_token, refresh: body.refresh_token ?? null },

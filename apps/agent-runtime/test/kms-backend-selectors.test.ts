@@ -57,3 +57,40 @@ describe('every envelope selector agrees on the backend set', () => {
     expect(body).toContain("backend: 'gcp-kms'");
   });
 });
+
+describe('custody derivation honours the configured backend', () => {
+  const IDX = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const AKCS = readFileSync(new URL('../src/akcs.ts', import.meta.url), 'utf8');
+
+  it('EVERY deriveSubjectCustodian call passes the backend', () => {
+    // `deriveSubjectCustodian` defaults to local-aes when no backend is passed, and not one of these
+    // call sites passed one — so person custody (C_sub) was derived in-process by HKDF whatever
+    // A2A_KMS_BACKEND said. Flipping the env would have moved the relayer and the envelopes and left
+    // the custody master exactly where it was.
+    const lines = IDX.split('\n');
+    const missed: number[] = [];
+    lines.forEach((line, i) => {
+      if (!line.includes('deriveSubjectCustodian(')) return;
+      const window = lines.slice(i, i + 3).join('\n');
+      if (!window.includes('custodyDerivationOpts(')) missed.push(i + 1);
+    });
+    expect(missed, `call sites still defaulting to local-aes: ${missed.join(', ')}`).toEqual([]);
+  });
+
+  it('there is at least one such call site, so the check cannot pass vacuously', () => {
+    expect(IDX.split('\n').filter((l) => l.includes('deriveSubjectCustodian(')).length).toBeGreaterThan(5);
+  });
+
+  it('custody may be pinned separately from the deployment backend', () => {
+    // A staged cutover moves one path at a time; absent the override, custody follows the deployment.
+    expect(AKCS).toContain('A2A_CUSTODY_KMS_BACKEND');
+  });
+
+  it('agentic-kms custody fails closed on missing AKCS config', () => {
+    // agenticKmsConfig throws on a missing value — a custody key is the last thing that should
+    // quietly downgrade.
+    const fn = AKCS.slice(AKCS.indexOf('export function custodyDerivationOpts'));
+    expect(fn).toContain('agenticKmsConfig(env');
+    expect(fn).not.toContain("?? 'local-aes'\n    ;");
+  });
+});
