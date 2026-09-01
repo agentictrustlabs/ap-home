@@ -556,7 +556,9 @@ export async function secureHomeWithGoogle(
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; agent: Address; name: string } | { ok: false; error: string }> {
   onStep?.('Finding a free name…');
-  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+  // spec 346 — a person's home claims the PERSON root (`.me` where claimable), not the legacy parent.
+  const typed = personClaimRoot();
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed.tld ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json()) as {
     label?: string;
     name?: string;
     node?: Hex;
@@ -569,7 +571,7 @@ export async function secureHomeWithGoogle(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node }),
+    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, tld: typed.tld }),
   });
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; name?: string; error?: string; detail?: string };
   if (!res.ok || !body.ok || !body.agent) {
@@ -1632,13 +1634,16 @@ export async function nameManagedAgent(
 
 /** Resolve an EXACT label to { label, node } or fail (MAM-D4) — for the social server paths that
  *  hand the worker a pre-checked name to register. */
-async function resolveExactName(label: string): Promise<{ ok: true; label: string; node: Hex } | { ok: false; error: string }> {
+async function resolveExactName(label: string, tld?: string): Promise<{ ok: true; label: string; node: Hex } | { ok: false; error: string }> {
   const clean = label.trim().toLowerCase();
-  const picked = (await (await fetch(`/connect/name?exact=1&label=${encodeURIComponent(clean)}`)).json()) as {
+  // The suffix must ride along: `node` is the namehash UNDER a root, so resolving without one returns
+  // the legacy `.impact` node and the claim lands there no matter what the form promised.
+  const q = `/connect/name?exact=1&label=${encodeURIComponent(clean)}${tld ? `&tld=${encodeURIComponent(tld)}` : ''}`;
+  const picked = (await (await fetch(q)).json()) as {
     label?: string; node?: Hex; error?: string; taken?: boolean;
   };
   if (!picked.label || !picked.node) {
-    if (picked.taken) return { ok: false, error: `“${clean}.impact” is already taken — pick another name.` };
+    if (picked.taken) return { ok: false, error: `“${clean}.${tld ?? AGENT_NAME_PARENT}” is already taken — pick another name.` };
     return { ok: false, error: picked.error ?? 'no free name' };
   }
   return { ok: true, label: picked.label, node: picked.node };
@@ -1651,12 +1656,16 @@ async function createManagedAgentSocial(
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
+  // spec 346 — the suffix names the derived agent TYPE, so it is part of what the member asked for.
+  // The KMS path used to drop it here and the worker defaulted to the legacy root: the form offered
+  // ".org" and produced `<label>.impact`, an agent with no declared type (2026-08-31).
+  const typed = typedTldForKind(input.kind);
   const wantName = !!input.label && input.label.trim().length >= 3;
   let label: string | undefined;
   let node: Hex | undefined;
   if (wantName) {
     onStep?.('Checking that name…');
-    const r = await resolveExactName(input.label!);
+    const r = await resolveExactName(input.label!, typed?.tld);
     if (!r.ok) return r;
     label = r.label; node = r.node;
   }
@@ -1667,7 +1676,7 @@ async function createManagedAgentSocial(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.parent, label, node }),
+    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.parent, label, node, tld: typed?.tld, serviceRole: typed?.serviceRole }),
   });
   const b = (await res.json().catch(() => ({}))) as {
     ok?: boolean; agent?: Address; name?: string; stewardshipDelegation?: DelegationWire; custodyDescriptor?: unknown; error?: string; detail?: string;
@@ -1712,8 +1721,9 @@ async function nameManagedAgentSocial(
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const typed = typedTldForKind(input.kind);
   onStep?.('Checking that name…');
-  const r = await resolveExactName(input.label);
+  const r = await resolveExactName(input.label, typed?.tld);
   if (!r.ok) return r;
 
   onStep?.('Naming your agent on the network…');
@@ -1722,7 +1732,7 @@ async function nameManagedAgentSocial(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, agent: input.agent, label: r.label, node: r.node }),
+    body: JSON.stringify({ session: sessionToken, agent: input.agent, label: r.label, node: r.node, tld: typed?.tld, serviceRole: typed?.serviceRole }),
   });
   const b = (await res.json().catch(() => ({}))) as { ok?: boolean; name?: string; error?: string; detail?: string };
   if (!res.ok || !b.ok || !b.name) {
@@ -1884,7 +1894,9 @@ export async function createOrganizationWithGoogle(
 ): Promise<{ ok: true; result: CreatedAgent } | { ok: false; error: string }> {
   // Resolve a free org name (label + node), like secureHomeWithGoogle does.
   onStep?.('Finding a unique name…');
-  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}`)).json()) as {
+  // spec 346 — an organization claims the ORG root where this deployment offers it.
+  const typed = typedTldForKind('org');
+  const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed?.tld ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json()) as {
     label?: string; name?: string; node?: Hex; error?: string;
   };
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
@@ -1895,7 +1907,7 @@ export async function createOrganizationWithGoogle(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg }),
+    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg, tld: typed?.tld }),
   });
   const b = (await res.json().catch(() => ({}))) as {
     ok?: boolean; org?: Address; name?: string; person?: Address;

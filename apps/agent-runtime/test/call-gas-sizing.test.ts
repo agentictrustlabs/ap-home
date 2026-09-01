@@ -15,37 +15,46 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8');
+/** The sizing rule itself. It lives in one helper because TWO endpoints need it — `/account/build-call-
+ *  userop` and `/custody/oidc/name-agent`, whose typed claim is the call that exposed the limit. */
+const SIZER = SRC.slice(SRC.indexOf('async function sizeCallGas'), SRC.indexOf('function subregistryForTld'));
 const HANDLER = SRC.slice(SRC.indexOf("app.post('/account/build-call-userop'"), SRC.indexOf("app.post('/account/submit-call-userop'"));
 
-describe('build-call-userop sizes the call gas', () => {
+describe('the call-gas sizing rule', () => {
   it('estimates the call rather than trusting the default', () => {
-    expect(HANDLER).toContain('estimateGas');
-    expect(HANDLER).toContain('callGasLimit');
+    expect(SIZER).toContain('estimateGas');
+    expect(SIZER).toContain('callGasLimit');
+  });
+
+  it('is applied by every endpoint that builds a CALL userOp', () => {
+    // Deploy ops default to 2.5M and have headroom; call ops default to 800k and do not.
+    expect(HANDLER).toContain('sizeCallGas(c.env, body.sender, body.callData)');
+    expect(SRC).toContain('sizeCallGas(c.env, body.agent, callData)');
   });
 
   it('adds headroom over the estimate', () => {
     // An estimate is the successful path's cost; a userOp that lands a block later can cost more.
-    expect(HANDLER).toMatch(/estimated \* 5n\) \/ 4n/);
+    expect(SIZER).toMatch(/estimated \* 5n\) \/ 4n/);
   });
 
   it('only RAISES the limit — a cheap call keeps the smaller default', () => {
     // The paymaster must hold deposit for maxCost, computed from the LIMITS. Raising every op's limit to
     // fix a few would raise the deposit every op needs, so the override applies only above the default.
-    expect(HANDLER).toMatch(/sized > 800_000n/);
+    expect(SIZER).toMatch(/sized > 800_000n/);
   });
 
   it('falls back to the default when the call is not estimable, and says so', () => {
     // Sizing a call is not deciding whether it is allowed — an unestimable call still gets built and
     // fails honestly at submission rather than being refused here.
-    expect(HANDLER).toMatch(/catch\s*\{[\s\S]*?default\s*\n?\s*\/\/ stands|catch\s*\{[\s\S]*?estimate-failed/);
+    expect(SIZER).toMatch(/catch\s*\{[\s\S]*?estimate-failed/);
   });
 });
 
 describe('gas sizing is reported, not silent', () => {
   it('tells the caller whether the limit was measured or defaulted', () => {
     const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-    expect(src).toContain("let gasBasis: 'estimated' | 'default' | 'estimate-failed'");
-    expect(src).toContain("gasBasis = 'estimate-failed'");
+    expect(src).toContain("gasBasis: 'estimated' | 'default' | 'estimate-failed'");
+    expect(src).toContain("gasBasis: 'estimate-failed'");
     expect(src).toMatch(/userOpHash,\n\s*gasBasis,/);
   });
 });

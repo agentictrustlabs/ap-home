@@ -51,7 +51,7 @@ import {
   SaMismatchError,
 } from '@agenticprimitives/agent-account';
 import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
-import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
 import {
   verifyCustodySession,
   deriveSubjectCustodian,
@@ -301,6 +301,10 @@ export interface Env {
    *  `/session/register-name` was removed 2026-06-01: it allowed orphan name
    *  registrations against undeployed SAs.) */
   PERMISSIONLESS_SUBREGISTRY?: string;
+  /** spec 346 — the TYPED roots, `{"me":"0x…","org":"0x…",…}`. A KMS-custodied create names through the
+   *  root its suffix declares; without this map the four `/custody/oidc/*` naming endpoints can only
+   *  serve the legacy untyped parent. */
+  PERMISSIONLESS_SUBREGISTRIES?: string;
   /** Public registrable base domain for personal A2A endpoints (spec 231).
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
    *  Defaults to `impact-agent.io`. */
@@ -2176,25 +2180,7 @@ app.post('/account/build-call-userop', async (c) => {
     // computed from the LIMITS, so a blanket 2M would raise the deposit every op needs in order to fix a
     // few. If the estimate is unavailable the builder's default still applies — this sizes a call, it does
     // not decide whether one is allowed.
-    let callGasLimit: bigint | undefined;
-    // Whether the limit was MEASURED or defaulted rides back in the response. A swallowed estimate is
-    // how a right-looking op silently keeps a limit too small for it, and the failure then shows up a
-    // block later as an unexplained revert — so say which one this is.
-    let gasBasis: 'estimated' | 'default' | 'estimate-failed' = 'default';
-    try {
-      const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
-      const estimated = await pub.estimateGas({
-        account: c.env.ENTRY_POINT as Address,
-        to: body.sender,
-        data: body.callData,
-      });
-      const sized = (estimated * 5n) / 4n;   // +25% headroom over the estimate
-      if (sized > 800_000n) { callGasLimit = sized; gasBasis = 'estimated'; }
-    } catch {
-      // Not estimable — a call that would revert anyway, or a lagging replica. The builder's default
-      // stands; it is a configured limit, not a second way of answering whether the call is allowed.
-      gasBasis = 'estimate-failed';
-    }
+    const { callGasLimit, gasBasis } = await sizeCallGas(c.env, body.sender, body.callData);
 
     const { userOp, userOpHash, sender } = await accountClient(c.env).buildCallUserOp({
       sender: body.sender,
@@ -2707,13 +2693,11 @@ app.post('/custody/oidc/resolve', async (c) => {
  */
 app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
-  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
-    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
-  }
+  if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'naming_not_configured' }, 503);
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
-  const body = (await c.req.json().catch(() => null)) as { session?: string; label?: string; node?: Hex } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; label?: string; node?: Hex; tld?: string } | null;
   if (!body?.session || !body?.label || !body?.node) {
     return c.json({ ok: false, error: 'session + label + node required' }, 400);
   }
@@ -2735,20 +2719,26 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived SA' }, 403);
     }
 
+    const root = subregistryForTld(c.env, body.tld);
+    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+    const claimedName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+
     // Idempotent: if already deployed, the atomic deploy+claim already ran.
     const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
-      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
+      return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: claimedName, alreadyDeployed: true });
     }
 
+    // Type first, then the claim — the record the suffix asserts must exist before the name does.
+    const declare = root.typed ? await declareTypeCallsFor(c.env, sa, root.tld) : [];
     const register = buildSubregistryRegisterCall({
-      subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address,
+      subregistry: root.subregistry,
       label,
       newOwner: sa,
     });
     const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
-    const callData = buildExecuteBatchCallData([register, setPrimary]);
+    const callData = buildExecuteBatchCallData([...declare, register, setPrimary]);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -2781,14 +2771,14 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       ({ deployedAddress, receipt } = await accountClient(c.env).submitDeployUserOp({ ...userOp, signature }, relayerAccount));
     } catch (submitErr) {
       if (await deployedNow()) {
-        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: claimedName, alreadyDeployed: true });
       }
       throw submitErr;
     }
     const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0]);
     if (!inner.ok) {
       if (await deployedNow()) {
-        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: `${label}.${AGENT_NAME_PARENT}`, alreadyDeployed: true });
+        return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: claimedName, alreadyDeployed: true });
       }
       return c.json(
         {
@@ -2804,7 +2794,7 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       ok: true,
       agent: deployedAddress ?? sa,
       agentId: caip10(Number(c.env.CHAIN_ID), sa),
-      name: `${label}.${AGENT_NAME_PARENT}`,
+      name: claimedName,
       transactionHash: receipt.transactionHash,
     });
   } catch (e) {
@@ -3066,9 +3056,7 @@ app.post('/custody/recover-probe', async (c) => {
  */
 app.post('/custody/oidc/bootstrap-org', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
-  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
-    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
-  }
+  if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'naming_not_configured' }, 503);
   if (!c.env.APPROVED_HASH_REGISTRY || !c.env.AGENT_RELATIONSHIP) {
     return c.json({ ok: false, error: 'grants_not_configured' }, 503);
   }
@@ -3076,7 +3064,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
   const body = (await c.req.json().catch(() => null)) as {
-    session?: string; label?: string; node?: Hex; delegate?: Address; grantOrg?: Address;
+    session?: string; label?: string; node?: Hex; delegate?: Address; grantOrg?: Address; tld?: string;
   } | null;
   if (!body?.session || !body?.label || !body?.node || !body?.delegate) {
     return c.json({ ok: false, error: 'session + label + node + delegate required' }, 400);
@@ -3119,9 +3107,14 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     const stewardship = buildOrgGrant(c.env, orgSA, person);
     approveCalls.push(orgApproveHashCall(c.env, stewardship.digest));
 
-    const register = buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label, newOwner: orgSA });
+    const root = subregistryForTld(c.env, body.tld);
+    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+    const orgName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+    // Type first, then the claim — the record the suffix asserts must exist before the name does.
+    const declare = root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
+    const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA });
     const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
-    const callData = buildExecuteBatchCallData([register, setPrimary, ...approveCalls]);
+    const callData = buildExecuteBatchCallData([...declare, register, setPrimary, ...approveCalls]);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -3172,7 +3165,7 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
       ok: true,
       org: deployedAddress ?? orgSA,
       orgId: caip10(Number(c.env.CHAIN_ID), orgSA),
-      name: `${label}.${AGENT_NAME_PARENT}`,
+      name: orgName,
       person,
       delegation: siteGrant.wire,
       brokerDelegation: brokerGrant?.wire,
@@ -3185,6 +3178,99 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     return c.json({ ok: false, error: 'bootstrap_org_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
+
+/** Size a CALL userOp's `callGasLimit` to the call it actually makes.
+ *
+ *  `buildCallUserOp` defaults to 800k, which fit the heaviest path it knew about. A typed claim
+ *  (register the profile subject + declare `atl:agentType` + register + setPrimary) measured 1,080,642
+ *  gas on faithchain against 302,387 for the untyped claim it replaced — so the default silently
+ *  truncated it and the op reverted with no reason (2026-08-31).
+ *
+ *  Estimating beats raising the constant: a verifying paymaster holds deposit for `maxCost`, computed
+ *  from the LIMITS, so a blanket 2M raises the deposit EVERY op needs in order to fix a few. This sizes
+ *  a call; it never decides whether one is allowed. `gasBasis` reports which limit is in force, because
+ *  a swallowed estimate is how a too-small limit stays invisible until the revert.
+ */
+async function sizeCallGas(
+  env: Env,
+  sender: Address,
+  callData: Hex,
+): Promise<{ callGasLimit?: bigint; gasBasis: 'estimated' | 'default' | 'estimate-failed' }> {
+  if (!env.RPC_URL || !env.ENTRY_POINT) return { gasBasis: 'default' };
+  try {
+    const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+    const estimated = await pub.estimateGas({ account: env.ENTRY_POINT as Address, to: sender, data: callData });
+    const sized = (estimated * 5n) / 4n;   // +25% headroom over the estimate
+    return sized > 800_000n ? { callGasLimit: sized, gasBasis: 'estimated' } : { gasBasis: 'default' };
+  } catch {
+    // Not estimable — a call that would revert anyway, or a lagging replica. The builder's default
+    // stands; it is a configured limit, not a second way of answering whether the call is allowed.
+    return { gasBasis: 'estimate-failed' };
+  }
+}
+
+/** spec 346 — the subregistry a requested suffix names through.
+ *
+ *  The four `/custody/oidc/*` naming endpoints were pinned to `PERMISSIONLESS_SUBREGISTRY`, the LEGACY
+ *  untyped root, while their callers had already moved to typed suffixes. The Home offered ".org", the
+ *  member typed a name, and the agent came back `<label>.impact` — a suffix that declares no type at all
+ *  (2026-08-31). The suffix NAMES the derived agent type, so getting it wrong is not cosmetic: the agent
+ *  is unlistable and fails closed at the registry.
+ *
+ *  An explicitly requested typed suffix that this deployment cannot serve is an ERROR, never the legacy
+ *  root quietly — silently substituting a different root is the bug this replaces (ADR-0013). */
+function subregistryForTld(
+  env: Env,
+  tld: string | undefined,
+): { ok: true; subregistry: Address; typed: false } | { ok: true; subregistry: Address; typed: true; tld: string } | { ok: false; error: string } {
+  const legacy = env.PERMISSIONLESS_SUBREGISTRY as Address | undefined;
+  const parent = env.AGENT_NAME_PARENT || AGENT_NAME_PARENT;
+  const raw = tld?.trim().toLowerCase();
+  if (!raw || raw === parent) {
+    if (!legacy) return { ok: false, error: 'naming_not_configured' };
+    return { ok: true, subregistry: legacy, typed: false };
+  }
+  const t = canonicalTld(raw) ?? raw;
+  if (!isAgentTld(t)) return { ok: false, error: `unknown_suffix: ".${raw}" is not an agent suffix` };
+  let map: Record<string, string> = {};
+  try {
+    map = env.PERMISSIONLESS_SUBREGISTRIES ? (JSON.parse(env.PERMISSIONLESS_SUBREGISTRIES) as Record<string, string>) : {};
+  } catch {
+    return { ok: false, error: 'typed_roots_misconfigured: PERMISSIONLESS_SUBREGISTRIES is not valid JSON' };
+  }
+  const addr = map[t];
+  if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    return { ok: false, error: `suffix_not_claimable: ".${t}" has no root on this deployment` };
+  }
+  return { ok: true, subregistry: addr as Address, typed: true, tld: t };
+}
+
+/** spec 346 §3.6 step 1b — declare the derived type on the SA's profile subject IN THE SAME batch as the
+ *  claim, so the suffix ↔ on-chain `atl:agentType` invariant holds from the first block. A typed name
+ *  without the record is worse than no name: it advertises a type the chain does not confirm, and the
+ *  registry rejects it. Mirrors the Home's device-credential path (`declareTypeCalls`). */
+async function declareTypeCallsFor(
+  env: Env,
+  agent: Address,
+  tld: string,
+  serviceRole?: string,
+): Promise<Array<{ to: Address; value: bigint; data: Hex }>> {
+  if (!env.PROFILE_RESOLVER || !env.RPC_URL) return [];
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  const registered = (await pub.readContract({
+    address: env.PROFILE_RESOLVER as Address,
+    abi: agentProfileResolverTypeAbi,
+    functionName: 'isRegistered',
+    args: [agent],
+  })) as boolean;
+  return buildDeclareAgentTypeCalls({
+    profileResolver: env.PROFILE_RESOLVER as Address,
+    agent,
+    agentType: derivedTypeForTld(tld as never),
+    ...(serviceRole ? { serviceRole } : {}),
+    registered,
+  }) as Array<{ to: Address; value: bigint; data: Hex }>;
+}
 
 /**
  * POST /custody/oidc/bootstrap-agent  (client → a2a, custody session — Google OR YouVersion)
@@ -3204,7 +3290,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
   const body = (await c.req.json().catch(() => null)) as {
-    session?: string; kind?: string; parent?: Address; label?: string; node?: Hex;
+    session?: string; kind?: string; parent?: Address; label?: string; node?: Hex; tld?: string; serviceRole?: string;
   } | null;
   if (!body?.session || !body?.kind || !body?.parent) {
     return c.json({ ok: false, error: 'session + kind + parent required' }, 400);
@@ -3245,12 +3331,16 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     // Stewardship grant child → parent (spec 246), pre-approved (0x03 sentinel) in the deploy batch.
     const stewardship = buildOrgGrant(c.env, childSA, body.parent);
     const calls: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    let claimedName = '';
     if (wantName) {
-      if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
-        return c.json({ ok: false, error: 'naming_not_configured' }, 503);
-      }
-      calls.push(buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label: body.label!.toLowerCase(), newOwner: childSA }));
+      if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'naming_not_configured' }, 503);
+      const root = subregistryForTld(c.env, body.tld);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+      // Type first, then the claim — the record the suffix asserts must exist before the name does.
+      if (root.typed) calls.push(...(await declareTypeCallsFor(c.env, childSA, root.tld, body.serviceRole)));
+      calls.push(buildSubregistryRegisterCall({ subregistry: root.subregistry, label: body.label!.toLowerCase(), newOwner: childSA }));
       calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
+      claimedName = `${body.label!.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
     }
     calls.push(orgApproveHashCall(c.env, stewardship.digest));
     const callData = buildExecuteBatchCallData(calls);
@@ -3294,7 +3384,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
     return c.json({
       ok: true,
       agent: deployedAddress ?? childSA,
-      name: wantName ? `${body.label!.toLowerCase()}.${AGENT_NAME_PARENT}` : '',
+      name: claimedName,
       person,
       stewardshipDelegation: stewardship.wire,
       custodyDescriptor,
@@ -3317,13 +3407,11 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
  */
 app.post('/custody/oidc/name-agent', async (c) => {
   if (!c.env.PAYMASTER) return c.json({ ok: false, error: 'paymaster not configured' }, 409);
-  if (!c.env.PERMISSIONLESS_SUBREGISTRY || !c.env.AGENT_NAME_REGISTRY) {
-    return c.json({ ok: false, error: 'naming_not_configured' }, 503);
-  }
+  if (!c.env.AGENT_NAME_REGISTRY) return c.json({ ok: false, error: 'naming_not_configured' }, 503);
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
-  const body = (await c.req.json().catch(() => null)) as { session?: string; agent?: Address; label?: string; node?: Hex } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; agent?: Address; label?: string; node?: Hex; tld?: string; serviceRole?: string } | null;
   if (!body?.session || !body?.agent || !body?.label || !body?.node) {
     return c.json({ ok: false, error: 'session + agent + label + node required' }, 400);
   }
@@ -3344,9 +3432,14 @@ app.post('/custody/oidc/name-agent', async (c) => {
       return c.json({ ok: false, error: 'not_custodian', detail: 'agent is not custodied by this session' }, 403);
     }
 
-    const register = buildSubregistryRegisterCall({ subregistry: c.env.PERMISSIONLESS_SUBREGISTRY as Address, label: body.label.toLowerCase(), newOwner: body.agent });
+    const root = subregistryForTld(c.env, body.tld);
+    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+    // Type first, then the claim — the record the suffix asserts must exist before the name does.
+    const declare = root.typed ? await declareTypeCallsFor(c.env, body.agent, root.tld, body.serviceRole) : [];
+    const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label: body.label.toLowerCase(), newOwner: body.agent });
     const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
-    const callData = buildExecuteBatchCallData([register, setPrimary]);
+    const callData = buildExecuteBatchCallData([...declare, register, setPrimary]);
+    const claimedName = `${body.label.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -3354,8 +3447,10 @@ app.post('/custody/oidc/name-agent', async (c) => {
       verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
     }
 
+    const sized = await sizeCallGas(c.env, body.agent, callData);
     const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({
       sender: body.agent, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster,
+      ...(sized.callGasLimit ? { callGasLimit: sized.callGasLimit } : {}),
     });
     const signature = await sign(userOpHash); // C_sub signs (it custodies the agent)
     const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
@@ -3364,7 +3459,7 @@ app.post('/custody/oidc/name-agent', async (c) => {
     if (!inner.ok) {
       return c.json({ ok: false, error: 'userop_reverted', detail: inner.revertReason ?? 'inner userOp reverted', transactionHash: receipt.transactionHash }, 500);
     }
-    return c.json({ ok: true, name: `${body.label.toLowerCase()}.${AGENT_NAME_PARENT}`, transactionHash: receipt.transactionHash });
+    return c.json({ ok: true, name: claimedName, gasBasis: sized.gasBasis, transactionHash: receipt.transactionHash });
   } catch (e) {
     console.error('[demo-a2a] custody/google/name-agent failed:', e);
     return c.json({ ok: false, error: 'name_agent_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
