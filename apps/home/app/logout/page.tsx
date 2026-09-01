@@ -13,6 +13,7 @@ import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
 import { setFedcmLoginStatus, SESSION_KEY } from '../../src/context/session';
 import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
+import { HOME_ORIGIN } from '../../src/lib/domain';
 import { disconnectWallet } from '../../src/lib/wallet';
 
 /** Relying apps that receive a front-channel sign-out at their `/sso-logout` — each clears its
@@ -53,6 +54,22 @@ export default function LogoutPage() {
     // This page tears the session down directly (not via session.signOut), so also drop the dApp
     // from MetaMask's "Connected sites" here (EIP-2255). Best-effort + silent; no-op for non-wallet.
     void disconnectWallet();
+
+    // ── ONE ORIGIN FOR THE WHOLE CHAIN ───────────────────────────────────────────────────────────
+    // This Home answers on more than one host (apex and www, no redirect between them), and every
+    // relying app allowlists exactly ONE of them as the return it will bounce back to. So the chain has
+    // to run on that one. Teardown above already ran for THIS origin — its localStorage is per-origin —
+    // and the SSO cookie is cross-subdomain, so hopping now loses nothing and is idempotent on arrival.
+    //
+    // Without this, signing out from the apex sent field-web a return it refuses, and field-web did the
+    // only safe thing it could: dropped the person on its own root. Signed out, on an app they were not
+    // using, with no way back.
+    if (HOME_ORIGIN && window.location.origin !== HOME_ORIGIN) {
+      const hop = new URL('/logout', HOME_ORIGIN);
+      for (const [k, v] of new URL(window.location.href).searchParams) hop.searchParams.set(k, v);
+      window.location.replace(hop.toString());
+      return;
+    }
 
     // Anti open-redirect: registered relying-app origin, or this Home origin, otherwise the apex.
     const params = new URL(window.location.href).searchParams;

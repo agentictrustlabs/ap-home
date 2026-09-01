@@ -29,6 +29,17 @@ export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
 /** Platform (apex) Connect origin — landing + bootstrap default. */
 export const PLATFORM_AUTH_ORIGIN = `https://${CONNECT_DOMAIN}`;
 
+/** The ONE origin this Home is known by to everything outside it.
+ *
+ *  A Home can be reachable at more than one host — faithnet.me and www.faithnet.me both serve it, with no
+ *  redirect between them. Relying apps allowlist exactly one, so which host you happened to be on decided
+ *  whether sign-out could come back: field-web accepts a return only from `https://www.faithnet.me`, and a
+ *  person signing out from the apex was handed to field-web and left there, signed out, on an app they
+ *  were not using.
+ *
+ *  Unset ⇒ no canonicalisation (today's behaviour). Deployed Homes set it. */
+export const HOME_ORIGIN = process.env.NEXT_PUBLIC_HOME_ORIGIN || '';
+
 /** Single-label subdomain of `baseDomain` (alice.impact-agent.me → alice). The
  *  apex, nested labels, `www`, and non-matching hosts → null. */
 export function parseAgentSubdomain(hostname: string, baseDomain: string = CONNECT_DOMAIN): string | null {
