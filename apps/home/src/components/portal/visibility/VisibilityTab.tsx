@@ -56,7 +56,9 @@ export function VisibilityTab() {
       {pane === 'agent' ? (
         <Stack gap={1}>
           <VisibilityPolicyCard value={preset} onChange={setPreset} />
-          <InvitationsPanel />
+          {/* The Settings nav links straight here (`/visibility#invitations`). Without the anchor the
+              link lands on the page and does nothing visible, which reads as a broken menu item. */}
+          <div id="invitations"><InvitationsPanel /></div>
           <DiscoveryAuthorityPanel />
         </Stack>
       ) : (

@@ -125,8 +125,9 @@ describe('a nameless agent shows what it cannot do yet, and why', () => {
   const item = (hasName: boolean, label: string) =>
     pane(hasName).flatMap((g) => g.items).find((i) => i.label === label)!;
 
-  it('Agent Card, Registry and Trust graph wait on a name — and say so', () => {
-    for (const label of ['Agent Card', 'Registry', 'Trust graph']) {
+  it('Agent Card and Registry wait on a name — and say so', () => {
+    // Trust graph is no longer in this pane, so it is no longer this pane's job to gate it.
+    for (const label of ['Agent Card', 'Registry']) {
       expect(item(false, label).disabledReason).toContain('name');
       expect(item(true, label).disabledReason).toBeUndefined();
     }
@@ -148,9 +149,16 @@ describe('a nameless agent shows what it cannot do yet, and why', () => {
       .toEqual(pane(true).flatMap((g) => g.items).map((i) => i.label));
   });
 
-  it('Visibility sits after Trust graph', () => {
-    const l = pane(true).flatMap((g) => g.items).map((i) => i.label);
-    expect(l.indexOf('Visibility') - l.indexOf('Trust graph')).toBe(1);
+  it('Reachability stays available while nameless — an invitation is how you reach an unnamed agent', () => {
+    // spec 338: named · listed · resolvable · inbound are four INDEPENDENT choices. Trust graph left
+    // Settings entirely (it is a view of what others said, not a setting), so the old "Visibility sits
+    // after Trust graph" ordering no longer has two things to order.
+    const nameless = pane(false);
+    const reach = nameless.find((g) => g.heading === 'Reachability')?.items.map((i) => i.label) ?? [];
+    expect(reach).toEqual(['Visibility', 'Invitations issued']);
+    for (const i of nameless.flatMap((g) => g.items).filter((x) => x.label === 'Visibility')) {
+      expect(i.disabledReason, 'reaching a nameless agent is the point of an invitation').toBeUndefined();
+    }
   });
 });
 
@@ -194,14 +202,16 @@ describe('the Settings pane', () => {
     buildSettingsPane(scope).flatMap((g) => g.items.map((i) => i.label));
 
   it('is grouped the same way, in the same order, for every class that has the group', () => {
+    // Five groups, each answering ONE question: who it is · how it is found · whether it can be
+    // reached · how it acts · who may act through it.
     for (const scope of [ORG_SCOPE, SVC_SCOPE]) {
-      expect(groups(scope)).toEqual(['Identity & presence', 'Behaviour', 'People & access']);
+      expect(groups(scope)).toEqual(['Identity', 'Discovery', 'Behaviour', 'Authority']);
     }
-    // A person has no People & access group, and that is the honest outcome rather than an empty
-    // heading (§5): they have no members, no lifecycle status, and their own access — credentials and
-    // the delegations they hold — is Security, in the user menu, because it is about the person and
-    // not about an agent in a workspace.
-    expect(groups(PERSON)).toEqual(['Identity & presence', 'Behaviour']);
+    // A person has no Authority group, and that is the honest outcome rather than an empty heading
+    // (§5): they have no members, no lifecycle status, and their own access — credentials and the
+    // delegations they hold — is Security, in the user menu, because it is about the person and not
+    // about an agent in a workspace. Reachability is person-only for the mirror-image reason.
+    expect(groups(PERSON)).toEqual(['Identity', 'Discovery', 'Reachability', 'Behaviour']);
   });
 
   it('carries the shared identity items everywhere', () => {
@@ -209,7 +219,9 @@ describe('the Settings pane', () => {
       // 'Capabilities' is what the agent can DO; 'Playbook' is the SKILL.md procedural package. They were
       // both called some form of "skill" before ADR-0051, which is exactly the collision being removed —
       // so this list asserts both names survive, separately.
-      for (const item of ['Profile', 'Naming', 'Agent Card', 'Registry', 'Trust graph', 'Capabilities', 'Playbook']) {
+      // Trust graph is NOT here any more — it moved to the main nav beside Attestations, because
+      // nothing on it is configured; it shows what other agents have said.
+      for (const item of ['Profile', 'Naming', 'Agent Card', 'Registry', 'Capabilities', 'Playbook']) {
         expect(items(scope)).toContain(item);
       }
     }

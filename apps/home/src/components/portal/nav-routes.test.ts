@@ -36,7 +36,9 @@ const ALL = new Set(routes(PORTAL).concat('/'));
 
 /** Does this concrete href match a route, treating `[param]` as a wildcard for one segment? */
 function resolves(href: string): boolean {
-  const path = href.split('?')[0]!.replace(/\/$/, '') || '/';
+  // Strip the FRAGMENT as well as the query: `#invitations` names a section within a page, not a route,
+  // and treating it as one reported a working link as dead.
+  const path = href.split('#')[0]!.split('?')[0]!.replace(/\/$/, '') || '/';
   if (ALL.has(path)) return true;
   const parts = path.split('/');
   for (const route of ALL) {

@@ -133,7 +133,7 @@ export function CapabilitiesCurator({
                   setAdding(false);
                 }}
               >
-                Add skill
+                Add capability
               </button>
               <button type="button" className="btn-ghost" onClick={() => setAdding(false)}>
                 Cancel
@@ -142,7 +142,7 @@ export function CapabilitiesCurator({
           </div>
         ) : (
           <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={() => setAdding(true)}>
-            + Add skill
+            + Add capability
           </button>
         ))}
     </div>

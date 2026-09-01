@@ -154,6 +154,13 @@ export function buildNav(
       { id: 'attestations-all', label: 'Attestations', href: '/attestations', Icon: AwardIcon, status: 'live' },
     ] });
   }
+  // Trust graph sits with Attestations, not in Settings. It is not a SETTING — nothing on it is
+  // configured; it is a view of what other agents have said, which is the same kind of thing an
+  // attestation is. Directly above Stewardship, so the three "what others say / what you hold for
+  // others" surfaces read as one band.
+  groups.push({ items: [
+    { id: 'trust-graph', label: 'Trust graph', href: href('trust-graph'), Icon: ShieldIcon, status: 'live' },
+  ] });
 
   // ── Stewardship, then Settings — the two PANES are neighbours at the bottom, so the one second-level
   //    grammar reads as one band: what this agent holds for other people, then how it is set up.
@@ -223,31 +230,43 @@ export function buildSettingsPane(
   // names a card), so those rows wait — and say what they are waiting for. Naming and Profile stay open,
   // because naming it is the way out.
   const needsName = hasName ? undefined : 'Give this agent a name first — its public address comes from its name.';
+  // IDENTITY — who this agent is. Two pages, and the split is real: Profile is the agent's own
+  // description; Naming owns the name, its records AND the A2A endpoint (the endpoint was once set inside
+  // the card editor because the card needs it, but it is published under the NAME and read by resolution).
   const identity: NavItem[] = [
     { id: 'set-profile', label: 'Profile', href: href('profile'), Icon: UserIcon, status: 'live' },
-    // Naming owns the name, its records AND the A2A endpoint: the endpoint was set inside the card
-    // editor because the card needs it, but it is published under the name and read by resolution.
     { id: 'set-naming', label: 'Naming', href: href('naming'), Icon: TagIcon, status: 'live' },
+  ];
+  // DISCOVERY — how this agent is FOUND, in the order the chain actually runs: what it can do, the card
+  // that advertises it, the registry that lists the card. Each needs a name, because the card is served
+  // at an address derived from it; shown-but-disabled rather than hidden, so a person sees what becomes
+  // available and why it is not yet.
+  const discovery: NavItem[] = [
+    { id: 'set-capabilities', label: 'Capabilities', href: href('capabilities'), Icon: AwardIcon, status: 'live' },
     { id: 'set-card', label: 'Agent Card', href: href('card'), Icon: IdCardIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
     { id: 'set-registry', label: 'Registry', href: href('registry'), Icon: DatabaseIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
-    { id: 'set-trust-graph', label: 'Trust graph', href: href('trust-graph'), Icon: ShieldIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
-    // Visibility sits AFTER Trust graph and stays available while nameless: issuing an invitation is how
-    // someone reaches an agent that has no public name at all (spec 338 — naming, listing, resolution and
-    // inbound are four INDEPENDENT choices, and lacking the first does not remove the others).
-    // Person-only today: the other classes have no agent-scoped surface for it yet.
-    ...(isPerson ? [{ id: 'set-visibility', label: 'Visibility', href: '/visibility', Icon: GlobeIcon, status: 'live' as const }] : []),
   ];
+  // REACHABILITY — whether anyone can GET TO this agent, which spec 338 insists is four independent
+  // choices (named · listed · resolvable · inbound) and not one switch. It stays available while
+  // NAMELESS, because issuing an invitation is exactly how someone reaches an agent with no public name:
+  // lacking the first choice does not remove the other three. Person-only today — the other classes have
+  // no agent-scoped surface for it yet, and §5 says an empty area renders nothing.
+  const reachability: NavItem[] = isPerson ? [
+    { id: 'set-visibility', label: 'Visibility', href: '/visibility', Icon: GlobeIcon, status: 'live' },
+    { id: 'set-invitations', label: 'Invitations issued', href: '/visibility#invitations', Icon: LinkIcon, status: 'live' },
+  ] : [];
   // Behaviour varies by class, and it varies because the SURFACES differ — not to make the pane shorter:
   //   • a service agent has no assistant configuration; its Playbook IS what it answers as, so `Ask`
   //     would point at the same page under a second name;
   //   • only a person's agent has a discussion-reply panel distinct from its assistant. An org's
   //     discussion behaviour is the assistant.
   // An item that would duplicate another is worse than an absent one (§5's empty rule).
+  // BEHAVIOUR — how it ACTS. Capabilities moved out to Discovery: what an agent can do is what others
+  // search for, and it was the one item here that answered a different question from its neighbours.
   const behaviour: NavItem[] = [
     ...(active.kind !== 'service' ? [{ id: 'set-ask', label: 'Ask', href: href('ask'), Icon: BotIcon, status: 'live' as const }] : []),
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
     ...(isPerson ? [{ id: 'set-discussion', label: 'Discussion replies', href: '/discussion-replies', Icon: HashIcon, status: 'live' as const }] : []),
-    { id: 'set-capabilities', label: 'Capabilities', href: href('capabilities'), Icon: AwardIcon, status: 'live' },
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
   ];
   const access: NavItem[] = [
@@ -262,10 +281,15 @@ export function buildSettingsPane(
     ...(isOrg ? [{ id: 'set-status', label: 'Status', href: orgHref(active.org, 'status'), Icon: SettingsIcon, status: 'live' as const }] : []),
   ];
 
+  // Five groups, each answering ONE question about the agent: who it is · how it is found · whether it
+  // can be reached · how it acts · who may act through it. The previous three mixed those — "Identity &
+  // presence" carried the card, the registry and the trust graph alongside the name.
   return [
-    { heading: 'Identity & presence', items: identity },
+    { heading: 'Identity', items: identity },
+    { heading: 'Discovery', items: discovery },
+    { heading: 'Reachability', items: reachability },
     { heading: 'Behaviour', items: behaviour },
-    { heading: 'People & access', items: access },
+    { heading: 'Authority', items: access },
   ].filter((g) => g.items.length > 0);
 }
 
