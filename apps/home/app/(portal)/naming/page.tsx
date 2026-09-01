@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
+import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
@@ -133,6 +134,18 @@ export default function NamingPage() {
       )}
 
       {err && <div style={cardSty}><b style={errorText}>Error</b> <span style={mutedText}>{err}</span></div>}
+
+      {/* Change or clear the name. Shown whether or not one is presented right now: an agent with a
+          cleared name still HOLDS its labels, and presenting one again is the way back. */}
+      {agentAddress && agentDeployed && (
+        <ChangeNameCard
+          agent={agentAddress}
+          kind="person"
+          via={memberVia}
+          token={session?.token ?? null}
+          onChanged={() => { void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+        />
+      )}
 
       {/* The records published under this name (including the A2A endpoint), the card projection that
           writes them, and the read-only account profile. */}

@@ -21,7 +21,13 @@ const SRC = readFileSync(join(process.cwd(), 'src/connect-client.ts'), 'utf8');
 
 describe('claimName defaults to the person root', () => {
   it('its `typed` parameter is not an empty default', () => {
-    const sig = SRC.slice(SRC.indexOf('export async function claimName'), SRC.indexOf('): Promise<{ ok: true; name: string }'));
+    // Slice to the END OF THE SIGNATURE, not to a literal return type: pinning the exact return string
+    // meant that changing it made `indexOf` return -1, `slice(start, -1)` scan the whole file, and this
+    // assertion fail on an unrelated match somewhere else.
+    const start = SRC.indexOf('export async function claimName');
+    expect(start).toBeGreaterThan(-1);
+    const bodyAt = SRC.indexOf('> {', start);
+    const sig = SRC.slice(start, bodyAt);
     expect(sig).toContain('typed: TypedClaimOpts = personClaimRoot()');
     expect(sig).not.toContain('typed: TypedClaimOpts = {}');
   });

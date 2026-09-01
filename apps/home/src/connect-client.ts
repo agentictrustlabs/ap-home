@@ -370,6 +370,9 @@ export async function collectSubscriptions(opts: {
 const SUBREG_CLAIMED_ABI = [
   { type: 'function', name: 'claimedBy', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ type: 'bytes32' }] },
 ] as const;
+const PRIMARY_NAME_ABI = [
+  { type: 'function', name: 'primaryName', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ type: 'bytes32' }] },
+] as const;
 const RESOLVER_NAMEOF_ABI = [
   { type: 'function', name: 'nameOf', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'string' }] },
 ] as const;
@@ -382,6 +385,71 @@ function subregistryForTld(tld: string | undefined): { ok: true; subregistry: Ad
   const a = isAgentTld(tld) ? PERMISSIONLESS_SUBREGISTRIES[tld] : undefined;
   if (!a) return { ok: false, error: `".${tld}" is not claimable on this deployment` };
   return { ok: true, subregistry: a, typed: true };
+}
+
+/** Which roots this SA has ALREADY claimed under, and the name it holds in each.
+ *
+ *  `PermissionlessSubregistry.claimedBy` is write-once and has no release: an SA gets exactly one label
+ *  per root, forever. So "rename" cannot mean "take a different label under the same suffix" — that
+ *  reverts `AlreadyClaimed`. It means claim under a suffix this agent has not used yet, and point the
+ *  primary name at it. This read is what lets the UI offer only the suffixes that can actually work,
+ *  instead of finding out on-chain after the member has typed a name.
+ */
+export async function readClaimedRoots(
+  agent: Address,
+): Promise<Array<{ tld: string; node: Hex; name: string | null; typed: boolean }>> {
+  const roots: Array<{ tld: string; subregistry: Address; typed: boolean }> = [
+    { tld: AGENT_NAME_PARENT, subregistry: CONTRACTS.permissionlessSubregistry, typed: false },
+    ...Object.entries(PERMISSIONLESS_SUBREGISTRIES)
+      .filter((e): e is [string, Address] => !!e[1])
+      .map(([tld, subregistry]) => ({ tld, subregistry, typed: true })),
+  ];
+  const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+  const out: Array<{ tld: string; node: Hex; name: string | null; typed: boolean }> = [];
+  await Promise.all(roots.map(async (r) => {
+    let node: Hex;
+    try {
+      node = (await pc.readContract({ address: r.subregistry, abi: SUBREG_CLAIMED_ABI, functionName: 'claimedBy', args: [agent] })) as Hex;
+    } catch {
+      return; // a root this deployment lists but cannot read is reported as unclaimed, never as claimed
+    }
+    if (!node || BigInt(node) === 0n) return;
+    let name: string | null = null;
+    try {
+      name = (await pc.readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_NAMEOF_ABI, functionName: 'nameOf', args: [node] })) as string;
+    } catch { /* the claim is the fact; the label is a nicety */ }
+    out.push({ tld: r.tld, node, name: name || null, typed: r.typed });
+  }));
+  return out.sort((a, b) => a.tld.localeCompare(b.tld));
+}
+
+/** The node this SA currently presents as its name (`primaryName`), or null when it presents none. */
+export async function readPrimaryNameNode(agent: Address): Promise<Hex | null> {
+  const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+  const node = (await pc.readContract({
+    address: CONTRACTS.agentNameRegistry, abi: PRIMARY_NAME_ABI, functionName: 'primaryName', args: [agent],
+  })) as Hex;
+  return node && BigInt(node) !== 0n ? node : null;
+}
+
+/** Point this SA's public name at `node`, or clear it entirely with `null`.
+ *
+ *  Clearing is the only "reset" the naming contracts offer: `setPrimaryName(0)` drops the reverse record
+ *  so the agent presents no name. It does NOT release the label — the forward record still resolves to
+ *  this agent and the root still counts it as claimed. Saying otherwise would promise a rollback the
+ *  chain cannot perform.
+ */
+export async function setPrimaryName(
+  agent: Address,
+  signHash: SignHash,
+  node: Hex | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const call = buildSetPrimaryNameCall({
+    registry: CONTRACTS.agentNameRegistry,
+    node: node ?? (`0x${'0'.repeat(64)}` as Hex),
+  });
+  const res = await executeCalls(agent, signHash, [call]);
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
 }
 
 /** spec 346 §3.6 step 1b — declare the derived type on the SA's profile subject BEFORE a typed claim, so the
@@ -452,7 +520,10 @@ export async function claimName(
   minNonce?: bigint,
   /** Defaults to this deployment's PERSON root; a managed agent passes its own via `typedTldForKind`. */
   typed: TypedClaimOpts = personClaimRoot(),
-): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  // `alreadyClaimed` is NOT decoration: this root gives an SA one label forever, so a second claim is a
+  // silent no-op that returns the OLD name. A rename screen reporting that as success would tell the
+  // member their name changed when nothing happened.
+): Promise<{ ok: true; name: string; alreadyClaimed?: boolean } | { ok: false; error: string }> {
   const sub = subregistryForTld(typed.tld);
   if (!sub.ok) return { ok: false, error: sub.error };
   // Already-claimed? Surface the existing name; never submit a reverting register.
@@ -468,8 +539,28 @@ export async function claimName(
           address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_NAMEOF_ABI, functionName: 'nameOf', args: [prior],
         })) as string;
       } catch { /* resolver read failed — still a no-op claim, just without the resolved label */ }
-      onStep?.(existing ? `This home already has a name: ${existing}` : 'This home already has a name.');
-      return { ok: true, name: existing || base };
+      // The label is already this agent's and cannot be re-claimed, but it may not be the one the agent
+      // PRESENTS — clearing the public name leaves the claim intact and the pointer empty. Re-point it,
+      // because otherwise this branch reports a name the agent does not answer to and changes nothing.
+      let restored = false;
+      try {
+        const current = (await pc.readContract({
+          address: CONTRACTS.agentNameRegistry, abi: PRIMARY_NAME_ABI, functionName: 'primaryName', args: [agent],
+        })) as Hex;
+        if (!current || current.toLowerCase() !== prior.toLowerCase()) {
+          onStep?.(existing ? `Presenting ${existing} again…` : 'Presenting your name again…');
+          const re = await executeCalls(agent, signHash, [
+            buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node: prior }),
+          ]);
+          if (!re.ok) return { ok: false, error: `could not present the held name: ${re.error}` };
+          restored = true;
+          requestReindex([agent]);
+        }
+      } catch (e) {
+        return { ok: false, error: `could not read or set the public name: ${String((e as Error)?.message ?? e)}` };
+      }
+      onStep?.(existing ? `This agent's name is ${existing}.` : 'This agent already holds a name.');
+      return { ok: true, name: existing || base, alreadyClaimed: !restored };
     }
   } catch { /* read failed → fall through and attempt the claim (the on-chain AlreadyClaimed guard still protects) */ }
 

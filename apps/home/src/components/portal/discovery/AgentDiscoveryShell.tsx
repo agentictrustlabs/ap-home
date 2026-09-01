@@ -13,6 +13,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
 import { useManagedAgents } from '../ManagedAgents';
+import type { AgentKind } from '../../../connect-client';
 import { agentClassOf } from '../../../lib/agent-class';
 
 const lc = (s: string) => s.toLowerCase();
@@ -27,8 +28,9 @@ export function AgentDiscoveryShell({
   /** Which ADR-0046 class this route serves; an address of the other class is not found here. */
   cls: 'org' | 'service';
   title: string;
-  /** Rendered with the resolved address and the agent's on-chain name (`null` when it has none). */
-  children(a: Address, name: string | null): ReactNode;
+  /** Rendered with the resolved address, the agent's on-chain name (`null` when it has none), and its
+   *  KIND — which typed suffix an agent may claim follows from its type, not from its route. */
+  children(a: Address, name: string | null, kind: AgentKind): ReactNode;
 }) {
   const { session } = useSession();
   const { agents, loaded } = useManagedAgents(session?.token ?? null, 'any');
@@ -46,5 +48,5 @@ export function AgentDiscoveryShell({
       </SectionShell>
     );
   }
-  return <SectionShell title={title}>{children(found.agent as Address, found.name || null)}</SectionShell>;
+  return <SectionShell title={title}>{children(found.agent as Address, found.name || null, found.kind)}</SectionShell>;
 }

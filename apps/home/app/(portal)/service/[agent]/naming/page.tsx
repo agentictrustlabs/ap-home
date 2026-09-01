@@ -5,14 +5,20 @@ import { use } from 'react';
 import { AgentDiscoveryShell } from '../../../../../src/components/portal/discovery/AgentDiscoveryShell';
 import { AgentNamingPanel } from '../../../../../src/components/portal/discovery/AgentDiscoveryPanels';
 import { AgentNamingEditor } from '../../../../../src/components/portal/discovery/AgentNamingEditor';
+import { useSession } from '../../../../../src/context/session';
+import { resolveVia } from '../../../../../src/home/onboarding';
+import { ChangeNameCard } from '../../../../../src/components/portal/naming/ChangeNameCard';
 
 export default function ServiceNamingPage({ params }: { params: Promise<{ agent: string }> }) {
   const { agent } = use(params);
+  const { session, profile } = useSession();
+  const via = resolveVia(profile?.credential as string | undefined, session?.via);
   return (
     <AgentDiscoveryShell agent={agent} cls="service" title="Naming">
-      {(a, name) => (
+      {(a, name, kind) => (
         <>
           <AgentNamingPanel agent={a} name={name} />
+          <ChangeNameCard agent={a} kind={kind} via={via} token={session?.token ?? null} onChanged={() => window.location.reload()} />
           <AgentNamingEditor kind="service" agent={agent} />
         </>
       )}
