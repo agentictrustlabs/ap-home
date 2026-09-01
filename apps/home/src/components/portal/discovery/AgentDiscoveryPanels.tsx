@@ -17,8 +17,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
-import { DISCOVERY_HOST, loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../lib/registry';
-import { getSkills, setSkills, registerAgent, canCheckCustody } from '../../../connect-client';
+import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../lib/registry';
+import { getSkills, setSkills } from '../../../connect-client';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { reverseAgentName } from '../../../lib/reverse-name';
 import { badgeStyle, cardSty, mono, mutedText, errorText, shortAddr } from '../theme';
@@ -52,63 +52,6 @@ function useAgentRow(agent: string): { row: AgentRegistryRow | null | undefined;
   }, [agent, session?.via, session?.token, agentName]);
   useEffect(() => { void load(); }, [load, tick]);
   return { row, err, reload: () => setTick((n) => n + 1) };
-}
-
-export function AgentRegistryPanel({ agent, name }: { agent: Address; name: string | null }) {
-  const { session, profile } = useSession();
-  const { row, err, reload } = useAgentRow(agent);
-  const [msg, setMsg] = useState<string | null>(null);
-  const act = useAction();
-
-  const register = async (): Promise<void> => {
-    setMsg(null);
-    if (!session || !name) { setMsg('This agent needs a name before it can be registered.'); return; }
-    try {
-      const signHash = await signHashFor(resolveVia(profile?.credential, session.via), agent, { token: session.token });
-      const res = await registerAgent(agent, name, signHash);
-      setMsg(res.ok ? 'Registered. It appears here after the next index run.' : res.error);
-      if (res.ok) reload();
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
-  };
-
-  return (
-    <div style={cardSty}>
-      <h3 style={{ margin: '0 0 .5rem' }}>Discovery registry</h3>
-      <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
-        Whether this agent has an entry in the discovery knowledge base — what a directory or another
-        agent finds when it searches. Read from <code style={mono}>{DISCOVERY_HOST}</code> through the
-        discovery agent, not the chain (ADR-0012).
-      </p>
-      {err && <p style={errorText}>{err}</p>}
-      {row === null && !err && <p style={mutedText}>Checking the registry…</p>}
-      {row === undefined && (
-        <>
-          <p><span style={badgeStyle('neutral')}>not in the registry</span></p>
-          <p style={{ ...mutedText, fontSize: '.82rem' }}>
-            <code style={mono}>{DISCOVERY_HOST}</code> has no entry for this agent. Registering is an
-            on-chain write the agent&rsquo;s OWN account makes (RB-01: only the subject may register
-            itself), so it needs a custodian of this agent, not just any signer.
-          </p>
-          <BusyButton className="btn-primary" busy={act.busy} busyLabel="Registering…" onClick={act.run(register)}>Register this agent</BusyButton>
-        </>
-      )}
-      {row && (
-        <>
-          <p>
-            {row.registered ? <span style={badgeStyle('ok')}>● registered</span> : <span style={badgeStyle('neutral')}>indexed, not registered</span>}
-            {row.shaclConforms ? <span style={{ marginLeft: '.5rem', ...badgeStyle('ok') }}>shape valid</span> : <span style={{ marginLeft: '.5rem', ...badgeStyle('warn') }}>shape not checked</span>}
-          </p>
-          <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '.3rem .8rem', fontSize: '.84rem', margin: 0 }}>
-            <dt style={mutedText}>Name</dt><dd style={{ margin: 0 }}>{row.name ?? <span style={mutedText}>none</span>}</dd>
-            <dt style={mutedText}>Address</dt><dd style={{ margin: 0 }}><code style={mono}>{row.subjectAgent}</code></dd>
-            <dt style={mutedText}>Registry</dt><dd style={{ margin: 0 }}><code style={mono}>{shortAddr(REGISTRY.address)}</code> · via {REGISTRY.source}</dd>
-          </dl>
-          {!row.registered && <div style={{ marginTop: '.7rem' }}><BusyButton className="btn-primary" busy={act.busy} busyLabel="Registering…" onClick={act.run(register)}>Register this agent</BusyButton></div>}
-        </>
-      )}
-      {msg && <p style={{ ...mutedText, fontSize: '.82rem', marginTop: '.6rem' }}>{msg}</p>}
-    </div>
-  );
 }
 
 export function AgentNamingPanel({ agent, name }: { agent: Address; name: string | null }) {
