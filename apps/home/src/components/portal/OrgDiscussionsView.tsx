@@ -962,7 +962,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                           />
                           <p style={{ fontSize: '0.7rem', opacity: 0.6, margin: '0.4rem 0 0' }}>
                             Only current members can be invited to a topic. To add someone new, use{' '}
-                            <a href={`/org/${communityId}/members`}>Members</a>.
+                            <a href={`/org/${communityId}/membership`}>Settings &rarr; Membership</a>.
                           </p>
                         </div>
                         <div style={{ overflowY: 'auto', padding: '0 0.6rem 0.6rem' }}>

@@ -74,6 +74,10 @@ export function buildNav(
   orgRelationship: 'steward' | 'member' = 'steward',
   /** Display name of the active org/service workspace — headed into the sidebar so you always know where you are. */
   workspaceName?: string,
+  /** Does this workspace COORDINATE PEOPLE? An organization always does. A service agent does when it is
+   *  a workspace; a treasury or a registry does not, and an always-empty Members page teaches nothing
+   *  (§5's empty rule). The caller knows the agent's kind; the nav should not re-derive it. */
+  hasMembers = false,
 ): NavGroup[] {
   const isPerson = active.kind === 'person';
   const href = (page: string): string => workspaceHref(active, page);
@@ -116,6 +120,13 @@ export function buildNav(
   // Discussions is a PARTICIPATION surface (the settings pane configures the replies — spec 348 §2.3).
   if (active.kind === 'org') {
     groups.push({ items: [{ id: 'org-discussions', label: 'Discussions', href: orgHref(active.org, 'discussions'), Icon: HashIcon, status: 'live' }] });
+  }
+
+  // Members: WHO IS HERE, beside the other places you take part. Deciding who belongs is a different
+  // question and lives in Settings → Membership — looking a colleague up should not put you on a screen
+  // of pending applications and invite controls.
+  if (hasMembers && active.kind !== 'person') {
+    groups.push({ items: [{ id: 'members', label: 'Members', href: href('members'), Icon: UserIcon, status: 'live' }] });
   }
 
   // ── Work (§2.1b): a participation surface beside the band, not inside it — the four stay four. ────
@@ -227,7 +238,9 @@ export function buildSettingsPane(
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
   ];
   const access: NavItem[] = [
-    ...(isOrg ? [{ id: 'set-members', label: 'Members', href: orgHref(active.org, 'members'), Icon: UserIcon, status: 'live' as const }] : []),
+    // "Membership", not "Members": the main nav's Members is the roster. This is where a steward decides
+    // who gets in and who is removed.
+    ...(isOrg ? [{ id: 'set-members', label: 'Membership', href: orgHref(active.org, 'membership'), Icon: UserIcon, status: 'live' as const }] : []),
     // A person's access — their credentials and the delegations they hold — is Security, in the user
     // menu (§4): it is about the signed-in person, not about an agent in a workspace.
     ...(!isPerson ? [{ id: 'set-access', label: 'Access', href: href('access'), Icon: ShieldIcon, status: 'live' as const }] : []),

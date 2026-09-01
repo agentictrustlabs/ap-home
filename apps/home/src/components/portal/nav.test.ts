@@ -120,6 +120,25 @@ describe('the shape after the 2026-08-31 design review', () => {
   });
 });
 
+describe('Members is a main-nav item for workspaces that coordinate people', () => {
+  const labelsFor = (scope: Parameters<typeof buildNav>[2], hasMembers: boolean) =>
+    buildNav(whitelabel, {}, scope, 'steward', undefined, hasMembers).flatMap((g) => g.items).map((i) => i.label);
+
+  it('an organization has one', () => {
+    expect(labelsFor(ORG_SCOPE, true)).toContain('Members');
+  });
+
+  it('a service agent has one only when it coordinates people', () => {
+    // A workspace does; a treasury or a registry does not, and an always-empty roster teaches nothing.
+    expect(labelsFor(SVC_SCOPE, true)).toContain('Members');
+    expect(labelsFor(SVC_SCOPE, false)).not.toContain('Members');
+  });
+
+  it('a person never has one — a person is not a workspace with a roster', () => {
+    expect(labelsFor(PERSON, true)).not.toContain('Members');
+  });
+});
+
 describe('account surfaces left the workspace nav for the user menu', () => {
   it('no class shows Security, Connected, Your apps or Network in the left nav', () => {
     for (const scope of [PERSON, ORG_SCOPE, SVC_SCOPE]) {
@@ -159,10 +178,13 @@ describe('the Settings pane', () => {
     }
   });
 
-  it('Members is org-only — the one item that varies by what the class IS', () => {
-    expect(items(ORG_SCOPE)).toContain('Members');
-    expect(items(PERSON)).not.toContain('Members');
-    expect(items(SVC_SCOPE)).not.toContain('Members');
+  it('Membership is org-only, and is the MANAGEMENT surface — not the roster', () => {
+    // "Who is here" is a main-nav item; this is where a steward decides who gets in. Two questions, two
+    // places: looking a colleague up should not land you among pending applications.
+    expect(items(ORG_SCOPE)).toContain('Membership');
+    expect(items(ORG_SCOPE)).not.toContain('Members');
+    expect(items(PERSON)).not.toContain('Membership');
+    expect(items(SVC_SCOPE)).not.toContain('Membership');
   });
 
   it('a service has no Ask: its Playbook IS what it answers as, so Ask would be a second name for one page', () => {

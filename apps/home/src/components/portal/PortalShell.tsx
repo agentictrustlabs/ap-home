@@ -32,10 +32,13 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
       : undefined;
   const rel = active.kind === 'org' ? (activeAgent?.relationship ?? 'member') : 'steward';
   const workspaceName = activeAgent?.name ? nameLabel(activeAgent.name) : undefined;
+  // An organization coordinates people by definition; a service agent does when it is a WORKSPACE. A
+  // treasury or a registry has no roster, and a Members page that is always empty teaches nothing.
+  const hasMembers = active.kind === 'org' || (active.kind === 'service' && activeAgent?.kind === 'workspace');
   const groups = buildNav(whitelabel, {
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
-  }, active, rel, workspaceName);
+  }, active, rel, workspaceName, hasMembers);
   const panes = { stewardship: paneGroups('stewardship', active, rel), settings: paneGroups('settings', active, rel) };
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view

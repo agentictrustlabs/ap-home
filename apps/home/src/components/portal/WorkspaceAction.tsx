@@ -27,7 +27,7 @@ export function WorkspaceAction() {
   }
   if (active.kind === 'org') {
     return (
-      <button type="button" style={STYLE} onClick={() => router.push(orgHref(active.org, 'members'))} title="Invite someone to this organization">
+      <button type="button" style={STYLE} onClick={() => router.push(orgHref(active.org, 'membership'))} title="Invite someone to this organization">
         ✉ Invite member
       </button>
     );

@@ -1,6 +1,6 @@
 // Org → Invite lives on Members (spec 324 §12). Keep this URL so relying-app ceremony
 // links still work — but never 308, and never drop `return` / `app`. A cached 308 to
-// `/members` without those params is why Commons invitees stayed on Home after joining.
+// `/membership` without those params is why Commons invitees stayed on Home after joining.
 import { redirect } from 'next/navigation';
 
 const KEEP = ['return', 'returnUrl', 'app'] as const;
@@ -20,5 +20,5 @@ export default async function OrgInviteRedirect({
     if (typeof v === 'string' && v) next.set(key, v);
   }
   const qs = next.toString();
-  redirect(`/org/${org}/members${qs ? `?${qs}` : ''}`);
+  redirect(`/org/${org}/membership${qs ? `?${qs}` : ''}`);
 }
