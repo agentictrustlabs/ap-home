@@ -818,8 +818,18 @@ export function publicationVerdict(receipt: { verificationResult: string; uri?: 
 
 /** Service error code → a sentence a steward can act on. The service's codes are precise and terse
  *  (`agent_has_no_host`); showing them raw makes a dead end out of a fixable situation. */
+/** spec 346 — the on-chain `atl:agentType` is the authority; a legacy `.impact`/`.agent` name carries
+ *  none, which is why an agent that plainly HAS a name can still have no type. */
+const UNTYPED_AGENT =
+  'This agent has not declared what KIND of agent it is, so a directory has nothing to file it under. '
+  + 'Give it a typed name under Naming — one ending in .me, .org, .team, .church, .circle, .svc, .workspace, '
+  + '.treasury or .registry — and listing becomes available. A legacy .impact or .agent name carries no type, '
+  + 'which is why an agent that clearly has a name can still be missing one.';
+
 export function studioErrorSentence(codeOrMessage: string): string {
   const c = codeOrMessage.trim();
+  // Matched on the message too, not just the code: this one arrives as prose from the Studio service.
+  if (/no on-chain atl:agentType|agent_type_undeclared/i.test(c)) return UNTYPED_AGENT;
   if (/illegal (projection|binding) transition|illegal_projection_transition/i.test(c)) {
     return 'This listing is in a state that does not allow that step right now. Reload the page to see where it actually stands, then try again.';
   }
@@ -827,6 +837,8 @@ export function studioErrorSentence(codeOrMessage: string): string {
     return "Your agent's account rejected the write to the chain, so nothing was recorded. This usually means the account needs a different signer or more than one approval for this kind of change — check who custodies this agent under Access, then try again.";
   }
   switch (c) {
+    case 'agent_type_undeclared':
+      return UNTYPED_AGENT;
     case 'agent_has_no_host':
     case 'the agent has no name, so no well-known host to publish at':
       return 'This agent has no public name yet, so there is nowhere on the web to publish its card. Give it a name first (Manage → Naming); the endpoint follows from the name.';

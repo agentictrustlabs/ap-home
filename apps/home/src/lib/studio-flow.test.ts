@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PublishPlan } from './studio-flow';
 import { cardRowView, describeStage, publicEndpoints, problemsFrom, servedInterfacesFrom, onlyAddressProblems, saveState, planPublish, publishSequence, landingCopySamples, FORBIDDEN_ON_LANDING, BINDING_PROMPT, PUBLISH_PHRASE } from './studio-flow';
+import { studioErrorSentence } from './studio-view';
 import { listingCatalog, listingRow, lossSentence, listingCopySamples, recordRows, recordVerdictLine, studioTabs } from './studio-listings';
 import type { StoredProjection } from '../studio-client';
 
@@ -40,6 +41,23 @@ describe('planPublish — one button, the whole chain, stops only where it must'
     expect(p.runnable).toEqual(['create-release', 'request-approval']);
     expect(p.stopAt).toEqual({ step: 'approve', line: 'Waiting for someone with approval rights.' });
     expect(p.asksForBinding).toBe(false);
+  });
+});
+
+describe('studioErrorSentence — a refusal has to say what to DO', () => {
+  it('translates the untyped-agent refusal instead of leaking it', () => {
+    // Clicking "List it" on a legacy `.impact` agent surfaced, verbatim: "the agent has no on-chain
+    // atl:agentType / atl:agentKind and no typed name; declare its type before projecting (spec 346)".
+    // That is a correct refusal reported in our vocabulary, with a spec number and no next step.
+    for (const raw of [
+      'agent_type_undeclared',
+      'the agent has no on-chain atl:agentType / atl:agentKind and no typed name; declare its type before projecting (spec 346)',
+    ]) {
+      const out = studioErrorSentence(raw);
+      expect(out).toContain('typed name');
+      expect(out).toContain('.impact');            // names the case the person is actually in
+      for (const ours of ['atl:', 'projecting', 'spec 346', 'agentKind']) expect(out).not.toContain(ours);
+    }
   });
 });
 

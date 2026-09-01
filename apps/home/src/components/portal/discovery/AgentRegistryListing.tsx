@@ -45,6 +45,17 @@ export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; a
         Listing this agent where people and other agents search. The listing points at its agent card, so
         whoever finds it reads what the card says.
       </p>
+      {/* Two prerequisites, said BEFORE the button rather than discovered by pressing it. The type is not
+          inferred from the name here on purpose: spec 346 makes the on-chain `atl:agentType` the
+          authority and a suffix only a claim, so guessing from ".impact" would be the very inference the
+          spec refuses. Stating the requirement is honest; asserting this agent fails it would not be. */}
+      <p className="manage-card-blurb" style={{ marginTop: '-.4rem' }}>
+        A directory needs two things from an agent: a <b>card</b> to point at, and a declared <b>type</b> —
+        what kind of agent it is — which it gets from a typed name (<code>.me</code>, <code>.org</code>,
+        <code>.team</code>, <code>.church</code>, <code>.circle</code>, <code>.svc</code>,
+        <code>.workspace</code>, <code>.treasury</code>, <code>.registry</code>). A legacy{' '}
+        <code>.impact</code> or <code>.agent</code> name carries no type.
+      </p>
       {!primary ? (
         <p style={{ ...mutedText, fontSize: '.85rem' }}>
           No agent card yet. A directory entry names a card — make one under <b>Agent Card</b> first, and
