@@ -2516,7 +2516,26 @@ export async function connectWithName(
           'This browser does not have the local passkey cache for this home. Use the synced/phone passkey option, or open the browser where this home was first secured.',
       };
     }
-    const { signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge, { preferLocalDevice: opts.passkeyMode !== 'discoverable' });
+    const localFirst = opts.passkeyMode !== 'discoverable';
+    let signature: Hex;
+    let credentialIdDigest: Hex;
+    try {
+      ({ signature, credentialIdDigest } = await connectAssertionDiscoverable(challenge, { preferLocalDevice: localFirst }));
+    } catch (e) {
+      // The platform's own words here are "There aren't any passkeys for <host> on this device", which
+      // reads as "your passkey is gone" when what it means is "not the one this browser remembers, and
+      // not here". The home's passkey may be perfectly fine on a phone or in a synced store. Say which
+      // of the two situations this is, and name the button that reaches the other one — the raw message
+      // dead-ended a member whose passkey was registered on chain the whole time.
+      const noCredential = e instanceof DOMException ? e.name === 'NotAllowedError' : /not allowed|no passkey|timed out/i.test(e instanceof Error ? e.message : String(e));
+      if (!noCredential) throw e;
+      return {
+        ok: false,
+        error: localFirst
+          ? 'No passkey on this device matched the one this browser remembers. If you set it up on your phone or in a synced store, use “Use synced or phone passkey”.'
+          : 'No passkey for this home was offered. Check that the device or phone holding it is available, or sign in with the credential that first opened this home.',
+      };
+    }
     proof = { kind: 'passkey', credentialIdDigest, challenge, signature };
   }
   const r = await fetch('/connect/with-name', {

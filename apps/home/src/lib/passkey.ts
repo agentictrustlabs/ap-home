@@ -335,7 +335,17 @@ export async function connectAssertionDiscoverable(
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
-  const cached = loadPasskey();
+  // `preferLocalDevice: false` is the caller saying "this is the CROSS-DEVICE attempt" (the explicit
+  // "Use synced or phone passkey" button). That has to mean an EMPTY allowCredentials, because a
+  // non-empty one pins the request to that exact credential: if this device cannot satisfy it, the
+  // platform answers "There aren't any passkeys for <rp> on this device" and never looks for the
+  // synced or phone copy the button exists to reach.
+  //
+  // Until now the mode only gated `hints` — which is `undefined` in choice mode, so it gated nothing —
+  // while `allowCredentials` came from the cache either way. Both buttons therefore sent the identical
+  // request and failed identically, leaving a member with an on-chain passkey and no way to use it
+  // (phone-6115, 2026-09-01). The escape hatch did not escape.
+  const cached = opts.preferLocalDevice === false ? null : loadPasskey();
   // Descriptor transports: the credential's registration-time getTransports when the cache carries it
   // (targets the store the credential actually lives in), else the PASSKEY_* fallback (choice mode:
   // omitted — the platform routes freely and offers the full chooser when unsure).
