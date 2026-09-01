@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
-import { loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../lib/registry';
+import { DISCOVERY_HOST, loadRegistry, markCustody, REGISTRY, type AgentRegistryRow } from '../../../lib/registry';
 import { getSkills, setSkills, registerAgent, canCheckCustody } from '../../../connect-client';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { reverseAgentName } from '../../../lib/reverse-name';
@@ -76,7 +76,8 @@ export function AgentRegistryPanel({ agent, name }: { agent: Address; name: stri
       <h3 style={{ margin: '0 0 .5rem' }}>Discovery registry</h3>
       <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
         Whether this agent has an entry in the discovery knowledge base — what a directory or another
-        agent finds when it searches. Read through the discovery agent, not the chain (ADR-0012).
+        agent finds when it searches. Read from <code style={mono}>{DISCOVERY_HOST}</code> through the
+        discovery agent, not the chain (ADR-0012).
       </p>
       {err && <p style={errorText}>{err}</p>}
       {row === null && !err && <p style={mutedText}>Checking the registry…</p>}
@@ -84,9 +85,9 @@ export function AgentRegistryPanel({ agent, name }: { agent: Address; name: stri
         <>
           <p><span style={badgeStyle('neutral')}>not in the registry</span></p>
           <p style={{ ...mutedText, fontSize: '.82rem' }}>
-            The knowledge base has no entry for this agent. Registering is an on-chain write the agent&rsquo;s
-            OWN account makes (RB-01: only the subject may register itself), so it needs a custodian of this
-            agent, not just any signer.
+            <code style={mono}>{DISCOVERY_HOST}</code> has no entry for this agent. Registering is an
+            on-chain write the agent&rsquo;s OWN account makes (RB-01: only the subject may register
+            itself), so it needs a custodian of this agent, not just any signer.
           </p>
           <BusyButton className="btn-primary" busy={act.busy} busyLabel="Registering…" onClick={act.run(register)}>Register this agent</BusyButton>
         </>

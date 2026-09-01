@@ -1,6 +1,6 @@
 // Browser orchestration for the real wallet (SIWE) connect → resolve → bootstrap
 // → PII, all against the live broker + the deployed demo-a2a worker (via /a2a).
-import { AGENT_NAME_PARENT, CLAIMABLE_TLDS, candidateNamesForLabel } from './lib/domain';
+import { AGENT_NAME_PARENT, AGENT_REGISTRY_URN, CLAIMABLE_TLDS, candidateNamesForLabel } from './lib/domain';
 import { buildMessage } from '@agenticprimitives/connect-auth/siwe';
 import {
   buildSubregistryRegisterCall,
@@ -2604,9 +2604,15 @@ export async function listMyReceivedDelegations(token: string): Promise<Received
  *  wallet/KMS credential the home uses for delegations + payments) and sponsored by the paymaster, gasless
  *  via `executeCall` — ONE custody prompt. The entry's cardHash + bindingProofHash are hashes of the card
  *  + binding-proof BODIES (no extra signature needed on-chain); the SA-signed bundles for off-chain
- *  re-verification are a follow-on (publish-by-hash). The `impact-agents` registry is open (no membership
- *  hook), so any agent may self-register. */
-export const DISCOVERY_REGISTRY_ID = 'urn:ap:registry:impact-agents';
+ *  re-verification are a follow-on (publish-by-hash). The registry this Home lists into is open (no
+ *  membership hook), so any agent may self-register.
+ *
+ *  WHICH registry is a DEPLOYMENT fact, never a constant. It was hardcoded to production's
+ *  `urn:ap:registry:impact-agents`, so the faithnet Home offered to register its agents into a registry
+ *  on another chain — a WRITE, signed by the agent's own account, into the wrong place. Unset now means
+ *  registration is not offered at all, which is the honest failure: better to say this Home has no
+ *  directory configured than to write into somebody else's. */
+export const DISCOVERY_REGISTRY_ID = AGENT_REGISTRY_URN;
 export async function registerAgent(
   sa: Address,
   name: string,
@@ -2615,6 +2621,7 @@ export async function registerAgent(
   const issuedAt = new Date().toISOString();
   const card: AgentCard = { type: 'service', displayName: name };
   const cardHash = hashAgentCard(card);
+  if (!DISCOVERY_REGISTRY_ID) return { ok: false, error: 'This Home has no directory configured, so there is nowhere to register. (NEXT_PUBLIC_AGENT_REGISTRY_URN)' };
   const registryId = DISCOVERY_REGISTRY_ID as RegistryId;
   const entryId = `urn:ap:registry-entry:${name}` as RegistryEntryId;
   // NEW-RK-1: chainId + registryAddress domain-scope the binding proof (BindingProofBody requires them).

@@ -9,10 +9,18 @@
 
 import type { Address } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS } from './chain';
+import { AGENT_REGISTRY_URN } from './domain';
 import { resolveCredential } from '../connect-client';
 
+// WHICH discovery agent, and WHICH registry, are DEPLOYMENT facts. Both were hardcoded to production's,
+// so a Home on another chain silently read production's knowledge base and reported its own registered
+// agents as missing — "not in the registry" for an agent plainly in its directory (seen 2026-08-31 on
+// faithnet). The default stays only as a last resort for local dev; every deployed Home sets these.
 const A2A_URL = (process.env.NEXT_PUBLIC_DISCOVERY_A2A_URL as string | undefined) ?? 'https://demo-discovery-a2a.richardpedersen3.workers.dev';
-export const DISCOVERY_REGISTRY_ID = 'urn:ap:registry:impact-agents';
+/** The directory host this Home reads — shown to a steward so a misconfigured deployment is VISIBLE
+ *  rather than silently answering about someone else's agents. */
+export const DISCOVERY_HOST = (() => { try { return new URL(A2A_URL).host; } catch { return A2A_URL; } })();
+export const DISCOVERY_REGISTRY_ID = AGENT_REGISTRY_URN;
 
 export interface AgentRegistryRow {
   name: string | null;
