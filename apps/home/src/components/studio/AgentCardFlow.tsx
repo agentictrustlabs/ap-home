@@ -237,6 +237,11 @@ export function AgentCardFlow({
         if (step === 'publish') {
           const res = await publishRelease(delegation, cardId, release.releaseId, newMutation());
           release = res.release; setLastVerdict(publicationVerdict(res.receipt));
+          // The card is now served at an address, and the A2A endpoint is how other agents reach it.
+          // Without this, saving left the agent live and unreachable BY NAME, and asked the person to go
+          // and say the same thing again under Naming.
+          setPhase(PUBLISH_PHRASE.adoptEndpoint);
+          await adoptEndpointIfUnset();
           continue;
         }
         if (step === 'verify' && release.state !== 'published') {
@@ -250,7 +255,7 @@ export function AgentCardFlow({
     } finally {
       setBusy(null); setPhase(''); setBindingAsk(null);
     }
-  }, [plan, delegation, detail.resource.cardResourceId, latest, bindingUri, sa, signHashFor, onReload]);
+  }, [plan, delegation, detail.resource.cardResourceId, latest, bindingUri, sa, signHashFor, onReload, adoptEndpointIfUnset]);
 
   const save = saveState({ plan, release: latest, cardUri, lastVerdict, publishedAtOldAddress });
   const waitingOnSomeoneElse = plan.kind === 'ready' && plan.stopAt !== null && plan.runnable.length === 0;

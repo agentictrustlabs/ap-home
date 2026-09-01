@@ -21,7 +21,7 @@ import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
 export type PublishStepId = 'create-release' | 'request-approval' | 'approve' | 'sign' | 'publish' | 'verify';
 
 /** What the busy button says during each step — the user's words, not the state machine's. */
-export const PUBLISH_PHRASE: Record<'check' | PublishStepId, string> = {
+export const PUBLISH_PHRASE: Record<'check' | 'adoptEndpoint' | PublishStepId, string> = {
   check: 'Checking the description…',
   'create-release': 'Saving…',
   'request-approval': 'Saving…',
@@ -29,6 +29,8 @@ export const PUBLISH_PHRASE: Record<'check' | PublishStepId, string> = {
   sign: 'Signing it…',
   publish: 'Putting it at the address…',
   verify: 'Checking what the address serves…',
+  // Saving a card also points the NAME at it when the name has no endpoint yet — one save, not two.
+  adoptEndpoint: 'Pointing your name at it…',
 };
 
 const STEP_OP: Record<PublishStepId, StudioOp> = {
