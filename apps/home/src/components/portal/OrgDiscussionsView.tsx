@@ -86,6 +86,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   /** Members known from the steward's received-delegations index — those who joined by invite and never
    *  published a directory listing. Membership has TWO projections and this view only ever read one. */
   const [invited, setInvited] = useState<RosterMember[]>([]);
+  /** The SERVER's answer to "is this person a member here" — it comes back on the channels read that
+   *  this view already makes. The view had been deciding membership itself from directory listings,
+   *  which is a narrower question: whether you published your own listing. */
+  const [linked, setLinked] = useState(false);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
   const [steward, setSteward] = useState(false);
@@ -161,6 +165,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     // from never-enabled: the steward must RE-Enable to re-sign, and the banner now explains it.
     if (c.orgVaultEnabled === false && c.reason) setError(c.needsReEnable ? `storage was upgraded — a steward must re-enable to continue (${c.reason})` : c.reason);
     if (c.membership && c.membership !== 'linked') setError(`membership link: ${c.membership}`);
+    setLinked(c.membership === 'linked');
     setMember(true);
     setSteward(c.steward === true);
     setYou(c.you);
@@ -483,10 +488,14 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     return out;
   }, [listings, invited]);
 
+  // "Are you a member here" — the server said so on the channels read (`membership: 'linked'`), and a
+  // published listing says so too. Deciding it from listings ALONE told a linked member, in an
+  // organization where nobody has published a listing, to add themselves — forever, with no effect on
+  // the thing they were actually being asked about.
   const youAreListed = useMemo(() => {
     const me = (agentAddress ?? '').toLowerCase();
-    return !!me && memberAddresses.has(me);
-  }, [memberAddresses, agentAddress]);
+    return linked || (!!me && memberAddresses.has(me));
+  }, [memberAddresses, agentAddress, linked]);
 
   // Prefill the self-add display name from the home's name once, when the CTA first applies.
   useEffect(() => {
@@ -733,7 +742,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
-                      : `Open · all ${memberAddresses.size} members participate · ${channel.messages.length} messages`}
+                      : `Open · everyone in the organization participates · ${channel.messages.length} messages`}
                     {channel.assistant && (
                       <span
                         title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @ask (or @${channel.assistant.mentionHandle})` : 'answers every post'}`}
@@ -959,7 +968,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               (bringing a NEW person in) lives on the dedicated Members page, not in a discussion topic. */}
           {activePolicy !== 'restricted' && (
             <>
-              <div className="channels-sidebar__title"><span>Participants · {listings.length}</span></div>
+              {/* No count: an open topic's participants are "everyone in the organization", and the
+                  number of directory LISTINGS is not the number of members — most members here have
+                  never published one. A confident 0 beside five join messages is worse than no number. */}
+              <div className="channels-sidebar__title"><span>Participants</span></div>
               {channel && (
                 <p style={{ fontSize: '0.72rem', opacity: 0.6, padding: '0 0.25rem', margin: '0 0 0.5rem' }}>
                   Open topic — everyone in the organization participates.
