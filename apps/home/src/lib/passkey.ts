@@ -8,6 +8,7 @@ import { parseAttestationObject, buildWebAuthnAssertion } from '@agenticprimitiv
 import { encodeWebAuthnSignature } from '@agenticprimitives/agent-account';
 import type { Hex } from '@agenticprimitives/types';
 import { CENTRAL_AUTH_DOMAIN } from './domain';
+import { assertPasskeysVerifiable } from './p256-support';
 
 const STORAGE_KEY = 'agenticprimitives:demo-sso:passkey';
 
@@ -179,6 +180,11 @@ export async function registerPasskey(label: string): Promise<DemoPasskey> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
     throw new Error('WebAuthn unavailable — this browser does not support passkeys.');
   }
+  // ONE choke point for every passkey this app mints — onboarding, add-a-credential, device-link. A
+  // chain with no P-256 verifier still ACCEPTS a passkey registration (an existing ECDSA custodian
+  // authorizes it), so without this a member walks away holding a credential that can never sign and
+  // that the OS will keep offering. Refuse to create it rather than explain it afterwards.
+  await assertPasskeysVerifiable();
   const challenge = new Uint8Array(32);
   crypto.getRandomValues(challenge);
 
