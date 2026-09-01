@@ -9,6 +9,7 @@ import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
 import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
+import { membersFromReceivedDelegations, type RosterMember } from '../../lib/recipient-directory';
 import { ApproveMessaging } from './ApproveMessaging';
 import { agentNameForLabel } from '../../lib/domain';
 import { SectionShell } from './SectionShell';
@@ -82,6 +83,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
+  /** Members known from the steward's received-delegations index — those who joined by invite and never
+   *  published a directory listing. Membership has TWO projections and this view only ever read one. */
+  const [invited, setInvited] = useState<RosterMember[]>([]);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
   const [steward, setSteward] = useState(false);
@@ -117,13 +121,23 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const load = useCallback(async () => {
     if (!session) return;
     const qs = active ? `&channelId=${encodeURIComponent(active)}` : '';
-    const [chRes, dirRes] = await Promise.all([
+    // BOTH projections of membership, always — a union, never a fallback (ADR-0013, and the same pair
+    // `fetchRoster` reads). A directory listing is the member's OWN self-signed row; the
+    // received-delegations index holds the members who joined by invite and never published one. Reading
+    // only the directory made an invited member invisible here: Participants · 0 on a topic whose own
+    // history says they joined, and a steward told forever to "add yourself as member".
+    const [chRes, dirRes, recRes] = await Promise.all([
       fetch(`/connect/channels?communityId=${communityId}${qs}`, { headers: authed }),
       fetch(`/connect/directory?communityId=${communityId}`, { headers: authed }),
+      fetch('/connect/received-delegations', { headers: authed }),
     ]);
     if (dirRes.ok) {
       const d = (await dirRes.json()) as { listings?: Listing[] };
       setListings(d.listings ?? []);
+    }
+    if (recRes.ok) {
+      const rec = (await recRes.json().catch(() => ({}))) as Parameters<typeof membersFromReceivedDelegations>[0];
+      setInvited(membersFromReceivedDelegations(rec, communityId));
     }
     if (chRes.status === 403) {
       // Non-member: the enrollment card (Request to join / Complete membership) IS the explanation now (spec
@@ -457,10 +471,22 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   // to be messaged). Compute whether THIS person already has a listing; if a steward isn't listed, the
   // main view offers a self-add CTA (the member===false join card never shows for them, since the
   // server returns member=true). Listing subjects are CAIP-10 (`eip155:<chain>:0x…`) → match by suffix.
+  /** Every member of this organization, from both projections — the roster this view should have used
+   *  all along. Addresses only; the listing map above still supplies the richer labels. */
+  const memberAddresses = useMemo(() => {
+    const out = new Set<string>();
+    for (const l of listings) {
+      const a = l.listing.subject.toLowerCase().match(/0x[0-9a-f]{40}/)?.[0];
+      if (a) out.add(a);
+    }
+    for (const m of invited) out.add(m.address.toLowerCase());
+    return out;
+  }, [listings, invited]);
+
   const youAreListed = useMemo(() => {
     const me = (agentAddress ?? '').toLowerCase();
-    return !!me && listings.some((l) => l.listing.subject.toLowerCase().endsWith(me));
-  }, [listings, agentAddress]);
+    return !!me && memberAddresses.has(me);
+  }, [memberAddresses, agentAddress]);
 
   // Prefill the self-add display name from the home's name once, when the CTA first applies.
   useEffect(() => {
@@ -707,7 +733,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
-                      : `Open · all ${listings.length} members participate · ${channel.messages.length} messages`}
+                      : `Open · all ${memberAddresses.size} members participate · ${channel.messages.length} messages`}
                     {channel.assistant && (
                       <span
                         title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @ask (or @${channel.assistant.mentionHandle})` : 'answers every post'}`}
