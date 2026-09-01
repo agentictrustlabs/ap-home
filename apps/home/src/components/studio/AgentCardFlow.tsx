@@ -54,6 +54,7 @@ const SERVING_TITLE: Record<'nothing' | 'this' | 'older' | 'elsewhere', string> 
 };
 import { readNameRecords, writeNameProperties } from '../../lib/name-properties';
 import { cardContentDigest } from '@agenticprimitives/agent-profile/a2a';
+import { reverseAgentName } from '../../lib/reverse-name';
 import { BINDING_PROMPT, PUBLISH_PHRASE, describeStage, publicEndpoints, saveState, onlyAddressProblems, planPublish, problemsFrom, servedInterfacesFrom, type PublishPlan, type StageStatus } from '../../lib/studio-flow';
 import { CardEditor } from './CardEditor';
 import { Inspector, type PanelId } from './Inspector';
@@ -180,21 +181,24 @@ export function AgentCardFlow({
    *  itself, and Naming is where the endpoint is edited if this could not set it.
    */
   const adoptEndpointIfUnset = useCallback(async (): Promise<void> => {
-    if (!typedName || !cardUri) return;
+    // The REGISTERED name, from the chain. `typedName` prefers the card's own name field but falls back
+    // to the workspace's display label, and writing a name record under a label writes nowhere.
+    const registered = await reverseAgentName(sa).catch(() => null);
+    if (!registered || !cardUri) return;
     try {
-      const records = await readNameRecords(typedName);
+      const records = await readNameRecords(registered);
       if ((records.a2aEndpoint ?? '').trim()) return;              // already set — never overwrite
       const fromCard = (draft?.card.supportedInterfaces ?? []).find((i) => i.url)?.url;
       const endpoint = fromCard ?? cardUri.replace('/.well-known/agent-card.json', '/api/a2a');
       const signHash = await signHashFor();
-      const out = await writeNameProperties(sa, typedName, { a2aEndpoint: endpoint }, signHash);
+      const out = await writeNameProperties(sa, registered, { a2aEndpoint: endpoint }, signHash);
       setEndpointNote(out.ok
         ? `Your name now points at ${endpoint} — other agents can reach this one by name.`
         : `Published, but your name still has no endpoint (${out.error}). You can set it under Naming.`);
     } catch (e) {
       setEndpointNote(`Published, but your name still has no endpoint (${e instanceof Error ? e.message : String(e)}). You can set it under Naming.`);
     }
-  }, [typedName, cardUri, draft, sa, signHashFor]);
+  }, [cardUri, draft, sa, signHashFor]);
 
   const runPublish = useCallback(async () => {
     if (plan.kind !== 'ready') return;

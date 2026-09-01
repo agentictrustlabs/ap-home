@@ -16,6 +16,7 @@ import { buildTreasuryScope, TREASURY_PROFILES, type TreasuryProfileId } from '@
 import { executeCalls, setSkills } from '../../connect-client';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { issueScopedDelegation } from '../../lib/delegation';
+import { useRegisteredName } from '../../lib/reverse-name';
 import { CONTRACTS, CAIP2_NETWORK } from '../../lib/chain';
 import { A2A_DOMAIN, nameLabel } from '../../lib/domain';
 import { connectTreasuryCeremony, type ConnectTreasuryResult } from '../../lib/connect-treasury';
@@ -59,6 +60,8 @@ export function ConnectTreasuryModal({
   treasury: string; name: string; person?: string | null; via?: string; token: string; onClose: () => void; onDone?: () => void;
 }) {
   const derived = useMemo(() => deriveEndpoints(name), [name]);
+  const registered = useRegisteredName(treasury as Address);
+  const registeredName = registered.name ?? name;
   const [a2aEndpoint, setA2a] = useState(derived.a2a);
   const [mcpEndpoint, setMcp] = useState(derived.mcp);
   // Single-tenant default: the host acts AS this treasury, so the delegate is the treasury's OWN SA. Override
@@ -88,7 +91,9 @@ export function ConnectTreasuryModal({
       const res = await connectTreasuryCeremony(
         {
           resolver: CONTRACTS.agentNameResolver,
-          node: namehash(name),
+          // The REGISTERED name, not the row's display label: `namehash` of a label writes to a node
+          // nobody registered, so the ceremony would succeed and bind nothing readable.
+          node: namehash(registeredName),
           endpoints: { a2aEndpoint: a2aEndpoint || undefined, mcpEndpoint: mcpEndpoint || undefined },
           scope,
           enforcers: {

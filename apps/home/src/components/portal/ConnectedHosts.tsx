@@ -8,6 +8,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { namehash } from '@agenticprimitives/agent-naming';
 import { CONTRACTS, CHAIN } from '../../lib/chain';
+import { useRegisteredName } from '../../lib/reverse-name';
 
 const NAME_RESOLVER_ABI = [
   { type: 'function', name: 'getString', stateMutability: 'view', inputs: [{ name: 'subject', type: 'bytes32' }, { name: 'predicate', type: 'bytes32' }], outputs: [{ type: 'string' }] },
@@ -15,6 +16,10 @@ const NAME_RESOLVER_ABI = [
 const pred = (key: string) => keccak256(toBytes(`atl:${key}`));
 
 /** Read the treasury's bound a2a/mcp endpoint records on-chain (spec 280; AgentNameResolver, node-keyed). */
+/** `name` here is the treasury's display label from the managed-agent row, which is not necessarily a
+ *  registered name — `namehash` of a label is a node nobody registered, and every read comes back empty
+ *  ("no hosts connected" for an agent that has them). The address is authoritative, so the node comes
+ *  from what the chain says resolves to it. */
 function useHostBindings(name: string): { a2a: string; mcp: string; loaded: boolean } {
   const [state, setState] = useState({ a2a: '', mcp: '', loaded: false });
   useEffect(() => {
@@ -45,10 +50,13 @@ const drawer: CSSProperties = { marginTop: '.4rem', padding: '.5rem .6rem', back
 
 /** The relationship picture + the two drill-downs. Renders only once at least one endpoint is bound. */
 export function ConnectedHosts({ name, address }: { name: string; address: string }) {
-  const { a2a, mcp, loaded } = useHostBindings(name);
+  // `name` is the row's DISPLAY LABEL and stays the label — it is what a person calls this treasury. The
+  // on-chain lookup is keyed by the REGISTERED name instead, because a label is not resolvable.
+  const registered = useRegisteredName(address as Address);
+  const { a2a, mcp, loaded } = useHostBindings(registered.name ?? '');
   const [open, setOpen] = useState<'a2a' | 'mcp' | null>(null);
 
-  if (!loaded || (!a2a && !mcp)) return null; // not connected yet → show nothing (the Connect button stands)
+  if (!registered.loaded || !loaded || (!a2a && !mcp)) return null; // not connected yet → the Connect button stands
 
   return (
     <div style={wrap}>

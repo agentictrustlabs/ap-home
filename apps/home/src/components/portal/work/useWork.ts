@@ -7,6 +7,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
 import { fetchWorkList, type WorkListResponse } from '../../../lib/work-client';
+import { membersFromReceivedDelegations } from '../../../lib/recipient-directory';
 import { isHiddenOrg } from '../../../lib/org-lifecycle';
 
 export interface RelatedOrg {
@@ -62,15 +63,28 @@ export function useOrgMemberNames(session: Session | null, org: string): Record<
     let cancelled = false;
     void (async () => {
       try {
-        const r = await fetch(`/connect/directory?communityId=${org.toLowerCase()}`, { headers: { authorization: `Bearer ${session.token}` } });
-        const b = (await r.json().catch(() => ({}))) as { listings?: Array<{ listing?: { subject?: string; displayName?: string } }> };
+        // BOTH projections of membership, as everywhere else: a directory listing is the member's own
+        // signed row, and the received-delegations index holds those who joined by invite and never
+        // published one. Reading only the directory left invited members labelled by raw address on work
+        // they are assigned — the same half-read that made them invisible in Discussions.
+        const headers = { authorization: `Bearer ${session.token}` };
+        const [dirRes, recRes] = await Promise.all([
+          fetch(`/connect/directory?communityId=${org.toLowerCase()}`, { headers }),
+          fetch('/connect/received-delegations', { headers }),
+        ]);
+        const b = (await dirRes.json().catch(() => ({}))) as { listings?: Array<{ listing?: { subject?: string; displayName?: string } }> };
         if (cancelled) return;
         const map: Record<string, string> = {};
+        // Invited members first; a listing is the member's OWN row, so it wins on the label.
+        if (recRes.ok) {
+          const rec = (await recRes.json().catch(() => ({}))) as Parameters<typeof membersFromReceivedDelegations>[0];
+          for (const m of membersFromReceivedDelegations(rec, org)) map[m.address] = m.displayName;
+        }
         for (const row of b.listings ?? []) {
           const addr = row.listing?.subject?.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
           if (addr && row.listing?.displayName) map[addr] = row.listing.displayName;
         }
-        setNames(map);
+        if (!cancelled) setNames(map);
       } catch { /* names stay short-address */ }
     })();
     return () => { cancelled = true; };
