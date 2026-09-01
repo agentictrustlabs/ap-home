@@ -294,13 +294,28 @@ export function withMountedSkills(skills: A2aSkill[]): A2aSkill[] {
   return [...skills, ...MOUNTED_PEER_SKILLS.filter((s) => !have.has(s.id))];
 }
 
-/** Map an agent's publicly-asserted skill labels (spec 282 `atl:skills`, comma-joined) to A2A skill cards. */
+/** An already-id-shaped value: lowercase, and only the characters an id may contain. */
+const ID_SHAPED = /^[a-z0-9][a-z0-9._:-]*$/;
+
+/**
+ * Map the agent's publicly-asserted capability values to A2A skill cards (`skills[]` is the wire's name
+ * for capabilities — ADR-0051).
+ *
+ * The stored value has TWO historical shapes and the id must survive both:
+ *   • an ID (`registry.search`) — what `atl:capabilities` holds. Used VERBATIM. Slugifying it would
+ *     publish `registry-search`, a different string from the one on chain and in ARD, which breaks the
+ *     one guarantee an id has: that it is the same everywhere. (Observed live before this fix.)
+ *   • a human LABEL (`treasury management`) — what legacy `atl:skills` holds. Slugified for the id,
+ *     kept whole as the name.
+ * The test is the value's shape, not which predicate it came from, so a legacy agent that happens to
+ * have stored ids keeps them too.
+ */
 export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
   if (!csv) return [];
-  return csv.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 64).map((label) => ({
-    id: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
-    name: label,
-    tags: ['skill'],
+  return csv.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 64).map((value) => ({
+    id: ID_SHAPED.test(value) ? value : value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+    name: value,
+    tags: ['capability'],
   }));
 }
 

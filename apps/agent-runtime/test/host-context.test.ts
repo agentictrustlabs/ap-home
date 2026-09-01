@@ -96,8 +96,8 @@ describe('label → agent name', () => {
 describe('skill cards', () => {
   it('maps labels to slugged ids, preserving the human name', () => {
     expect(skillsFromLabels('Grant Writing, Legal Review')).toEqual([
-      { id: 'grant-writing', name: 'Grant Writing', tags: ['skill'] },
-      { id: 'legal-review', name: 'Legal Review', tags: ['skill'] },
+      { id: 'grant-writing', name: 'Grant Writing', tags: ['capability'] },
+      { id: 'legal-review', name: 'Legal Review', tags: ['capability'] },
     ]);
   });
 
@@ -115,7 +115,7 @@ describe('skill cards', () => {
   });
 
   it('slugs punctuation without leaving stray separators', () => {
-    expect(skillsFromLabels('C++ / Rust!')[0]).toEqual({ id: 'c-rust', name: 'C++ / Rust!', tags: ['skill'] });
+    expect(skillsFromLabels('C++ / Rust!')[0]).toEqual({ id: 'c-rust', name: 'C++ / Rust!', tags: ['capability'] });
   });
 
   it('adds the consult card only when consultable, and never twice', () => {
