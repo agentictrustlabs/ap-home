@@ -120,7 +120,7 @@ export function DiscoveryAuthorityPanel() {
               </div>
               <button type="button"
                 onClick={() => { void navigator.clipboard.writeText(bundleJson).then(() => setCopied(true)); }}
-                style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.78rem' }}>
+                style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--color-text-body)' }}>
                 {copied ? 'Copied' : 'Copy bundle'}
               </button>
             </Row>

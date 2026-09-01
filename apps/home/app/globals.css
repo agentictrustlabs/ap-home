@@ -45,6 +45,17 @@
         --grad-hero: radial-gradient(ellipse at 50% 110%, rgba(245,158,11,.18) 0%, rgba(217,119,6,.10) 38%, rgba(251,191,36,.06) 62%, transparent 80%);
         /* Portal shell metrics */
         --sidebar-w: 240px; --topbar-h: 56px; --portal-max: 880px;
+        /* The Visibility panels were ported from an app with its own palette and reference tokens this
+           one never defined — --accent, --border, --muted and friends. Every use carried a fallback, so
+           nothing broke visibly, but the whole surface rendered in the OTHER app's colours (a purple
+           accent on an amber product). Mapping the names here retires the fallbacks. */
+        --accent: var(--color-amber-700, #b45309);
+        --accent-soft: var(--color-amber-50, #fffbeb);
+        --border: var(--color-border);
+        --muted: var(--color-text-muted);
+        --danger: var(--color-danger);
+        --success: var(--color-sage-700, #3f6b4a);
+        --surface-alt: var(--color-surface-sunken);
         /* Declared here, not only as a var() fallback, so the narrow-desktop override below takes. */
         --settings-pane-w: 208px;
       }
@@ -1001,6 +1012,10 @@
                            letter-spacing: .08em; color: var(--color-text-muted); }
       .pane-head-name { font-size: .95rem; font-weight: 700; color: var(--color-text-primary);
                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* Waiting on something else: readable, obviously not a destination, and not in the tab order. */
+      .nav-item-blocked { color: var(--color-text-faint); cursor: default; }
+      .nav-item-blocked:hover { background: none; }
 
       /* The item is flush to the column edge, so the focus ring is inset or it is clipped. */
       .nav-item:focus-visible { outline: 2px solid var(--color-amber-700); outline-offset: -2px; }

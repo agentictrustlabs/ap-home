@@ -16,6 +16,17 @@ import type { NavGroup, NavItem, PaneId, SettingsGroup } from './nav';
 import { ChevronRightIcon } from '../shared/Icons';
 
 function Item({ item, active }: { item: NavItem; active: boolean }) {
+  // A row that cannot do its job yet is SHOWN and not navigable, with the reason on it — so a person can
+  // see what becomes available and what unlocks it, instead of wondering where a page went. It is not a
+  // link at all: an <a> that goes nowhere is a broken link, and `aria-disabled` on a working link lies.
+  if (item.disabledReason) {
+    return (
+      <span className="nav-item nav-item-blocked" aria-disabled="true" title={item.disabledReason}>
+        <item.Icon size={18} />
+        <span className="nav-item-label">{item.label}</span>
+      </span>
+    );
+  }
   return (
     <Link
       href={item.href}

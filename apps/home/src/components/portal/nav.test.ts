@@ -120,6 +120,40 @@ describe('the shape after the 2026-08-31 design review', () => {
   });
 });
 
+describe('a nameless agent shows what it cannot do yet, and why', () => {
+  const pane = (hasName: boolean) => buildSettingsPane(PERSON, 'steward', hasName);
+  const item = (hasName: boolean, label: string) =>
+    pane(hasName).flatMap((g) => g.items).find((i) => i.label === label)!;
+
+  it('Agent Card, Registry and Trust graph wait on a name — and say so', () => {
+    for (const label of ['Agent Card', 'Registry', 'Trust graph']) {
+      expect(item(false, label).disabledReason).toContain('name');
+      expect(item(true, label).disabledReason).toBeUndefined();
+    }
+  });
+
+  it('Naming and Profile stay open — naming it is the way out', () => {
+    expect(item(false, 'Naming').disabledReason).toBeUndefined();
+    expect(item(false, 'Profile').disabledReason).toBeUndefined();
+  });
+
+  it('Visibility stays open: an invitation is how someone reaches a nameless agent', () => {
+    // spec 338 — naming, listing, resolution and inbound are four INDEPENDENT choices, so lacking the
+    // first must not remove the others.
+    expect(item(false, 'Visibility').disabledReason).toBeUndefined();
+  });
+
+  it('nothing is HIDDEN by being nameless — the pane keeps its shape', () => {
+    expect(pane(false).flatMap((g) => g.items).map((i) => i.label))
+      .toEqual(pane(true).flatMap((g) => g.items).map((i) => i.label));
+  });
+
+  it('Visibility sits after Trust graph', () => {
+    const l = pane(true).flatMap((g) => g.items).map((i) => i.label);
+    expect(l.indexOf('Visibility') - l.indexOf('Trust graph')).toBe(1);
+  });
+});
+
 describe('Members is a main-nav item for workspaces that coordinate people', () => {
   const labelsFor = (scope: Parameters<typeof buildNav>[2], hasMembers: boolean) =>
     buildNav(whitelabel, {}, scope, 'steward', undefined, hasMembers).flatMap((g) => g.items).map((i) => i.label);

@@ -9,7 +9,8 @@ import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
-import { buildNav, paneGroups, bottomNav } from './nav';
+import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
+import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
@@ -19,7 +20,7 @@ import { nameLabel } from '../../lib/domain';
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
   const pathname = usePathname();
   const active = parseWorkspacePath(pathname ?? '/');
-  const { session } = useSession();
+  const { session, agentAddress, agentName } = useSession();
   // 'any' (spec 342): the shell must name and route the workspace the URL points at, whatever the
   // org's lifecycle status — a deactivated org is hidden from lists, not made unreachable.
   const { agents } = useManagedAgents(session?.token ?? null, 'any');
@@ -39,7 +40,16 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
   }, active, rel, workspaceName, hasMembers);
-  const panes = { stewardship: paneGroups('stewardship', active, rel), settings: paneGroups('settings', active, rel) };
+  // "Has a name" means the NAMING SERVICE resolves to this agent — not that the managed-agent row has a
+  // label. A workspace's row says "Northern Colorado Field", which is a display label and not a name
+  // anything can resolve; keying off it would call a nameless agent named.
+  const activeSa = active.kind === 'org' ? active.org : active.kind === 'service' ? active.agent : agentAddress;
+  const registered = useRegisteredName((activeSa ?? null) as `0x${string}` | null);
+  const hasName = active.kind === 'person' ? !!agentName : (!registered.loaded || !!registered.name);
+  const panes = {
+    stewardship: paneGroups('stewardship', active, rel),
+    settings: buildSettingsPane(active, rel, hasName),
+  };
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
   // decision, not a locked door), but it must SAY why it is missing from everywhere else.

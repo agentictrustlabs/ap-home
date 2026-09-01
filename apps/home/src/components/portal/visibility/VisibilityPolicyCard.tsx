@@ -81,7 +81,10 @@ export function VisibilityPolicyCard({
                   padding: '0.6rem 0.75rem',
                   borderRadius: 8,
                   border: `1px solid ${selected ? 'var(--accent, #7c5cff)' : 'var(--border, #e4e0d8)'}`,
-                  background: selected ? 'var(--accent-soft, rgba(124,92,255,0.08))' : 'transparent',
+                  background: selected ? 'var(--accent-soft)' : 'transparent',
+                  // The app's bare `button {}` rule paints text #fff on a primary fill. These buttons
+                  // replace the FILL and not the colour, so the label stayed white on white.
+                  color: 'var(--color-text-body)',
                   cursor: 'pointer',
                 }}
               >
@@ -95,7 +98,7 @@ export function VisibilityPolicyCard({
         <button
           type="button"
           onClick={() => setShowDimensions((s) => !s)}
-          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontSize: '0.8rem', textDecoration: 'underline', opacity: 0.8 }}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontSize: '0.8rem', textDecoration: 'underline', opacity: 0.8, color: 'var(--color-text-body)' }}
         >
           {showDimensions ? 'Hide' : 'Show'} what this sets
         </button>

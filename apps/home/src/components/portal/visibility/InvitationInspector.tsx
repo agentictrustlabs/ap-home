@@ -109,7 +109,7 @@ export function InvitationInspector() {
                 setInvitation(null);
                 setError(null);
               }}
-              style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.8rem' }}
+              style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-text-body)' }}
             >
               Clear
             </button>

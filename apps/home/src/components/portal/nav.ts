@@ -20,6 +20,9 @@ export interface NavItem {
   /** This row opens a SECOND PANE beside the nav rather than being a destination in itself. One
    *  grammar for every second level: a right caret, a pane, and the row lit for the whole section. */
   opensPane?: PaneId;
+  /** Present ⇒ the row is shown but not navigable, and this says why. Reserved for a surface that
+   *  genuinely cannot do its job yet — never for permission (a server decides that, not a nav). */
+  disabledReason?: string;
 }
 
 /** The sections that open a pane. Both are lists too long to hang under a heading in a 240px column,
@@ -206,23 +209,33 @@ export function paneGroups(
 export function buildSettingsPane(
   active: WorkspaceScope = { kind: 'person' },
   orgRelationship: 'steward' | 'member' = 'steward',
+  /** Does anything in the naming service resolve to this agent? Several surfaces depend on it: a card is
+   *  served at an address derived from the NAME, and a directory entry names that card. Shown-but-
+   *  disabled rather than hidden — a person should see what becomes available, and why it is not yet. */
+  hasName = true,
 ): SettingsGroup[] {
   if (active.kind === 'org' && orgRelationship === 'member') return [];
   const href = (page: string): string => workspaceHref(active, page);
   const isOrg = active.kind === 'org';
   const isPerson = active.kind === 'person';
 
+  // A nameless agent cannot serve a card (the address comes from the name) and cannot be listed (an entry
+  // names a card), so those rows wait — and say what they are waiting for. Naming and Profile stay open,
+  // because naming it is the way out.
+  const needsName = hasName ? undefined : 'Give this agent a name first — its public address comes from its name.';
   const identity: NavItem[] = [
     { id: 'set-profile', label: 'Profile', href: href('profile'), Icon: UserIcon, status: 'live' },
     // Naming owns the name, its records AND the A2A endpoint: the endpoint was set inside the card
     // editor because the card needs it, but it is published under the name and read by resolution.
     { id: 'set-naming', label: 'Naming', href: href('naming'), Icon: TagIcon, status: 'live' },
-    { id: 'set-card', label: 'Agent Card', href: href('card'), Icon: IdCardIcon, status: 'live' },
-    { id: 'set-registry', label: 'Registry', href: href('registry'), Icon: DatabaseIcon, status: 'live' },
-    // spec 338 §20. Person-only today — the four choices (naming/listing/resolution/inbound) have no
-    // agent-scoped surface yet, and an item that 404s is worse than one that is honestly absent.
+    { id: 'set-card', label: 'Agent Card', href: href('card'), Icon: IdCardIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
+    { id: 'set-registry', label: 'Registry', href: href('registry'), Icon: DatabaseIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
+    { id: 'set-trust-graph', label: 'Trust graph', href: href('trust-graph'), Icon: ShieldIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
+    // Visibility sits AFTER Trust graph and stays available while nameless: issuing an invitation is how
+    // someone reaches an agent that has no public name at all (spec 338 — naming, listing, resolution and
+    // inbound are four INDEPENDENT choices, and lacking the first does not remove the others).
+    // Person-only today: the other classes have no agent-scoped surface for it yet.
     ...(isPerson ? [{ id: 'set-visibility', label: 'Visibility', href: '/visibility', Icon: GlobeIcon, status: 'live' as const }] : []),
-    { id: 'set-trust-graph', label: 'Trust graph', href: href('trust-graph'), Icon: ShieldIcon, status: 'live' },
   ];
   // Behaviour varies by class, and it varies because the SURFACES differ — not to make the pane shorter:
   //   • a service agent has no assistant configuration; its Playbook IS what it answers as, so `Ask`
