@@ -148,16 +148,26 @@ export interface SubjectCustodian {
  */
 export async function deriveSubjectCustodian(
   subject: OidcSubject,
-  masterHex: string,
+  /** The in-process derivation master. Meaningful ONLY for local derivation — under `agentic-kms` the
+   *  master lives in AKCS and never enters this process, so callers there pass nothing. */
+  masterHex: string | undefined,
   opts: { backend?: KmsBackend; auditSink?: AuditSink; rotation?: number; agenticKms?: AgenticKmsConfig } = {},
 ): Promise<SubjectCustodian> {
   const backend = opts.backend ?? 'local-aes';
+  // Fail closed and say which value is missing. A local backend without a master cannot derive anything,
+  // and defaulting one would mint custody keys from a value nobody chose.
+  if (backend !== 'agentic-kms' && !masterHex) {
+    throw new Error(
+      `[demo-a2a] custody derivation on "${backend}" requires A2A_CUSTODY_ROOT_KEY. It is optional only ` +
+        'under agentic-kms, where AKCS derives C_sub from the tenant signing seed (ADR-0013: no fallback).',
+    );
+  }
   // agentic-kms: the master never enters this process — AKCS derives C_sub from the tenant signing
   // seed (the legacy master imported via ceremony) with the identical v1 scheme. No fallback.
   const signerBackend = deriveSubjectSigner({
     subject: { iss: subject.iss, sub: subject.sub, rotation: opts.rotation },
     backend,
-    ...(backend === 'agentic-kms' ? { agenticKms: opts.agenticKms } : { config: { derivationSecretHex: masterHex } }),
+    ...(backend === 'agentic-kms' ? { agenticKms: opts.agenticKms } : { config: { derivationSecretHex: masterHex! } }),
     auditSink: opts.auditSink, // G-2: every C_sub signature emits key-custody.sign
   });
   const acct = await createKmsViemAccount(signerBackend);

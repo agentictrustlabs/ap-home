@@ -80,9 +80,17 @@ export function loadConfig(): DemoA2aConfig {
   } else {
     require_('A2A_MASTER_PRIVATE_KEY');
   }
-  // Phase A / D-P0-1: the OIDC custody-derivation root is required in EVERY backend (even gcp-kms, where the
-  // relay signer is a KMS key but C_sub still derives from this key). Fail-closed at boot — no fallback.
-  require_('A2A_CUSTODY_ROOT_KEY');
+  // The OIDC custody-derivation root — required only where C_sub is derived IN THIS PROCESS.
+  //
+  // Under `agentic-kms` it is not: AKCS derives C_sub from the tenant signing seed with the identical v1
+  // scheme, and the master never enters the Worker. Requiring it there would force a deployment to keep
+  // the exact secret this migration exists to remove, and a present-but-unused custody master is a
+  // standing liability, not a harmless leftover.
+  //
+  // `A2A_CUSTODY_KMS_BACKEND` can pin custody separately from the deployment's backend (a staged cutover
+  // moves one path at a time), so the requirement follows THAT when set.
+  const custodyBackend = (process.env.A2A_CUSTODY_KMS_BACKEND ?? backend).trim();
+  if (custodyBackend !== 'agentic-kms') require_('A2A_CUSTODY_ROOT_KEY');
 
   return {
     port: Number(process.env.PORT ?? 8787),

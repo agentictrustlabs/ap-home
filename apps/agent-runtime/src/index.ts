@@ -347,7 +347,10 @@ export interface Env {
   // address). This key must NEVER rotate — rotating it re-derives a different SA for every subject, orphaning
   // the old accounts. It is now a DEDICATED key, distinct from the relay signer above; the set-cloudflare-secrets
   // never-regen guard is pinned to it, and config.ts requires it at boot (fail-closed, no fallback).
-  A2A_CUSTODY_ROOT_KEY: string;
+  /** The in-process OIDC custody-derivation master. NOT required under `agentic-kms`, where AKCS derives
+   *  C_sub from the tenant signing seed and this never enters the Worker — hence optional. Every reader
+   *  passes it through `deriveSubjectCustodian`, which ignores it on the remote backend. */
+  A2A_CUSTODY_ROOT_KEY?: string;
   // Phase A / D-P0-1: durable (iss,sub)→SA map. If a resolve re-derivation yields a DIFFERENT SA than the one
   // recorded for this subject, the resolve FAILS CLOSED (the custody root changed — refuse to silently orphan).
   // Optional/inert until the KV namespace is provisioned (deploy-safe during migration).
