@@ -18,7 +18,9 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../lib/registry';
-import { getCapabilities, setCapabilities } from '../../../connect-client';
+import { getCapabilities, setCapabilities, capabilityIdFor, type CapabilityClaim } from '../../../connect-client';
+import { getCapabilityDefinition } from '@agenticprimitives/capability-claims';
+import { AgentCapabilitiesEditor } from '../capabilities/AgentCapabilitiesEditor';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { reverseAgentName } from '../../../lib/reverse-name';
 import { badgeStyle, cardSty, mono, mutedText, errorText, shortAddr } from '../theme';
@@ -101,59 +103,63 @@ export function AgentNamingPanel({ agent, name }: { agent: Address; name: string
 
 export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: string | null }) {
   const { session, profile } = useSession();
-  const [capabilityIds, setCapabilityIds] = useState<string[] | null>(null);
-  const [draft, setDraft] = useState('');
+  const [claims, setClaims] = useState<CapabilityClaim[] | null>(null);
+  const [published, setPublished] = useState<string[]>([]);
+  const [busy, setBusy] = useState<'save' | 'publish' | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const act = useAction();
 
+  // The SAME editor a person gets, on the SAME record key. An org and a service used to get a
+  // comma box here — a second UI, over a second shape, for one concept — which is how a person's
+  // capabilities became structured rows while an org's stayed free text nobody could match on.
+  //
+  // The published IDS are read from chain; the structured rows come from what the catalog defines for
+  // them. An id with no definition still shows, badged "not in catalog" by the editor, because it is
+  // live on chain and hiding it would leave the agent advertising something its steward cannot see.
   const load = useCallback(async () => {
-    const s = await getCapabilities(agent);
-    setCapabilityIds(s); setDraft(s.join(', '));
+    const ids = await getCapabilities(agent);
+    setPublished(ids);
+    setClaims(ids.map((id) => {
+      const def = getCapabilityDefinition(id);
+      return {
+        label: def?.title ?? id, capabilityId: id, description: def?.description,
+        relation: 'hasSkill', asserted: true, createdAt: Date.now(),
+      };
+    }));
   }, [agent]);
   useEffect(() => { void load(); }, [load]);
 
-  const save = async (): Promise<void> => {
+  const publish = async (): Promise<void> => {
     setMsg(null);
     if (!session || !name) { setMsg('This agent needs a name before its capabilities can be published.'); return; }
-    const next = draft.split(',').map((x) => x.trim()).filter(Boolean);
+    setBusy('publish');
     try {
+      const ids = (claims ?? []).filter((c) => c.asserted).map((c) => capabilityIdFor(c));
       const signHash = await signHashFor(resolveVia(profile?.credential, session.via), agent, { token: session.token });
-      const res = await setCapabilities(agent, name, next, signHash);
-      if (res.ok) { setCapabilityIds(next); setMsg('Published. Discovery ranks against this list.'); }
+      const res = await setCapabilities(agent, name, ids, signHash);
+      if (res.ok) { setPublished(ids); setMsg('Published. Discovery ranks against this list.'); }
       else setMsg(res.error);
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
   };
 
   return (
     <div style={cardSty}>
-      <h3 style={{ margin: '0 0 .5rem' }}>Declared capabilities</h3>
+      <h3 style={{ margin: '0 0 .5rem' }}>Capabilities</h3>
       <p style={{ ...mutedText, fontSize: '.82rem', marginTop: 0 }}>
-        What this agent says it can do — the PUBLIC <code style={mono}>atl:capabilities</code> record on its
-        profile, which the discovery matcher ranks. Owner-signed and gasless; a custodian of this agent
-        signs once.
+        What this agent can do — the public <code style={mono}>atl:capabilities</code> record on its
+        profile, which the discovery matcher ranks and its agent card advertises. Owner-signed and
+        gasless; a custodian of this agent signs once.
       </p>
-      {capabilityIds === null ? <p style={mutedText}>Reading the profile…</p> : (
-        <>
-          <label htmlFor="agent-caps" style={{ ...mutedText, fontSize: '.78rem', display: 'block', marginBottom: '.3rem' }}>
-            Comma-separated capability labels
-          </label>
-          <input
-            id="agent-caps"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="e.g. coordination, translation, scheduling"
-            style={{ width: '100%', padding: '.45rem .6rem', borderRadius: 8, border: '1px solid var(--c-g200)', font: 'inherit' }}
-          />
-          <div style={{ marginTop: '.7rem' }}>
-            <BusyButton className="btn-primary" busy={act.busy} busyLabel="Publishing…" onClick={act.run(save)} disabled={draft === (capabilityIds ?? []).join(', ')}>
-              Publish capabilities
-            </BusyButton>
-          </div>
-          <p style={{ ...mutedText, fontSize: '.78rem', marginTop: '.6rem' }}>
-            This is the public tier only. Private capability CLAIMS live in the agent&rsquo;s own vault behind
-            its stewardship delegation and are not edited here.
-          </p>
-        </>
+      {claims === null ? <p style={mutedText}>Reading the profile…</p> : (
+        <AgentCapabilitiesEditor
+          claims={claims}
+          onChange={setClaims}
+          published={published}
+          busy={busy}
+          onSaveRecord={async () => { setMsg('Selections are kept until you publish; this agent has no separate private record yet.'); }}
+          onPublish={publish}
+          {...(name ? {} : { disabledReason: 'This agent needs a name before its capabilities can be published.' })}
+        />
       )}
       {msg && <p style={{ ...mutedText, fontSize: '.82rem', marginTop: '.4rem' }}>{msg}</p>}
     </div>

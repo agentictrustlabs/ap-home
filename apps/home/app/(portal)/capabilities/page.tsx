@@ -13,7 +13,7 @@ import { listSkillClaims, saveSkillClaims, setCapabilities, getCapabilities, cap
 import { lookupIndependentEndorsers } from '../../../src/lib/agent-search';
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 import { cardSty, btnSty, btnPrimarySty, mutedText, errorText, inputSty, infoBannerSty, pillStyle as pill } from '../../../src/components/portal/theme';
-import { Tooltip } from '../../../src/components/shared/ui';
+import { AgentCapabilitiesEditor } from '../../../src/components/portal/capabilities/AgentCapabilitiesEditor';
 
 const toViaForSign = (via: string | undefined): Via => {
   const v = (via ?? '').toLowerCase();
@@ -112,75 +112,14 @@ export default function CapabilitiesPage() {
         : !agentName ? <p style={mutedText}>Your home needs a public name first (Naming Service tab) before you can publish capabilities for discovery.</p>
         : loading ? <p style={mutedText}>Loading your capability record…</p>
         : (
-          <div style={cardSty}>
-            <div style={{ display: 'grid', gap: '.5rem', marginBottom: claims.length ? '.9rem' : 0 }}>
-              {claims.map((c) => (
-                <div key={c.label} data-capability={capabilityIdFor(c)} style={{ padding: '.55rem .7rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-8)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.6rem' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <span style={{ fontWeight: 600, fontSize: '.9rem' }}>{c.label}</span>
-                      {/* The id is what actually travels: on chain, onto the card, into ARD. Show it, so a
-                          steward is never guessing which string a matcher will see. */}
-                      <code style={{ fontSize: '.72rem', color: 'var(--color-text-faint)', marginLeft: '.5rem' }}>{capabilityIdFor(c)}</code>
-                    </div>
-                    <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
-                      <span style={pill(c.asserted)} role="button" aria-label={`toggle publishing ${c.label}`} onClick={() => toggle(c.label)} title="Toggle publishing for discovery">{c.asserted ? '● Published' : '○ Private'}</span>
-                      <Tooltip content={`Remove ${c.label}`}>
-                        <button onClick={() => remove(c.label)} aria-label={`remove ${c.label}`} style={{ border: 'none', background: 'none', color: 'var(--color-text-faint)', cursor: 'pointer', fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>×</button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gap: '.35rem', marginTop: '.45rem' }}>
-                    <input
-                      value={c.description ?? ''} aria-label={`description for ${c.label}`}
-                      onChange={(e) => patch(c.label, { description: e.target.value })}
-                      placeholder="What this capability does — one sentence (shown on your agent card)"
-                      style={{ ...inputSty, fontSize: '.82rem' }}
-                    />
-                    <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap' }}>
-                      <input
-                        value={(c.tags ?? []).join(', ')} aria-label={`tags for ${c.label}`}
-                        onChange={(e) => patch(c.label, { tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })}
-                        placeholder="tags, comma separated"
-                        style={{ ...inputSty, fontSize: '.82rem', flex: 1, minWidth: 140 }}
-                      />
-                      <input
-                        value={(c.examples ?? []).join(' | ')} aria-label={`example queries for ${c.label}`}
-                        onChange={(e) => patch(c.label, { examples: e.target.value.split('|').map((t) => t.trim()).filter(Boolean).slice(0, 5) })}
-                        placeholder="example questions, separated by |  (up to 5)"
-                        style={{ ...inputSty, fontSize: '.82rem', flex: 2, minWidth: 180 }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {claims.length === 0 && <span style={{ color: 'var(--color-text-faint)', fontSize: '.85rem' }}>Nothing in your capability record yet — add what this agent can do.</span>}
-            </div>
-            <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-                placeholder="e.g. treasury management, accounting, solidity audits"
-                style={{ ...inputSty, flex: 1, minWidth: 200 }}
-              />
-              <button style={btnSty} onClick={add} disabled={!norm(input)}>Add</button>
-            </div>
-            <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-              <button style={btnSty} onClick={savePrivate} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save to your record'}</button>
-              <button style={btnPrimarySty} onClick={publishPublic} disabled={!!busy || !publicChanged} title={publicChanged ? '' : 'Everything you publish is up to date'}>
-                {busy === 'publish' ? 'Publishing…' : 'Publish for discovery'}
-              </button>
-            </div>
-            <p style={{ fontSize: '.78rem', ...mutedText, marginTop: '.7rem' }}>
-              Publishing writes the <strong>ids</strong> of your chosen capabilities on chain — your agent signs it
-              (<code>msg.sender == agent</code>) with your {toViaForSign(session?.via)} credential, sponsored. One prompt.
-              Their names, descriptions and examples travel with your agent card; the chain records which capabilities you
-              claim, not their prose.
-            </p>
-            {msg && <p style={{ fontSize: '.82rem', color: 'var(--color-sage-700)', marginTop: '.4rem' }}>{msg}</p>}
-            {err && <p style={{ fontSize: '.82rem', ...errorText, marginTop: '.4rem' }}>{err}</p>}
-          </div>
+          <AgentCapabilitiesEditor
+            claims={claims}
+            onChange={setClaims}
+            published={publishedPublic}
+            busy={busy}
+            onSaveRecord={savePrivate}
+            onPublish={publishPublic}
+          />
         )}
     </SectionShell>
   );
