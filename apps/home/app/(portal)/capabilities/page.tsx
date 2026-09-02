@@ -81,7 +81,18 @@ export default function CapabilitiesPage() {
       const ids = publishedIds(claims);
       const signHash = await signHashFor(toViaForSign(session.via), agentAddress, { token: session.token });
       const res = await setCapabilities(agentAddress, agentName, ids, signHash);
-      if (res.ok) { setPublishedPublic(ids); setMsg(ids.length ? 'Published — your agent card and discovery now advertise these capabilities.' : 'Cleared what you publish for discovery.'); }
+      if (res.ok) {
+        setPublishedPublic(ids);
+        // SAY WHAT ACTUALLY HAPPENED. Publishing writes ids on chain; it does not touch the agent card,
+        // which is a separately signed document. The old message ("your agent card and discovery now
+        // advertise these") claimed the job was done at the exact moment someone is most likely to
+        // believe it and stop — with a release-and-sign still standing between them and a public card.
+        // Un-publishing is worse: a release already signed keeps advertising what it was signed with,
+        // so "cleared" on its own reads as a retraction that did not happen.
+        setMsg(ids.length
+          ? 'Published on chain — discovery can match on these now. Your agent card is separate: add them to its draft in Card Studio, then release it to advertise them publicly.'
+          : 'Cleared what you publish for discovery. Any agent card release already signed keeps advertising these as they were — start a new draft in Card Studio to remove them there too.');
+      }
       else setErr(res.error);
     } catch (e) { setErr(String((e as Error)?.message ?? e)); }
     finally { setBusy(null); }
@@ -94,8 +105,9 @@ export default function CapabilitiesPage() {
     >
       <div style={{ ...infoBannerSty, marginBottom: '1.1rem', fontSize: '.82rem' }}>
         Capabilities come from a <strong>shared catalog</strong>, so every agent claiming one claims the same id — that is what
-        lets anyone match on it. Your record stays <strong>private</strong> in your agent's vault; mark an entry
-        <strong>Published</strong> and only its <em>id</em> goes public, on chain and on your agent card.
+        lets anyone match on it. Your record stays <strong>private</strong> in your agent&rsquo;s vault; mark an entry
+        <strong>Published</strong> and only its <em>id</em> goes public, <strong>on chain</strong>. Your agent card is a
+        separate, signed document — publishing does not change it until you add the capability to its draft and release it.
       </div>
 
       {/* `endorsers && …` RENDERS THE 0. JSX skips false/null/undefined but prints the number 0, so an
