@@ -115,7 +115,7 @@ export function CapabilitiesCurator({
       {!readOnly && (picking ? (
         <div style={{ marginTop: '.6rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.5rem' }}>
-            <div style={{ fontSize: '.78rem', fontWeight: 700 }}>Add from what this agent claims</div>
+            <div style={{ fontSize: '.78rem', fontWeight: 700 }}>Add from what this agent publishes</div>
             <button type="button" className="btn-ghost" onClick={() => setPicking(false)}>Close</button>
           </div>
           {loadError && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read your capabilities: {loadError}</p>}
@@ -140,8 +140,8 @@ export function CapabilitiesCurator({
           {candidates !== null && candidates.every((c) => c.onCard) && (
             <p className="manage-card-blurb" style={{ marginTop: '.4rem' }}>
               {candidates.length === 0
-                ? 'This agent publishes no capabilities yet. Claim one on the Capabilities page and it becomes available here — there is deliberately no way to invent one on a card.'
-                : 'Everything this agent claims is already on this card.'}
+                ? 'This agent publishes no capabilities yet. Saving one to your record keeps it PRIVATE — it is only a candidate here once you press "Publish for discovery" on the Capabilities page, which writes its id on chain. There is deliberately no way to invent one on a card.'
+                : 'Everything this agent publishes is already on this card.'}
             </p>
           )}
         </div>
