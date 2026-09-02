@@ -16,6 +16,7 @@ import {
 import { capabilityIdFor, type CapabilityClaim } from '../../../connect-client';
 import { cardSty, btnSty, btnPrimarySty, mutedText, errorText, inputSty, pillStyle as pill } from '../theme';
 import { BusyButton } from '../../shared/BusyButton';
+import { publishBlockedReason } from '../../../lib/publish-gate';
 
 export interface CapabilitiesEditorProps {
   claims: CapabilityClaim[];
@@ -42,6 +43,11 @@ export function AgentCapabilitiesEditor({
   const held = useMemo(() => new Set(onAgent.map((r) => r.id)), [onAgent]);
   const publishedIds = useMemo(() => onAgent.filter((r) => r.claim.asserted).map((r) => r.id).sort(), [onAgent]);
   const changed = publishedIds.join('||') !== published.slice().sort().join('||');
+
+  // WHY Publish is disabled, phrased as what to do about it (pure + tested in lib/publish-gate).
+  const blockedReason = publishBlockedReason({
+    total: claims.length, marked: publishedIds.length, changed, override: disabledReason,
+  });
 
   const add = useCallback((d: CatalogCapabilityDefinition) => {
     if (held.has(d.id)) return;
@@ -86,10 +92,14 @@ export function AgentCapabilitiesEditor({
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
-                  <span style={pill(c.asserted)} role="button" aria-label={`toggle publishing ${c.label}`}
+                  {/* A real button: this is the control that decides whether the id goes on chain, and as
+                      a <span> it was reachable only by mouse and read as a status badge. */}
+                  <button type="button" style={pill(c.asserted)} aria-label={`toggle publishing ${c.label}`}
+                    aria-pressed={c.asserted}
+                    title={c.asserted ? 'Published — its id is advertised on chain. Click to keep it private.' : 'Private to your record. Click to publish its id on chain.'}
                     onClick={() => onChange(claims.map((x) => (capabilityIdFor(x) === id ? { ...x, asserted: !x.asserted } : x)))}>
                     {c.asserted ? '● Published' : '○ Private'}
-                  </span>
+                  </button>
                   <button aria-label={`remove ${c.label}`} onClick={() => onChange(claims.filter((x) => capabilityIdFor(x) !== id))}
                     title="Removes it from this agent — the definition stays in the catalog."
                     style={{ border: 'none', background: 'none', color: 'var(--color-text-faint)', cursor: 'pointer', fontWeight: 800, fontSize: '1.1rem', lineHeight: 1 }}>×</button>
@@ -113,11 +123,11 @@ export function AgentCapabilitiesEditor({
         </button>
         <BusyButton busy={busy === 'save'} busyLabel="Saving…" style={btnSty} onClick={() => void onSaveRecord()}>Save to your record</BusyButton>
         <BusyButton busy={busy === 'publish'} busyLabel="Publishing…" style={btnPrimarySty} onClick={() => void onPublish()}
-          disabled={!!disabledReason || !changed} title={disabledReason ?? (changed ? '' : 'Everything you publish is up to date')}>
+          disabled={!!blockedReason} title={blockedReason ?? ''}>
           Publish for discovery
         </BusyButton>
       </div>
-      {disabledReason && <p style={{ fontSize: '.78rem', ...mutedText, marginTop: '.5rem' }}>{disabledReason}</p>}
+      {blockedReason && <p style={{ fontSize: '.78rem', ...mutedText, marginTop: '.5rem' }}>{blockedReason}</p>}
 
       {picker && (
         <div style={{ marginTop: '.9rem', paddingTop: '.8rem', borderTop: '1px solid var(--color-border)' }}>
