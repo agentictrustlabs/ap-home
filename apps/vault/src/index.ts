@@ -11,7 +11,7 @@ import {
   bodyDigestHex,
 } from '@agenticprimitives/mcp-runtime';
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
-import { buildMacProvider } from '@agenticprimitives/key-custody';
+import { buildMacProvider, akcsVaultKeyRef, AKCS_KEY_REF_PREFIX, provisionEnvelopeKey } from '@agenticprimitives/key-custody';
 import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
 import { executeGcpProvision, createGcpRestStepExecutor, sanitizeKeyId } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
@@ -1901,7 +1901,11 @@ app.get('/custody/vault-key/server-info', (c) => {
   // call later returns; null when the GCP env is unset ⇒ the client falls back to signing the bind.
   const owner = (c.req.query('owner') ?? '').trim().toLowerCase();
   let kmsKeyRef: string | null = null;
-  if (/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+  if (/^0x[0-9a-fA-F]{40}$/.test(owner) && isAgenticKms(c.env)) {
+    // AKCS deployment: the ref is the person's ENVELOPE-key PURPOSE, derived the same way `provision`
+    // derives it. Deterministic like the GCP ref, so the batched pre-approve path works unchanged.
+    kmsKeyRef = akcsVaultKeyRef(owner);
+  } else if (/^0x[0-9a-fA-F]{40}$/.test(owner)) {
     try {
       const raw = (c.env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
       const sa = JSON.parse(raw.startsWith('{') ? raw : atob(raw)) as { project_id?: string };
@@ -1943,8 +1947,8 @@ app.post('/custody/vault-key/provision', async (c) => {
   if (c.env.DEMO_VAULT_PROVISION_ENABLED !== 'true') return c.json({ error: 'not_found' }, 404);
   // Dev-only local KEKs (vault-key.ts): nothing to mint — the ref is derived — but the owner-control
   // proof below is still enforced so the route contract is identical.
-  const useLocalKek = !c.env.GCP_SERVICE_ACCOUNT_JSON && localKekEnabled(c.env);
-  if (!c.env.GCP_SERVICE_ACCOUNT_JSON && !useLocalKek) {
+  const useLocalKek = !c.env.GCP_SERVICE_ACCOUNT_JSON && !isAgenticKms(c.env) && localKekEnabled(c.env);
+  if (!c.env.GCP_SERVICE_ACCOUNT_JSON && !useLocalKek && !isAgenticKms(c.env)) {
     return c.json({ error: 'unsupported', error_description: 'GCP_SERVICE_ACCOUNT_JSON unset (provisioning unavailable)' }, 501);
   }
   let body: Record<string, unknown> = {};
@@ -1979,6 +1983,24 @@ app.post('/custody/vault-key/provision', async (c) => {
   }
   if (useLocalKek) {
     return c.json({ ok: true, owner: owner.toLowerCase(), kmsKeyRef: localKekRef(owner), alreadyExisted: true });
+  }
+  if (isAgenticKms(c.env)) {
+    // One ENVELOPE key per person, addressed by a per-person PURPOSE — spec 278 VKB-D1 wants a per-person
+    // KEY, and AKCS resolves `data-keys/generate` by purpose, so the purpose IS the key selector. Sharing
+    // one tenant key and separating people by AAD would NOT have satisfied the spec.
+    const ref = akcsVaultKeyRef(owner);
+    try {
+      // key-custody owns the AKCS call: it carries the headers AKCS requires on every request
+      // (tenant / request-id / timestamp / body digest) plus the retry + no-redirect rules a custody
+      // call must have. A hand-rolled fetch here got INVALID_HEADERS and would have skipped both.
+      const r = await provisionEnvelopeKey(agenticKmsConfig(c.env), {
+        purpose: ref.slice(AKCS_KEY_REF_PREFIX.length),
+        externalName: `vault-kek-${owner.toLowerCase()}`,
+      });
+      return c.json({ ok: true, owner: owner.toLowerCase(), kmsKeyRef: ref, alreadyExisted: r.alreadyExisted });
+    } catch (e) {
+      return c.json({ ok: false, error: 'provision_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+    }
   }
   let sa: { project_id?: string; client_email?: string };
   try {

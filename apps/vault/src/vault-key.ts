@@ -28,7 +28,8 @@ import {
   type Delegation,
   type Hex,
 } from '@agenticprimitives/delegation';
-import { selectVaultKeyProvider } from '@agenticprimitives/key-custody';
+import { selectVaultKeyProvider, akcsVaultKeyRef, AKCS_KEY_REF_PREFIX } from '@agenticprimitives/key-custody';
+import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
 import { cachingDekWrapper } from './dek-cache';
 import { canonicalize, sha256Hex, type Sha256 } from '@agenticprimitives/key-authorization';
 import { createDemoVault } from './vault.js';
@@ -40,7 +41,7 @@ import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticpr
 /** The host id a person SA authorizes in its VaultKeyBinding. */
 export const VAULT_SERVER_ID = 'demo-mcp';
 
-export interface VaultKeyEnv {
+export interface VaultKeyEnv extends AkcsEnv {
   DB: D1Database;
   RPC_URL: string;
   CHAIN_ID: string;
@@ -153,10 +154,19 @@ export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promi
       allowFixtureKey: true, // dev-only local envelope — LocalAesProvider keeps its own production guard
       fixtureKeyHex: localKekMasterHex(env.DEMO_VAULT_LOCAL_KEK_SECRET!, row.owner_address),
     });
+  } else if (row.kms_key_ref.startsWith(AKCS_KEY_REF_PREFIX)) {
+    // AKCS per-person KEK. The ref carries the ENVELOPE key's PURPOSE, because AKCS resolves
+    // `data-keys/generate` by purpose rather than by key id; a per-person purpose therefore selects
+    // that person's own key, which is what VKB-D1 requires (AAD binding on one tenant key would not be).
+    // key-custody fails closed if the AKCS config is absent — it never degrades to GCP or local-aes.
+    provider = selectVaultKeyProvider({
+      kmsKeyRef: row.kms_key_ref,
+      agenticKms: agenticKmsConfig(env),
+    });
   } else {
     if (!env.GCP_SERVICE_ACCOUNT_JSON) {
       throw new Error(
-        'resolvePersonVault: GCP_SERVICE_ACCOUNT_JSON is required to wield a per-person KEK (spec 278). ' +
+        'resolvePersonVault: GCP_SERVICE_ACCOUNT_JSON is required to wield a per-person GCP KEK (spec 278). ' +
           'No local-aes fallback for person data.',
       );
     }
