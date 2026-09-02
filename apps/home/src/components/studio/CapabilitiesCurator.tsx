@@ -22,6 +22,7 @@ import { getCapabilityDefinition } from '@agenticprimitives/capability-claims';
 import { capabilityCandidates, type CapabilityCandidateV1 } from '../../studio-client';
 import type { DelegationWire } from '../../lib/delegation';
 import { Chip, iconButtonStyle } from './ui';
+import { BusyButton } from '../shared/BusyButton';
 
 const SOURCE_TAG: Record<string, string> = {
   'surface-catalog': 'catalog',
@@ -187,15 +188,17 @@ export function CapabilitiesCurator({
                 <span style={{ color: 'var(--c-g500)', fontWeight: 400 }}> · {c.id}</span>
               </span>
               <Chip tone="muted">{c.source}</Chip>
-              <button
-                type="button"
+              {/* The shared busy affordance, not a hand-rolled one: pressing a button must ALWAYS
+                  visibly do something, and this one waits on a vault round trip. */}
+              <BusyButton
+                busy={adding.has(c.id)}
+                busyLabel="Adding…"
                 className="btn-ghost"
                 aria-label={`add ${c.id} to this card`}
-                disabled={adding.has(c.id)}
                 onClick={() => addCandidate(c)}
               >
-                {adding.has(c.id) ? 'Adding…' : 'Add'}
-              </button>
+                Add
+              </BusyButton>
             </div>
           ))}
           {candidates !== null && candidates.every((c) => c.onCard) && (
