@@ -255,6 +255,27 @@ export async function patchDraft(d: DelegationWire, cardResourceId: string, patc
   return studioCall('card.patchDraft', d, { cardResourceId, patch, ...(ifMatch ? { ifMatch } : {}), mutation: m });
 }
 
+/** One capability this agent could advertise on a card — sourced, never invented. */
+export interface CapabilityCandidateV1 {
+  id: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  /** `claim` = the agent's own public atl:capabilities; `catalog` = served by its runtime. */
+  source: 'claim' | 'catalog';
+  onCard: boolean;
+}
+
+/** What this agent could advertise, and what it already does. `unsourced` are ids the card carries that
+ *  neither its published claims nor its runtime explain — surfaced so a steward can see them, because a
+ *  published card advertising one is a live fact. */
+export async function capabilityCandidates(
+  d: DelegationWire,
+  cardResourceId: string,
+): Promise<{ candidates: CapabilityCandidateV1[]; unsourced: string[] }> {
+  return studioCall('card.capabilityCandidates', d, { cardResourceId });
+}
+
 /** Import an external A2A card document (bytes kept as evidence; becomes the draft as a proposal). */
 export async function importCard(d: DelegationWire, cardResourceId: string, input: { source: string; uri?: string }, m: StudioMutation): Promise<ImportReport> {
   return studioCall('card.import', d, { cardResourceId, ...input, mutation: m });

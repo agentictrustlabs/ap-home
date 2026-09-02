@@ -639,3 +639,78 @@ describe('the Agent Metadata Steward (service-agent caller)', () => {
     expect(rec.status).toBe(403);
   });
 });
+
+/**
+ * card.capabilityCandidates — the op that lets the Studio's curator CURATE.
+ *
+ * Without it the curator had nothing to offer and grew a free-text id form instead, so a card could
+ * advertise an id that existed in no catalog, in no vault record and on no chain. Matching works only
+ * because every agent claiming a capability claims the SAME id, which makes an invented one unmatchable
+ * rather than merely unusual. These assert the two properties the picker depends on: the candidates come
+ * from what the agent has actually claimed or serves, and anything on the card that neither source
+ * explains is REPORTED rather than quietly tolerated.
+ */
+describe('card.capabilityCandidates', () => {
+  let w: World;
+  let studio: AgentCardStudio;
+  beforeEach(() => { w = makeWorld(); studio = new AgentCardStudio(deps(w)); });
+
+  async function newCard(): Promise<string> {
+    const c = await ok(studio.run(as(STEWARD), 'card.create', mutation()));
+    return (c as { resource: { cardResourceId: string } }).resource.cardResourceId;
+  }
+
+  it('offers the agent’s public claims and its runtime catalog, each labelled with where it came from', async () => {
+    const card = await newCard();
+    const r = (await ok(studio.run(as(STEWARD), 'card.capabilityCandidates', { cardResourceId: card }))) as
+      { candidates: Array<{ id: string; source: string; onCard: boolean }>; unsourced: string[] };
+
+    const claim = r.candidates.find((c) => c.id === 'translation');
+    expect(claim, 'the agent’s published capability must be offerable').toBeTruthy();
+    expect(claim!.source).toBe('claim');
+    // Every candidate is sourced. A candidate with no source is exactly the invented id this op exists
+    // to make impossible.
+    for (const c of r.candidates) expect(['claim', 'catalog']).toContain(c.source);
+  });
+
+  it('offers back what the card has DROPPED, and marks what it still carries', async () => {
+    // A fresh card is seeded from the same sources, so everything starts on it — which is why the
+    // interesting case is a card that has fallen behind: omit a capability here, and the picker must be
+    // able to put it back without recreating the card. That gap is what sent people to the free-text form.
+    const card = await newCard();
+    const seeded = (await ok(studio.run(as(STEWARD), 'card.get', { cardResourceId: card }))) as
+      { draft: { revision: number; card: { skills: Array<{ id: string }> } } };
+    const dropped = seeded.draft.card.skills[0];
+    expect(dropped, 'the fixture card must be seeded with at least one capability').toBeTruthy();
+
+    const before = (await ok(studio.run(as(STEWARD), 'card.capabilityCandidates', { cardResourceId: card }))) as
+      { candidates: Array<{ id: string; onCard: boolean }> };
+    expect(before.candidates.find((c) => c.id === dropped!.id)?.onCard, 'seeded ⇒ already on the card').toBe(true);
+
+    await ok(studio.run(as(STEWARD), 'card.patchDraft', {
+      cardResourceId: card,
+      patch: [{ op: 'replace', path: '/skills', value: seeded.draft.card.skills.filter((sk) => sk.id !== dropped!.id) }],
+      ...mutation({ expectedRevision: seeded.draft.revision }),
+    }));
+
+    const after = (await ok(studio.run(as(STEWARD), 'card.capabilityCandidates', { cardResourceId: card }))) as
+      { candidates: Array<{ id: string; onCard: boolean }>; unsourced: string[] };
+    expect(after.candidates.find((c) => c.id === dropped!.id)?.onCard, 'dropped ⇒ offerable again').toBe(false);
+    expect(after.unsourced, 'removing it from the card does not make it unclaimed').not.toContain(dropped!.id);
+  });
+
+  it('reports an id the card carries that neither the claims nor the catalog explain', async () => {
+    // The shape left behind by the old free-text form — and the reason removing the form is not enough
+    // on its own: a card that already advertises one keeps advertising it until someone is told.
+    const card = await newCard();
+    const draft = (await ok(studio.run(as(STEWARD), 'card.get', { cardResourceId: card }))) as { draft: { revision: number; card: { skills: unknown[] } } };
+    await ok(studio.run(as(STEWARD), 'card.patchDraft', {
+      cardResourceId: card,
+      patch: [{ op: 'replace', path: '/skills', value: [...draft.draft.card.skills, { id: 'summarize-transactions', name: 'Summarize transactions', description: '', tags: [] }] }],
+      ...mutation({ expectedRevision: draft.draft.revision }),
+    }));
+
+    const r = (await ok(studio.run(as(STEWARD), 'card.capabilityCandidates', { cardResourceId: card }))) as { unsourced: string[] };
+    expect(r.unsourced, 'an unclaimed id on the card must be surfaced, not tolerated').toContain('summarize-transactions');
+  });
+});

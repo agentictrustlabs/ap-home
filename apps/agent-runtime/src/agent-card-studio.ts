@@ -257,6 +257,7 @@ export interface StoredApprovalV1 {
 
 export type StudioOp =
   | 'card.list' | 'card.create' | 'card.get' | 'card.page' | 'card.patchDraft' | 'card.import' | 'card.validate' | 'card.createRelease' | 'card.wellKnown'
+  | 'card.capabilityCandidates'
   | 'release.requestApproval' | 'release.approve' | 'release.sign' | 'release.publish' | 'release.verifyPublication'
   | 'release.deprecate' | 'release.revoke'
   | 'projection.list' | 'projection.configure' | 'projection.preview' | 'projection.planPublication'
@@ -265,6 +266,7 @@ export type StudioOp =
 
 export const STUDIO_OPS: readonly StudioOp[] = [
   'card.list', 'card.create', 'card.get', 'card.page', 'card.patchDraft', 'card.import', 'card.validate', 'card.createRelease', 'card.wellKnown',
+  'card.capabilityCandidates',
   'release.requestApproval', 'release.approve', 'release.sign', 'release.publish', 'release.verifyPublication',
   'release.deprecate', 'release.revoke',
   'projection.list', 'projection.configure', 'projection.preview', 'projection.planPublication',
@@ -288,6 +290,9 @@ const OP_SCOPE: Record<Exclude<StudioOp, 'projection.recordPublication'>, Studio
   'card.validate': 'agent.card.validate',
   'card.createRelease': 'agent.card.draft',
   'card.wellKnown': 'agent.card.read',
+  // A READ of what the agent already claims publicly — no wider than card.get, and strictly narrower
+  // than anything that could add a capability, because it cannot create one.
+  'card.capabilityCandidates': 'agent.card.read',
   'release.requestApproval': 'agent.card.draft',
   'release.approve': 'agent.card.approve',
   'release.sign': 'agent.card.sign',
@@ -443,6 +448,7 @@ export class AgentCardStudio {
       case 'card.validate': return this.cardValidate(caller, kind, args);
       case 'card.createRelease': return this.mutation(op, args, (m) => this.cardCreateRelease(caller, kind, args, m));
       case 'card.wellKnown': return this.cardWellKnown(caller);
+      case 'card.capabilityCandidates': return this.cardCapabilityCandidates(caller, str(args.cardResourceId, 'cardResourceId'));
       case 'release.requestApproval': return this.mutation(op, args, (m) => this.releaseTransition(caller, kind, args, m, 'approvalPending'));
       case 'release.approve': return this.mutation(op, args, (m) => this.releaseApprove(caller, kind, args, m));
       case 'release.sign': return this.mutation(op, args, (m) => this.releaseSign(caller, kind, args, m));
@@ -645,6 +651,59 @@ export class AgentCardStudio {
       };
     });
     return { cards };
+  }
+
+  /**
+   * What this agent could ADVERTISE on a card, and what it already does.
+   *
+   * The card is a PROJECTION of `profile.capabilities` (ADR-0051), so a steward adding one to a card is
+   * always CHOOSING from what the agent already claims — never authoring a new capability. Without an op
+   * to list those choices, the Studio's curator had nothing to offer and grew a free-text form instead:
+   * an id typed there exists in no catalog, in no vault record and on no chain, yet still reaches the
+   * public card and ARD. Matching only works because every agent claiming a capability claims the SAME
+   * id, so an invented one is not a lesser entry — it is unmatchable by construction.
+   *
+   * Two honest sources, labelled, because "why could this be on my card?" has two different answers:
+   *   claim   — the agent's own public `atl:capabilities`, published from its Capabilities page.
+   *   catalog — served by its runtime and inherited from the surface catalog (messaging.deliver &c).
+   * A private claim appears in NEITHER: the absence is the privacy boundary (spec 347 §5), not an
+   * omission to be helpfully filled in.
+   */
+  private async cardCapabilityCandidates(caller: StudioCaller, cardResourceId: string): Promise<Record<string, unknown>> {
+    const [idx, draft] = await this.getMany<{ v: 1; resources: A2AAgentCardResourceV1[] } | A2AAgentCardDraftV1>([
+      STUDIO_KEYS.cardIndex(),
+      STUDIO_KEYS.draft(cardResourceId),
+    ]);
+    const resource = ((idx as { resources?: A2AAgentCardResourceV1[] } | null)?.resources ?? []).find((r) => r.cardResourceId === cardResourceId);
+    if (!resource) throw new StudioError(404, 'card_not_found');
+    const onCard = new Set(((draft as A2AAgentCardDraftV1 | null)?.card.skills ?? []).map((sk) => sk.id));
+
+    const [claims, live] = await Promise.all([
+      this.deps.sources.publicSkillClaims(caller.agent),
+      this.deps.sources.liveCard(caller.agent).catch(() => ({}) as Record<string, unknown>),
+    ]);
+    const catalog = Array.isArray(live.skills) ? (live.skills as Array<{ id: string; name?: string; description?: string; tags?: string[] }>) : [];
+
+    // Claims first, then catalog entries the claims did not already cover: an id the agent has PUBLISHED
+    // is the same capability as the one its runtime serves, and showing it twice would invite a steward
+    // to add a duplicate the card schema then rejects.
+    const seen = new Set<string>();
+    const candidates: Array<Record<string, unknown>> = [];
+    for (const c of claims) {
+      if (seen.has(c.skillId)) continue;
+      seen.add(c.skillId);
+      candidates.push({ id: c.skillId, name: c.name, ...(c.description ? { description: c.description } : {}), tags: c.tags, source: 'claim', onCard: onCard.has(c.skillId) });
+    }
+    for (const sk of catalog) {
+      if (seen.has(sk.id)) continue;
+      seen.add(sk.id);
+      candidates.push({ id: sk.id, name: sk.name ?? sk.id, ...(sk.description ? { description: sk.description } : {}), tags: sk.tags ?? [], source: 'catalog', onCard: onCard.has(sk.id) });
+    }
+
+    // Ids the CARD carries that neither source explains. Reported, never silently dropped: a published
+    // card advertising one is a live fact its steward has to see before deciding what to do about it.
+    const unsourced = [...onCard].filter((id) => !seen.has(id));
+    return { candidates, unsourced };
   }
 
   private async cardGet(cardResourceId: string): Promise<Record<string, unknown>> {

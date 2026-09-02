@@ -9,10 +9,18 @@
 //
 // A private / org-only claim never appears here at all: the absence IS the privacy boundary, so there is
 // no disabled row explaining that something private exists.
-import { useState } from 'react';
+//
+// ADDING MEANS CHOOSING, NEVER AUTHORING. This screen used to carry a free-text id/name/description form
+// beneath the very sentence telling you to edit capabilities elsewhere. An id typed there existed in no
+// catalog, in no vault record and on no chain, and still travelled onto the public card and into ARD.
+// That is not a lesser entry: matching works ONLY because every agent claiming a capability claims the
+// same id, so an invented one is unmatchable by construction. The picker below offers what the agent has
+// actually published (or its runtime serves), and nothing else.
+import { useCallback, useEffect, useState } from 'react';
 import type { A2AAgentSkillV1, FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
-import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
-import { Chip, iconButtonStyle, inputStyle } from './ui';
+import { capabilityCandidates, type CapabilityCandidateV1 } from '../../studio-client';
+import type { DelegationWire } from '../../lib/delegation';
+import { Chip, iconButtonStyle } from './ui';
 
 const SOURCE_TAG: Record<string, string> = {
   'surface-catalog': 'catalog',
@@ -25,25 +33,37 @@ const SOURCE_TAG: Record<string, string> = {
 export function CapabilitiesCurator({
   skills,
   bindings,
-  diagnostics,
   readOnly,
+  delegation,
+  cardResourceId,
   onCommit,
 }: {
   skills: A2AAgentSkillV1[];
   bindings: Record<string, FieldBindingV1>;
-  diagnostics: ProjectionDiagnosticV1[];
   readOnly: boolean;
+  delegation: DelegationWire;
+  cardResourceId: string;
   onCommit(next: A2AAgentSkillV1[]): void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ id: '', name: '', description: '', tags: '' });
+  const [picking, setPicking] = useState(false);
+  const [candidates, setCandidates] = useState<CapabilityCandidateV1[] | null>(null);
+  const [unsourced, setUnsourced] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Catalog-served skills the card hasn't caught up to. The validator names them in prose; that is the only
-  // candidate source this wave has — there is no Studio op that lists public capability claims.
-  const catalogMissing = diagnostics
-    .filter((d) => d.code === 'CATALOG_DIVERGENCE' && /catalog skill/.test(d.message))
-    .map((d) => /catalog skill "([^"]+)"/.exec(d.message)?.[1])
-    .filter((id): id is string => !!id && !skills.some((s) => s.id === id));
+  // Read the candidates whenever the card changes, not only when the picker opens: `unsourced` is a
+  // finding about what is ALREADY advertised, and a finding nobody opened a panel to see is not shown.
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const r = await capabilityCandidates(delegation, cardResourceId);
+      setCandidates(r.candidates);
+      setUnsourced(r.unsourced);
+    } catch (e) {
+      setCandidates(null);
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, [delegation, cardResourceId]);
+  useEffect(() => { void load(); }, [load, skills.length]);
 
   return (
     <div>
@@ -81,70 +101,55 @@ export function CapabilitiesCurator({
         {skills.length === 0 && <p className="manage-card-blurb">No skills on this card yet.</p>}
       </div>
 
-      {catalogMissing.length > 0 && (
-        <div style={{ marginTop: '.6rem' }}>
-          <div style={{ fontSize: '.75rem', fontWeight: 700, color: 'var(--c-g700)' }}>From the surface catalog</div>
-          {catalogMissing.map((id) => (
-            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.35rem 0' }}>
-              <code style={{ fontSize: '.75rem', flex: 1 }}>{id}</code>
-              <Chip tone="muted">catalog</Chip>
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => onCommit([...skills, { id, name: id, description: '', tags: [] }])}
-                >
-                  Add
-                </button>
-              )}
-            </div>
-          ))}
+      {unsourced.length > 0 && (
+        <div style={{ marginTop: '.6rem', border: '1px solid var(--c-amber-300, #fcd34d)', borderRadius: 8, padding: '.5rem .6rem' }}>
+          <div style={{ fontSize: '.75rem', fontWeight: 700 }}>On this card, but not claimed anywhere</div>
+          <p className="manage-card-blurb" style={{ margin: '.25rem 0 0' }}>
+            {unsourced.map((id) => <code key={id} style={{ marginRight: '.4rem' }}>{id}</code>)}
+            — neither published in your capabilities nor served by this agent&rsquo;s runtime. Nothing can match
+            an id no one else claims, so remove it here, or claim it on the Capabilities page to make it real.
+          </p>
         </div>
       )}
 
-      <p className="manage-card-blurb" style={{ margin: '.6rem 0 0' }}>
-        Candidates from your public capability claims aren&rsquo;t listed here yet — the Studio service reads them
-        when it seeds a new card, but exposes no picker operation for them in this wave.
-      </p>
-
-      {!readOnly &&
-        (adding ? (
-          <div style={{ display: 'grid', gap: '.35rem', marginTop: '.5rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem' }}>
-            <input aria-label="Skill id" placeholder="summarize-transactions" value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} style={inputStyle} />
-            <input aria-label="Skill name" placeholder="Summarize transactions" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={inputStyle} />
-            <textarea aria-label="Skill description" placeholder="What this skill does, for another agent to read." value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ ...inputStyle, minHeight: 72, fontFamily: 'inherit' }} />
-            <input aria-label="Tags (comma separated)" placeholder="finance, reporting" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} style={inputStyle} />
-            <div style={{ display: 'flex', gap: '.4rem' }}>
+      {!readOnly && (picking ? (
+        <div style={{ marginTop: '.6rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.6rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.5rem' }}>
+            <div style={{ fontSize: '.78rem', fontWeight: 700 }}>Add from what this agent claims</div>
+            <button type="button" className="btn-ghost" onClick={() => setPicking(false)}>Close</button>
+          </div>
+          {loadError && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read your capabilities: {loadError}</p>}
+          {candidates === null && !loadError && <p className="manage-card-blurb">Reading what this agent claims…</p>}
+          {candidates?.filter((c) => !c.onCard).map((c) => (
+            <div key={c.id} data-candidate={c.id} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.35rem 0', borderTop: '1px solid var(--c-g100)' }}>
+              <span style={{ fontSize: '.8rem', fontWeight: 600, flex: 1, minWidth: 0 }}>
+                {c.name}
+                <span style={{ color: 'var(--c-g500)', fontWeight: 400 }}> · {c.id}</span>
+              </span>
+              <Chip tone="muted">{c.source}</Chip>
               <button
                 type="button"
-                className="btn-primary"
-                disabled={!draft.id.trim() || skills.some((s) => s.id === draft.id.trim())}
-                onClick={() => {
-                  onCommit([
-                    ...skills,
-                    {
-                      id: draft.id.trim(),
-                      name: draft.name.trim() || draft.id.trim(),
-                      description: draft.description.trim(),
-                      tags: draft.tags.split(',').map((t) => t.trim()).filter(Boolean),
-                    },
-                  ]);
-                  setDraft({ id: '', name: '', description: '', tags: '' });
-                  setAdding(false);
-                }}
+                className="btn-ghost"
+                aria-label={`add ${c.id} to this card`}
+                onClick={() => onCommit([...skills, { id: c.id, name: c.name, description: c.description ?? '', tags: c.tags }])}
               >
-                Add capability
-              </button>
-              <button type="button" className="btn-ghost" onClick={() => setAdding(false)}>
-                Cancel
+                Add
               </button>
             </div>
-          </div>
-        ) : (
-          <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={() => setAdding(true)}>
-            + Add capability
-          </button>
-        ))}
+          ))}
+          {candidates !== null && candidates.every((c) => c.onCard) && (
+            <p className="manage-card-blurb" style={{ marginTop: '.4rem' }}>
+              {candidates.length === 0
+                ? 'This agent publishes no capabilities yet. Claim one on the Capabilities page and it becomes available here — there is deliberately no way to invent one on a card.'
+                : 'Everything this agent claims is already on this card.'}
+            </p>
+          )}
+        </div>
+      ) : (
+        <button type="button" className="btn-ghost" style={{ marginTop: '.5rem' }} onClick={() => { setPicking(true); void load(); }}>
+          + Add a capability
+        </button>
+      ))}
     </div>
   );
 }

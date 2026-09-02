@@ -262,8 +262,9 @@ export function CardEditor({
           <CapabilitiesCurator
             skills={Array.isArray(value) ? (value as A2AAgentSkillV1[]) : []}
             bindings={draft.fieldBindings}
-            diagnostics={diags}
             readOnly={readOnly}
+            delegation={delegation}
+            cardResourceId={detail.resource.cardResourceId}
             onCommit={(next) => commit(field.pointer, next)}
           />
         );

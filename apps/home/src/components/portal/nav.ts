@@ -237,12 +237,17 @@ export function buildSettingsPane(
     { id: 'set-profile', label: 'Profile', href: href('profile'), Icon: UserIcon, status: 'live' },
     { id: 'set-naming', label: 'Naming', href: href('naming'), Icon: TagIcon, status: 'live' },
   ];
-  // DISCOVERY — how this agent is FOUND, in the order the chain actually runs: what it can do, the card
-  // that advertises it, the registry that lists the card. Each needs a name, because the card is served
-  // at an address derived from it; shown-but-disabled rather than hidden, so a person sees what becomes
-  // available and why it is not yet.
-  const discovery: NavItem[] = [
+  // CAPABILITIES — what this agent can DO. Its own area, not a row under Discovery, because it is the
+  // RECORD every other surface projects from (ADR-0051): the card advertises a curated subset of it, the
+  // registry ranks on the ids it publishes, ARD restates them. Filing the source under one of its
+  // consumers made it look like a discovery setting, which is how a card grew a second, rival editor.
+  const capabilities: NavItem[] = [
     { id: 'set-capabilities', label: 'Capabilities', href: href('capabilities'), Icon: AwardIcon, status: 'live' },
+  ];
+  // DISCOVERY — how this agent is FOUND: the card that advertises what it can do, and the registry that
+  // lists the card. Each needs a name, because the card is served at an address derived from it;
+  // shown-but-disabled rather than hidden, so a person sees what becomes available and why it is not yet.
+  const discovery: NavItem[] = [
     { id: 'set-card', label: 'Agent Card', href: href('card'), Icon: IdCardIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
     { id: 'set-registry', label: 'Registry', href: href('registry'), Icon: DatabaseIcon, status: 'live', ...(needsName ? { disabledReason: needsName } : {}) },
   ];
@@ -261,8 +266,8 @@ export function buildSettingsPane(
   //   • only a person's agent has a discussion-reply panel distinct from its assistant. An org's
   //     discussion behaviour is the assistant.
   // An item that would duplicate another is worse than an absent one (§5's empty rule).
-  // BEHAVIOUR — how it ACTS. Capabilities moved out to Discovery: what an agent can do is what others
-  // search for, and it was the one item here that answered a different question from its neighbours.
+  // BEHAVIOUR — how it ACTS, which is not the same question as what it CAN do (that is Capabilities,
+  // above): these configure how it responds, not what it is able to offer.
   const behaviour: NavItem[] = [
     ...(active.kind !== 'service' ? [{ id: 'set-ask', label: 'Ask', href: href('ask'), Icon: BotIcon, status: 'live' as const }] : []),
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
@@ -281,11 +286,11 @@ export function buildSettingsPane(
     ...(isOrg ? [{ id: 'set-status', label: 'Status', href: orgHref(active.org, 'status'), Icon: SettingsIcon, status: 'live' as const }] : []),
   ];
 
-  // Five groups, each answering ONE question about the agent: who it is · how it is found · whether it
-  // can be reached · how it acts · who may act through it. The previous three mixed those — "Identity &
-  // presence" carried the card, the registry and the trust graph alongside the name.
+  // Six groups, each answering ONE question about the agent: who it is · what it can do · how it is
+  // found · whether it can be reached · how it acts · who may act through it.
   return [
     { heading: 'Identity', items: identity },
+    { heading: 'Capabilities', items: capabilities },
     { heading: 'Discovery', items: discovery },
     { heading: 'Reachability', items: reachability },
     { heading: 'Behaviour', items: behaviour },
