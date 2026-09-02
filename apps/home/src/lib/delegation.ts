@@ -23,6 +23,7 @@ import {
 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS } from './chain';
+import { INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
 type SignHash = (hash: Hex) => Promise<Hex>;
 
@@ -453,6 +454,32 @@ export async function issueInteractionsDelegation(
 
 /** spec 253 batching — the interactions grant as an approved-hash (0x03) wire; the principal pre-approves
  *  its digest in its deploy userOp, so it needs no per-grant passkey. */
+
+/**
+ * The interactions grant + its DEL-001 session leaf, built from an INJECTED signer and fetcher.
+ *
+ * Exists so a re-issue can happen outside the browser (`scripts/reissue-interactions-grants.mts`)
+ * without a second copy of the scope list — a copy would drift, and a grant signed over a drifted
+ * list is denied per-record with no sign anything is wrong until someone reads their vault.
+ */
+export async function buildInteractionsGrantForScript(
+  principal: string,
+  signHash: (digest: Hex) => Promise<string>,
+  get: (path: string) => Promise<{ ok?: boolean; address?: string }>,
+): Promise<{ grant: DelegationWire; sessionLeaf?: DelegationWire }> {
+  const service = INTERACTIONS_SERVICE_SA;
+  if (!service) throw new Error('NEXT_PUBLIC_INTERACTIONS_SERVICE_SA is unset — nothing to delegate to');
+  const { delegation, digest } = buildInteractionsStruct(principal as Address, service, MCP_SERVER_ID, 60 * 60 * 24 * 365);
+  delegation.signature = (await signHash(digest)) as Hex;
+
+  let sessionLeaf: DelegationWire | undefined;
+  const sk = await get('/agent/interactions-session-key').catch(() => null);
+  if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
+    sessionLeaf = toWire(await issueSessionDelegation(principal as Address, sk.address as Address, signHash as (h: Hex) => Promise<Hex>));
+  }
+  return { grant: toWire(delegation), ...(sessionLeaf ? { sessionLeaf } : {}) };
+}
+
 export function buildApprovedInteractionsDelegation(
   principal: Address,
   interactionsServiceSA: Address,
