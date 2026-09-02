@@ -134,9 +134,40 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // Per-subject rotation (spec 235 §5b): which KMS home this Google account opens now. demo-a2a
   // derives `SA(iss,sub,rotation)` deterministically — derive-only here, no on-chain effect.
   const rotation = await readRotation(env.AUTH_CODES, oidcIss, oidcSub);
-  const derived = custodyEligible
+  let derived = custodyEligible
     ? await resolveKmsAgent(env, oidcIss, oidcSub, rotation)
     : ({ ok: false, reason: 'not eligible' } as const);
+
+  // REFUSE TO DEMOTE A RETURNING CUSTODY-GRADE MEMBER (mirrors email-verify / phone-verify).
+  //
+  // Without this, a resolve failure fell straight through to the login-grade branch below, which reads
+  // the (iss,sub) facet and signs the member in to their OWN home — looking entirely normal — while every
+  // later custody operation 403s at demo-a2a's gate. The member is then told to "sign out and sign in
+  // again with the method that secures your account", which is advice that cannot work: the method they
+  // used IS that method, and signing in again reruns the same failing resolve. Their vault, their agent
+  // card, their whole home reads as broken for a reason nothing on screen names.
+  //
+  // Two failures matter and they are different. `custody_root_changed` means the derivation root moved,
+  // so this subject now derives a DIFFERENT, empty Smart Agent — a configuration fault that no amount of
+  // retrying fixes and that must never be papered over by signing them into a lesser session. Anything
+  // else is likely transient, so retry once and then refuse rather than demote.
+  if (custodyEligible && !derived.ok) {
+    const rootChanged = /custody_root_changed/i.test(derived.reason);
+    if (!rootChanged) derived = await resolveKmsAgent(env, oidcIss, oidcSub, rotation); // one retry
+    if (!derived.ok) {
+      const known = await readOidcFacet(env.AUTH_CODES, oidcIss, oidcSub);
+      if (known) {
+        console.error('[google/callback] refusing to demote a custody-grade subject', { reason: derived.reason, known });
+        return json({
+          error: rootChanged ? 'custody_root_changed' : 'custody_unavailable',
+          detail: rootChanged
+            ? 'This account\u2019s custody-derivation root changed, so it now derives a different Smart Agent. '
+              + 'Signing in again cannot fix it \u2014 the custody service must be pointed back at the original root.'
+            : 'The custody service is temporarily unavailable. Try again in a moment.',
+        }, rootChanged ? 409 : 503);
+      }
+    }
+  }
 
   let agent: CanonicalAgentId | null = null;
   let custodyGrade = false;
