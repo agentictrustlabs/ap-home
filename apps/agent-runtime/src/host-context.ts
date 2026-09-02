@@ -294,8 +294,16 @@ export function withMountedSkills(skills: A2aSkill[]): A2aSkill[] {
   return [...skills, ...MOUNTED_PEER_SKILLS.filter((s) => !have.has(s.id))];
 }
 
-/** An already-id-shaped value: lowercase, and only the characters an id may contain. */
-const ID_SHAPED = /^[a-z0-9][a-z0-9._:-]*$/;
+/**
+ * An already-id-shaped value: no whitespace, and only the characters an id may contain.
+ *
+ * WHITESPACE is the discriminator, not case. This required all-lowercase, which rejected every
+ * camelCase id the catalog actually uses — `interactions.deliverCredential` was slugged to
+ * `interactions-delivercredential`, so the card and ARD advertised a string that appears nowhere on
+ * chain, and the Studio then offered it back as a second, unmatchable capability. A human LABEL (the
+ * legacy `atl:skills` shape) is what has spaces in it; an id never does.
+ */
+const ID_SHAPED = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 /**
  * Map the agent's publicly-asserted capability values to A2A skill cards (`skills[]` is the wire's name

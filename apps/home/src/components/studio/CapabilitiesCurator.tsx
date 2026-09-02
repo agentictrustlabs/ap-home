@@ -18,6 +18,7 @@
 // actually published (or its runtime serves), and nothing else.
 import { useCallback, useEffect, useState } from 'react';
 import type { A2AAgentSkillV1, FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
+import { getCapabilityDefinition } from '@agenticprimitives/capability-claims';
 import { capabilityCandidates, type CapabilityCandidateV1 } from '../../studio-client';
 import type { DelegationWire } from '../../lib/delegation';
 import { Chip, iconButtonStyle } from './ui';
@@ -29,6 +30,30 @@ const SOURCE_TAG: Record<string, string> = {
   user: 'manual',
   import: 'imported',
 };
+
+/** A card's own wording for one capability. Commits on BLUR, not per keystroke: every commit is a
+ *  JSON-Patch round trip to the agent's vault, and one per character would be a request storm. */
+function DescriptionField({ value, readOnly, ariaLabel, onCommit }: {
+  value: string; readOnly: boolean; ariaLabel: string; onCommit(next: string): void;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  return (
+    <textarea
+      value={local}
+      aria-label={ariaLabel}
+      readOnly={readOnly}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => { if (local !== value) onCommit(local); }}
+      placeholder="What this capability does, for another agent to read. Required on a card."
+      style={{
+        width: '100%', marginTop: '.35rem', minHeight: 44, fontFamily: 'inherit', fontSize: '.78rem',
+        padding: '.35rem .5rem', borderRadius: 6,
+        border: `1px solid ${local.trim() ? 'var(--c-g200)' : 'var(--c-amber-400, #fbbf24)'}`,
+      }}
+    />
+  );
+}
 
 export function CapabilitiesCurator({
   skills,
@@ -49,6 +74,10 @@ export function CapabilitiesCurator({
   const [candidates, setCandidates] = useState<CapabilityCandidateV1[] | null>(null);
   const [unsourced, setUnsourced] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Ids this component has just added but whose patch has not come back yet. Without it the picker kept
+  // offering a candidate whose `onCard` was still false server-side, so a second click added a DUPLICATE
+  // — which the card schema then rejects (SKILL_ID_DUPLICATE) after the fact.
+  const [adding, setAdding] = useState<Set<string>>(new Set());
 
   // Read the candidates whenever the card changes, not only when the picker opens: `unsourced` is a
   // finding about what is ALREADY advertised, and a finding nobody opened a panel to see is not shown.
@@ -64,6 +93,25 @@ export function CapabilitiesCurator({
     }
   }, [delegation, cardResourceId]);
   useEffect(() => { void load(); }, [load, skills.length]);
+  useEffect(() => { setAdding((a) => (a.size ? new Set([...a].filter((id) => !skills.some((sk) => sk.id === id))) : a)); }, [skills]);
+
+  /** Add one candidate to the card, with the catalog's own words where it has them.
+   *
+   *  A skill needs a DESCRIPTION to be a valid card entry, and a candidate derived from an on-chain id
+   *  carries none — committing `description: ''` produced STRUCT_MISSING_FIELD on every such row. The
+   *  catalog defines most ids, so use its wording; anything it does not define gets an editable
+   *  description on the row, which is card WORDING and legitimately per-card (spec 347), unlike the id. */
+  const addCandidate = useCallback((c: CapabilityCandidateV1) => {
+    if (adding.has(c.id) || skills.some((sk) => sk.id === c.id)) return;
+    const def = getCapabilityDefinition(c.id);
+    setAdding((a) => new Set(a).add(c.id));
+    onCommit([...skills, {
+      id: c.id,
+      name: def?.title ?? c.name,
+      description: c.description ?? def?.description ?? '',
+      tags: c.tags.length ? c.tags : (def?.domain ? [def.domain] : []),
+    }]);
+  }, [adding, skills, onCommit]);
 
   return (
     <div>
@@ -75,7 +123,8 @@ export function CapabilitiesCurator({
         {skills.map((s, i) => {
           const tag = SOURCE_TAG[bindings[`/skills/${i}`]?.source.kind ?? ''] ?? 'manual';
           return (
-            <div key={`${s.id}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.45rem .6rem' }}>
+            <div key={`${s.id}-${i}`} style={{ border: '1px solid var(--c-g200)', borderRadius: 8, padding: '.45rem .6rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
               <span aria-hidden style={{ color: 'var(--color-sage-700)' }}>
                 ✓
               </span>
@@ -95,6 +144,17 @@ export function CapabilitiesCurator({
                   ×
                 </button>
               )}
+              </div>
+              {/* The card's own WORDING for this capability. Editable per card and required by the card
+                  schema — a row with none fails validation with STRUCT_MISSING_FIELD, which is how a row
+                  added from a bare on-chain id used to break the card. The ID is not editable here: the
+                  id is identity and must match everywhere, the prose is how THIS card explains it. */}
+              <DescriptionField
+                value={s.description ?? ''}
+                readOnly={readOnly}
+                ariaLabel={`description for ${s.name || s.id}`}
+                onCommit={(next) => onCommit(skills.map((sk, j) => (j === i ? { ...sk, description: next } : sk)))}
+              />
             </div>
           );
         })}
@@ -120,7 +180,7 @@ export function CapabilitiesCurator({
           </div>
           {loadError && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read your capabilities: {loadError}</p>}
           {candidates === null && !loadError && <p className="manage-card-blurb">Reading what this agent claims…</p>}
-          {candidates?.filter((c) => !c.onCard).map((c) => (
+          {candidates?.filter((c) => !c.onCard && !skills.some((sk) => sk.id === c.id)).map((c) => (
             <div key={c.id} data-candidate={c.id} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.35rem 0', borderTop: '1px solid var(--c-g100)' }}>
               <span style={{ fontSize: '.8rem', fontWeight: 600, flex: 1, minWidth: 0 }}>
                 {c.name}
@@ -131,9 +191,10 @@ export function CapabilitiesCurator({
                 type="button"
                 className="btn-ghost"
                 aria-label={`add ${c.id} to this card`}
-                onClick={() => onCommit([...skills, { id: c.id, name: c.name, description: c.description ?? '', tags: c.tags }])}
+                disabled={adding.has(c.id)}
+                onClick={() => addCandidate(c)}
               >
-                Add
+                {adding.has(c.id) ? 'Adding…' : 'Add'}
               </button>
             </div>
           ))}

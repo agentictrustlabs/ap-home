@@ -101,6 +101,24 @@ describe('skill cards', () => {
     ]);
   });
 
+  it('keeps a camelCase id VERBATIM — case is not what makes something a label', () => {
+    // The catalog's ids are camelCase. An all-lowercase shape test rejected them, so
+    // `interactions.deliverCredential` was published as `interactions-delivercredential`: a string that
+    // appears nowhere on chain, that no matcher can resolve back, and that the Card Studio then offered
+    // as a SECOND capability beside the real one. Whitespace is the discriminator — a label has spaces.
+    expect(skillsFromLabels('interactions.deliverCredential, adv:tax-position-analysis, registry.search')).toEqual([
+      { id: 'interactions.deliverCredential', name: 'interactions.deliverCredential', tags: ['capability'] },
+      { id: 'adv:tax-position-analysis', name: 'adv:tax-position-analysis', tags: ['capability'] },
+      { id: 'registry.search', name: 'registry.search', tags: ['capability'] },
+    ]);
+  });
+
+  it('still slugs a human label, which is the shape legacy atl:skills holds', () => {
+    expect(skillsFromLabels('Treasury Management')).toEqual([
+      { id: 'treasury-management', name: 'Treasury Management', tags: ['capability'] },
+    ]);
+  });
+
   it('is empty for absent or blank input rather than producing a blank card', () => {
     expect(skillsFromLabels(null)).toEqual([]);
     expect(skillsFromLabels(undefined)).toEqual([]);
