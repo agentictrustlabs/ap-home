@@ -202,16 +202,21 @@ describe('the Settings pane', () => {
     buildSettingsPane(scope).flatMap((g) => g.items.map((i) => i.label));
 
   it('is grouped the same way, in the same order, for every class that has the group', () => {
-    // Five groups, each answering ONE question: who it is · how it is found · whether it can be
-    // reached · how it acts · who may act through it.
+    // Six groups, each answering ONE question: who it is · what it can do · how it is found · whether
+    // it can be reached · how it acts · who may act through it.
+    //
+    // Capabilities is its OWN group, not a row under Discovery. It is the record every other surface
+    // projects from (ADR-0051) — the card advertises a curated subset, the registry ranks the ids it
+    // publishes, ARD restates them — and filing the source under one of its consumers is part of how
+    // the Card Studio grew a rival capability editor.
     for (const scope of [ORG_SCOPE, SVC_SCOPE]) {
-      expect(groups(scope)).toEqual(['Identity', 'Discovery', 'Behaviour', 'Authority']);
+      expect(groups(scope)).toEqual(['Identity', 'Capabilities', 'Discovery', 'Behaviour', 'Authority']);
     }
     // A person has no Authority group, and that is the honest outcome rather than an empty heading
     // (§5): they have no members, no lifecycle status, and their own access — credentials and the
     // delegations they hold — is Security, in the user menu, because it is about the person and not
     // about an agent in a workspace. Reachability is person-only for the mirror-image reason.
-    expect(groups(PERSON)).toEqual(['Identity', 'Discovery', 'Reachability', 'Behaviour']);
+    expect(groups(PERSON)).toEqual(['Identity', 'Capabilities', 'Discovery', 'Reachability', 'Behaviour']);
   });
 
   it('carries the shared identity items everywhere', () => {
