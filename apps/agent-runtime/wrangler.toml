@@ -382,11 +382,29 @@ MCP_URL = "https://mcp.faithnet.io"
 # otherwise have been missed — per-subject OIDC custody (C_sub), which used to derive in-process from
 # A2A_CUSTODY_ROOT_KEY no matter what this said.
 #
-# A2A_CUSTODY_ROOT_KEY and A2A_ALLOW_LOCAL_MASTER_KEY are DELIBERATELY ABSENT. Under agentic-kms the
-# derivation seed lives in the confidential VM, sealed by a Key Vault HSM root key, and never enters the
-# Worker. Keeping an unused custody master here would preserve exactly the liability this migration
-# removes: a secret that could not be rotated, backed up, or recovered.
+# Under agentic-kms the derivation seed lives in the confidential VM, sealed by a Key Vault HSM root
+# key, and never enters the Worker — which is the liability this migration removes: a custody master
+# that could not be rotated, backed up, or recovered. That remains the destination for C_sub too; see
+# the staged note on A2A_CUSTODY_KMS_BACKEND below for why it has not moved yet.
 A2A_KMS_BACKEND = "agentic-kms"
+# CUSTODY DERIVATION STAYS ON THE LEGACY ROOT (staged cutover — the reason this override exists).
+#
+# A person's KMS-custodied home IS a CREATE2 address over their derived custodian C_sub, so the
+# derivation root can never move: a different root derives a different custodian, which is a
+# different — empty — Smart Agent. AKCS is meant to hold the legacy master as its OIDC-custodian
+# seed and run the identical `ap-oidc-custodian-secp256k1-v1` scheme; it does not yet, so every
+# subject that existed before the cutover drifted. `assertSubjectSaStable` refused to route them
+# (custody_root_changed, D-P0-1) — correctly — and their Homes were locked out of accounts that
+# still exist and still hold their data.
+#
+# `A2A_CUSTODY_ROOT_KEY` is still a secret on this Worker, so pinning custody back to local-aes
+# restores every existing member immediately. This is NOT a return to Google KMS: the root is an
+# in-Worker secret. Everything else — relay signing, interactions-session, service MAC, vault KEKs —
+# stays on AKCS. Remove this line once AKCS derives the same C_sub, proven with
+# `scripts/verify-custody-derivation.mts` (MASTER + AKCS_TOKEN → MATCH) and not before: flipping it
+# on a mismatched seed locks out every member again.
+A2A_CUSTODY_KMS_BACKEND = "local-aes"
+A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
 AKCS_TENANT_ID = "faithnet"
 # The SIGNING key the relayer signs userOps with. Its address is 0xf9a98b25…f2c5 — new, and never used
