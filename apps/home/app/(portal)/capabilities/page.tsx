@@ -128,6 +128,12 @@ export default function CapabilitiesPage() {
             {...(agentName ? {} : { disabledReason: 'Publishing needs a public name — give this agent one under Identity → Naming. Your record is private and works without one.' })}
           />
         )}
+
+      {/* Say what happened. Both of these were COMPUTED and never rendered: saving looked like nothing,
+          and — worse — a failed publish was swallowed entirely, so an owner could believe their agent
+          advertises a capability it does not. */}
+      {msg && <p style={{ ...mutedText, fontSize: '.82rem', marginTop: '.7rem' }} role="status">{msg}</p>}
+      {err && <p style={{ ...errorText, fontSize: '.82rem', marginTop: '.7rem' }} role="alert">{err}</p>}
     </SectionShell>
   );
 }
