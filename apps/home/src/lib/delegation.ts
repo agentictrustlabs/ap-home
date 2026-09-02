@@ -318,6 +318,10 @@ export const MEMBER_PROFILE_WILDCARD_SCOPE = 'vault:member.profile:*' as const;
  *  person's community profile (V-1 remediation — delegation-authorized, replaces the bearer path),
  *  their private capability record (`vault:skills.data` — legacy key), and their home manifest master. */
 export const IMPACT_PROFILE_RESOURCE_SCOPE = 'vault:impact-profile' as const;
+/** The capability record's CURRENT key (ADR-0051). The Home writes here; `skills.data` below is the
+ *  same record under its old name, kept so an unmigrated one still reads. Both are in the grant, or a
+ *  save is refused at the vault-record-scope caveat with `record_scope_denied`. */
+export const CAPABILITIES_DATA_RESOURCE_SCOPE = 'vault:capabilities.data' as const;
 export const SKILLS_DATA_RESOURCE_SCOPE = 'vault:skills.data' as const;
 export const HOME_MANIFEST_RESOURCE_SCOPE = 'vault:home.manifest' as const;
 /** The person's portable control-plane timeline (spec 323 W2.3) — append via bridge, read self. */
@@ -413,7 +417,7 @@ function buildInteractionsStruct(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },

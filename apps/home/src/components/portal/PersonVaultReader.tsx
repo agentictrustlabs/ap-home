@@ -23,7 +23,8 @@ function labelFor(recordType: string): string {
     'impact-profile': 'Community profile',
     // `skills.data` — the vault-resident CAPABILITY CLAIM CREDENTIALS (facet-registries.md §7); the
     // record-type key is legacy and immutable (it addresses live vault rows), the label is canonical.
-    'skills.data': 'Your capability record',
+    'capabilities.data': 'Your capability record',
+    'skills.data': 'Your capability record',   // the same record under its pre-ADR-0051 name
     'home.manifest': 'Home manifest',
     'control-events.data': 'Activity timeline',
     'inbox.data': 'Inbox',

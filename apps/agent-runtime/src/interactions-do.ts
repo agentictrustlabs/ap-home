@@ -337,7 +337,12 @@ const MEMBERSHIP_RESOURCE = (org: string): string => `org.membership:${org.toLow
 // self (session SA === principal) over the interactions grant. This is the delegation-authorized,
 // KEK-encrypted replacement for the bearer/service-MAC `impact-profile` path (V-1 remediation) and
 // the app-local `skills`/`home-manifest` KV. NOT append logs (control-events needs its own op).
-const CAPABILITY_RECORDS = new Set(['impact-profile', 'skills.data', 'home.manifest', 'control-events.data']);
+// `capabilities.data` is the CURRENT key (ADR-0051 renamed it); `skills.data` is the same record under
+// its old name, kept so an unmigrated one still reads and writes. The rename landed on the Home's write
+// path without landing here, so every capability save was refused by this allowlist and fell back to the
+// Home's KV cache — the save LOOKED fine and nothing reached the owner's vault. A best-effort mirror
+// hides a missing allowlist entry perfectly; only reading the vault back shows it.
+const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
 const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timeline is a recent-window projection.
 
