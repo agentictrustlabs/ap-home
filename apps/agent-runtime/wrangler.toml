@@ -377,13 +377,23 @@ SA_BUDGET_LIMIT_UNITS = "50000"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "true"
 ALLOWED_ORIGINS = "http://localhost:5175,http://127.0.0.1:5175,https://faithnet.me,https://www.faithnet.me,https://*.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev"
 MCP_URL = "https://mcp.faithnet.io"
-A2A_KMS_BACKEND = "gcp-kms"
-# C_sub (per-subject OIDC custodian) derives from A2A_CUSTODY_ROOT_KEY via a local secp256k1
-# signer even under gcp-kms (the relay key is KMS; the derivation root is not). Production sets this too.
-A2A_ALLOW_LOCAL_MASTER_KEY = "true"
-GCP_KMS_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/relay/cryptoKeyVersions/1"
-GCP_KMS_ENCRYPT_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/envelope/cryptoKeyVersions/1"
-GCP_KMS_INTERACTIONS_KEY_NAME = "projects/churchcore2/locations/us-east1/keyRings/a2a/cryptoKeys/interactions-session/cryptoKeyVersions/1"
+# AKCS (Agentic Key Custody Service) — faithchain runs entirely on it; Base Sepolia stays on gcp-kms.
+# Every key role moves together: the relayer signer, envelope wrap/unwrap, and — the one that would
+# otherwise have been missed — per-subject OIDC custody (C_sub), which used to derive in-process from
+# A2A_CUSTODY_ROOT_KEY no matter what this said.
+#
+# A2A_CUSTODY_ROOT_KEY and A2A_ALLOW_LOCAL_MASTER_KEY are DELIBERATELY ABSENT. Under agentic-kms the
+# derivation seed lives in the confidential VM, sealed by a Key Vault HSM root key, and never enters the
+# Worker. Keeping an unused custody master here would preserve exactly the liability this migration
+# removes: a secret that could not be rotated, backed up, or recovered.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "faithnet"
+# The SIGNING key the relayer signs userOps with. Its address is 0xf9a98b25…f2c5 — new, and never used
+# by the paymaster: faithnet's paymaster is in ALLOWLIST mode (verifyingSigner == address(0)), so a
+# changed relayer address does not break sponsorship.
+AKCS_RELAY_KEY_ID = "01a05f87-868f-7520-ab03-783fbc36aae4"
+# AKCS_TOKEN is a SECRET (wrangler secret put), never a var — it is a bearer credential for the tenant.
 PAYMASTER = "0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7"
 PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"

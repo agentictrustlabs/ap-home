@@ -2968,7 +2968,7 @@ export class InteractionsDO {
           // Delegate MUST be the interactions-session KMS key (the §3.1 pairing) — fail-closed if unprovisioned.
           let sessionKey: string;
           try { sessionKey = (await interactionsSessionAccount(this.env)).address.toLowerCase(); } catch {
-            return json({ error: 'interactions-session KMS key unprovisioned — routing needs GCP_KMS_INTERACTIONS_KEY_NAME' }, 503);
+            return json({ error: 'interactions-session key unprovisioned — routing needs AKCS_INTERACTIONS_KEY_ID (agentic-kms) or GCP_KMS_INTERACTIONS_KEY_NAME (gcp-kms)' }, 503);
           }
           if (incoming.delegate.toLowerCase() !== sessionKey) return json({ error: 'org consult wire delegate must be the interactions-session key' }, 400);
           const tsEnf = (this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase();
@@ -3195,7 +3195,7 @@ export class InteractionsDO {
         // The delegate every wire must name. Unprovisioned ⇒ 503 rather than a wire we cannot spend.
         let sessionKey: string;
         try { sessionKey = (await interactionsSessionAccount(this.env)).address.toLowerCase(); } catch {
-          return json({ error: 'interactions-session KMS key unprovisioned — messaging needs GCP_KMS_INTERACTIONS_KEY_NAME' }, 503);
+          return json({ error: 'interactions-session key unprovisioned — messaging needs AKCS_INTERACTIONS_KEY_ID (agentic-kms) or GCP_KMS_INTERACTIONS_KEY_NAME (gcp-kms)' }, 503);
         }
         const rec = (await this.state.storage.get(MESSAGING_WIRE_KEY)) as MessagingWireRecord | undefined;
 

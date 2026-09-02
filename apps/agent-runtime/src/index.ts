@@ -421,6 +421,9 @@ export interface Env {
    *  signed by it (callMcpToolBound) instead of server-mint. When set, the DO prefers the bound path; when
    *  unset, the DO falls back to server-mint (DEMO_ALLOW_SERVER_MINT). Read directly from env (not process.env). */
   GCP_KMS_INTERACTIONS_KEY_NAME?: string;
+  /** AKCS SIGNING key for the interactions-session role. A DEDICATED key, never the relayer's — its
+   *  address is the delegate in principal-signed DEL-001 session leaves. */
+  AKCS_INTERACTIONS_KEY_ID?: string;
   /** DEV ONLY — the interactions-session signer as a local secp256k1 key (a workstation has no Cloud
    *  KMS). Used only when GCP_KMS_INTERACTIONS_KEY_NAME is unset; key-custody refuses it in production. */
   A2A_INTERACTIONS_SESSION_PRIVATE_KEY?: string;
@@ -4585,13 +4588,28 @@ let _interactionsSessionAccount: Awaited<ReturnType<typeof createKmsViemAccount>
  *  (GCP_KMS_INTERACTIONS_KEY_NAME). Cached per isolate (the key name is stable). Throws if unset. */
 export async function interactionsSessionAccount(env: Env): Promise<Awaited<ReturnType<typeof createKmsViemAccount>>> {
   if (_interactionsSessionAccount) return _interactionsSessionAccount;
+  const akcsKeyId = (env.AKCS_INTERACTIONS_KEY_ID ?? '').trim();
   const keyName = (env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim();
   const localKey = (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim();
-  if (!keyName && !localKey) {
-    throw new Error('GCP_KMS_INTERACTIONS_KEY_NAME unset — the InteractionsDO bound-mint (NEW-C1) needs the interactions-session KMS key');
+  if (!akcsKeyId && !keyName && !localKey) {
+    throw new Error(
+      'no interactions-session signer configured — set AKCS_INTERACTIONS_KEY_ID (agentic-kms), ' +
+        'GCP_KMS_INTERACTIONS_KEY_NAME (gcp-kms), or A2A_INTERACTIONS_SESSION_PRIVATE_KEY (dev). ' +
+        'The InteractionsDO bound-mint (NEW-C1) needs it.',
+    );
   }
   let backend;
-  if (keyName) {
+  if (akcsKeyId) {
+    // A DEDICATED AKCS signing key — deliberately NOT the relayer's. This key's address is the delegate
+    // inside every principal-signed DEL-001 session leaf, so reusing the relay key would make the
+    // relayer a delegate of every principal's interactions grant. Two roles, two keys.
+    backend = buildSignerBackend({
+      backend: 'agentic-kms',
+      agenticKms: agenticKmsConfig(env, { signingPurpose: 'interactions-session' as never }),
+      config: { agenticKeyId: akcsKeyId },
+      auditSink: buildAuditSink(env),
+    });
+  } else if (keyName) {
     const serviceAccountJson = (env.GCP_SERVICE_ACCOUNT_JSON ?? '').trim();
     if (!serviceAccountJson) {
       throw new Error('GCP_SERVICE_ACCOUNT_JSON unset — required to sign with the interactions-session KMS key');
@@ -4618,7 +4636,11 @@ export async function interactionsSessionAccount(env: Env): Promise<Awaited<Retu
 
 /** Is an interactions-session signer configured (KMS in production, a local dev key on a workstation)? */
 export function interactionsSessionKeyConfigured(env: Env): boolean {
-  return !!((env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim() || (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim());
+  return !!(
+    (env.AKCS_INTERACTIONS_KEY_ID ?? '').trim()
+    || (env.GCP_KMS_INTERACTIONS_KEY_NAME ?? '').trim()
+    || (env.A2A_INTERACTIONS_SESSION_PRIVATE_KEY ?? '').trim()
+  );
 }
 
 function toDelegationStruct(w: IncomingDelegation): Delegation {
