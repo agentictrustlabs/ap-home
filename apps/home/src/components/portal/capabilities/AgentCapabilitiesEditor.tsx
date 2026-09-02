@@ -8,7 +8,7 @@
 //
 // Two tiers, unchanged: the record is private in the agent's vault; publishing writes only the IDS on
 // chain (`atl:capabilities`), and the card and ARD project from there.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listCapabilityDefinitions, getCapabilityDefinition, capabilityDomains,
   type CatalogCapabilityDefinition,
@@ -17,6 +17,7 @@ import { capabilityIdFor, type CapabilityClaim } from '../../../connect-client';
 import { cardSty, btnSty, btnPrimarySty, mutedText, errorText, inputSty, pillStyle as pill } from '../theme';
 import { BusyButton } from '../../shared/BusyButton';
 import { publishBlockedReason } from '../../../lib/publish-gate';
+import { parseExamples } from '../../../lib/examples-field';
 
 export interface CapabilitiesEditorProps {
   claims: CapabilityClaim[];
@@ -29,6 +30,43 @@ export interface CapabilitiesEditorProps {
   published: string[];
   busy: 'save' | 'publish' | null;
   disabledReason?: string;
+}
+
+/**
+ * The example-queries field.
+ *
+ * It cannot be a plain controlled input over the parsed array. The displayed value was
+ * `examples.join(' | ')` while every keystroke re-parsed with `split('|').map(trim).filter(Boolean)`,
+ * so the round trip ran between one character and the next: type a space and `trim()` removed it before
+ * the following letter arrived, making it impossible to type a two-word example at all. The field looked
+ * like it was rejecting spaces; it was deleting them.
+ *
+ * So the input owns the RAW text while it is being edited, and publishes the parsed array upward. It
+ * re-syncs only when the value arrives from somewhere else (a reload, a discarded edit) — never from its
+ * own keystroke, which is the loop that ate the space.
+ */
+function ExamplesInput({ label, examples, onCommit }: { label: string; examples: string[]; onCommit(next: string[]): void }) {
+  const joined = examples.join(' | ');
+  const [text, setText] = useState(joined);
+  const mine = useRef(joined); // the last value THIS input produced
+  useEffect(() => {
+    if (joined !== mine.current) { setText(joined); mine.current = joined; }
+  }, [joined]);
+  return (
+    <input
+      value={text}
+      aria-label={`example queries for ${label}`}
+      onChange={(e) => {
+        setText(e.target.value);
+        // Trim + drop empties only for what LEAVES this field; the text on screen keeps what was typed.
+        const next = parseExamples(e.target.value);
+        mine.current = next.join(' | ');
+        onCommit(next);
+      }}
+      placeholder="example questions others might ask, separated by |  (optional, up to 5)"
+      style={{ ...inputSty, fontSize: '.8rem' }}
+    />
+  );
 }
 
 export function AgentCapabilitiesEditor({
@@ -106,11 +144,10 @@ export function AgentCapabilitiesEditor({
                 </div>
               </div>
               <p style={{ fontSize: '.78rem', ...mutedText, margin: '.3rem 0 .4rem' }}>{def?.description ?? c.description ?? ''}</p>
-              <input
-                value={(c.examples ?? []).join(' | ')} aria-label={`example queries for ${c.label}`}
-                onChange={(e) => onChange(claims.map((x) => (capabilityIdFor(x) === id ? { ...x, examples: e.target.value.split('|').map((t) => t.trim()).filter(Boolean).slice(0, 5) } : x)))}
-                placeholder="example questions others might ask, separated by |  (optional, up to 5)"
-                style={{ ...inputSty, fontSize: '.8rem' }}
+              <ExamplesInput
+                label={c.label}
+                examples={c.examples ?? []}
+                onCommit={(next) => onChange(claims.map((x) => (capabilityIdFor(x) === id ? { ...x, examples: next } : x)))}
               />
             </div>
           );
