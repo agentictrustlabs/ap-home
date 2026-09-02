@@ -55,9 +55,22 @@ const faithImpact: WhiteLabelConfig = {
       // key" but the service was still the custodian, which is the shape the rule forbids. Grants
       // minted to that address name a delegate this worker can no longer present a wire for and must
       // be re-minted. NOT the shared `delegate` above, which a dozen entries name.
-      operational_delegate: '0x9c9b7aDd48B001CC3b4672911972b2e6feDCC95F',
-      // Where the service-agent-wire ceremony talks to skills-a2a.
-      serviceAgentConfig: { a2aBase: 'https://skills-a2a-production.richardpedersen3.workers.dev' },
+      //
+      // A DIFFERENT SA PER IDENTITY UNIVERSE, same as field-app below: the faithnet deploy sets
+      // NEXT_PUBLIC_SKILLS_SERVICE_SA to `skills-agent.svc`, minted on 34348
+      // (0x6723CBCE5c1913A54F8a8a10A105130206dcaAe0); the default stays base-sepolia's. Without the
+      // override, a faithnet org's grant names an identity that has no code on faithchain and
+      // skills-a2a can present no wire for it — a refusal at the far side with no local symptom.
+      operational_delegate:
+        process.env.NEXT_PUBLIC_SKILLS_SERVICE_SA || '0x9c9b7aDd48B001CC3b4672911972b2e6feDCC95F',
+      // Where the service-agent-wire ceremony talks to skills-a2a. One worker name, both universes:
+      // the skills stack CUT OVER to faithnet in place rather than running a parallel deployment,
+      // so `skills-a2a-production` IS the faithnet worker. Overridable all the same.
+      serviceAgentConfig: {
+        a2aBase:
+          process.env.NEXT_PUBLIC_SKILLS_A2A_BASE ||
+          'https://skills-a2a-production.richardpedersen3.workers.dev',
+      },
     },
     // commons-app — the reference third-party app from the PUBLIC starter repo
     // (agentic-primitives-starter, apps/commons). It is the one entry here that exists to be COPIED:
