@@ -18,6 +18,7 @@
     "@agenticprimitives/agent-profile": "workspace:*",
     "@agenticprimitives/agent-resolution": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
+    "@agenticprimitives/capability-claims": "workspace:*",
     "@agenticprimitives/chain-state": "workspace:*",
     "@agenticprimitives/chain-state-viem": "workspace:*",
     "@agenticprimitives/connect": "workspace:*",

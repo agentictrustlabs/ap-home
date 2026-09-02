@@ -10,6 +10,7 @@
 // public `https://<handle>.impact-agent.io`). For direct workers.dev / local
 // access we parse the Host header ourselves.
 
+import { isCapabilityId } from '@agenticprimitives/capability-claims';
 import { apAuthorityExtension } from '@agenticprimitives/a2a';
 import { AgentNamingClient, allAgentTlds, isAgentTld, parseAgentName, InvalidNameError } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
@@ -294,16 +295,9 @@ export function withMountedSkills(skills: A2aSkill[]): A2aSkill[] {
   return [...skills, ...MOUNTED_PEER_SKILLS.filter((s) => !have.has(s.id))];
 }
 
-/**
- * An already-id-shaped value: no whitespace, and only the characters an id may contain.
- *
- * WHITESPACE is the discriminator, not case. This required all-lowercase, which rejected every
- * camelCase id the catalog actually uses — `interactions.deliverCredential` was slugged to
- * `interactions-delivercredential`, so the card and ARD advertised a string that appears nowhere on
- * chain, and the Studio then offered it back as a second, unmatchable capability. A human LABEL (the
- * legacy `atl:skills` shape) is what has spaces in it; an id never does.
- */
-const ID_SHAPED = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+// Whether a stored value is already an ID or a human LABEL. `capability-claims` owns the rule — it
+// owns the catalog, so it owns the vocabulary — and three apps each having their own copy is how two
+// of them ended up demanding a CURIE colon the dotted ids do not have.
 
 /**
  * Map the agent's publicly-asserted capability values to A2A skill cards (`skills[]` is the wire's name
@@ -321,7 +315,7 @@ const ID_SHAPED = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 export function skillsFromLabels(csv: string | null | undefined): A2aSkill[] {
   if (!csv) return [];
   return csv.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 64).map((value) => ({
-    id: ID_SHAPED.test(value) ? value : value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+    id: isCapabilityId(value) ? value : value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
     name: value,
     tags: ['capability'],
   }));
