@@ -35,6 +35,12 @@ export const STUDIO_VAULT_SCOPE: SelfVaultGrantConfig = {
 };
 
 /** Read the stored grant for the signed-in person; `null` when there is none or it has expired. */
+/** The grant if one is ALREADY stored, else null — never mints, so a screen may check for card access
+ *  without costing a device prompt just to render a control. */
+export async function storedStudioSelfGrant(token: string): Promise<DelegationWire | null> {
+  return loadStoredGrant(token);
+}
+
 async function loadStoredGrant(token: string): Promise<DelegationWire | null> {
   const r = await fetch('/connect/self-grant?purpose=agent-card-studio', {
     headers: { authorization: `Bearer ${token}` },

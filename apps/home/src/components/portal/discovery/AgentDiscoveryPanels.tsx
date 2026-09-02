@@ -156,7 +156,6 @@ export function AgentCapabilitiesPanel({ agent, name }: { agent: Address; name: 
           onChange={setClaims}
           published={published}
           busy={busy}
-          onSaveRecord={async () => { setMsg('Selections are kept until you publish; this agent has no separate private record yet.'); }}
           onPublish={publish}
           {...(name ? {} : { disabledReason: 'This agent needs a name before its capabilities can be published.' })}
         />

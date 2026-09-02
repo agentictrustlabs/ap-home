@@ -22,14 +22,19 @@ import { parseExamples } from '../../../lib/examples-field';
 export interface CapabilitiesEditorProps {
   claims: CapabilityClaim[];
   onChange(next: CapabilityClaim[]): void;
-  /** Save the private record. */
-  onSaveRecord(): Promise<void>;
   /** Publish the chosen ids on chain. */
   onPublish(): Promise<void>;
   /** Ids currently published on chain, so the editor can show what is already live. */
   published: string[];
   busy: 'save' | 'publish' | null;
   disabledReason?: string;
+  /** Whether the marked set differs from what is on chain. Supplied so the owner of the record decides
+   *  what "changed" means; absent, the editor computes it from `published`. */
+  changed?: boolean;
+  /** Offer to add the newly published ids to a card's DRAFT in the same gesture. Only shown when there
+   *  is exactly one card and this person may edit it — guessing which card someone meant would be a
+   *  silent decision about what an agent advertises. */
+  cardOption?: { label: string; checked: boolean; onChange(next: boolean): void };
 }
 
 /**
@@ -70,7 +75,7 @@ function ExamplesInput({ label, examples, onCommit }: { label: string; examples:
 }
 
 export function AgentCapabilitiesEditor({
-  claims, onChange, onSaveRecord, onPublish, published, busy, disabledReason,
+  claims, onChange, onPublish, published, busy, disabledReason, changed: changedProp, cardOption,
 }: CapabilitiesEditorProps) {
   const [picker, setPicker] = useState(false);
   const [query, setQuery] = useState('');
@@ -80,7 +85,7 @@ export function AgentCapabilitiesEditor({
   const onAgent = useMemo(() => claims.map((c) => ({ claim: c, id: capabilityIdFor(c) })), [claims]);
   const held = useMemo(() => new Set(onAgent.map((r) => r.id)), [onAgent]);
   const publishedIds = useMemo(() => onAgent.filter((r) => r.claim.asserted).map((r) => r.id).sort(), [onAgent]);
-  const changed = publishedIds.join('||') !== published.slice().sort().join('||');
+  const changed = changedProp ?? (publishedIds.join('||') !== published.slice().sort().join('||'));
 
   // WHY Publish is disabled, phrased as what to do about it (pure + tested in lib/publish-gate).
   const blockedReason = publishBlockedReason({
@@ -158,12 +163,26 @@ export function AgentCapabilitiesEditor({
         <button style={btnSty} onClick={() => { setPicker((v) => !v); setErr(null); }}>
           {picker ? 'Close' : '+ Add a capability'}
         </button>
-        <BusyButton busy={busy === 'save'} busyLabel="Saving…" style={btnSty} onClick={() => void onSaveRecord()}>Save to your record</BusyButton>
         <BusyButton busy={busy === 'publish'} busyLabel="Publishing…" style={btnPrimarySty} onClick={() => void onPublish()}
           disabled={!!blockedReason} title={blockedReason ?? ''}>
-          Publish for discovery
+          {cardOption && cardOption.checked ? 'Publish & update card draft' : 'Publish for discovery'}
         </BusyButton>
       </div>
+
+      {/* One gesture, two effects, both named BEFORE the signature — not a side effect discovered later
+          on another screen. The draft is private until released, so this changes nothing public. */}
+      {cardOption && !blockedReason && (
+        <div style={{ marginTop: '.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '.45rem', fontSize: '.82rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={cardOption.checked} onChange={(e) => cardOption.onChange(e.target.checked)}
+              aria-describedby="also-card-note" style={{ marginTop: '.15rem' }} />
+            <span>Also add them to <strong>{cardOption.label}</strong>&rsquo;s draft</span>
+          </label>
+          <p id="also-card-note" style={{ ...mutedText, fontSize: '.76rem', margin: '.2rem 0 0 1.55rem' }}>
+            The draft is private. Nothing on the public card changes until you release and sign it in Card Studio.
+          </p>
+        </div>
+      )}
       {blockedReason && <p style={{ fontSize: '.78rem', ...mutedText, marginTop: '.5rem' }}>{blockedReason}</p>}
 
       {picker && (
