@@ -124,7 +124,9 @@ export default function CapabilitiesPage() {
         const local = claims.find((c) => capabilityIdFor(c) === id);
         const def = getCapabilityDefinition(id);
         const description = (local?.description ?? def?.description ?? '').trim();
-        return description ? { name: def?.title ?? local?.label ?? id, description } : null;
+        return description
+          ? { name: def?.title ?? local?.label ?? id, description, ...(local?.examples?.length ? { examples: local.examples } : {}) }
+          : null;
       });
       setCardMsg(added.ok
         ? added.added.length
@@ -152,6 +154,8 @@ export default function CapabilitiesPage() {
         lets anyone match on it. Your record stays <strong>private</strong> in your agent&rsquo;s vault; mark an entry
         <strong> Published</strong> and only its <em>id</em> goes public, <strong>on chain</strong>. Your agent card is a
         separate, signed document — publishing can add ids to its draft, but nothing on the card changes until you release it.
+        Descriptions and example questions are never written on chain: they save to your record, and travel to a card when you add
+        the capability to its draft.
       </div>
 
       {agentAddress && endorsers !== null && endorsers > 0 && (
@@ -168,7 +172,20 @@ export default function CapabilitiesPage() {
         : loading ? <p style={mutedText}>Loading your capability record…</p>
         : (
           <>
-            <div role="status" aria-live="polite" style={{ ...mutedText, fontSize: '.78rem', marginBottom: '.4rem', minHeight: '1.1em', ...(saveState === 'error' ? errorText : {}) }}>
+            {/* STICKY. Autosave feedback has to be visible where the editing happens: this sat above the
+                list, so anyone editing a row further down watched their change disappear into nothing and
+                went looking for a Save button. An acknowledgement nobody can see is not an
+                acknowledgement. */}
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                ...mutedText, fontSize: '.78rem', minHeight: '1.1em', marginBottom: '.4rem',
+                position: 'sticky', top: 0, zIndex: 2, padding: '.25rem 0',
+                background: 'var(--color-surface, #fff)',
+                ...(saveState === 'error' ? errorText : {}),
+              }}
+            >
               {savedLabel}
             </div>
             <AgentCapabilitiesEditor

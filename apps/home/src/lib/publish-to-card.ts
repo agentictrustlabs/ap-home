@@ -51,7 +51,7 @@ export async function addPublishedToCardDraft(
   delegation: DelegationWire,
   target: CardTarget,
   ids: readonly string[],
-  describe: (id: string) => { name: string; description: string } | null,
+  describe: (id: string) => { name: string; description: string; examples?: string[] } | null,
 ): Promise<CardAddOutcome> {
   try {
     const detail = await getCard(delegation, target.cardResourceId);
@@ -61,12 +61,18 @@ export async function addPublishedToCardDraft(
     const additions = ids
       .filter((id) => !on.has(id))
       .map((id) => ({ id, d: describe(id) }))
-      .filter((x): x is { id: string; d: { name: string; description: string } } => !!x.d && !!x.d.description.trim());
+      .filter((x): x is { id: string; d: { name: string; description: string; examples?: string[] } } => !!x.d && !!x.d.description.trim());
     if (additions.length === 0) return { ok: true, added: [], displayName: target.displayName };
     await patchDraft(
       delegation,
       target.cardResourceId,
-      [{ op: 'replace', path: '/skills', value: [...(draft.card.skills ?? []), ...additions.map((a) => ({ id: a.id, name: a.d.name, description: a.d.description, tags: [] as string[] }))] }],
+      // `examples` travels: they are the agent's own example questions, and ARD's `representativeQueries`
+      // are read straight off `card.skills[].examples`. Dropping them here meant a question typed on the
+      // Capabilities page reached the vault and then stopped, with nothing saying so.
+      [{ op: 'replace', path: '/skills', value: [...(draft.card.skills ?? []), ...additions.map((a) => ({
+        id: a.id, name: a.d.name, description: a.d.description, tags: [] as string[],
+        ...(a.d.examples?.length ? { examples: a.d.examples } : {}),
+      }))] }],
       { ...newMutation(), expectedRevision: draft.revision },
       draft.etag,
     );
