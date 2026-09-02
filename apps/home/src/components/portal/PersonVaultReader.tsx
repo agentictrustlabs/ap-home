@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from '../../context/session';
+import { BusyButton } from '../shared/BusyButton';
+import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import {
   listPersonRecords,
   readPersonRecord,
@@ -37,13 +39,32 @@ function labelFor(recordType: string): string {
 }
 
 export function PersonVaultReader() {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, profile } = useSession();
   const [records, setRecords] = useState<PersonVaultRecordRef[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [gate, setGate] = useState<'vault-key' | 'interactions' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [enabling, setEnabling] = useState(false);
+  const [enableErr, setEnableErr] = useState<string | null>(null);
+
+  /** Re-issue the interactions grant + DEL-001 session leaf, then re-read. `force` because a STALE grant
+   *  still reports as granted; without it the activation short-circuits and the member stays stuck. */
+  const enableInteractions = useCallback(async () => {
+    if (!agentAddress || !session?.token) return;
+    setEnabling(true); setEnableErr(null);
+    try {
+      const via = resolveVia(profile?.credential as string | undefined, session.via);
+      const res = await activateInteractionsIfNeeded(agentAddress, via, { token: session.token }, true);
+      if (!res.ok) { setEnableErr(res.error); return; }
+      window.location.reload();
+    } catch (e) {
+      setEnableErr(String((e as Error)?.message ?? e));
+    } finally {
+      setEnabling(false);
+    }
+  }, [agentAddress, session?.token, session?.via, profile?.credential]);
 
   useEffect(() => {
     if (!agentAddress) return;
@@ -99,10 +120,25 @@ export function PersonVaultReader() {
           Your vault key isn&rsquo;t active yet. <Link href="/vault-key">Activate your vault key</Link> to read your records.
         </p>
       ) : gate === 'interactions' ? (
-        <p className="manage-card-blurb">
-          Your interactions plane isn&rsquo;t enabled yet — that&rsquo;s what holds your vault records. Enabling it (via
-          sign-in / your home setup) is the one path to a readable vault.
-        </p>
+        // "Enable it via sign-in" is not a path a person already signed in can take. A grant also goes
+        // stale when the interactions-session key rotates — the stored DEL-001 leaf still names the old
+        // signer — and that leaves a returning member reading an instruction they cannot act on. So the
+        // action lives here, and it re-issues rather than telling someone to leave and come back.
+        <div>
+          <p className="manage-card-blurb">
+            Your interactions plane isn&rsquo;t enabled — that&rsquo;s what holds your vault records. Enabling it
+            signs one grant from your agent; nothing else changes.
+          </p>
+          <BusyButton
+            busy={enabling}
+            busyLabel="Enabling…"
+            className="btn-primary"
+            onClick={() => void enableInteractions()}
+          >
+            Enable interactions
+          </BusyButton>
+          {enableErr && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>{enableErr}</p>}
+        </div>
       ) : err ? (
         <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read: {err}</p>
       ) : !records || records.length === 0 ? (

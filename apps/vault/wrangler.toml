@@ -148,7 +148,14 @@ DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 DEMO_NATIVE_MCP_ENABLED = "true"
 SA_BUDGET_LIMIT_UNITS = "50000"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-A2A_KMS_BACKEND = "gcp-kms"
+# AKCS — both halves of the A2A→MCP hop must agree on the MAC mechanism. demo-a2a generates service
+# MACs from the tenant MAC root; a demo-mcp still on gcp-kms verified with a local A2A_MAC_SECRET and
+# rejected every call ("service-mac rejected"). MAC keys are derived from the tenant root, so there is
+# no key id here — only the tenant.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "faithnet"
+# AKCS_TOKEN is a SECRET (wrangler secret put).
 
 [[env.faithnet.d1_databases]]
 binding = "DB"

@@ -393,6 +393,10 @@ AKCS_TENANT_ID = "faithnet"
 # by the paymaster: faithnet's paymaster is in ALLOWLIST mode (verifyingSigner == address(0)), so a
 # changed relayer address does not break sponsorship.
 AKCS_RELAY_KEY_ID = "01a05f87-868f-7520-ab03-783fbc36aae4"
+# The interactions-session signer — a DEDICATED key, never the relayer's. Its address
+# (0xa6ed7ed0…c495) is the delegate inside every principal-signed DEL-001 session leaf, so sharing the
+# relay key would make the relayer a delegate of every principal's interactions grant.
+AKCS_INTERACTIONS_KEY_ID = "01a05fed-cc40-7e12-8558-0e8a0fa001df"
 # AKCS_TOKEN is a SECRET (wrangler secret put), never a var — it is a bearer credential for the tenant.
 PAYMASTER = "0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7"
 PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"

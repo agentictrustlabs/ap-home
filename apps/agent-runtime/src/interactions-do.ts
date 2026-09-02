@@ -1218,6 +1218,26 @@ export class InteractionsDO {
     } catch { return false; }
   }
 
+  /**
+   * Does the stored session leaf still delegate to the key this DO actually signs with?
+   *
+   * `true` when there is no leaf at all — absence is a different state (the principal predates the leaf
+   * and uses the older path), and reporting it as stale would make every such principal re-sign for no
+   * gain. Unreadable signer config also returns `true`: an unprovisioned key is already reported by its
+   * own fail-closed path, and turning that into "stale" would ask a principal to re-issue a leaf that
+   * cannot be minted yet.
+   */
+  private async sessionLeafMatchesSigner(st: StoredState): Promise<boolean> {
+    const leaf = st.sessionLeaf;
+    if (!leaf?.delegate) return true;
+    try {
+      const acct = await interactionsSessionAccount(this.env);
+      return acct.address.toLowerCase() === String(leaf.delegate).toLowerCase();
+    } catch {
+      return true;
+    }
+  }
+
   /** Bridge-HMAC gate for the Home-server channel (SEC-010 envelope; audience pins the op). */
   private async bridgeGate(request: Request, rawBody: string, op: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
@@ -1509,7 +1529,16 @@ export class InteractionsDO {
     if (op === 'status') {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       return json({
-        ok: true, granted: !!st.grant, current: !!st.grant && this.grantIsCurrent(st.grant), deliveryGranted: !!st.deliveryGrant,
+        ok: true, granted: !!st.grant,
+        // `current` must mean "this principal can actually transact", not merely "a grant exists with
+        // the right scopes". The stored DEL-001 session leaf names the DO's interactions-session key as
+        // its delegate BY ADDRESS, so rotating that key strands every principal: the leaf still points at
+        // the old address, the DO signs with the new one, and every vault call fails DEL-001 while status
+        // cheerfully reported `current: true` — so the Home's activateInteractionsIfNeeded skipped and
+        // nothing ever re-issued. Seen live on the 2026-09-02 AKCS cutover. Including the leaf's delegate
+        // here makes a key rotation self-heal on the principal's next sign-in.
+        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st),
+        deliveryGranted: !!st.deliveryGrant,
         // The migration, visible from outside. A ladder whose rungs can only be read by grepping the
         // source is one nobody checks before promoting — and promotion is exactly the decision that
         // needs the evidence in front of it. `divergences` carries outcomes, INCLUDING `equal`: a report

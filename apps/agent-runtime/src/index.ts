@@ -4605,7 +4605,10 @@ export async function interactionsSessionAccount(env: Env): Promise<Awaited<Retu
     // relayer a delegate of every principal's interactions grant. Two roles, two keys.
     backend = buildSignerBackend({
       backend: 'agentic-kms',
-      agenticKms: agenticKmsConfig(env, { signingPurpose: 'interactions-session' as never }),
+      // The signing purpose is the PAYLOAD TYPE, not the key's business purpose — AKCS rejects anything
+      // outside its enum, which is how `'interactions-session'` (a key attribute) surfaced as an
+      // INVALID_REQUEST here. This account signs 32-byte digests, same as the relayer.
+      agenticKms: agenticKmsConfig(env, { signingPurpose: 'RAW_32_BYTE_DIGEST' }),
       config: { agenticKeyId: akcsKeyId },
       auditSink: buildAuditSink(env),
     });
