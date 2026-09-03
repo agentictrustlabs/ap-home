@@ -100,7 +100,8 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { runUnderMandate, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
+import { QUERY_PUBLIC_GRAPH_TOOL, runPublicSparql } from './public-graph.js';
+import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -1180,6 +1181,59 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 // the payment redeems the mandate on chain from the service SA. The receipts come back with the result
 // and go to the audit sink. Suspend/resume (durable approvals) is W3; here an undischargeable obligation
 // is a refusal, because there is nobody to wait for.
+/**
+ * POST /harness/ask { session, addressee, message, presented?, supplied?, runRef? } — THE ASK SURFACE.
+ *
+ * The same harness as `/harness/run`, entered the way a person enters it: you type a sentence at the agent
+ * whose realm you are standing in. What comes back is one of four things, never a refusal-by-default:
+ *
+ *   answer              — the ask needed nothing but reading
+ *   authority_required  — the plan reached a step whose authority nobody has granted: here is EXACTLY what
+ *                         would have to be signed (capability, whose authority, for THIS ask, for an hour).
+ *                         Nothing was verified and nothing ran — this is 401, never 403.
+ *   prompt              — the tool needs something only the person (or their surface) holds: a name, the
+ *                         connected credential, a signature over what it derived (spec 350 §3.5)
+ *   done                — it happened; the receipts say under what authority
+ *
+ * The ADDRESSEE is who you are asking. The AUTHORITY is whose mandate the step needs — the parent whose
+ * namespace the action enters, which for a team is its workspace and for an organization is the person.
+ * They are usually the same agent (you ask the realm you stand in) and they are never assumed to be.
+ */
+app.post('/harness/ask', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
+    supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
+  } | null;
+  if (!body?.session || !body.message?.trim() || !body.addressee) return c.json({ ok: false, error: 'session, addressee and message required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
+  const addressee = body.addressee.toLowerCase() as Address;
+  // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
+  // so authority granted for this ask covers this ask — retyping the same words in another realm is
+  // another intent, and the mandate does not travel.
+  const intent = { goal: body.message.trim(), context: { addressee, asker: who.sa } };
+  const audit = buildAuditSink(c.env);
+  try {
+    const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, harnessDeps(c.env, audit), {
+      intent, presented: body.presented ?? null, person: who.sa as Address,
+      ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
+      // The informational half of an Ask: the PUBLIC graph, read-only (ADR-0040 — public, on-chain-derivable
+      // facts only). A question is answered from evidence or not at all; the private vault stays behind its
+      // own delegation and is not reachable from this surface.
+      mcpInvoke: async (toolId, args) => {
+        if (toolId !== QUERY_PUBLIC_GRAPH_TOOL.id) throw new Error(`${toolId} is not available on the Ask surface`);
+        const r = await runPublicSparql(c.env as never, String((args as { query?: string }).query ?? ''));
+        if (!r.ok) throw new Error(r.error);
+        return r;
+      },
+    });
+    return c.json({ ok: true, addressee, reply: askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee }) });
+  } catch (e) {
+    return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 app.post('/harness/run', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; supplied?: HarnessRunInput['supplied']; runRef?: string;
@@ -1189,32 +1243,8 @@ app.post('/harness/run', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
 
-  const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
   const audit = buildAuditSink(c.env);
-  const deps: HarnessDeps = {
-    readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
-    audit,
-    teamGenesis: teamGenesisDeps(c.env, audit),
-    executeAsServiceSa: async (sender, callData) => {
-      // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
-      // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.
-      let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
-      if (c.env.PAYMASTER_VERIFYING_SIGNER) {
-        const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', audit);
-        verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
-      }
-      const { callGasLimit } = await sizeCallGas(c.env, sender, callData);
-      const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({ sender, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster, ...(callGasLimit ? { callGasLimit } : {}) });
-      const signer = await interactionsSessionAccount(c.env);
-      const signature = (await signer.signMessage({ message: { raw: userOpHash } })) as Hex;
-      const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', audit);
-      const { receipt } = await accountClient(c.env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
-      const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender });
-      // An inner revert is a FAILED step, thrown so the loop records it — never a silent success with a tx hash.
-      if (!inner.ok) throw new Error(`redemption reverted on chain: ${inner.revertReason ?? 'inner userOp reverted'} (tx ${receipt.transactionHash})`);
-      return { txHash: receipt.transactionHash as Hex };
-    },
-  };
+  const deps = harnessDeps(c.env, audit);
   try {
     const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
       intent: body.intent, presented: body.presented, person: who.sa as Address,
@@ -1742,9 +1772,10 @@ function accountClient(env: Env): AgentAccountClient {
 }
 
 /**
- * Spec 350 W2 scenario 2 — the substrate a team's genesis needs, behind `TeamGenesisDeps`. Exactly the
- * pieces the Home ceremony and `/custody/oidc/bootstrap-agent` use (declare the `.team` type, register the
- * label under the typed root, set the primary name, approve the stewardship grant child → workspace, one
+ * Spec 350 W2 — the substrate a CHILD AGENT's genesis needs (a team, an organization), behind
+ * `TeamGenesisDeps`. Exactly the pieces the Home ceremony and `/custody/oidc/bootstrap-agent` use (declare
+ * the typed agent type, register the label under its typed root, set the primary name, approve the
+ * stewardship grant child → parent, one
  * sponsored deploy userOp) — the protocol around them (ask → derive → check → submit) lives in
  * `harness-run.ts` and knows nothing of this Worker.
  */
@@ -1771,16 +1802,16 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
       return client.resolveName(name);
     },
-    async build({ credential, salt, label, workspace, stewardship }) {
+    async build({ credential, salt, label, tld, parent, stewardship }) {
       if (!env.PAYMASTER) throw new Error('paymaster not configured');
       if (!env.APPROVED_HASH_REGISTRY || !env.AGENT_NAME_REGISTRY) throw new Error('grants / naming not configured');
-      const root = subregistryForTld(env, 'team');
+      const root = subregistryForTld(env, tld);
       if (!root.ok) throw new Error(root.error);
-      if (!root.typed) throw new Error('".team" is not a typed root on this deployment');
+      if (!root.typed) throw new Error(`".${tld}" is not a typed root on this deployment`);
       const spec = specFor(credential, salt);
       const child = await accountClient(env).getAddressForAgentAccount(spec);
       const name = `${label}.${root.tld}`;
-      const grant = buildOrgGrant(env, child, workspace, undefined, stewardship);
+      const grant = buildOrgGrant(env, child, parent, undefined, stewardship);
       const calls: Array<{ to: Address; value: bigint; data: Hex }> = [
         ...(await declareTypeCallsFor(env, child, root.tld)),
         buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
@@ -1809,6 +1840,37 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       const { receipt } = await accountClient(env).submitDeployUserOp(signed as never, relayerAccount);
       const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: userOp.sender });
       if (!inner.ok) throw new Error(`the team's genesis reverted on chain: ${inner.revertReason ?? (inner.matched === false ? 'no UserOperationEvent for the team' : 'no revert reason — almost always out of gas')} (tx ${receipt.transactionHash})`);
+      return { txHash: receipt.transactionHash as Hex };
+    },
+  };
+}
+
+/** The harness's substrate on this Worker: chain reads, the service SA's signing + submission, the audit
+ *  sink, and the child-agent genesis. Shared by `/harness/ask` and `/harness/run` — one wiring, so the
+ *  conversational entry point and the programmatic one cannot drift apart. */
+function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
+  const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  return {
+    readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
+    audit,
+    teamGenesis: teamGenesisDeps(env, audit),
+    executeAsServiceSa: async (sender, callData) => {
+      // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
+      // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.
+      let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+      if (env.PAYMASTER_VERIFYING_SIGNER) {
+        const kmsAccount = await getRelayerAccount(env, 'direct-deploy', audit);
+        verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+      }
+      const { callGasLimit } = await sizeCallGas(env, sender, callData);
+      const { userOp, userOpHash } = await accountClient(env).buildCallUserOp({ sender, callData, paymaster: env.PAYMASTER as Address, verifyingPaymaster, ...(callGasLimit ? { callGasLimit } : {}) });
+      const signer = await interactionsSessionAccount(env);
+      const signature = (await signer.signMessage({ message: { raw: userOpHash } })) as Hex;
+      const relayerAccount = await getRelayerAccount(env, 'direct-deploy', audit);
+      const { receipt } = await accountClient(env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
+      const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender });
+      // An inner revert is a FAILED step, thrown so the loop records it — never a silent success with a tx hash.
+      if (!inner.ok) throw new Error(`redemption reverted on chain: ${inner.revertReason ?? 'inner userOp reverted'} (tx ${receipt.transactionHash})`);
       return { txHash: receipt.transactionHash as Hex };
     },
   };

@@ -1,0 +1,257 @@
+'use client';
+// THE ASK FLYOUT — one sliding panel any page can open, addressed to the realm you are standing in.
+//
+// Spec 350 §3.5. This is the Ask doing what the buttons do: you type "create a team called outreach"
+// instead of walking a form, and the agent asks back for whatever it turns out to need. The panel's whole
+// job is to render four replies honestly and to answer the ONE question it can answer itself — which
+// credential is connected (`credential` fields are filled here, never put to the person).
+//
+// Two signatures, and they are different things, so the panel never blurs them:
+//   • the MANDATE — "you may create teams under this workspace, for this request, for the next hour".
+//     Granting authority. Shown in words before it is signed.
+//   • the GENESIS — "this is the team, and I custody it". Bringing an agent into being. What you create,
+//     you custody: it is signed with YOUR credential, never the agent's.
+//
+// The addressee comes from the workspace switcher's active scope, not from a second picker — one source
+// of truth for "where am I", exactly as the sidebar uses.
+import { useEffect, useRef, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
+import { useSession } from '../../../context/session';
+import { resolveVia, signHashFor } from '../../../home/onboarding';
+import { ask, mintMandate, describeRequirement, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
+import { BusyButton } from '../../shared/BusyButton';
+import { XIcon } from '../../shared/Icons';
+import { connectedCredential } from './credential';
+
+type Entry =
+  | { role: 'you'; text: string }
+  | { role: 'agent'; text: string }
+  | { role: 'agent'; reply: AskReply };
+
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: Address; addresseeLabel: string; onClose: () => void }) {
+  const { session, profile, agentAddress } = useSession();
+  const [thread, setThread] = useState<Entry[]>([]);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ reply: AskReply; state: AskTurnState } | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, pending]);
+
+  const via = resolveVia(profile?.credential, session?.via);
+  const signAs = async (sa: Address) => signHashFor(via, sa, { token: session!.token });
+
+  /** One turn: send what we have, render what came back, and answer anything WE can answer (the
+   *  connected credential) without troubling the person. */
+  const turn = async (state: AskTurnState, label: string) => {
+    if (!session) return;
+    setErr(null);
+    setBusy(label);
+    try {
+      const reply = await ask(session, state);
+      // A `credential` field is ours to fill: the person is signed in, and what they create they custody.
+      if (reply.kind === 'prompt' && reply.prompt.kind === 'data') {
+        const fields = reply.prompt.fields;
+        const credField = fields.find((f) => f.type === 'credential');
+        const others = fields.filter((f) => f.type !== 'credential');
+        if (credField) {
+          const credential = await connectedCredential(via, agentAddress as Address, session.token);
+          const next: AskTurnState = { ...state, runRef: reply.runRef, supplied: [...state.supplied, { stepRef: reply.resumeToken, data: { [credField.name]: credential } }] };
+          if (others.length === 0) return turn(next, 'Working…');   // nothing left to ask a human
+          setPending({ reply: { ...reply, prompt: { ...reply.prompt, fields: others } }, state: next });
+          setBusy(null);
+          return;
+        }
+      }
+      setThread((t) => [...t, { role: 'agent', reply }]);
+      setPending(reply.kind === 'prompt' || reply.kind === 'authority_required' ? { reply, state: { ...state, runRef: reply.runRef } } : null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const send = async () => {
+    const message = q.trim();
+    if (!message || !session) return;
+    setQ('');
+    setAnswers({});
+    setThread((t) => [...t, { role: 'you', text: message }]);
+    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [] }, 'Thinking…');
+  };
+
+  /** Grant the authority the agent said it needs — signed by the credential that custodies the DELEGATOR
+   *  (the parent), which for a steward is their own. Then run the same ask again, with it. */
+  const grant = async (reply: Extract<AskReply, { kind: 'authority_required' }>, state: AskTurnState) => {
+    setBusy('Granting authority…');
+    setErr(null);
+    try {
+      const wire = await mintMandate(reply, await signAs(reply.delegator));
+      setThread((t) => [...t, { role: 'agent', text: `Authority granted: ${CAPABILITY_WORDS[reply.capability] ?? reply.capability}, for this request.` }]);
+      setPending(null);
+      await turn({ ...state, presented: wire }, 'Working…');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setBusy(null);
+    }
+  };
+
+  /** Answer a prompt. Data goes back as typed; a signature is signed with the connected credential over
+   *  the digest the agent derived — and the agent re-derives and checks it before it acts on it. */
+  const answer = async (reply: Extract<AskReply, { kind: 'prompt' }>, state: AskTurnState) => {
+    const p = reply.prompt;
+    setBusy(p.kind === 'signature' ? 'Signing…' : 'Working…');
+    setErr(null);
+    try {
+      let supplied: SuppliedInput;
+      if (p.kind === 'data') {
+        supplied = { stepRef: reply.resumeToken, data: Object.fromEntries(p.fields.map((f) => [f.name, answers[f.name] ?? ''])) };
+      } else if (p.kind === 'signature') {
+        const signature = await (await signAs(agentAddress as Address))(p.digest);
+        supplied = { stepRef: reply.resumeToken, signature: { digest: p.digest, signer: p.signer, signature, payload: p.payload } };
+      } else {
+        supplied = { stepRef: reply.resumeToken, confirmed: true };
+      }
+      setPending(null);
+      setAnswers({});
+      await turn({ ...state, supplied: [...state.supplied, supplied] }, 'Working…');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="ask-flyout" data-testid="ask-flyout" role="dialog" aria-label={`Asking ${addresseeLabel}`}>
+      <div className="ask-flyout-h">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Asking {addresseeLabel}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>Follows the workspace you are in — switch it in the topbar.</div>
+        </div>
+        <button type="button" className="btn ghost" data-testid="ask-close" aria-label="Close Ask" onClick={onClose}><XIcon size={16} /></button>
+      </div>
+
+      <div className="ask-flyout-body">
+        {thread.length === 0 && !pending && (
+          <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
+            Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.
+            Anything that changes the world will ask you to grant the authority for it first, and you will
+            see exactly what you are granting.
+          </p>
+        )}
+        {thread.map((e, i) => (
+          <div key={i} className={e.role === 'you' ? 'ask-msg you' : 'ask-msg agent'}>
+            {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} />}
+          </div>
+        ))}
+        {pending?.reply.kind === 'authority_required' && (
+          <AuthorityCard reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)} />
+        )}
+        {pending?.reply.kind === 'prompt' && (
+          <PromptCard
+            prompt={pending.reply.prompt} answers={answers} setAnswers={setAnswers} busy={busy}
+            onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
+          />
+        )}
+        {busy && !pending && <div className="muted" style={{ fontSize: 12 }}><span className="spinner" /> {busy}</div>}
+        {err && <div className="ask-err" role="alert">{err}</div>}
+        <div ref={endRef} />
+      </div>
+
+      <div className="ask-flyout-f">
+        <input
+          className="input" data-testid="ask-input" value={q} placeholder={`Ask ${addresseeLabel}…`}
+          onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void send(); }}
+          disabled={!!busy || !!pending}
+        />
+        <BusyButton busy={busy === 'Thinking…'} busyLabel="Thinking…" disabled={!q.trim() || !!pending} onClick={() => void send()} className="btn primary">Ask</BusyButton>
+      </div>
+    </div>
+  );
+}
+
+/** What the agent said, in the shape it said it. */
+function ReplyView({ reply }: { reply: AskReply }) {
+  if (reply.kind === 'answer') return <span>{reply.text}</span>;
+  if (reply.kind === 'done') {
+    const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
+    return (
+      <div>
+        <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : `Done — ${r?.name ?? 'it'} is live.`}</div>
+        {r?.agent && <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{short(r.agent)}{r.txHash ? ` · ${short(r.txHash)}` : ''}</div>}
+      </div>
+    );
+  }
+  if (reply.kind === 'refused') {
+    return (
+      <div>
+        <div>{reply.outcome === 'denied' ? 'Refused — the authority does not cover this.' : 'That did not go through.'}</div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{reply.error}</div>
+      </div>
+    );
+  }
+  return <span className="muted">…</span>;
+}
+
+/** The grant. Plain words first, the machine-readable underneath — a person should be able to refuse this
+ *  for a reason. */
+function AuthorityCard({ reply, busy, onGrant, onCancel }: { reply: Extract<AskReply, { kind: 'authority_required' }>; busy: string | null; onGrant: () => void; onCancel: () => void }) {
+  const d = describeRequirement(reply);
+  return (
+    <div className="ask-card" data-testid="ask-authority">
+      <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>
+      <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
+        To do this, {short(reply.delegate)} needs permission to <strong>{CAPABILITY_WORDS[reply.capability] ?? reply.capability}</strong> as{' '}
+        <strong>{short(d.delegator)}</strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
+      </p>
+      <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
+        You are granting it because your credential custodies {short(d.delegator)}. You can revoke it on chain at any time.
+      </p>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <BusyButton busy={busy === 'Granting authority…'} busyLabel="Granting…" onClick={onGrant} className="btn primary" data-testid="ask-grant">Grant &amp; continue</BusyButton>
+        <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Not now</button>
+      </div>
+    </div>
+  );
+}
+
+/** A question for the person. Never a credential field — this surface answered those already. */
+function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel }: {
+  prompt: AskPrompt; answers: Record<string, string>; setAnswers: (v: Record<string, string>) => void;
+  busy: string | null; onAnswer: () => void; onCancel: () => void;
+}) {
+  const ready = prompt.kind !== 'data' || prompt.fields.every((f) => !f.required || (answers[f.name] ?? '').trim().length > 0);
+  return (
+    <div className="ask-card" data-testid="ask-prompt">
+      <div style={{ fontWeight: 600, fontSize: 13 }}>{prompt.prompt}</div>
+      {prompt.kind === 'data' && prompt.fields.map((f: AskField) => (
+        <div key={f.name} style={{ marginTop: 8 }}>
+          <label className="muted" style={{ fontSize: 11.5, display: 'block' }} htmlFor={`ask-f-${f.name}`}>{f.label}</label>
+          <input
+            id={`ask-f-${f.name}`} className="input" data-testid={`ask-field-${f.name}`} value={answers[f.name] ?? ''}
+            onChange={(e) => setAnswers({ ...answers, [f.name]: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter' && ready && !busy) onAnswer(); }}
+          />
+          {f.hint && <div className="muted" style={{ fontSize: 11 }}>{f.hint}</div>}
+        </div>
+      ))}
+      {prompt.kind === 'signature' && (
+        <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
+          Signing this creates the agent and makes your credential its custodian. The agent re-derives what
+          you signed and refuses it if it differs.
+        </p>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <BusyButton busy={!!busy} busyLabel={busy ?? 'Working…'} disabled={!ready} onClick={onAnswer} className="btn primary" data-testid="ask-answer">
+          {prompt.kind === 'signature' ? 'Sign & continue' : prompt.kind === 'confirmation' ? 'Yes, continue' : 'Continue'}
+        </BusyButton>
+        <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
+      </div>
+    </div>
+  );
+}

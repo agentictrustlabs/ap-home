@@ -36,15 +36,17 @@ import {
   runIntent, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1,
 } from '@agenticprimitives/orchestration';
-import { delegationMandateVerifier, riskLadderPolicy } from '@agenticprimitives/harness';
+import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
-  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, type Delegation, type EnforcerAddresses,
+  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
+  type Delegation, type EnforcerAddresses, type MandateRequirementV1,
 } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { selectPlanner, ORCHESTRATION_TOOLS } from './orchestration.js';
+import { selectPlanner } from './orchestration.js';
+import { QUERY_PUBLIC_GRAPH_TOOL } from './public-graph.js';
 
 
 export interface HarnessEnv {
@@ -63,6 +65,17 @@ export interface HarnessEnv {
 
 /** The action tools this agent exposes to the harness, WITH their capability declarations. Risk and
  *  capability are declared on the tool — the planner cannot describe a step out of needing authority. */
+/** The child agents an Ask can charter, and the typed root each lands under (spec 346). One shape, one
+ *  ceremony: what differs is the capability the mandate must grant and whose authority it needs — a team
+ *  needs its workspace's, an organization needs the PERSON's (nothing above them exists yet, which is
+ *  exactly why org-create belongs to the person's own realm). */
+export const CHILD_AGENT_KINDS = [
+  { capability: 'organization.team.create', tld: 'team', noun: 'team', parentNoun: 'a workspace or organization' },
+  { capability: 'organization.create', tld: 'org', noun: 'organization', parentNoun: 'a person (their own realm)' },
+] as const;
+
+export const CHILD_AGENT_TLD: Record<string, string> = Object.fromEntries(CHILD_AGENT_KINDS.map((k) => [k.capability, k.tld]));
+
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
@@ -79,20 +92,20 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset' },
     risk: 'high',
   },
-  {
-    id: 'organization.team.create',
-    description: 'Create (charter) a new TEAM under a workspace or organization. The team becomes a typed agent named <label>.team, custodied by the connected user and stewarded by the workspace. Requires a mandate from the workspace. Args: workspace (the parent SA address — the mandate\'s delegator), label (the team\'s name: lowercase letters, digits, hyphens; omit if the ask did not name it — the person will be asked).',
+  ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
+    id: capability,
+    description: `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, custodied by the connected user and stewarded by its parent. Requires a mandate from the parent. Args: parent (the parent SA address — the mandate's delegator), label (the ${noun}'s name: lowercase letters, digits, hyphens; omit if the ask did not name it — the person will be asked).`,
     inputSchema: {
       type: 'object',
       properties: {
-        workspace: { type: 'string', description: 'The parent workspace / organization SA address' },
-        label: { type: 'string', description: 'The team name label (a-z, 0-9, hyphen). Omit when the ask did not say it.' },
+        parent: { type: 'string', description: `The ${parentNoun} SA address` },
+        label: { type: 'string', description: `The ${noun} name label (a-z, 0-9, hyphen). Omit when the ask did not say it.` },
       },
-      required: ['workspace'],
+      required: ['parent'],
     },
-    capability: { id: 'organization.team.create', action: 'create', resourceArg: 'workspace' },
+    capability: { id: capability, action: 'create', resourceArg: 'parent' },
     risk: 'medium',
-  },
+  })),
 ];
 
 // ─── organization.team.create — the genesis a connected user signs ────────────────────────────────────
@@ -107,7 +120,7 @@ export interface GenesisUserOpJson {
   sender: Address; nonce: string; initCode: Hex; callData: Hex; accountGasLimits: Hex; preVerificationGas: string; gasFees: Hex; paymasterAndData: Hex; signature: Hex;
 }
 
-export const TEAM_LABEL_PATTERN = '^[a-z0-9-]{3,63}$';
+export const CHILD_LABEL_PATTERN = '^[a-z0-9-]{3,63}$';
 
 /** What the Worker supplies for a team's genesis — the substrate the Home ceremony already uses, behind a
  *  port so the protocol (ask → derive → check → submit) is testable without a chain. */
@@ -117,8 +130,8 @@ export interface TeamGenesisDeps {
   /** Who `<label>.team` resolves to, if anyone. */
   resolveName(name: string): Promise<Address | null>;
   /** Predict the child and build its genesis userOp: initCode from (credential, salt); callData = declare
-   *  type + register `<label>.team` + set primary + approve the stewardship digest (child → workspace). */
-  build(input: { credential: CredentialV1; salt: bigint; label: string; workspace: Address; stewardship: { salt: bigint; validUntil: number } }): Promise<{ child: Address; name: string; userOp: GenesisUserOpJson; userOpHash: Hex; stewardship: DelegationWireV1 }>;
+   *  type + register `<label>.<tld>` + set primary + approve the stewardship digest (child → parent). */
+  build(input: { credential: CredentialV1; salt: bigint; label: string; tld: string; parent: Address; stewardship: { salt: bigint; validUntil: number } }): Promise<{ child: Address; name: string; userOp: GenesisUserOpJson; userOpHash: Hex; stewardship: DelegationWireV1 }>;
   /** The EntryPoint's hash of an arbitrary userOp (readContract). */
   userOpHash(userOp: GenesisUserOpJson): Promise<Hex>;
   /** Has the child already been deployed? (a resume after success is a no-op) */
@@ -141,39 +154,44 @@ function parseCredential(v: unknown): CredentialV1 | null {
 const signerOf = (c: CredentialV1): string => (c.kind === 'eoa' ? c.address : `passkey:${c.credentialIdDigest}`);
 
 /**
- * The team-create invoker. Reads the ask (args) and the answers (ctx.supplied); asks for what is missing;
- * derives the genesis deterministically from the intent so a resume rebuilds the same child; and on a
- * signed resume checks the signed userOp against what it derived — sender, initCode, callData, hash —
- * before submitting. `person` is the connected user (from the session): the credential MUST custody them.
+ * The child-agent-create invoker (team, organization — same ceremony, different typed root). Reads the ask
+ * (args) and the answers (ctx.supplied); asks for what is missing; derives the genesis deterministically
+ * from the intent so a resume rebuilds the same child; and on a signed resume checks the signed userOp
+ * against what it derived — sender, initCode, callData, hash — before submitting. `person` is the connected
+ * user (from the session): the credential MUST custody them, because what you create, you custody.
  */
-export function teamCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
+export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const wire = presented.wire as Delegation;
-    const workspace = String(args.workspace ?? '').toLowerCase() as Address;
-    if (workspace !== wire.delegator.toLowerCase()) throw new Error(`the team is chartered by the mandate's delegator (${wire.delegator}); the plan named ${workspace || 'no workspace'}`);
-    if (!person) throw new Error('no connected user: a team is custodied by the connected user, and there is none on this run');
+    const tld = CHILD_AGENT_TLD[toolId];
+    const noun = CHILD_AGENT_KINDS.find((k) => k.capability === toolId)?.noun ?? 'agent';
+    const aNoun = `${/^[aeiou]/.test(noun) ? 'an' : 'a'} ${noun}`;
+    if (!tld) throw new Error(`${toolId} is not a child-agent capability`);
+    const parent = String(args.parent ?? '').toLowerCase() as Address;
+    if (parent !== wire.delegator.toLowerCase()) throw new Error(`the ${noun} is chartered by the mandate's delegator (${wire.delegator}); the plan named ${parent || 'no parent'}`);
+    if (!person) throw new Error(`no connected user: ${aNoun} is custodied by the connected user, and there is none on this run`);
 
     const data = dataFor(ctx.supplied, stepRef);
     const rawLabel = String(data.label ?? args.label ?? '').trim().toLowerCase();
-    const label = new RegExp(TEAM_LABEL_PATTERN).test(rawLabel) ? rawLabel : '';
+    const label = new RegExp(CHILD_LABEL_PATTERN).test(rawLabel) ? rawLabel : '';
     const credential = parseCredential(data.custodian);
     const ask = (fields: InputFieldV1[], prompt: string): never => {
       throw new InputRequired({ kind: 'data', stepRef, toolId, prompt, fields });
     };
-    const labelField = (hint?: string): InputFieldV1 => ({ name: 'label', label: 'Team name', type: 'text', required: true, pattern: TEAM_LABEL_PATTERN, ...(hint ? { hint } : { hint: 'lowercase letters, digits and hyphens; becomes <name>.team' }) });
-    const credentialField: InputFieldV1 = { name: 'custodian', label: 'Connected credential', type: 'credential', required: true, hint: 'the credential you are signed in with will custody the team' };
+    const labelField = (hint?: string): InputFieldV1 => ({ name: 'label', label: `${noun[0]!.toUpperCase()}${noun.slice(1)} name`, type: 'text', required: true, pattern: CHILD_LABEL_PATTERN, ...(hint ? { hint } : { hint: `lowercase letters, digits and hyphens; becomes <name>.${tld}` }) });
+    const credentialField: InputFieldV1 = { name: 'custodian', label: 'Connected credential', type: 'credential', required: true, hint: `the credential you are signed in with will custody the ${noun}` };
     if (!label || !credential) {
-      const fields: InputFieldV1[] = [...(label ? [] : [labelField(rawLabel ? `"${rawLabel}" is not a valid team name` : undefined)]), ...(credential ? [] : [credentialField])];
-      ask(fields, label ? 'Which credential will custody the team?' : 'What should the team be called?');
+      const fields: InputFieldV1[] = [...(label ? [] : [labelField(rawLabel ? `"${rawLabel}" is not a valid ${noun} name` : undefined)]), ...(credential ? [] : [credentialField])];
+      ask(fields, label ? `Which credential will custody the ${noun}?` : `What should the ${noun} be called?`);
     }
-    const name = `${label}.team`;
+    const name = `${label}.${tld}`;
     if (!(await genesis.isCustodianOf(person, credential!))) throw new Error(`the supplied credential does not custody the connected user's agent ${person} — custody is always the connected user`);
 
     // Deterministic from the intent: the same ask derives the same child, so a resume rebuilds what was
     // signed, and a second identical ask finds the team already there instead of chartering a twin.
     const digest = intentDigest(ctx.intent);
-    const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:team`)));
+    const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:${tld}`)));
     const stewardshipSalt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:stewardship`)));
     // The stewardship grant's window starts where the mandate's does (a fixed point per mandate), so it too
     // is the same on every run of this ask.
@@ -182,21 +200,21 @@ export function teamCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEnv, pre
     if (!ts) throw new Error('the mandate carries no timestamp caveat');
     const validUntil = Number(decodeTimestampTerms(ts.terms as Hex).validAfter) + 365 * 24 * 3600;
 
-    const g = await genesis.build({ credential: credential!, salt, label, workspace, stewardship: { salt: stewardshipSalt, validUntil } });
+    const g = await genesis.build({ credential: credential!, salt, label, tld, parent, stewardship: { salt: stewardshipSalt, validUntil } });
     if (await genesis.isDeployed(g.child)) {
-      return { team: g.child, name: g.name, workspace, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true };
+      return { agent: g.child, name: g.name, kind: noun, parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true };
     }
     // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
     const holder = await genesis.resolveName(name);
-    if (holder && holder.toLowerCase() !== g.child.toLowerCase()) ask([labelField(`${name} is already taken — pick another name`)], `${name} is already taken. What should the team be called instead?`);
+    if (holder && holder.toLowerCase() !== g.child.toLowerCase()) ask([labelField(`${name} is already taken — pick another name`)], `${name} is already taken. What should the ${noun} be called instead?`);
 
     const signed = signatureFor(ctx.supplied, stepRef);
     if (!signed) {
       throw new InputRequired({
         kind: 'signature', stepRef, toolId,
-        prompt: `Sign the genesis of ${g.name} — a team under ${workspace}, custodied by you.`,
+        prompt: `Sign the genesis of ${g.name} — ${aNoun} under ${parent}, custodied by you.`,
         digest: g.userOpHash, signer: signerOf(credential!),
-        payload: { child: g.child, name: g.name, workspace, userOp: g.userOp },
+        payload: { child: g.child, name: g.name, parent, userOp: g.userOp },
       });
     }
     // What was signed must be what this run derives. The paymaster window and gas may differ between the
@@ -211,9 +229,9 @@ export function teamCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEnv, pre
     }
     const hash = await genesis.userOpHash(op);
     if (!same(hash, signed.digest)) throw new Error(`the signed digest ${signed.digest} is not the hash of the supplied userOp (${hash})`);
-    if (signed.signer.toLowerCase() !== signerOf(credential!).toLowerCase()) throw new Error('the signature is not from the credential that will custody the team');
+    if (signed.signer.toLowerCase() !== signerOf(credential!).toLowerCase()) throw new Error(`the signature is not from the credential that will custody the ${noun}`);
     const { txHash } = await genesis.submit({ ...op, signature: signed.signature as Hex });
-    return { txHash, team: g.child, name: g.name, workspace, custodian: credential, person, stewardshipDelegation: g.stewardship };
+    return { txHash, agent: g.child, name: g.name, kind: noun, parent, custodian: credential, person, stewardshipDelegation: g.stewardship };
   };
 }
 
@@ -298,11 +316,14 @@ export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approv
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation, mcpInvoke: ToolInvoker, person?: Address): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address): ToolInvoker {
   return async (toolId, args, ctx) => {
-    if (toolId === 'organization.team.create') {
-      if (!deps.teamGenesis) throw new Error('organization.team.create is not configured on this agent (no genesis substrate)');
-      return teamCreateInvoker(deps.teamGenesis, env, presented, person)(toolId, args, ctx);
+    // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
+    // mandate); explicit so a future caller cannot make it reachable quietly.
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute')) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (CHILD_AGENT_TLD[toolId]) {
+      if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
+      return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
     }
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
@@ -312,7 +333,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     const asset = String(args.asset).toLowerCase() as Address;
     const payee = String(args.payee) as Address;
     const amount = BigInt(String(args.amount));
-    const wire = presented.wire as Delegation;
+    const wire = presented!.wire as Delegation;
     const digest = intentDigest(ctx.intent);
 
     // Redeem-time caveat args. PaymentEnforcer: (mandateId, nonce, resourceHash) — the nonce is single-use
@@ -325,7 +346,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     // DigestBindingEnforcer: the intent digest this run is acting under — the commitment.
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const nonce = keccak256(toBytes(`${digest}:${stepRef}`));
-    const paymentArgs = encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [digest, nonce, keccak256(toBytes(`${presented.ref}:${stepRef}`))]);
+    const paymentArgs = encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [digest, nonce, keccak256(toBytes(`${presented!.ref}:${stepRef}`))]);
     const caveats = wire.caveats.map((c) => {
       const e = c.enforcer.toLowerCase();
       if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: paymentArgs };
@@ -342,7 +363,9 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
 
 export interface HarnessRunInput {
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
-  presented: DelegationWireV1;
+  /** The mandate the caller presents. `null` is legitimate on an ASK: the run then reports the authority it
+   *  would need (`authority-required`) instead of failing — and grants nothing. */
+  presented: DelegationWireV1 | null;
   approvals?: SuppliedApprovalV1[];
   /** Spec 350 §3.4 — answers to the prompts an earlier run of this ask raised (a resume). */
   supplied?: SuppliedInputV1[];
@@ -353,14 +376,54 @@ export interface HarnessRunInput {
   mcpInvoke: ToolInvoker;
 }
 
+/** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
+ *  is what the verifier will judge. */
+export const REQUIREMENT_TYPE_FOR = (capabilityId: string): string =>
+  capabilityId === 'treasury.payment.execute' ? PAYMENT_RAR_TYPE : CAPABILITY_RAR_TYPE;
+
+/** What the Ask surface gets back: an answer, the authority it would need, a question for the person, or
+ *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
+export type AskReply =
+  | { kind: 'answer'; text: string; runRef: string }
+  | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string }
+  | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
+  | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts'] }
+  | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts'] };
+
+/** Turn a finished run into the one reply shape. Nothing here decides anything — it reads what the loop
+ *  already concluded. */
+export function askReplyFor(env: HarnessEnv, input: { intent: unknown; result: RunResult; addressee: Address }): AskReply {
+  const r = input.result;
+  if (r.outcome === 'authority-required' && r.required) {
+    const requirement = mandateRequirementForStep({ required: r.required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
+    // The DELEGATOR is the resource the step names — the parent whose authority the action needs — and
+    // falls back to the agent being asked. Never the person: a team's authority is its workspace's.
+    const delegator = ((r.required.capability.resource ?? input.addressee) as string).toLowerCase() as Address;
+    return {
+      kind: 'authority_required', runRef: r.runRef, requirement, delegator,
+      delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
+      capability: r.required.capability.id, stepRef: r.required.stepRef,
+      summary: `${r.required.capability.id} on ${delegator}`,
+    };
+  }
+  if (r.outcome === 'suspended' && r.prompt) return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
+  if (r.outcome === 'completed') {
+    const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+    return acted
+      ? { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts }
+      : { kind: 'answer', runRef: r.runRef, text: typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null) };
+  }
+  return { kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts };
+}
+
 /** Run one ask under a mandate. Everything the loop decided is on the receipts; nothing here re-decides. */
 export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string }> {
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
   const enforcers = harnessEnforcers(env);
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
-  const wire = wireToDelegation(input.presented);
-  const presented: MandatePresentation = { ref: hashDelegation(wire, chainId, dm), wire };
+  const wire = input.presented ? wireToDelegation(input.presented) : null;
+  const presented: MandatePresentation | null = wire ? { ref: hashDelegation(wire, chainId, dm), wire } : null;
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
 
   const verifier = delegationMandateVerifier({
@@ -389,12 +452,17 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     },
   };
   const { planner, kind } = selectPlanner(env as never);
-  const tools = [...ORCHESTRATION_TOOLS, ...HARNESS_ACTION_TOOLS];
+  // What the harness may compose: the public knowledge graph (read; ADR-0040) and the action tools, each
+  // declaring the capability and risk that decide whether it needs authority. The private-vault tools are
+  // NOT here — they ride their own delegation on the orchestrate skill, and an Ask is not a way around it.
+  const tools = [QUERY_PUBLIC_GRAPH_TOOL, ...HARNESS_ACTION_TOOLS];
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? []), receiptSink },
     presented,
+    // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
+    ...(presented ? {} : { onMissingMandate: 'report' as const }),
     ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,

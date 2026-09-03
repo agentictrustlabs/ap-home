@@ -1502,7 +1502,7 @@ export interface CreateManagedAgentResult {
 }
 
 /** Public demo roster names the custodian EOA. Used only after isDemoCustodyHome. */
-async function demoCustodianFor(person: Address): Promise<Address | null> {
+export async function demoCustodianFor(person: Address): Promise<Address | null> {
   try {
     const r = await fetch('/connect/demo-personas');
     const b = (await r.json()) as { personas?: Array<{ sa?: string; custodian?: string }> };

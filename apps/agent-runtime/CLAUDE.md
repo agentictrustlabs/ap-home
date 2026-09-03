@@ -42,7 +42,11 @@ proxies selected MCP requests during local demos.
   `HARNESS_AGENT_SA`; `organization.team.create` does what the Home's team button does, conversationally —
   asks (§3.5 prompts) for the connected credential and its signature over a genesis it derives from the ask,
   re-derives + checks the signed op, submits. Custody is ALWAYS the connected user. `teamGenesisDeps` in
-  `index.ts` supplies the substrate. Live checks: `scripts/verify-harness-payment.mts`, `-team-create.mts`.
+  `index.ts` supplies the substrate. **`POST /harness/ask {session, addressee, message, presented?, supplied?}`**
+  is the conversational entry (spec 350 §3.6/§3.7): it returns ONE of `answer` · `authority_required` (the
+  `MandateRequirementV1` the plan needs — 401, never 403) · `prompt` · `done`. Reads go to the PUBLIC graph
+  only (ADR-0040); the private vault is not reachable from this surface. Live checks:
+  `scripts/verify-harness-payment.mts`, `-team-create.mts`, `verify-ask-surface.mts`.
 
 ## What this app does not own
 

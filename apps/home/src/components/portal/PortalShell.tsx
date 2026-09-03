@@ -2,7 +2,7 @@
 // The authenticated portal chrome: topbar (brand + workspace switcher + identity) + sidebar
 // (desktop) / bottom-nav (mobile) + the routed section as <main>. The active WORKSPACE is
 // derived from the URL (spec 315) and scopes the left nav: person / org / connected app.
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
@@ -12,12 +12,14 @@ import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
+import { AskFlyout } from './ask/AskFlyout';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
 import { useInboxView } from '../../home/use-inbox';
 import { nameLabel } from '../../lib/domain';
 
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
+  const [askOpen, setAskOpen] = useState(false);
   const pathname = usePathname();
   const active = parseWorkspacePath(pathname ?? '/');
   const { session, agentAddress, agentName } = useSession();
@@ -54,9 +56,16 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
   // decision, not a locked door), but it must SAY why it is missing from everywhere else.
   const orgStatus = active.kind === 'org' && activeAgent ? orgStatusOf(activeAgent) : 'active';
+  // THE ASK (spec 350 §3.5) — addressed to the realm you are standing in, which is the same scope the
+  // sidebar uses. The person's own realm is their SA; an org's or a service's is the one in the URL.
+  const askAddressee = (active.kind === 'person' ? agentAddress : activeSa) as `0x${string}` | null;
+  const askLabel = active.kind === 'person'
+    ? (agentName ? nameLabel(agentName) : 'your agent')
+    : (workspaceName ?? (activeAgent?.name ? nameLabel(activeAgent.name) : undefined) ?? 'this workspace');
+  const canAsk = !!session && !!askAddressee;
   return (
     <div className="portal-root">
-      <PortalTopbar brandName={whitelabel.brand.name} />
+      <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => setAskOpen((v) => !v) } : {})} />
       <div className="portal-body">
         <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} />
         <main className="portal-main">
@@ -78,6 +87,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
         </main>
       </div>
       <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />
+      {askOpen && canAsk && <AskFlyout addressee={askAddressee!} addresseeLabel={askLabel} onClose={() => setAskOpen(false)} />}
     </div>
   );
 }
