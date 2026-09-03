@@ -41,7 +41,16 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'skills-app',
       name: 'Skills',
-      redirect_uris: ['https://skills-web-7ar.pages.dev/', 'http://localhost:5190/'],
+      // EXACT MATCH (CN-1) — a redirect_uri that is not listed here is refused, so the app's own
+      // custom domain has to be registered before anyone can sign in from it. FIRST on purpose: the
+      // front-channel sign-out (app/logout) takes the first https URI per client for the `/sso-logout`
+      // hop, and on faithnet that must reach skills.faithnet.io. The pages.dev origin stays — it is
+      // the Pages project's permanent hostname and what preview deploys serve from.
+      redirect_uris: [
+        'https://skills.faithnet.io/',
+        'https://skills-web-7ar.pages.dev/',
+        'http://localhost:5190/',
+      ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
