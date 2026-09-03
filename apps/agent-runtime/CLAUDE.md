@@ -37,6 +37,13 @@ proxies selected MCP requests during local demos.
   `STEWARD_DEFAULT_SCOPES`; `SEPARATION_OF_DUTIES=strict` refuses editor-approves. Guide:
   `apps/demo-sso-next/docs/agent-cards/guide.md`.
 
+- **The harness under a mandate** (spec 350 W2, `src/harness-run.ts`, route `POST /harness/run {session, intent,
+  presented, approvals?, supplied?, runRef?}`): `treasury.payment.execute` redeems the mandate on chain from
+  `HARNESS_AGENT_SA`; `organization.team.create` does what the Home's team button does, conversationally —
+  asks (§3.5 prompts) for the connected credential and its signature over a genesis it derives from the ask,
+  re-derives + checks the signed op, submits. Custody is ALWAYS the connected user. `teamGenesisDeps` in
+  `index.ts` supplies the substrate. Live checks: `scripts/verify-harness-payment.mts`, `-team-create.mts`.
+
 ## What this app does not own
 
 - Package delegation semantics → `packages/delegation`.

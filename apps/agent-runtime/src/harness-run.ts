@@ -1,4 +1,5 @@
-// THE HARNESS ON THIS AGENT — spec 350 W2, first scenario: a treasury payment under a mandate.
+// THE HARNESS ON THIS AGENT — spec 350 W2: a treasury payment (scenario 3) and a team's creation
+// (scenario 2) under a mandate.
 //
 // This is where the harness stops being a package and becomes a thing that moves money. `runIntent` asks
 // its ports before every capability step; this module binds those ports to this Worker's substrate:
@@ -10,7 +11,16 @@
 //                      evidence and hands it in with the ask; verified ERC-1271 against the approver SA.
 //                      W3 makes this durable (suspend / resume through A2aTaskDO).
 //   ReceiptSink      → the audit sink + the response. Vault-resident receipts are W3.
-//   ToolInvoker      → `treasury.payment.execute` REDEEMS the mandate on chain: this agent's service SA
+//   ToolInvoker      → `organization.team.create` does what the Home's button does, conversationally: it
+//                      builds the team's GENESIS (deploy + `<label>.team` + typed declaration + the
+//                      stewardship grant child → workspace, one sponsored userOp) and ASKS the connected
+//                      user for what only they hold — the name if the ask did not say it, the credential
+//                      that will custody the team (custody is ALWAYS the connected user), and the
+//                      signature over the genesis hash. On resume it re-derives the genesis and checks the
+//                      signed userOp IS the one it derived before submitting. The mandate (delegator = the
+//                      workspace) is what lets this agent act in the workspace's name; the custodian's
+//                      signature is what brings the team into being. Neither substitutes for the other.
+//                    → `treasury.payment.execute` REDEEMS the mandate on chain: this agent's service SA
 //                      submits `DelegationManager.redeemDelegation(mandate, USDC, 0, transfer(payee, amt))`
 //                      as a sponsored userOp, with the PaymentEnforcer's redeem-time args AND the
 //                      DigestBindingEnforcer's presented intent digest filled in. The delegator is the
@@ -22,10 +32,13 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
-import { runIntent, type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation } from '@agenticprimitives/orchestration';
+import {
+  runIntent, InputRequired, dataFor, signatureFor,
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1,
+} from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy } from '@agenticprimitives/harness';
 import {
-  hashDelegation, intentDigest, encodeDigestBindingArgs, type Delegation, type EnforcerAddresses,
+  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, type Delegation, type EnforcerAddresses,
 } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -66,7 +79,143 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset' },
     risk: 'high',
   },
+  {
+    id: 'organization.team.create',
+    description: 'Create (charter) a new TEAM under a workspace or organization. The team becomes a typed agent named <label>.team, custodied by the connected user and stewarded by the workspace. Requires a mandate from the workspace. Args: workspace (the parent SA address — the mandate\'s delegator), label (the team\'s name: lowercase letters, digits, hyphens; omit if the ask did not name it — the person will be asked).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspace: { type: 'string', description: 'The parent workspace / organization SA address' },
+        label: { type: 'string', description: 'The team name label (a-z, 0-9, hyphen). Omit when the ask did not say it.' },
+      },
+      required: ['workspace'],
+    },
+    capability: { id: 'organization.team.create', action: 'create', resourceArg: 'workspace' },
+    risk: 'medium',
+  },
 ];
+
+// ─── organization.team.create — the genesis a connected user signs ────────────────────────────────────
+
+/** The connected user's credential, as the Ask surface describes it (a `credential` field answer). */
+export type CredentialV1 =
+  | { kind: 'eoa'; address: Address }
+  | { kind: 'passkey'; credentialIdDigest: Hex; pubKeyX: string; pubKeyY: string; rpIdHash: Hex };
+
+/** A packed userOp as it travels (bigints as decimal strings) — the /session/deploy wire shape. */
+export interface GenesisUserOpJson {
+  sender: Address; nonce: string; initCode: Hex; callData: Hex; accountGasLimits: Hex; preVerificationGas: string; gasFees: Hex; paymasterAndData: Hex; signature: Hex;
+}
+
+export const TEAM_LABEL_PATTERN = '^[a-z0-9-]{3,63}$';
+
+/** What the Worker supplies for a team's genesis — the substrate the Home ceremony already uses, behind a
+ *  port so the protocol (ask → derive → check → submit) is testable without a chain. */
+export interface TeamGenesisDeps {
+  /** Does `credential` custody `person`? A chain read on the person's SA (isCustodian / hasPasskey). */
+  isCustodianOf(person: Address, credential: CredentialV1): Promise<boolean>;
+  /** Who `<label>.team` resolves to, if anyone. */
+  resolveName(name: string): Promise<Address | null>;
+  /** Predict the child and build its genesis userOp: initCode from (credential, salt); callData = declare
+   *  type + register `<label>.team` + set primary + approve the stewardship digest (child → workspace). */
+  build(input: { credential: CredentialV1; salt: bigint; label: string; workspace: Address; stewardship: { salt: bigint; validUntil: number } }): Promise<{ child: Address; name: string; userOp: GenesisUserOpJson; userOpHash: Hex; stewardship: DelegationWireV1 }>;
+  /** The EntryPoint's hash of an arbitrary userOp (readContract). */
+  userOpHash(userOp: GenesisUserOpJson): Promise<Hex>;
+  /** Has the child already been deployed? (a resume after success is a no-op) */
+  isDeployed(child: Address): Promise<boolean>;
+  /** Submit the signed genesis, sponsored. Throws on an inner revert. */
+  submit(userOp: GenesisUserOpJson): Promise<{ txHash: Hex }>;
+}
+
+function parseCredential(v: unknown): CredentialV1 | null {
+  if (!v || typeof v !== 'object') return null;
+  const c = v as Record<string, unknown>;
+  if (c.kind === 'eoa' && typeof c.address === 'string' && /^0x[0-9a-fA-F]{40}$/.test(c.address)) return { kind: 'eoa', address: c.address.toLowerCase() as Address };
+  if (c.kind === 'passkey' && typeof c.credentialIdDigest === 'string' && typeof c.pubKeyX === 'string' && typeof c.pubKeyY === 'string' && typeof c.rpIdHash === 'string') {
+    return { kind: 'passkey', credentialIdDigest: c.credentialIdDigest as Hex, pubKeyX: c.pubKeyX, pubKeyY: c.pubKeyY, rpIdHash: c.rpIdHash as Hex };
+  }
+  return null;
+}
+
+/** Who must sign the genesis — the credential's address, or the passkey by its credential id. */
+const signerOf = (c: CredentialV1): string => (c.kind === 'eoa' ? c.address : `passkey:${c.credentialIdDigest}`);
+
+/**
+ * The team-create invoker. Reads the ask (args) and the answers (ctx.supplied); asks for what is missing;
+ * derives the genesis deterministically from the intent so a resume rebuilds the same child; and on a
+ * signed resume checks the signed userOp against what it derived — sender, initCode, callData, hash —
+ * before submitting. `person` is the connected user (from the session): the credential MUST custody them.
+ */
+export function teamCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    const wire = presented.wire as Delegation;
+    const workspace = String(args.workspace ?? '').toLowerCase() as Address;
+    if (workspace !== wire.delegator.toLowerCase()) throw new Error(`the team is chartered by the mandate's delegator (${wire.delegator}); the plan named ${workspace || 'no workspace'}`);
+    if (!person) throw new Error('no connected user: a team is custodied by the connected user, and there is none on this run');
+
+    const data = dataFor(ctx.supplied, stepRef);
+    const rawLabel = String(data.label ?? args.label ?? '').trim().toLowerCase();
+    const label = new RegExp(TEAM_LABEL_PATTERN).test(rawLabel) ? rawLabel : '';
+    const credential = parseCredential(data.custodian);
+    const ask = (fields: InputFieldV1[], prompt: string): never => {
+      throw new InputRequired({ kind: 'data', stepRef, toolId, prompt, fields });
+    };
+    const labelField = (hint?: string): InputFieldV1 => ({ name: 'label', label: 'Team name', type: 'text', required: true, pattern: TEAM_LABEL_PATTERN, ...(hint ? { hint } : { hint: 'lowercase letters, digits and hyphens; becomes <name>.team' }) });
+    const credentialField: InputFieldV1 = { name: 'custodian', label: 'Connected credential', type: 'credential', required: true, hint: 'the credential you are signed in with will custody the team' };
+    if (!label || !credential) {
+      const fields: InputFieldV1[] = [...(label ? [] : [labelField(rawLabel ? `"${rawLabel}" is not a valid team name` : undefined)]), ...(credential ? [] : [credentialField])];
+      ask(fields, label ? 'Which credential will custody the team?' : 'What should the team be called?');
+    }
+    const name = `${label}.team`;
+    if (!(await genesis.isCustodianOf(person, credential!))) throw new Error(`the supplied credential does not custody the connected user's agent ${person} — custody is always the connected user`);
+
+    // Deterministic from the intent: the same ask derives the same child, so a resume rebuilds what was
+    // signed, and a second identical ask finds the team already there instead of chartering a twin.
+    const digest = intentDigest(ctx.intent);
+    const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:team`)));
+    const stewardshipSalt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:stewardship`)));
+    // The stewardship grant's window starts where the mandate's does (a fixed point per mandate), so it too
+    // is the same on every run of this ask.
+    const enforcers = harnessEnforcers(env);
+    const ts = wire.caveats.find((c) => c.enforcer.toLowerCase() === enforcers.timestamp.toLowerCase());
+    if (!ts) throw new Error('the mandate carries no timestamp caveat');
+    const validUntil = Number(decodeTimestampTerms(ts.terms as Hex).validAfter) + 365 * 24 * 3600;
+
+    const g = await genesis.build({ credential: credential!, salt, label, workspace, stewardship: { salt: stewardshipSalt, validUntil } });
+    if (await genesis.isDeployed(g.child)) {
+      return { team: g.child, name: g.name, workspace, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true };
+    }
+    // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
+    const holder = await genesis.resolveName(name);
+    if (holder && holder.toLowerCase() !== g.child.toLowerCase()) ask([labelField(`${name} is already taken — pick another name`)], `${name} is already taken. What should the team be called instead?`);
+
+    const signed = signatureFor(ctx.supplied, stepRef);
+    if (!signed) {
+      throw new InputRequired({
+        kind: 'signature', stepRef, toolId,
+        prompt: `Sign the genesis of ${g.name} — a team under ${workspace}, custodied by you.`,
+        digest: g.userOpHash, signer: signerOf(credential!),
+        payload: { child: g.child, name: g.name, workspace, userOp: g.userOp },
+      });
+    }
+    // What was signed must be what this run derives. The paymaster window and gas may differ between the
+    // build that was signed and this one, so the comparison is on what the genesis MEANS — sender, initCode
+    // (credential + salt), callData (name, type, stewardship) — and the hash the EntryPoint computes over
+    // the supplied op must be the digest the credential signed.
+    const op = (signed.payload as { userOp?: GenesisUserOpJson } | undefined)?.userOp;
+    if (!op) throw new Error('the signature answer carries no userOp payload');
+    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    if (!same(op.sender, g.child) || !same(op.initCode, g.userOp.initCode) || !same(op.callData, g.userOp.callData)) {
+      throw new Error(`the signed genesis is not the one this ask derives (sender/initCode/callData differ) — refusing to submit`);
+    }
+    const hash = await genesis.userOpHash(op);
+    if (!same(hash, signed.digest)) throw new Error(`the signed digest ${signed.digest} is not the hash of the supplied userOp (${hash})`);
+    if (signed.signer.toLowerCase() !== signerOf(credential!).toLowerCase()) throw new Error('the signature is not from the credential that will custody the team');
+    const { txHash } = await genesis.submit({ ...op, signature: signed.signature as Hex });
+    return { txHash, team: g.child, name: g.name, workspace, custodian: credential, person, stewardshipDelegation: g.stewardship };
+  };
+}
 
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 const EXECUTE_ABI = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' }], outputs: [] }] as const;
@@ -91,6 +240,8 @@ export interface HarnessDeps {
   /** Build, sign (with the service SA's custodian) and submit a sponsored userOp from `sender`. */
   executeAsServiceSa: (sender: Address, callData: Hex) => Promise<{ txHash: Hex }>;
   audit: AuditSink;
+  /** The team-genesis substrate; absent ⇒ `organization.team.create` fails as unconfigured (never silently). */
+  teamGenesis?: TeamGenesisDeps;
   now?: () => number;
 }
 
@@ -145,9 +296,14 @@ export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approv
   };
 }
 
-/** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation, mcpInvoke: ToolInvoker): ToolInvoker {
+/** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
+ *  team tool builds a genesis the connected user signs. */
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation, mcpInvoke: ToolInvoker, person?: Address): ToolInvoker {
   return async (toolId, args, ctx) => {
+    if (toolId === 'organization.team.create') {
+      if (!deps.teamGenesis) throw new Error('organization.team.create is not configured on this agent (no genesis substrate)');
+      return teamCreateInvoker(deps.teamGenesis, env, presented, person)(toolId, args, ctx);
+    }
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const dm = env.DELEGATION_MANAGER as Address;
@@ -188,6 +344,10 @@ export interface HarnessRunInput {
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
   presented: DelegationWireV1;
   approvals?: SuppliedApprovalV1[];
+  /** Spec 350 §3.4 — answers to the prompts an earlier run of this ask raised (a resume). */
+  supplied?: SuppliedInputV1[];
+  /** The connected user (the session's SA). What they create, they custody. */
+  person?: Address;
   runRef?: string;
   /** The MCP-backed invoker for informational tools (the existing orchestrate path). */
   mcpInvoke: ToolInvoker;
@@ -224,7 +384,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
         action: `harness.step.${r.status}`, outcome: r.status === 'executed' || r.status === 'compensated' ? 'success' : r.status === 'denied' || r.status === 'failed' ? 'failure' : 'success',
         actor: { type: 'agent', id: (env.HARNESS_AGENT_SA ?? '').toLowerCase() },
         subject: { type: 'harness-step', id: `${r.runRef}:${r.stepRef}` },
-        metadata: { toolId: r.toolId, risk: r.risk, capability: r.capability ?? null, mandateRef: r.authority?.presentedRef ?? null, decision: r.authority?.decision.decision ?? null, approvalRecords: r.approvalRecords ?? null, idempotencyKey: r.idempotencyKey ?? null, error: r.error ?? null },
+        metadata: { toolId: r.toolId, risk: r.risk, capability: r.capability ?? null, mandateRef: r.authority?.presentedRef ?? null, decision: r.authority?.decision.decision ?? null, approvalRecords: r.approvalRecords ?? null, idempotencyKey: r.idempotencyKey ?? null, pendingInput: r.pendingInput ?? null, error: r.error ?? null },
       } as never);
     },
   };
@@ -232,9 +392,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const tools = [...ORCHESTRATION_TOOLS, ...HARNESS_ACTION_TOOLS];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke),
+    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? []), receiptSink },
     presented,
+    ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,
   });

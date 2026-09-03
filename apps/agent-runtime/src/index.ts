@@ -49,6 +49,7 @@ import {
   AgentAccountClient,
   buildExecuteBatchCallData,
   SaMismatchError,
+  entryPointAbi,
 } from '@agenticprimitives/agent-account';
 import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
 import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
@@ -99,7 +100,8 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { runUnderMandate, type HarnessDeps, type HarnessEnv, type HarnessRunInput } from './harness-run.js';
+import { runUnderMandate, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
+import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -1180,7 +1182,7 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 // is a refusal, because there is nobody to wait for.
 app.post('/harness/run', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
-    session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; runRef?: string;
+    session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; supplied?: HarnessRunInput['supplied']; runRef?: string;
   } | null;
   if (!body?.session || !body.intent?.goal || !body.presented?.delegator) return c.json({ ok: false, error: 'session, intent.goal, presented (a delegation wire) required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
@@ -1192,6 +1194,7 @@ app.post('/harness/run', async (c) => {
   const deps: HarnessDeps = {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
+    teamGenesis: teamGenesisDeps(c.env, audit),
     executeAsServiceSa: async (sender, callData) => {
       // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
       // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.
@@ -1214,10 +1217,13 @@ app.post('/harness/run', async (c) => {
   };
   try {
     const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
-      intent: body.intent, presented: body.presented, ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
+      intent: body.intent, presented: body.presented, person: who.sa as Address,
+      ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
       mcpInvoke: async () => { throw new Error('informational tools are not wired on /harness/run yet — use the orchestrate skill'); },
     });
-    return c.json({ ok: true, caller: who.sa, plannerKind, outcome: result.outcome, runRef: result.runRef, plan: result.plan, result: result.result ?? null, error: result.error ?? null, receipts: result.receipts });
+    // `prompt` (spec 350 §3.4): the run stopped to ask the connected user for something. The surface
+    // renders it and calls again with the same intent + runRef and the answers in `supplied`.
+    return c.json({ ok: true, caller: who.sa, plannerKind, outcome: result.outcome, runRef: result.runRef, plan: result.plan, result: result.result ?? null, error: result.error ?? null, receipts: result.receipts, ...(result.prompt ? { prompt: result.prompt, resumeToken: result.resumeToken } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'harness_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -1733,6 +1739,79 @@ function accountClient(env: Env): AgentAccountClient {
     entryPoint: env.ENTRY_POINT as Address,
     factory: env.AGENT_ACCOUNT_FACTORY as Address,
   });
+}
+
+/**
+ * Spec 350 W2 scenario 2 — the substrate a team's genesis needs, behind `TeamGenesisDeps`. Exactly the
+ * pieces the Home ceremony and `/custody/oidc/bootstrap-agent` use (declare the `.team` type, register the
+ * label under the typed root, set the primary name, approve the stewardship grant child → workspace, one
+ * sponsored deploy userOp) — the protocol around them (ask → derive → check → submit) lives in
+ * `harness-run.ts` and knows nothing of this Worker.
+ */
+function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
+  const pub = () => createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  const toJson = (u: { nonce: bigint; preVerificationGas: bigint } & Record<string, unknown>): GenesisUserOpJson =>
+    ({ ...u, nonce: u.nonce.toString(), preVerificationGas: u.preVerificationGas.toString() }) as unknown as GenesisUserOpJson;
+  const fromJson = (u: GenesisUserOpJson) => ({ ...u, nonce: BigInt(u.nonce), preVerificationGas: BigInt(u.preVerificationGas) });
+  const specFor = (credential: Parameters<TeamGenesisDeps['build']>[0]['credential'], salt: bigint) =>
+    credential.kind === 'eoa'
+      ? { custodians: [credential.address], salt }
+      : { custodians: [] as Address[], passkey: { credentialIdDigest: credential.credentialIdDigest, x: BigInt(credential.pubKeyX), y: BigInt(credential.pubKeyY), rpIdHash: credential.rpIdHash }, salt };
+  return {
+    async isCustodianOf(person, credential) {
+      const code = await pub().getBytecode({ address: person }).catch(() => undefined);
+      if (!code || code === '0x') return false; // an undeployed person custodies nothing yet — fail closed
+      if (credential.kind === 'eoa') {
+        return (await pub().readContract({ address: person, abi: [{ type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] }], functionName: 'isCustodian', args: [credential.address] })) === true;
+      }
+      return (await pub().readContract({ address: person, abi: [{ type: 'function', name: 'hasPasskey', stateMutability: 'view', inputs: [{ name: 'credentialIdDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] }], functionName: 'hasPasskey', args: [credential.credentialIdDigest] })) === true;
+    },
+    async resolveName(name) {
+      if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) throw new Error('naming is not configured');
+      const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+      return client.resolveName(name);
+    },
+    async build({ credential, salt, label, workspace, stewardship }) {
+      if (!env.PAYMASTER) throw new Error('paymaster not configured');
+      if (!env.APPROVED_HASH_REGISTRY || !env.AGENT_NAME_REGISTRY) throw new Error('grants / naming not configured');
+      const root = subregistryForTld(env, 'team');
+      if (!root.ok) throw new Error(root.error);
+      if (!root.typed) throw new Error('".team" is not a typed root on this deployment');
+      const spec = specFor(credential, salt);
+      const child = await accountClient(env).getAddressForAgentAccount(spec);
+      const name = `${label}.${root.tld}`;
+      const grant = buildOrgGrant(env, child, workspace, undefined, stewardship);
+      const calls: Array<{ to: Address; value: bigint; data: Hex }> = [
+        ...(await declareTypeCallsFor(env, child, root.tld)),
+        buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
+        buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
+        orgApproveHashCall(env, grant.digest),
+      ];
+      let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+      if (env.PAYMASTER_VERIFYING_SIGNER) {
+        const kmsAccount = await getRelayerAccount(env, 'direct-deploy', audit);
+        verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+      }
+      const { userOp, userOpHash, sender } = await accountClient(env).buildDeployUserOpForAgentAccount({ spec, callData: buildExecuteBatchCallData(calls), paymaster: env.PAYMASTER as Address, verifyingPaymaster });
+      if (sender.toLowerCase() !== child.toLowerCase()) throw new Error('built userOp sender ≠ predicted team SA');
+      return { child, name, userOp: toJson(userOp as never), userOpHash, stewardship: grant.wire as DelegationWireV1 };
+    },
+    async userOpHash(userOp) {
+      return (await pub().readContract({ address: env.ENTRY_POINT as Address, abi: entryPointAbi, functionName: 'getUserOpHash', args: [fromJson(userOp)] })) as Hex;
+    },
+    async isDeployed(child) {
+      const code = await pub().getBytecode({ address: child }).catch(() => undefined);
+      return !!code && code !== '0x';
+    },
+    async submit(userOp) {
+      const relayerAccount = await getRelayerAccount(env, 'direct-deploy', audit);
+      const signed = fromJson(userOp);
+      const { receipt } = await accountClient(env).submitDeployUserOp(signed as never, relayerAccount);
+      const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: userOp.sender });
+      if (!inner.ok) throw new Error(`the team's genesis reverted on chain: ${inner.revertReason ?? (inner.matched === false ? 'no UserOperationEvent for the team' : 'no revert reason — almost always out of gas')} (tx ${receipt.transactionHash})`);
+      return { txHash: receipt.transactionHash as Hex };
+    },
+  };
 }
 
 function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {
@@ -3032,8 +3111,9 @@ function buildOrgGrant(
   orgSA: Address,
   delegate: Address,
   validitySeconds = 60 * 60 * 24 * 365,
+  fixed?: { salt: bigint; validUntil: number },
 ): { digest: Hex; wire: Omit<Delegation, 'salt'> & { salt: string } } {
-  const { d, digest } = buildUnsignedSiteGrant(env, orgSA, delegate, validitySeconds);
+  const { d, digest } = buildUnsignedSiteGrant(env, orgSA, delegate, validitySeconds, fixed);
   d.signature = ORG_GRANT_SENTINEL; // validated via the org SA's approved-hash ERC-1271 branch
   return { digest, wire: { ...d, salt: d.salt.toString() } };
 }
@@ -3064,11 +3144,16 @@ function buildUnsignedSiteGrant(
   delegator: Address,
   delegate: Address,
   validitySeconds = 60 * 60 * 24 * 365,
+  fixed?: { salt: bigint; validUntil: number },
 ): { d: Delegation; digest: Hex } {
-  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let salt = 0n;
-  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  // `fixed` — the harness derives BOTH from the ask (spec 350 §3.4): a resume must rebuild the grant it
+  // asked the person to sign for, byte for byte. Everything else gets a fresh random salt + a now-anchored window.
+  const validUntil = fixed?.validUntil ?? Math.floor(Date.now() / 1000) + validitySeconds;
+  let salt = fixed?.salt ?? 0n;
+  if (!fixed) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  }
   const d: Delegation = {
     delegator,
     delegate,

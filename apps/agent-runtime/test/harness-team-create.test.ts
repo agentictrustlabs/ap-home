@@ -1,0 +1,155 @@
+// Spec 350 W2 scenario 2 — `organization.team.create` does what the Home's button does, conversationally:
+// asks for what it lacks, derives the genesis from the ask, checks what came back signed IS what it derived,
+// and only then submits. The substrate is faked; the protocol is what is under test.
+import { describe, expect, it, vi } from 'vitest';
+import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
+import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
+import { teamCreateInvoker, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+
+const env: HarnessEnv = {
+  CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
+  TIMESTAMP_ENFORCER: '0xBb8fF9c82417189c6EfeBbB369e9dd9d651aa0f3', VALUE_ENFORCER: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975',
+  ALLOWED_TARGETS_ENFORCER: '0xb06252FaD1D41B9943c73ec696Af70F268581625', ALLOWED_METHODS_ENFORCER: '0xa076b759D6785bA5E67016e399Af651fC2ABC811',
+  DIGEST_BINDING_ENFORCER: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
+};
+const WORKSPACE = '0x3d653cbab0c99b1513439758eb2eac2039caa6e1';
+const HARNESS = '0xd34c3fbc89706dd57d426546dcebd3ba926ede35';
+const PERSON = '0x1111111111111111111111111111111111111111';
+const EOA = '0x2222222222222222222222222222222222222222';
+const CHILD = '0x3333333333333333333333333333333333333333';
+const VALID_AFTER = 1_800_000_000;
+
+const wire: Delegation = {
+  delegator: WORKSPACE, delegate: HARNESS, authority: `0x${'f'.repeat(64)}`,
+  caveats: [buildCaveat(env.TIMESTAMP_ENFORCER as `0x${string}`, encodeTimestampTerms(VALID_AFTER, VALID_AFTER + 3600))],
+  salt: 1n, signature: '0x',
+};
+const presented: MandatePresentation = { ref: '0xmandate', wire };
+const intent = { goal: 'add a new team xyz to this workspace', context: { workspace: WORKSPACE } };
+const ctxWith = (supplied?: InvokeContext['supplied']): InvokeContext => ({ intent, step: { toolId: 'organization.team.create', args: {} }, index: 0, ...(supplied ? { supplied } : {}) });
+
+function fakeGenesis(over: Partial<TeamGenesisDeps> = {}) {
+  const built: unknown[] = [];
+  const submitted: GenesisUserOpJson[] = [];
+  const op = (salt: bigint, label: string): GenesisUserOpJson => ({ sender: CHILD, nonce: '0', initCode: `0xinit${salt.toString(16).slice(0, 8)}`, callData: `0xcall${label}`, accountGasLimits: '0x00', preVerificationGas: '1', gasFees: '0x00', paymasterAndData: '0xpm-window-A', signature: '0x' });
+  const deps: TeamGenesisDeps = {
+    isCustodianOf: vi.fn(async (p, c) => p === PERSON && c.kind === 'eoa' && c.address === EOA),
+    resolveName: vi.fn(async () => null),
+    build: vi.fn(async (i) => { built.push(i); return { child: CHILD, name: `${i.label}.team`, userOp: op(i.salt, i.label), userOpHash: `0xhash-${i.label}`, stewardship: { delegator: CHILD, delegate: i.workspace, authority: '0x', caveats: [], salt: i.stewardship.salt.toString(), signature: '0x03' } }; }),
+    userOpHash: vi.fn(async (u) => `0xhash-${u.callData.replace('0xcall', '')}`),
+    isDeployed: vi.fn(async () => false),
+    submit: vi.fn(async (u) => { submitted.push(u); return { txHash: '0xtx' }; }),
+    ...over,
+  };
+  return { deps, built, submitted };
+}
+
+const run = async (deps: TeamGenesisDeps, args: Record<string, unknown>, supplied?: InvokeContext['supplied'], person: `0x${string}` | undefined = PERSON) => {
+  try { return { ok: true as const, result: await teamCreateInvoker(deps, env, presented, person)('organization.team.create', args, ctxWith(supplied)) }; }
+  catch (e) { return isInputRequired(e) ? { ok: false as const, prompt: e.request } : { ok: false as const, error: (e as Error).message }; }
+};
+
+describe('organization.team.create — the conversational ceremony', () => {
+  it('asks for the name and the credential when the ask named neither; asks only for what is still missing', async () => {
+    const g = fakeGenesis();
+    const r1 = await run(g.deps, { workspace: WORKSPACE });
+    expect(r1.ok).toBe(false);
+    expect(r1.prompt?.kind).toBe('data');
+    expect(r1.prompt?.kind === 'data' ? r1.prompt.fields.map((f) => `${f.name}:${f.type}`) : []).toEqual(['label:text', 'custodian:credential']);
+    const r2 = await run(g.deps, { workspace: WORKSPACE, label: 'xyz' });
+    expect(r2.prompt?.kind === 'data' ? r2.prompt.fields.map((f) => f.name) : []).toEqual(['custodian']);
+    expect(g.deps.build).not.toHaveBeenCalled();
+  });
+
+  it('rejects a label the naming rule refuses and says so in the hint', async () => {
+    const g = fakeGenesis();
+    const r = await run(g.deps, { workspace: WORKSPACE, label: 'X Y!' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: EOA } } }]);
+    expect(r.prompt?.kind === 'data' ? r.prompt.fields[0] : null).toMatchObject({ name: 'label', hint: expect.stringContaining('not a valid team name') });
+  });
+
+  it('asks again with the reason when the name is taken', async () => {
+    const g = fakeGenesis({ resolveName: vi.fn(async (n) => (n === 'xyz.team' ? '0x9999999999999999999999999999999999999999' : null)) });
+    const r = await run(g.deps, { workspace: WORKSPACE, label: 'xyz' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: EOA } } }]);
+    expect(r.prompt?.kind === 'data' ? r.prompt.fields[0]?.hint : '').toContain('xyz.team is already taken');
+  });
+
+  it('custody is always the connected user: a credential that does not custody the person is refused', async () => {
+    const g = fakeGenesis();
+    const r = await run(g.deps, { workspace: WORKSPACE, label: 'xyz' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: '0x9999999999999999999999999999999999999999' } } }]);
+    expect(r.ok).toBe(false);
+    expect('error' in r ? r.error : '').toContain('custody is always the connected user');
+    expect(g.deps.build).not.toHaveBeenCalled();
+  });
+
+  it("the workspace is the mandate's delegator — a plan naming another parent fails the step", async () => {
+    const g = fakeGenesis();
+    const r = await run(g.deps, { workspace: PERSON, label: 'xyz' });
+    expect('error' in r ? r.error : '').toContain("chartered by the mandate's delegator");
+  });
+
+  it('derives the genesis from the ask and asks the connected credential to sign its hash — with the userOp in the open', async () => {
+    const g = fakeGenesis();
+    const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];
+    const r = await run(g.deps, { workspace: WORKSPACE }, supplied);
+    expect(r.prompt?.kind).toBe('signature');
+    const p = r.prompt as Extract<NonNullable<typeof r.prompt>, { kind: 'signature' }>;
+    expect(p.signer).toBe(EOA);
+    expect(p.digest).toBe('0xhash-xyz');
+    expect(p.payload).toMatchObject({ child: CHILD, name: 'xyz.team', workspace: WORKSPACE, userOp: { sender: CHILD, callData: '0xcallxyz' } });
+    // deterministic from the intent: the same ask derives the same salts and the same stewardship window
+    const b = g.built[0] as { salt: bigint; stewardship: { salt: bigint; validUntil: number } };
+    const again = await run(g.deps, { workspace: WORKSPACE }, supplied);
+    expect(again.prompt?.kind).toBe('signature');
+    const b2 = g.built[1] as typeof b;
+    expect(b2.salt).toBe(b.salt);
+    expect(b2.stewardship.salt).toBe(b.stewardship.salt);
+    expect(b2.stewardship.validUntil).toBe(VALID_AFTER + 365 * 24 * 3600);
+    expect(g.deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('on a signed resume: re-derives, checks the signed op IS the derived one, and submits it with the signature', async () => {
+    const g = fakeGenesis();
+    const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];
+    const asked = await run(g.deps, { workspace: WORKSPACE }, supplied);
+    const p = asked.prompt as Extract<NonNullable<typeof asked.prompt>, { kind: 'signature' }>;
+    // the surface's build may differ in the paymaster window — the meaning (sender/initCode/callData) must not
+    const signedOp = { ...(p.payload as { userOp: GenesisUserOpJson }).userOp, paymasterAndData: '0xpm-window-B' };
+    const r = await run(g.deps, { workspace: WORKSPACE }, [...supplied, { stepRef: 's0', signature: { digest: p.digest, signer: EOA, signature: '0xsig', payload: { userOp: signedOp } } }]);
+    expect(r.ok).toBe(true);
+    expect('result' in r ? r.result : null).toMatchObject({ txHash: '0xtx', team: CHILD, name: 'xyz.team', workspace: WORKSPACE, custodian: { kind: 'eoa', address: EOA }, person: PERSON });
+    expect(g.submitted[0]).toMatchObject({ sender: CHILD, callData: '0xcallxyz', paymasterAndData: '0xpm-window-B', signature: '0xsig' });
+  });
+
+  it('refuses a signed op whose meaning differs from what this ask derives (a different callData)', async () => {
+    const g = fakeGenesis();
+    const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];
+    const asked = await run(g.deps, { workspace: WORKSPACE }, supplied);
+    const p = asked.prompt as Extract<NonNullable<typeof asked.prompt>, { kind: 'signature' }>;
+    const tampered = { ...(p.payload as { userOp: GenesisUserOpJson }).userOp, callData: '0xcallabc' };
+    const r = await run(g.deps, { workspace: WORKSPACE }, [...supplied, { stepRef: 's0', signature: { digest: p.digest, signer: EOA, signature: '0xsig', payload: { userOp: tampered } } }]);
+    expect('error' in r ? r.error : '').toContain('not the one this ask derives');
+    expect(g.deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a signature whose digest is not the EntryPoint hash of the supplied op', async () => {
+    const g = fakeGenesis();
+    const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];
+    const asked = await run(g.deps, { workspace: WORKSPACE }, supplied);
+    const p = asked.prompt as Extract<NonNullable<typeof asked.prompt>, { kind: 'signature' }>;
+    const r = await run(g.deps, { workspace: WORKSPACE }, [...supplied, { stepRef: 's0', signature: { digest: '0xhash-other', signer: EOA, signature: '0xsig', payload: p.payload } }]);
+    expect('error' in r ? r.error : '').toContain('is not the hash of the supplied userOp');
+    expect(g.deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('a resume after the team already exists is a no-op that reports the team (idempotent on the ask) — its own name is not "taken"', async () => {
+    const g = fakeGenesis({ isDeployed: vi.fn(async () => true), resolveName: vi.fn(async () => CHILD) });
+    const r = await run(g.deps, { workspace: WORKSPACE }, [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }]);
+    expect(r.ok).toBe(true);
+    expect('result' in r ? r.result : null).toMatchObject({ team: CHILD, name: 'xyz.team', alreadyCreated: true });
+    expect(g.deps.submit).not.toHaveBeenCalled();
+  });
+
+  it('the intent digest the salts derive from is the canonical one', () => {
+    expect(intentDigest(intent)).toBe(intentDigest({ context: { workspace: WORKSPACE }, goal: intent.goal }));
+  });
+});
