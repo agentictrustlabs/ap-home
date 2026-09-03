@@ -34,7 +34,7 @@
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 import {
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1,
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer,
 } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
@@ -45,7 +45,7 @@ import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-v
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { selectPlanner } from './orchestration.js';
+import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 
 
@@ -391,8 +391,14 @@ export type AskReply =
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts'] };
 
 /** Turn a finished run into the one reply shape. Nothing here decides anything — it reads what the loop
- *  already concluded. */
-export function askReplyFor(env: HarnessEnv, input: { intent: unknown; result: RunResult; addressee: Address }): AskReply {
+ *  already concluded.
+ *
+ *  The one thing it ADDS is prose, and only on the `answer` path: a question's result is rendered from the
+ *  observations by the `AnswerComposer` (grounded in them, never beyond them). An ACTION's result is never
+ *  paraphrased — what was created, at what address, in which transaction is stated from the receipt, where
+ *  precision is the point. No composer, or a composer that fails, ⇒ the raw result, unchanged: the evidence
+ *  is identical either way and only its rendering degrades. */
+export async function askReplyFor(env: HarnessEnv, input: { intent: { goal: string }; result: RunResult; addressee: Address; composer?: AnswerComposer | null }): Promise<AskReply> {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
     const requirement = mandateRequirementForStep({ required: r.required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
@@ -409,9 +415,14 @@ export function askReplyFor(env: HarnessEnv, input: { intent: unknown; result: R
   if (r.outcome === 'suspended' && r.prompt) return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   if (r.outcome === 'completed') {
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
-    return acted
-      ? { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts }
-      : { kind: 'answer', runRef: r.runRef, text: typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null) };
+    if (acted) return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
+    const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
+    if (!input.composer) return { kind: 'answer', runRef: r.runRef, text: raw };
+    try {
+      return { kind: 'answer', runRef: r.runRef, text: await input.composer.compose({ intent: input.intent, observations: r.steps }) };
+    } catch {
+      return { kind: 'answer', runRef: r.runRef, text: raw };
+    }
   }
   return { kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts };
 }

@@ -101,6 +101,7 @@ import {
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
+import { selectComposer } from './orchestration.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1227,7 +1228,8 @@ app.post('/harness/ask', async (c) => {
         return askDiscoveryInvoker(c.env as never)(toolId, args, ctx);
       },
     });
-    return c.json({ ok: true, addressee, reply: askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee }) });
+    const reply = await askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee, composer: selectComposer(c.env) });
+    return c.json({ ok: true, addressee, reply });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

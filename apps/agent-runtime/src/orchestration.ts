@@ -6,8 +6,8 @@
 //     where the browser holds a server-side session rather than a signable A2A message).
 // Both run the IDENTICAL orchestration core over a delegation-bound invoker — the planner chooses WHICH tool;
 // every composed MCP call rides the supplied delegation (authority unchanged, ADR-0041).
-import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type ToolInvoker, type RunResult } from '@agenticprimitives/orchestration';
-import { createAnthropicPlanner, createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
+import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type ToolInvoker, type RunResult, type AnswerComposer } from '@agenticprimitives/orchestration';
+import { createAnthropicPlanner, createAnthropicComposer, createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
 import type { Address } from 'viem';
 // Type-only import (erased at build — no runtime cycle with index.ts).
 import type { Env } from './index.js';
@@ -108,6 +108,19 @@ export function withPlaybook(playbook: string | undefined, contract: string): st
  *  `opts.maxTokens` MUST be raised for turns whose tool argument carries a long artifact (work
  *  deliverables, outcome answers): the 1024 default silently truncates the tool input mid-emit and
  *  the turn yields an empty capture with NO error. */
+/** The ANSWERING binding, when this deployment has a model. Absent ⇒ the caller renders the raw result:
+ *  a rendering may degrade, and the EVIDENCE (receipts, observations) is identical either way. This is not
+ *  the fallback ADR-0013 forbids — nothing here decides anything, and no authority path has a second
+ *  mechanism. */
+export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string }): AnswerComposer | null {
+  if (env.ORCHESTRATION_LLM !== 'anthropic' || !env.ANTHROPIC_API_KEY) return null;
+  return createAnthropicComposer({
+    client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY }),
+    ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
+    ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+  });
+}
+
 export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number }): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
   if (env.ORCHESTRATION_LLM === 'anthropic' && env.ANTHROPIC_API_KEY) {
     const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY });

@@ -169,8 +169,8 @@ describe('the ask reply (what the surface is told)', () => {
   const env2 = { ...env, HARNESS_AGENT_SA: HARNESS } as HarnessEnv;
   const base = { runRef: 'r1', plan: { steps: [] }, steps: [], receipts: [] } as const;
 
-  it('authority-required becomes the requirement to sign — delegator = the parent the step names, never the asker', () => {
-    const reply = askReplyFor(env2, {
+  it('authority-required becomes the requirement to sign — delegator = the parent the step names, never the asker', async () => {
+    const reply = await askReplyFor(env2, {
       intent, addressee: WORKSPACE as `0x${string}`,
       result: { ...base, outcome: 'authority-required', required: { stepRef: 's0', toolId: 'organization.team.create', capability: { id: 'organization.team.create', action: 'create', resource: WORKSPACE }, risk: 'medium', args: {} } } as never,
     });
@@ -178,21 +178,55 @@ describe('the ask reply (what the surface is told)', () => {
     expect(reply.kind === 'authority_required' ? reply.requirement : null).toMatchObject({ actions: ['organization.team.create'], locations: [WORKSPACE], intentDigest: intentDigest(intent) });
   });
 
-  it('a completed run that only READ is an answer; one that acted is done', () => {
-    const readOnly = askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'completed', result: 'four teams', receipts: [{ status: 'executed', risk: 'informational' }] } as never });
+  it('a completed run that only READ is an answer; one that acted is done', async () => {
+    const readOnly = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'completed', result: 'four teams', receipts: [{ status: 'executed', risk: 'informational' }] } as never });
     expect(readOnly).toMatchObject({ kind: 'answer', text: 'four teams' });
-    const acted = askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'completed', result: { agent: CHILD }, receipts: [{ status: 'executed', risk: 'medium' }] } as never });
+    const acted = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'completed', result: { agent: CHILD }, receipts: [{ status: 'executed', risk: 'medium' }] } as never });
     expect(acted.kind).toBe('done');
   });
 
-  it('a denial is refused, and says so — never dressed up as a request for authority', () => {
-    const reply = askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'denied', error: 'intent-mismatch: …' } as never });
+  it('a denial is refused, and says so — never dressed up as a request for authority', async () => {
+    const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'denied', error: 'intent-mismatch: …' } as never });
     expect(reply).toMatchObject({ kind: 'refused', outcome: 'denied' });
   });
 
-  it('a prompt is passed through with its resume token', () => {
+  it('a prompt is passed through with its resume token', async () => {
     const prompt = { kind: 'data', stepRef: 's0', toolId: 'organization.team.create', prompt: 'What should the team be called?', fields: [] } as const;
-    const reply = askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'suspended', resumeToken: 's0', prompt } as never });
+    const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'suspended', resumeToken: 's0', prompt } as never });
     expect(reply).toMatchObject({ kind: 'prompt', resumeToken: 's0', prompt });
+  });
+});
+
+describe('composing the answer (spec 350 §3.7)', () => {
+  const env2 = { ...env, HARNESS_AGENT_SA: HARNESS } as HarnessEnv;
+  const base = { runRef: 'r1', plan: { steps: [] }, steps: [], receipts: [] } as const;
+  const readRun = (steps: unknown[]) => ({ ...base, outcome: 'completed', result: { agents: [{ name: 'outreach.team' }] }, steps, receipts: [{ status: 'executed', risk: 'informational' }] }) as never;
+  const observations = [
+    { step: { toolId: 'find_agents', args: { terms: 'outreach' } }, ok: true, result: { agents: [{ name: 'outreach.team' }] } },
+    { step: { toolId: 'find_agents', args: { terms: 'x' } }, ok: false, error: 'boom' },
+  ];
+
+  it('renders a question\'s result in words, from the observations', async () => {
+    const compose = vi.fn(async () => 'There is one: outreach.team.');
+    const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations), composer: { compose } });
+    expect(reply).toMatchObject({ kind: 'answer', text: 'There is one: outreach.team.' });
+    expect(compose).toHaveBeenCalledWith({ intent, observations });
+  });
+
+  it('never paraphrases an ACTION — what happened is stated from the receipt', async () => {
+    const compose = vi.fn(async () => 'I made you a team!');
+    const reply = await askReplyFor(env2, {
+      intent, addressee: WORKSPACE as `0x${string}`, composer: { compose },
+      result: { ...base, outcome: 'completed', result: { agent: CHILD, name: 'xyz.team' }, receipts: [{ status: 'executed', risk: 'medium' }] } as never,
+    });
+    expect(reply.kind).toBe('done');
+    expect(compose).not.toHaveBeenCalled();
+  });
+
+  it('degrades to the raw result when there is no composer, or it fails — the evidence is identical either way', async () => {
+    const none = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations) });
+    expect(none).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
+    const broken = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations), composer: { compose: async () => { throw new Error('down'); } } });
+    expect(broken).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
   });
 });
