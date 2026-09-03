@@ -66,8 +66,10 @@ const faithImpact: WhiteLabelConfig = {
       // be re-minted. NOT the shared `delegate` above, which a dozen entries name.
       //
       // A DIFFERENT SA PER IDENTITY UNIVERSE, same as field-app below: the faithnet deploy sets
-      // NEXT_PUBLIC_SKILLS_SERVICE_SA to `skills-agent.svc`, minted on 34348
-      // (0x6723CBCE5c1913A54F8a8a10A105130206dcaAe0); the default stays base-sepolia's. Without the
+      // NEXT_PUBLIC_SKILLS_SERVICE_SA to `skills-service.svc` on 34348
+      // (0x6F976a629b170b705E21c39D3489892FBbe9a86b) — minted and custodied SOLELY by its owner's
+      // SIWE account, which is why it replaced the demo-persona-custodied `skills-agent.svc`
+      // (0x6723CBCE…aAe0) this repo had seeded. The default stays base-sepolia's. Without the
       // override, a faithnet org's grant names an identity that has no code on faithchain and
       // skills-a2a can present no wire for it — a refusal at the far side with no local symptom.
       operational_delegate:
