@@ -22,6 +22,7 @@ import { ask, mintMandate, canGrantAs, describeRequirement, CAPABILITY_WORDS, ty
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { connectedCredential } from './credential';
+import { createdAgentOf, recordCreatedAgent } from '../../../home/ask-record';
 
 type Entry =
   | { role: 'you'; text: string }
@@ -87,6 +88,18 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
       }
       setThread((t) => [...t, { role: 'agent', reply }]);
       setPending(reply.kind === 'prompt' || reply.kind === 'authority_required' ? { reply, state: { ...state, runRef: reply.runRef } } : null);
+      // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
+      // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
+      // named, and invisible in its owner's own home.
+      if (reply.kind === 'done' && session) {
+        const created = createdAgentOf(reply.result);
+        if (created && !created.alreadyCreated) {
+          const saved = await recordCreatedAgent(created, session.token);
+          setThread((t) => [...t, saved.ok
+            ? { role: 'agent', text: `${created.name} is in your agents now.` }
+            : { role: 'agent', text: `${created.name} was created, but saving it to your private tree failed (${saved.error}) — it is on chain and yours; the list may not show it until that write succeeds.` }]);
+        }
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
