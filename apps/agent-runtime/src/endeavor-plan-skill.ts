@@ -164,7 +164,7 @@ export async function draftEndeavorPlan(
       { planner: effective, tools: DRAFT_TOOLS, invoke },
     );
   } catch {
-    result = { outcome: 'failed', plan: { steps: [] }, steps: [] };
+    result = { outcome: 'failed', plan: { steps: [] }, steps: [], receipts: [], runRef: 'no-run' };
   }
 
   // Fail-safe: an LLM turn that produced nothing usable still yields the deterministic skeleton so

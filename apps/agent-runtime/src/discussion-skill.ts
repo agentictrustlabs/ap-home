@@ -351,7 +351,12 @@ export async function handleDiscussionRespond(
     let outcome: { outcome: 'completed' | 'failed'; error?: string };
     try {
       last = await runTurn(true);
-      outcome = { outcome: last.result.outcome, ...(last.result.error ? { error: last.result.error } : {}) };
+      // Spec 350 widened RunOutcome with `denied` / `suspended`. A discussion turn's tools are all
+      // informational (no capability ⇒ no mandate ⇒ neither can occur), so folding them to `failed` here
+      // is a type statement, not a runtime path — and if a capability tool is ever added to this turn,
+      // a denial degrades honestly rather than posting as though it completed.
+      const o = last.result.outcome;
+      outcome = { outcome: o === 'completed' ? 'completed' : 'failed', ...(last.result.error ? { error: last.result.error } : o !== 'completed' ? { error: `run ${o}` } : {}) };
     } catch (e) {
       // A throw OUTSIDE the loop's observation (planner/setup) — same invariant, same degrade.
       outcome = { outcome: 'failed', error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
@@ -382,7 +387,7 @@ export async function handleDiscussionRespond(
     // (posting itself broken), not routing failures.
     last = await runTurn(false);
   }
-  const finalResult: RunResult = last?.result ?? { outcome: 'failed', plan: { steps: [] }, steps: [], error: 'no turn ran' };
+  const finalResult: RunResult = last?.result ?? { outcome: 'failed', plan: { steps: [] }, steps: [], receipts: [], runRef: 'no-run', error: 'no turn ran' };
   return {
     result: finalResult,
     plannerKind: (last?.kind ?? (llmConfigured ? 'anthropic' : 'rule-based')),

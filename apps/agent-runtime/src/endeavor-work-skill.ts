@@ -313,7 +313,7 @@ async function runSingleToolTurn(
         { planner, tools: opts.tools, invoke },
       );
     } catch (e) {
-      result = { outcome: 'failed', plan: { steps: [] }, steps: [], error: e instanceof Error ? e.message : String(e) };
+      result = { outcome: 'failed', plan: { steps: [] }, steps: [], receipts: [], runRef: 'no-run', error: e instanceof Error ? e.message : String(e) };
     }
     if (captured.length > 0) return { output: captured, plannerKind: kind, fellBack: false };
     // A "successful" run with nothing captured = the model emitted an empty/truncated tool input;
