@@ -183,12 +183,22 @@ export function buildNav(
  *  it does not steward, so it has none. */
 export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): SettingsGroup[] {
   if (active.kind === 'service') return [];
+  // ONE destination for the agents themselves, then the surfaces that are ABOUT something other than a
+  // class of agent. The four items here used to be four different kinds of thing wearing one heading:
+  // a class (Organizations), a role (Treasuries), a relationship (Alliances) — and "Workspaces", which
+  // listed an APP's membership organizations and no agent at all, under the same word the substrate uses
+  // for a coordinator SA (`.workspace`, spec 344/346). A person reading the list could not tell which
+  // axis it was cut on, and the answer was: all of them at once.
+  //
+  // `Agents` holds every agent you steward, grouped by CLASS (ADR-0046). Treasuries stays because a
+  // treasury surface is about money — balances and funding — not about listing a role. Alliances stays
+  // because it is about a relationship between organizations. App workspaces moved out of stewardship
+  // entirely: you join them, you do not steward them.
   const items: NavItem[] = active.kind === 'person'
     ? [
-        { id: 'organizations', label: 'Organizations', href: '/organizations', Icon: BuildingIcon, status: 'live' },
+        { id: 'agents', label: 'Agents', href: '/agents', Icon: BuildingIcon, status: 'live' },
         { id: 'treasuries', label: 'Treasuries', href: '/treasuries', Icon: LandmarkIcon, status: 'live' },
         { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
-        { id: 'workspaces', label: 'Workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' },
       ]
     : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
   return [{ heading: 'You steward', items }];
@@ -306,6 +316,9 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   if (wl.services.connectedApps) {
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });
+    // The membership organizations an app supports for invite / register. NOT `.workspace` agents, and
+    // not something you steward — it sits with the apps it belongs to, under the name it actually means.
+    items.push({ id: 'workspaces', label: 'App workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' });
     items.push({ id: 'developer', label: 'Your apps', href: '/developer', Icon: CodeIcon, status: 'live' });
   }
   items.push({ id: 'network', label: 'Network', href: '/network', Icon: GlobeIcon, status: 'live' });

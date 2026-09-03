@@ -457,8 +457,11 @@ export function OrganizationsManager({
   const claimable = (k: AgentKind) => !!typedTldForKind(k);
   const showOrgs = filter !== 'service';
   const showServices = filter !== 'org';
+  // The filter NARROWS a page that already shows its own structure — it is not the structure. With
+  // everything shown, the two classes read as headed sections; picking one hides the other rather than
+  // rearranging the page under you.
   const Filter = () => (
-    <div style={{ display: 'flex', gap: '.35rem', marginBottom: '.8rem' }} role="group" aria-label="Filter what you steward">
+    <div style={{ display: 'flex', gap: '.35rem', marginBottom: '.8rem' }} role="group" aria-label="Filter the agents you steward">
       {([['all', `All (${orgs.length + services.length})`], ['org', `Organizations (${orgs.length})`], ['service', `Services (${services.length})`]] as const).map(([v, l]) => (
         <button
           key={v} type="button" onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`}
@@ -466,6 +469,9 @@ export function OrganizationsManager({
         >{l}</button>
       ))}
     </div>
+  );
+  const Heading = ({ children }: { children: React.ReactNode }) => (
+    <h3 className="subhead" style={{ gridColumn: '1 / -1', margin: '.2rem 0 -.2rem' }}>{children}</h3>
   );
 
   return (
@@ -476,6 +482,7 @@ export function OrganizationsManager({
         <>
         <Filter />
         <div className="manage-grid">
+          {showOrgs && orgs.length > 0 && <Heading>Organizations</Heading>}
           {showOrgs && orgs.map((org) => {
             const t = treasuryFor(org.agent);
             const inactive = orgStatusOf(org) === 'inactive';
@@ -516,6 +523,7 @@ export function OrganizationsManager({
           {/* Every service-class agent you steward — a workspace, a registry, a plain `.svc` service. They
               were invisible here: this page listed org-class agents only, so a service you had chartered
               existed, resolved, and appeared nowhere you could act on it. */}
+          {showServices && services.length > 0 && <Heading>Services</Heading>}
           {showServices && services.map((svc) => (
             <div className="manage-card" key={svc.agent}>
               <div className="manage-card-head">
@@ -530,6 +538,7 @@ export function OrganizationsManager({
           ))}
 
           {/* Charter something new — the kind picker offers every typed root THIS chain has provisioned. */}
+          <Heading>Charter a new agent</Heading>
           <div className="manage-card">
             <div className="manage-card-head">
               <span className="manage-card-icon"><BuildingIcon size={17} /></span>
@@ -581,7 +590,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
 
           <h3 className="subhead" style={{ marginTop: '1.5rem' }}>Organization treasuries</h3>
           {orgTreasuries.length === 0 ? (
-            <p className="manage-card-blurb">No org treasuries yet — create one from an organization in <a href="/organizations">Organizations</a>.</p>
+            <p className="manage-card-blurb">No org treasuries yet — create one from an organization in <a href="/agents">Agents</a>.</p>
           ) : (
             <div className="manage-grid">
               {orgTreasuries.map((t) => (

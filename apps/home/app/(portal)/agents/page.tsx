@@ -1,8 +1,13 @@
 'use client';
-// Organizations — the dedicated portal view of the orgs you control (spec 246 / ADR-0025 + spec 275).
-// Create an organization and add its treasury here (in-home, gasless, custodied by you); selecting an
-// org opens its detail view, which reads the org's vault (stewardship) + your member record (membership)
-// live over the two person↔org delegations.
+// Agents — every agent you steward, grouped by CLASS (ADR-0046: an organization, a team, a circle and a
+// church are all org-class; a workspace, a registry, a treasury and a plain `.svc` service are all
+// service-class). Charter a new one of any kind whose typed root this chain has provisioned, and add an
+// organization's treasury here — in-home, gasless, custodied by you. Selecting an organization opens its
+// detail view, which reads the org's vault (stewardship) + your member record (membership) live over the
+// two person↔org delegations (spec 246 / ADR-0025 + spec 275).
+//
+// This page was `/organizations`, and the name stopped being true the moment the Home could charter a
+// service: the header said Organizations while the list held a `.svc`. The route moved with the meaning.
 import { useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { whitelabel } from '../../../src/whitelabel/config';
@@ -30,11 +35,11 @@ export default function OrganizationsPage() {
   const a = whitelabel.manageableAgents.find((x) => x.id === 'organization');
   return (
     <SectionShell
-      title={selected ? selected.orgName || 'Organization' : a?.label ?? 'Organizations'}
+      title={selected ? selected.orgName || 'Organization' : 'Agents'}
       description={
         selected
           ? 'Everything your home knows about this organization, with live reads over your delegations.'
-          : `${a?.blurb ?? 'Organizations you govern'} — their own Smart Agents, custodied by you. Create one and add its treasury, all from your home.`
+          : 'Every agent you steward — organizations and teams, workspaces and services. Their own Smart Agents, custodied by you, named by the suffix that says what they are.'
       }
     >
       {selected ? (

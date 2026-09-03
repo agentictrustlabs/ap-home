@@ -20,7 +20,7 @@ export function WorkspaceAction() {
 
   if (active.kind === 'person') {
     return (
-      <button type="button" style={STYLE} onClick={() => router.push('/organizations')} title="Create a new organization">
+      <button type="button" style={STYLE} onClick={() => router.push('/agents')} title="Create a new organization">
         ＋ Add organization
       </button>
     );

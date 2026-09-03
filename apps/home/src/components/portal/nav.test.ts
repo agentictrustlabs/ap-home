@@ -13,7 +13,7 @@
  * the fix is to delete the exception, not to loosen the test.
  */
 import { describe, it, expect } from 'vitest';
-import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, type NavGroup } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, type NavGroup } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const ORG = '0xe26157068af46629691e2ab19726bf61476e6b6c';
@@ -271,5 +271,34 @@ describe('membership is not widened by any of this (spec 318)', () => {
     expect(l).not.toContain('Stewardship');
     expect(l).not.toContain('Records');
     expect(buildSettingsPane(ORG_SCOPE, 'member')).toEqual([]);
+  });
+});
+
+// spec 348 / ADR-0046 — the "You steward" pane lists what you steward, cut on ONE axis. It used to be
+// four different kinds of thing under one heading: a class (Organizations), a role (Treasuries), a
+// relationship (Alliances), and "Workspaces" — which listed an APP's membership organizations and no
+// agent at all, under the same word the substrate uses for a coordinator SA (spec 344/346).
+describe('the "You steward" pane', () => {
+  const items = stewardshipPane({ kind: 'person' })[0]!.items.map((i) => i.id);
+
+  it('has ONE destination for the agents themselves, whatever class they are', () => {
+    expect(items).toContain('agents');
+    expect(items).not.toContain('organizations'); // a page called Organizations cannot hold a .svc
+  });
+
+  it('does not list app workspaces — you join those, you do not steward them', () => {
+    expect(items).not.toContain('workspaces');
+    // Moved, not dropped: it sits with the apps it belongs to, under the name it actually means.
+    const menu = buildUserMenu(whitelabel).map((i) => i.id);
+    expect(menu).toContain('workspaces');
+    expect(menu.indexOf('workspaces')).toBeGreaterThan(menu.indexOf('apps'));
+  });
+
+  it('keeps the surfaces that are about something other than a class of agent', () => {
+    expect(items).toEqual(expect.arrayContaining(['treasuries', 'alliances']));
+  });
+
+  it('an org workspace still gets its own treasury surface', () => {
+    expect(stewardshipPane({ kind: 'org', org: '0x1' })[0]!.items.map((i) => i.id)).toEqual(['org-treasury']);
   });
 });

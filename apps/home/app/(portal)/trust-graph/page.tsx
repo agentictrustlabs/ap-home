@@ -48,7 +48,7 @@ export default function TrustGraphPage() {
             Your trust graph grows with <strong>authority between smart agents</strong> — create an
             organization to draw your first stewardship edge.
           </p>
-          <Link href="/organizations" className="btn-primary" style={{ width: 'auto', display: 'inline-block' }}>Create an organization</Link>
+          <Link href="/agents" className="btn-primary" style={{ width: 'auto', display: 'inline-block' }}>Create an organization</Link>
         </div>
       </SectionShell>
     );

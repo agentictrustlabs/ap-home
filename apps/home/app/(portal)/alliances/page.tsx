@@ -116,7 +116,7 @@ export default function AlliancesPage() {
               <h2>No alliances yet</h2>
               <p className="manage-card-blurb">
                 None of the organizations you steward is an alliance (an org created with an
-                &lsquo;alliance&rsquo; purpose). Create one from <Link href="/organizations">Organizations</Link>{' '}
+                &lsquo;alliance&rsquo; purpose). Create one from <Link href="/agents">Agents</Link>{' '}
                 or from a relying app, then manage its member roster here.
               </p>
             </div>

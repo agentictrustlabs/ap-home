@@ -164,7 +164,7 @@ export function AgentSwitcher() {
 
         <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
         <button
-          onClick={() => go('/organizations')}
+          onClick={() => go('/agents')}
           style={{
             display: 'block', width: '100%', textAlign: 'left', padding: '.45rem .6rem', minHeight: 0,
             background: 'transparent', border: 'none', color: 'var(--color-amber-700)', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',

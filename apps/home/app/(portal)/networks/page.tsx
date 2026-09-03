@@ -142,7 +142,7 @@ export default function NetworksPage() {
         <h2>Publish your organization</h2>
         {orgs.length === 0 ? (
           <p className="manage-card-blurb">
-            You don&apos;t steward a named organization yet. <Link href="/organizations">Create one</Link> — every
+            You don&apos;t steward a named organization yet. <Link href="/agents">Create one</Link> — every
             org is named (that&apos;s what makes it reachable), then publish it here.
           </p>
         ) : (

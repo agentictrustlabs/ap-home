@@ -14,7 +14,7 @@ import { useAvatar } from '../../src/components/portal/chat/use-avatar';
 // Which dedicated page each stewarded area links to (live areas only; spec 275), plus the icon
 // that gives the manage-card its identity at a glance (Discord/Telegram-style iconography).
 const STEWARD_HREF: Record<string, string | undefined> = {
-  organization: '/organizations',
+  organization: '/agents',
   treasury: '/treasuries',
   'data-source': '/data-sources',
 };
