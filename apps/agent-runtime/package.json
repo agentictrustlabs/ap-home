@@ -28,6 +28,7 @@
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
     "@agenticprimitives/fabric": "workspace:*",
+    "@agenticprimitives/harness": "workspace:*",
     "@agenticprimitives/home": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",

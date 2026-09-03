@@ -54,6 +54,7 @@ import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
 import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
 import {
   verifyCustodySession,
+  verifyHomeSession,
   deriveSubjectCustodian,
   timingSafeEqual,
   caip10,
@@ -98,6 +99,7 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
+import { runUnderMandate, type HarnessDeps, type HarnessEnv, type HarnessRunInput } from './harness-run.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -469,6 +471,11 @@ export interface Env {
   // wrong delegate). Inert until provisioned (unset ⇒ no pin, the pre-Phase-B behavior). These are also the
   // SAs the DO will client-mint AS once the DEL-001 service-session infrastructure lands (kills server-mint).
   INTERACTIONS_SERVICE_SA?: string;
+  /** Spec 350 — the SA this agent acts as under a mandate; per chain, custodied by the interactions-session key. */
+  HARNESS_AGENT_SA?: string;
+  DIGEST_BINDING_ENFORCER?: string;
+  PAYMENT_ENFORCER?: string;
+  MOCK_USDC?: string;
   /** Gateway adoption (ADR-0055 amendment): `'on'` runs the shadow comparison for ops the ledger has at
    *  rung 2. Default OFF — shadowing constructs a co-resident gateway (and its tables) in every polling
    *  principal's DO, which is a decision a deployment makes, not one a commit makes for it. */
@@ -1159,6 +1166,62 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
   if (v === '' || v === 'off') return 'off';
   return null;
 }
+
+// ─── Spec 350 W2 — run an ask UNDER A MANDATE (the authority-aware harness) ───────────────────────────
+//
+// POST /harness/run { session, intent, presented, approvals? }
+//
+// The caller is a Home session (any principal); the AUTHORITY is the presented wire, a mandate whose
+// delegator is the PAYER (an org or its treasury) and whose delegate is this agent's service SA. Nothing
+// about the session decides anything: the verifier checks the wire per step, the ladder demands a second
+// party for a payment, the approvals must be signed by that party over THIS step's authority digest, and
+// the payment redeems the mandate on chain from the service SA. The receipts come back with the result
+// and go to the audit sink. Suspend/resume (durable approvals) is W3; here an undischargeable obligation
+// is a refusal, because there is nobody to wait for.
+app.post('/harness/run', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; runRef?: string;
+  } | null;
+  if (!body?.session || !body.intent?.goal || !body.presented?.delegator) return c.json({ ok: false, error: 'session, intent.goal, presented (a delegation wire) required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
+
+  const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+  const audit = buildAuditSink(c.env);
+  const deps: HarnessDeps = {
+    readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
+    audit,
+    executeAsServiceSa: async (sender, callData) => {
+      // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
+      // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.
+      let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+      if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+        const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', audit);
+        verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+      }
+      const { callGasLimit } = await sizeCallGas(c.env, sender, callData);
+      const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({ sender, callData, paymaster: c.env.PAYMASTER as Address, verifyingPaymaster, ...(callGasLimit ? { callGasLimit } : {}) });
+      const signer = await interactionsSessionAccount(c.env);
+      const signature = (await signer.signMessage({ message: { raw: userOpHash } })) as Hex;
+      const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', audit);
+      const { receipt } = await accountClient(c.env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
+      const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender });
+      // An inner revert is a FAILED step, thrown so the loop records it — never a silent success with a tx hash.
+      if (!inner.ok) throw new Error(`redemption reverted on chain: ${inner.revertReason ?? 'inner userOp reverted'} (tx ${receipt.transactionHash})`);
+      return { txHash: receipt.transactionHash as Hex };
+    },
+  };
+  try {
+    const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
+      intent: body.intent, presented: body.presented, ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
+      mcpInvoke: async () => { throw new Error('informational tools are not wired on /harness/run yet — use the orchestrate skill'); },
+    });
+    return c.json({ ok: true, caller: who.sa, plannerKind, outcome: result.outcome, runRef: result.runRef, plan: result.plan, result: result.result ?? null, error: result.error ?? null, receipts: result.receipts });
+  } catch (e) {
+    return c.json({ ok: false, error: 'harness_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
 
 app.post('/agent-cards/:op', async (c) => {
   const op = c.req.param('op');

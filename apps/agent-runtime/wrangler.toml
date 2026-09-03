@@ -446,6 +446,14 @@ BROKER_ISS = "https://www.faithnet.me"
 BROKER_JWKS_URL = "https://www.faithnet.me/jwks"
 DEMO_SSO_AUD = "demo-sso"
 INTERACTIONS_SERVICE_SA = "0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a"
+# Spec 350 W2 — the harness's on-chain substrate. The digest-binding enforcer turns a delegation into a
+# MANDATE; the payment enforcer bounds a treasury payment on chain; MockUSDC is the demo asset.
+DIGEST_BINDING_ENFORCER = "0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1"
+PAYMENT_ENFORCER = "0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE"
+MOCK_USDC = "0xdaE09066A2cc32f6203605619137dcF01A9B49Ae"
+# The SA THIS agent acts as when it executes under a mandate — custodied by the interactions-session key.
+# Separate from INTERACTIONS_SERVICE_SA (which existing grants name; changing that would stale them).
+HARNESS_AGENT_SA = "0xD34c3Fbc89706dd57d426546DCEBD3bA926eDE35"
 
 [env.faithnet.durable_objects]
 bindings = [
