@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, describeRequirement, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
+import { ask, mintMandate, canGrantAs, describeRequirement, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { connectedCredential } from './credential';
@@ -37,10 +37,28 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState<{ reply: AskReply; state: AskTurnState } | null>(null);
+  // Can this session AUTHORIZE anything here, or only ask? An agent can sit in your home's tree while its
+  // custodian is someone else's credential — say so on arrival rather than at the end of a ceremony.
+  const [canAuthorize, setCanAuthorize] = useState<boolean | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, pending]);
+
+  useEffect(() => {
+    let live = true;
+    if (!session || !agentAddress) return;
+    void (async () => {
+      try {
+        const cred = await connectedCredential(resolveVia(profile?.credential, session.via), agentAddress as Address, session.token);
+        const ok = await canGrantAs(addressee, cred);
+        if (live) setCanAuthorize(ok);
+      } catch {
+        if (live) setCanAuthorize(null); // unknown is not "no" — the grant-time check is the one that decides
+      }
+    })();
+    return () => { live = false; };
+  }, [addressee, agentAddress, session?.token, session?.via, profile?.credential]);
 
   const via = resolveVia(profile?.credential, session?.via);
   const signAs = async (sa: Address) => signHashFor(via, sa, { token: session!.token });
@@ -91,6 +109,15 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
     setBusy('Granting authority…');
     setErr(null);
     try {
+      // Never ask for a signature we already know the verifier will reject. Only the credential that
+      // CUSTODIES the delegator can grant as it — being in your home's tree is not custody.
+      const credential = await connectedCredential(via, agentAddress as Address, session!.token);
+      if (!(await canGrantAs(reply.delegator, credential))) {
+        setPending(null);
+        setBusy(null);
+        setThread((t) => [...t, { role: 'agent', text: `You can’t grant this: ${short(reply.delegator)} is custodied by a different credential than the one you are signed in with. Whoever custodies it has to grant this authority.` }]);
+        return;
+      }
       const wire = await mintMandate(reply, await signAs(reply.delegator));
       setThread((t) => [...t, { role: 'agent', text: `Authority granted: ${CAPABILITY_WORDS[reply.capability] ?? reply.capability}, for this request.` }]);
       setPending(null);
@@ -175,6 +202,19 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
   );
 }
 
+/** The verifier's codes are precise and unreadable. Say what they MEAN — and keep the original after it,
+ *  because a person who reports a problem should be able to quote the thing the logs contain. */
+function plainReason(error: string): string {
+  const say = (m: string) => `${m} (${error})`;
+  if (/not-live: delegation signature did not verify/.test(error)) return say('The credential that signed this authority does not custody that agent');
+  if (/not-live: .*revoked/.test(error)) return say('That authority has been revoked on chain');
+  if (/intent-mismatch/.test(error)) return say('That authority was granted for a different request');
+  if (/expired|validUntil|not-live: outside/.test(error)) return say('That authority has expired — ask again to grant a fresh one');
+  if (/action-not-granted/.test(error)) return say('That authority does not cover this action');
+  if (/no-handler/.test(error)) return say('Nothing here can bound that kind of authority, so it was refused');
+  return error;
+}
+
 /** What the agent said, in the shape it said it. */
 function ReplyView({ reply }: { reply: AskReply }) {
   if (reply.kind === 'answer') return <span>{reply.text}</span>;
@@ -191,7 +231,7 @@ function ReplyView({ reply }: { reply: AskReply }) {
     return (
       <div>
         <div>{reply.outcome === 'denied' ? 'Refused — the authority does not cover this.' : 'That did not go through.'}</div>
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{reply.error}</div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{plainReason(reply.error)}</div>
       </div>
     );
   }

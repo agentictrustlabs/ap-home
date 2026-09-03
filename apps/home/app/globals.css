@@ -981,10 +981,11 @@
       }
       /* ── The Ask flyout (spec 350 §3.5) — one panel, addressed to the realm you are standing in ── */
       .portal-ask-btn {
-        display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
-        border-radius: 999px; border: 1px solid var(--color-border-strong); background: var(--color-surface);
-        color: var(--color-text-body); cursor: pointer;
+        display: inline-flex; align-items: center; gap: .35rem; min-height: 36px; padding: .34rem .7rem;
+        border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface);
+        color: var(--color-text-body); cursor: pointer; font-size: .82rem; font-weight: 600; white-space: nowrap;
       }
+      .portal-ask-btn svg { flex: none; }
       .portal-ask-btn:hover { background: var(--color-surface-sunken); }
       .portal-ask-btn.on { background: var(--color-amber-50, #fffbeb); border-color: var(--color-amber-200, #fde68a); color: var(--color-amber-800, #92400e); }
       .ask-flyout {

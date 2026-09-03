@@ -26,7 +26,10 @@ export function PortalTopbar({ brandName, askOpen, onToggleAsk }: { brandName: s
             type="button" className={`portal-ask-btn${askOpen ? ' on' : ''}`} data-testid="ask-toggle"
             aria-label="Ask this agent" aria-pressed={!!askOpen} title="Ask this agent" onClick={onToggleAsk}
           >
-            <ChatIcon size={17} />
+            {/* LABELLED, like the workspace action beside it. A bare glyph in a circle asks the person to
+                guess, and this control is the one place they can talk to the agent — it says what it is. */}
+            <ChatIcon size={15} />
+            <span>Ask</span>
           </button>
         )}
         <IdentityChip />

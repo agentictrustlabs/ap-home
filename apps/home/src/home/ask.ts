@@ -17,15 +17,17 @@
 // a team's workspace, an organization's person. They are usually the same agent and never assumed to be.
 // The mandate is signed by the credential that custodies the DELEGATOR, which for everything a person
 // steward does is their own credential (an SA validates its custodians' signatures, ERC-1271).
+import { createPublicClient, http } from 'viem';
 import {
   buildDigestBindingCaveat, capabilityHandler, hashDelegation, paymentHandler, ROOT_AUTHORITY,
   type Caveat, type Delegation, type MandateRequirementV1,
 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
-import { CHAIN_ID, CONTRACTS } from '../lib/chain';
+import { CHAIN, CHAIN_ID, CONTRACTS } from '../lib/chain';
 import { toWire, type DelegationWire } from '../lib/delegation';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { SignHash } from './resolution';
+import type { AskCredential } from '../components/portal/ask/credential';
 
 /** Is the Ask available on the deployment this build targets? It needs the harness, and the harness needs
  *  `DigestBindingEnforcer` — the caveat that binds a mandate to ONE request. Absent (Base Sepolia today)
@@ -99,6 +101,29 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
 }
 
 const PAYMENT_TYPE = 'urn:ap:rar:treasury.payment.execute';
+
+const CUSTODY_ABI = [
+  { type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'hasPasskey', stateMutability: 'view', inputs: [{ name: 'credentialIdDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+] as const;
+
+/**
+ * CAN this credential grant authority as `delegator`? Asked BEFORE the person is put through a signing
+ * ceremony, because the answer is knowable and the alternative is cruel: they sign, the verifier reads the
+ * signature against an SA their key does not custody, and the run comes back "not-live: delegation
+ * signature did not verify" — true, unhelpful, and after the fact.
+ *
+ * An agent can appear in your home's tree without your credential custodying it — a workspace someone else
+ * stewards, seeded or handed over. Being in the tree is not custody, and only custody can grant.
+ */
+export async function canGrantAs(delegator: Address, credential: AskCredential): Promise<boolean> {
+  const pub = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
+  const code = await pub.getBytecode({ address: delegator }).catch(() => undefined);
+  if (!code || code === '0x') return false; // an undeployed agent custodies nothing — fail closed
+  return credential.kind === 'eoa'
+    ? (await pub.readContract({ address: delegator, abi: CUSTODY_ABI, functionName: 'isCustodian', args: [credential.address] }).catch(() => false)) === true
+    : (await pub.readContract({ address: delegator, abi: CUSTODY_ABI, functionName: 'hasPasskey', args: [credential.credentialIdDigest] }).catch(() => false)) === true;
+}
 
 /**
  * Mint the mandate the agent said it would need, and sign it as the DELEGATOR.
