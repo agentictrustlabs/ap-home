@@ -100,7 +100,7 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { QUERY_PUBLIC_GRAPH_TOOL, runPublicSparql } from './public-graph.js';
+import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1218,14 +1218,13 @@ app.post('/harness/ask', async (c) => {
     const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, harnessDeps(c.env, audit), {
       intent, presented: body.presented ?? null, person: who.sa as Address,
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
-      // The informational half of an Ask: the PUBLIC graph, read-only (ADR-0040 — public, on-chain-derivable
-      // facts only). A question is answered from evidence or not at all; the private vault stays behind its
-      // own delegation and is not reachable from this surface.
-      mcpInvoke: async (toolId, args) => {
-        if (toolId !== QUERY_PUBLIC_GRAPH_TOOL.id) throw new Error(`${toolId} is not available on the Ask surface`);
-        const r = await runPublicSparql(c.env as never, String((args as { query?: string }).query ?? ''));
-        if (!r.ok) throw new Error(r.error);
-        return r;
+      // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
+      // (ADR-0040 — public, on-chain-derivable facts only, and the indexer is the KB's only writer). A
+      // question is answered from that evidence or not at all; the private vault stays behind its own
+      // delegation and is not reachable from this surface.
+      mcpInvoke: async (toolId, args, ctx) => {
+        if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
+        return askDiscoveryInvoker(c.env as never)(toolId, args, ctx);
       },
     });
     return c.json({ ok: true, addressee, reply: askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee }) });

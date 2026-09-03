@@ -44,8 +44,11 @@ proxies selected MCP requests during local demos.
   re-derives + checks the signed op, submits. Custody is ALWAYS the connected user. `teamGenesisDeps` in
   `index.ts` supplies the substrate. **`POST /harness/ask {session, addressee, message, presented?, supplied?}`**
   is the conversational entry (spec 350 §3.6/§3.7): it returns ONE of `answer` · `authority_required` (the
-  `MandateRequirementV1` the plan needs — 401, never 403) · `prompt` · `done`. Reads go to the PUBLIC graph
-  only (ADR-0040); the private vault is not reachable from this surface. Live checks:
+  `MandateRequirementV1` the plan needs — 401, never 403) · `prompt` · `done`. Reads go to the PUBLIC agent
+  directory through the `DISCOVERY_MCP` service binding (`ask-discovery.ts` — ADR-0040: public, on-chain-derived
+  facts, read-only, no GraphDB credential here, and the indexer stays the KB's only writer); the private vault
+  is not reachable from this surface. **faithnet only** (`demo-discovery-mcp-faithnet`; the production binding
+  is find_members' and projects Base Sepolia). Live checks:
   `scripts/verify-harness-payment.mts`, `-team-create.mts`, `verify-ask-surface.mts`.
 
 ## What this app does not own

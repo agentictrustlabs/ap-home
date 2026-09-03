@@ -13,6 +13,7 @@ import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { AskFlyout } from './ask/AskFlyout';
+import { askIsAvailable } from '../../home/ask';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
 import { useInboxView } from '../../home/use-inbox';
@@ -62,7 +63,10 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const askLabel = active.kind === 'person'
     ? (agentName ? nameLabel(agentName) : 'your agent')
     : (workspaceName ?? (activeAgent?.name ? nameLabel(activeAgent.name) : undefined) ?? 'this workspace');
-  const canAsk = !!session && !!askAddressee;
+  // The Ask needs the harness, and the harness needs the enforcer that binds a mandate to ONE request.
+  // Where that is not deployed (Base Sepolia today), there is no Ask — not a button that fails when
+  // pressed. One signal, read from the deployment this build targets.
+  const canAsk = !!session && !!askAddressee && askIsAvailable();
   return (
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => setAskOpen((v) => !v) } : {})} />

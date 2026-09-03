@@ -27,6 +27,13 @@ import { toWire, type DelegationWire } from '../lib/delegation';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { SignHash } from './resolution';
 
+/** Is the Ask available on the deployment this build targets? It needs the harness, and the harness needs
+ *  `DigestBindingEnforcer` — the caveat that binds a mandate to ONE request. Absent (Base Sepolia today)
+ *  ⇒ there is no Ask surface at all, rather than a button that asks for authority nothing can bound. */
+export function askIsAvailable(): boolean {
+  return !/^0x0{40}$/i.test(CONTRACTS.digestBindingEnforcer ?? '');
+}
+
 /** A field the agent wants filled. `credential` is filled by this surface, never shown to the person. */
 export interface AskField {
   name: string;

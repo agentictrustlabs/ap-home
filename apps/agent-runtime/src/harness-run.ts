@@ -46,7 +46,7 @@ import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner } from './orchestration.js';
-import { QUERY_PUBLIC_GRAPH_TOOL } from './public-graph.js';
+import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 
 
 export interface HarnessEnv {
@@ -452,10 +452,12 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     },
   };
   const { planner, kind } = selectPlanner(env as never);
-  // What the harness may compose: the public knowledge graph (read; ADR-0040) and the action tools, each
-  // declaring the capability and risk that decide whether it needs authority. The private-vault tools are
-  // NOT here — they ride their own delegation on the orchestrate skill, and an Ask is not a way around it.
-  const tools = [QUERY_PUBLIC_GRAPH_TOOL, ...HARNESS_ACTION_TOOLS];
+  // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
+  // and the action tools, each declaring the capability and risk that decide whether it needs authority.
+  // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
+  // Ask is not a way around it. Nothing on this list writes to the knowledge base — the indexer is its
+  // only writer, and a fact the chain does not have is a fact discovery must not be told.
+  const tools = [...ASK_DISCOVERY_TOOLS, ...HARNESS_ACTION_TOOLS];
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),

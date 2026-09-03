@@ -68,3 +68,28 @@ describe('granting the authority an Ask says it needs', () => {
     expect(d.expiresInMinutes).toBeLessThanOrEqual(60);
   });
 });
+
+describe('where the Ask exists at all', () => {
+  it('is available where the enforcer that binds a mandate to one request is deployed', async () => {
+    const { askIsAvailable } = await import('./ask');
+    expect(askIsAvailable()).toBe(true); // the mocked deployment has it (faithchain)
+  });
+
+  it('refuses to mint authority a deployment cannot bound', async () => {
+    vi.resetModules();
+    vi.doMock('../lib/chain', () => ({
+      CHAIN_ID: 84532,
+      CONTRACTS: {
+        delegationManager: '0x710cb1bf08c234df397e0910331e0a29710ef4f7', timestampEnforcer: '0x73a7b878168b7de48677617179a8be894f0dfe96',
+        allowedTargetsEnforcer: '0x2156311097a936de1916a878bf53bfd43c7b5715', allowedMethodsEnforcer: '0xdbb2e47793393c499efb0f3fcbf6ca8669791a41',
+        valueEnforcer: '0x8759c1a6cebf1d5069e9434ef46327bf2ef69975', paymentEnforcer: '0x07fa0ae59fde4b7ce8962d6fe7a1d648ec3dd5ce',
+        digestBindingEnforcer: `0x${'0'.repeat(40)}`,
+      },
+    }));
+    const fresh = await import('./ask');
+    expect(fresh.askIsAvailable()).toBe(false);
+    await expect(fresh.mintMandate(reply, async () => `0x${'cd'.repeat(65)}`)).rejects.toThrow(/not deployed here/);
+    vi.doUnmock('../lib/chain');
+    vi.resetModules();
+  });
+});
