@@ -17,6 +17,7 @@ import { defineChain, type Chain } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import type { Address } from '@agenticprimitives/types';
 import { CONTRACTS as BASE_SEPOLIA } from '@agenticprimitives/contracts/deployments/base-sepolia';
+import { CONTRACTS as FAITHCHAIN } from '@agenticprimitives/contracts/deployments/faithchain';
 
 type DeploymentsDoc = Record<string, string | number | undefined> & { chainId?: number; deploymentEpoch?: string };
 
@@ -72,9 +73,35 @@ export const EXPLORER: string =
   process.env.NEXT_PUBLIC_EXPLORER_ADDRESS_BASE
   ?? (CHAIN_ID === baseSepolia.id ? 'https://sepolia.basescan.org/address/' : '');
 
-const DEPLOYED: DeploymentsDoc = INJECTED ?? (BASE_SEPOLIA as unknown as DeploymentsDoc);
+// The committed deployment for THIS chain, from the contracts package's generated modules — the single
+// source of truth every consumer shares (R7.3). Absent for a machine-local chain (anvil), which is what
+// the injected JSON is for.
+const COMMITTED: Record<number, DeploymentsDoc> = {
+  [baseSepolia.id]: BASE_SEPOLIA as unknown as DeploymentsDoc,
+  34348: FAITHCHAIN as unknown as DeploymentsDoc,
+};
+
 if (INJECTED && INJECTED.chainId != null && Number(INJECTED.chainId) !== CHAIN_ID) {
   throw new Error(`NEXT_PUBLIC_CONTRACTS_JSON is for chain ${INJECTED.chainId}, but CHAIN_ID is ${CHAIN_ID}`);
+}
+
+/**
+ * Committed FIRST, injected OVER it — and the order is the point.
+ *
+ * `NEXT_PUBLIC_CONTRACTS_JSON` is set by hand in the deployment's environment, so it is a COPY of the
+ * committed file taken at some past moment. A copy cannot grow: every contract added to
+ * `deployments-<network>.json` after the paste is simply absent, and an absent address resolves to
+ * `0x0`, which reads to the app as "not deployed on this chain". That is how the Ask surface went missing
+ * on a chain where its enforcer had been live for hours — the address existed in the repo, on chain, and
+ * in the a2a's own vars, and only the Home's pasted copy had never heard of it (2026-09-03).
+ *
+ * Merging the other way round fixes the whole class: a stale paste can no longer DELETE a contract, while
+ * a deliberate per-key override still wins. Both documents are for the same chain — the guard above
+ * refuses anything else — so overlaying them is well-defined.
+ */
+const DEPLOYED: DeploymentsDoc = { ...(COMMITTED[CHAIN_ID] ?? {}), ...(INJECTED ?? {}) };
+if (!COMMITTED[CHAIN_ID] && !INJECTED) {
+  throw new Error(`no contract addresses for chain ${CHAIN_ID}: commit a deployments-<network>.json or set NEXT_PUBLIC_CONTRACTS_JSON`);
 }
 
 /** Spec 311 — authority deployment epoch of the contracts this build targets. */
