@@ -9,6 +9,7 @@
 // permissionless subregistry `<label>.demo.agent`.
 
 import { parseAgentName } from '@agenticprimitives/agent-naming';
+import { PERMISSIONLESS_SUBREGISTRIES } from './chain';
 
 /** Registrable Connect SSO domain — each person's home is a single-label subdomain. */
 export const CONNECT_DOMAIN = process.env.NEXT_PUBLIC_CONNECT_DOMAIN || 'impact-agent.me';
@@ -84,10 +85,19 @@ export function candidateNamesForLabel(label: string): string[] {
   return AGENT_NAME_PARENTS.map((p) => `${l}.${p}`);
 }
 
-/** Typed suffixes the claim flow may offer next to the legacy `AGENT_NAME_PARENT` (spec 346 §4). Empty
- *  until the typed roots are provisioned on this deployment's chain (`AddTypedRoots.s.sol`) and the
- *  `permissionlessSubregistries` map lands in the deployment JSON. */
-export const CLAIMABLE_TLDS: readonly string[] = (process.env.NEXT_PUBLIC_CLAIMABLE_TLDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+/**
+ * Typed suffixes the claim flow may offer next to the legacy `AGENT_NAME_PARENT` (spec 346 §4).
+ *
+ * DERIVED, not declared: a suffix is claimable exactly when this chain has a provisioned root for it —
+ * which is what `permissionlessSubregistries` in the deployment JSON records (`AddTypedRoots.s.sol` writes
+ * it). A hand-set `NEXT_PUBLIC_CLAIMABLE_TLDS` remains as an override for a deployment that wants to offer
+ * fewer, but it can no longer be the reason a provisioned root is invisible: `.svc` existed on chain with a
+ * root at `0xeBe1…74A2` and the Home would not offer it, because a separate list had never been updated
+ * (2026-09-03 — the same drift as the contracts table, one layer up).
+ */
+const DECLARED_TLDS: readonly string[] = (process.env.NEXT_PUBLIC_CLAIMABLE_TLDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const PROVISIONED_TLDS: readonly string[] = Object.keys(PERMISSIONLESS_SUBREGISTRIES).filter((t) => !!PERMISSIONLESS_SUBREGISTRIES[t]);
+export const CLAIMABLE_TLDS: readonly string[] = DECLARED_TLDS.length ? DECLARED_TLDS.filter((t) => PROVISIONED_TLDS.includes(t)) : PROVISIONED_TLDS;
 
 /** Parse a name with the agent-naming grammar, or null when it is not a typed/legacy name at all. */
 function parsedOrNull(name: string) {

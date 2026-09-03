@@ -23,7 +23,7 @@ import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
-import { agentClassOf, orgKindWordOf } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from '../../lib/agent-class';
 
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -38,6 +38,7 @@ const KIND_LABEL: Record<AgentKind, string> = {
   circle: 'Circle',
   church: 'Church',
   'org-treasury': 'Org treasury',
+  service: 'Service agent',
   workspace: 'App workspace',
 };
 
@@ -156,20 +157,28 @@ export function FundForm({
   );
 }
 
-/** Inline "name it and create" form for one agent slot (MAM-D4 exact-name, MAM-D5 one prompt). */
+/** Inline "name it and create" form for one agent slot (MAM-D4 exact-name, MAM-D5 one prompt).
+ *
+ *  `choices` turns the single-slot form into a chartering form: the person picks WHAT to create, and the
+ *  suffix beside the name field is the one that kind will actually claim. The list is filtered to the
+ *  typed roots this chain has provisioned, so it never offers a kind whose name would fail to claim. */
 export function CreateAgentForm({
-  kind, parent, person, token, via, onDone, cta,
+  kind: fixedKind, choices, parent, person, token, via, onDone, cta,
 }: {
-  kind: AgentKind; parent: string; person: string; token: string; via: string; onDone: () => void; cta: string;
+  kind?: AgentKind; choices?: CreatableKind[]; parent: string; person: string; token: string; via: string; onDone: () => void; cta: string;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
+  const [picked, setPicked] = useState<AgentKind | null>(null);
 
-  // Orgs MUST be named (counterparty-facing identity); treasuries may defer.
-  const nameRequired = kind === 'org';
+  const kind: AgentKind = picked ?? fixedKind ?? choices?.[0]?.kind ?? 'org';
+  const choice = choices?.find((c) => c.kind === kind);
+  // Counterparty-facing agents MUST be named — an organization, a team, a service others will address.
+  // Plumbing (a treasury) may defer. The table says which; a single-kind form keeps the old rule.
+  const nameRequired = choice ? choice.nameRequired : kind === 'org';
 
   async function create(named: boolean) {
     const clean = label.trim().toLowerCase();
@@ -232,6 +241,20 @@ export function CreateAgentForm({
   }
   return (
     <div style={{ marginTop: '.55rem', display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
+      {choices && choices.length > 1 && (
+        <label style={{ display: 'flex', gap: '.4rem', alignItems: 'center', fontSize: '.82rem' }}>
+          <span style={{ color: 'var(--c-g500, #64748b)' }}>Create</span>
+          <select
+            value={kind} disabled={busy} onChange={(e) => { setPicked(e.target.value as AgentKind); setErr(''); }}
+            data-testid="create-kind"
+            style={{ flex: 1, padding: '.35rem .5rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }}
+          >
+            {choices.map((c) => (
+              <option key={c.kind} value={c.kind}>{c.label} · .{typedTldForKind(c.kind)?.tld ?? AGENT_NAME_PARENT}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={nameRequired ? 'name (required)' : 'name (optional)'} disabled={busy}
           style={{ flex: 1, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
@@ -257,7 +280,7 @@ export function CreateAgentForm({
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
         Deploys an on-chain Smart Agent custodied by you — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
-        {' '}{nameRequired ? 'Organizations are counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
+        {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
@@ -422,17 +445,38 @@ export function OrganizationsManager({
 }: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void }) {
   // 'roster' (spec 342): this list shows deactivated orgs — it is the route back to activating them.
   const { agents, loaded, version, reload } = useManagedAgents(token, 'roster');
+  const [filter, setFilter] = useState<'all' | 'org' | 'service'>('all');
   if (!token || !person) return null;
+  // ADR-0046 — the CLASS is the trichotomy (a team is an organization, a treasury is a service); the row
+  // says which SUBCLASS it is. The filter groups by class because that is the distinction the substrate
+  // makes; it never invents a third category to hold the things that did not fit.
   const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
+  // A treasury is shown INSIDE the organization it belongs to, so it would read twice here.
+  const services = agents.filter((a) => agentClassOf(a.kind) === 'service' && a.kind !== 'org-treasury');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
+  const claimable = (k: AgentKind) => !!typedTldForKind(k);
+  const showOrgs = filter !== 'service';
+  const showServices = filter !== 'org';
+  const Filter = () => (
+    <div style={{ display: 'flex', gap: '.35rem', marginBottom: '.8rem' }} role="group" aria-label="Filter what you steward">
+      {([['all', `All (${orgs.length + services.length})`], ['org', `Organizations (${orgs.length})`], ['service', `Services (${services.length})`]] as const).map(([v, l]) => (
+        <button
+          key={v} type="button" onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`}
+          className={filter === v ? 'btn-primary' : 'btn-ghost'} style={{ fontSize: '.78rem', padding: '.3rem .6rem' }}
+        >{l}</button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="dash-section">
       {!loaded ? (
         <p className="manage-card-blurb">Loading…</p>
       ) : (
+        <>
+        <Filter />
         <div className="manage-grid">
-          {orgs.map((org) => {
+          {showOrgs && orgs.map((org) => {
             const t = treasuryFor(org.agent);
             const inactive = orgStatusOf(org) === 'inactive';
             return (
@@ -469,17 +513,34 @@ export function OrganizationsManager({
             );
           })}
 
-          {/* New organization */}
+          {/* Every service-class agent you steward — a workspace, a registry, a plain `.svc` service. They
+              were invisible here: this page listed org-class agents only, so a service you had chartered
+              existed, resolved, and appeared nowhere you could act on it. */}
+          {showServices && services.map((svc) => (
+            <div className="manage-card" key={svc.agent}>
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
+                <span className="manage-card-label">{svc.name || 'Unnamed service agent'}</span>
+                <span className="manage-card-badge live">{KIND_LABEL[svc.kind]}</span>
+              </div>
+              <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
+              <p className="manage-card-blurb">Custodied by you. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
+              {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
+            </div>
+          ))}
+
+          {/* Charter something new — the kind picker offers every typed root THIS chain has provisioned. */}
           <div className="manage-card">
             <div className="manage-card-head">
               <span className="manage-card-icon"><BuildingIcon size={17} /></span>
-              <span className="manage-card-label">New organization</span>
+              <span className="manage-card-label">New agent</span>
               <span className="manage-card-badge">＋</span>
             </div>
-            <p className="manage-card-blurb">An organization you control — its own Smart Agent and name. Add its treasury after.</p>
-            <CreateAgentForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create organization" />
+            <p className="manage-card-blurb">An organization, team, workspace or service you control — its own Smart Agent and typed name.</p>
+            <CreateAgentForm choices={creatableKinds('person', claimable)} parent={person} person={person} token={token} via={via} onDone={reload} cta="Create agent" />
           </div>
         </div>
+        </>
       )}
     </div>
   );

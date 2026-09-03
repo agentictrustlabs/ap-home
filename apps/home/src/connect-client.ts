@@ -468,6 +468,7 @@ export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serv
   const map: Record<string, { tld: string; serviceRole?: string }> = {
     person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, team: { tld: 'team' },
     workspace: { tld: 'workspace', serviceRole: 'workspace' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
+    service: { tld: 'svc', serviceRole: 'service' },
   };
   const t = map[kind];
   return t && CLAIMABLE_TLDS.includes(t.tld) ? t : undefined;
@@ -1463,7 +1464,11 @@ export async function createChildAgentForSite(
 // Person/Org/Service class set, never a subclass of treasury. Typically org-parented: the app's
 // governing org custodies it and its custodian runs the service-agent-wire ceremony against the
 // app's a2a Worker.
-export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church';
+// spec 346 — the agents a person can charter from their home, each named by the typed suffix it claims.
+// `service` is the GENERIC service agent (`.svc`): a workspace, treasury and registry are service-class
+// too, but they carry a role the substrate knows about, and this one is the plain one (ADR-0046 — the
+// class is the trichotomy, the role is a label).
+export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church' | 'service';
 
 export interface ManagedAgent {
   agent: Address;

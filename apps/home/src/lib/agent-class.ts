@@ -40,3 +40,41 @@ export function authorityLineage(agent: ManagedAgent, all: ManagedAgent[], youLa
   }
   return [youLabel, ...chain];
 }
+
+
+/** One agent a person can charter, in the words the picker shows: what it is, and the suffix it claims.
+ *  Ordered as a person meets them — the counterparty-facing things first, the plumbing after. */
+export interface CreatableKind {
+  kind: AgentKind;
+  label: string;
+  blurb: string;
+  /** A name is required for anything counterparty-facing; plumbing may be named later. */
+  nameRequired: boolean;
+}
+
+const FROM_PERSON: CreatableKind[] = [
+  { kind: 'org', label: 'Organization', blurb: 'An organization you control — its own Smart Agent and name.', nameRequired: true },
+  { kind: 'team', label: 'Team', blurb: 'A team under you. A team IS an organization, with a narrower remit.', nameRequired: true },
+  { kind: 'workspace', label: 'Workspace', blurb: 'A coordinator for work across people and teams.', nameRequired: true },
+  { kind: 'service', label: 'Service agent', blurb: 'A service that acts on its own — a bot, a bridge, an app\u2019s agent.', nameRequired: true },
+  { kind: 'circle', label: 'Circle', blurb: 'A small group that meets.', nameRequired: true },
+  { kind: 'church', label: 'Church', blurb: 'A congregation.', nameRequired: true },
+  { kind: 'person-treasury', label: 'Personal treasury', blurb: 'Holds and spends value on your behalf.', nameRequired: false },
+];
+
+const FROM_ORG: CreatableKind[] = [
+  { kind: 'team', label: 'Team', blurb: 'A team inside this organization.', nameRequired: true },
+  { kind: 'workspace', label: 'Workspace', blurb: 'A coordinator for this organization\u2019s work.', nameRequired: true },
+  { kind: 'service', label: 'Service agent', blurb: 'A service this organization runs.', nameRequired: true },
+  { kind: 'org-treasury', label: 'Treasury', blurb: 'Holds and spends this organization\u2019s value.', nameRequired: false },
+];
+
+/**
+ * What can be chartered here, filtered to the suffixes this CHAIN has a root for. A kind whose typed root
+ * is not provisioned is not offered: it would deploy an agent that cannot claim the name that gives it its
+ * type, which is worse than not offering it (spec 346 §3.6 — the suffix and the on-chain `atl:agentType`
+ * must agree, or a typed claim fails closed).
+ */
+export function creatableKinds(under: 'person' | 'org', claimable: (k: AgentKind) => boolean): CreatableKind[] {
+  return (under === 'person' ? FROM_PERSON : FROM_ORG).filter((c) => claimable(c.kind));
+}
