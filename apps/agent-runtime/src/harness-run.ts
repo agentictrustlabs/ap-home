@@ -121,6 +121,30 @@ export const INVITE_TOOL: ToolSpec = {
   risk: 'medium',
 };
 
+/**
+ * "NONE OF THESE" AS A TOOL — spec 353 §3, the honest end of classification.
+ *
+ * The planner must pick a tool (`tool_choice: any` is what stops it answering in prose), so when nothing
+ * fits it picks the nearest thing: asked to create a treasury with no treasury capability it created an
+ * ORGANIZATION; asked to send a message with no messaging capability it read the directory and explained
+ * that nothing had been sent. Both are a planner behaving reasonably with a menu that had no way to say no.
+ *
+ * This is that way. Selecting it is a real answer — "this agent cannot do that here" — and the reply lists
+ * what it CAN do, drawn from the capabilities actually on offer rather than from the model's imagination.
+ */
+export const UNSUPPORTED_TOOL: ToolSpec = {
+  id: 'ask.unsupported',
+  description:
+    'Choose this when NO other tool performs what was asked. It is the correct answer, not a failure: '
+    + 'better to say plainly that this agent cannot do a thing here than to do something adjacent to it. '
+    + 'Args: what (what the person asked for, in their words).',
+  inputSchema: {
+    type: 'object',
+    properties: { what: { type: 'string', description: 'What was asked, in the person\'s own words' } },
+    required: ['what'],
+  },
+};
+
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
@@ -656,11 +680,15 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1): ToolInvoker {
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
     if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (toolId === UNSUPPORTED_TOOL.id) {
+      const offered = scopedActionTools(surface).map((t) => t.capability?.id ?? t.id);
+      return { unsupported: true, what: String(args.what ?? ''), available: offered };
+    }
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
@@ -763,8 +791,9 @@ const ASK_PLANNER_SYSTEM =
   + '• An INSTRUCTION ("send", "pay", "fund", "create", "charter", "invite") is satisfied ONLY by the '
   + 'capability that performs it. Never answer one with a directory lookup: the capabilities take agent '
   + 'NAMES ("nathan.treasury", "bob.me") wherever they need an address and resolve them themselves, so '
-  + 'there is never a reason to look an address up first. If no capability performs what was asked, say '
-  + 'that plainly rather than doing something adjacent.\n'
+  + 'there is never a reason to look an address up first. If no capability performs what was asked, choose '
+  + '`ask.unsupported` — saying so is the correct answer, and a directory lookup is NOT a way of saying it. '
+  + 'A capability missing from your tools does not exist here, however obviously related another one looks.\n'
   + '• A QUESTION ("which teams…", "who is…", "what kinds…") is what the directory tools are for.\n\n'
   + 'Missing details are not a reason to fall back to a lookup: the capability will ask the person for '
   + 'what it needs. Choosing the tool that ACTS is what lets it.\n\n'
@@ -772,6 +801,18 @@ const ASK_PLANNER_SYSTEM =
   + 'ASKING and which agent they are addressing — not who they are talking about. Pass the words the '
   + 'person used ("alice", "alice.me") and let the capability resolve them; if the ask names nobody, pass '
   + 'nothing and it will ask.';
+
+/** Plain words for the capabilities an agent offers, for a refusal that says what it CAN do. An id with no
+ *  word falls back to the id — an unfamiliar capability must still be readable, never silently dropped. */
+const CAPABILITY_WORDS: Record<string, string> = {
+  'organization.team.create': 'create teams',
+  'organization.create': 'create organizations',
+  'treasury.create': 'create treasuries',
+  'organization.membership.invite': 'invite members',
+  'treasury.payment.execute': 'make payments',
+  'treasury.fund': 'fund a treasury with demo USDC',
+  'messaging.direct.send': 'send direct messages',
+};
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
  *  is what the verifier will judge. */
@@ -949,6 +990,21 @@ export async function askReplyFor(env: HarnessEnv, input: {
   }
   if (r.outcome === 'suspended' && r.prompt) return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   if (r.outcome === 'completed') {
+    // "None of these" is stated, never composed: a model asked to phrase a refusal will soften it into a
+    // suggestion, and the useful part is the list of what this agent CAN do — which is not its to invent.
+    const unsupported = r.steps.find((o) => o.ok && (o.result as { unsupported?: boolean } | null)?.unsupported);
+    if (unsupported) {
+      const u = unsupported.result as { what?: string; available?: string[] };
+      const can = (u.available ?? []).map((id) => CAPABILITY_WORDS[id] ?? id);
+      return {
+        kind: 'answer', runRef: r.runRef,
+        // Quoted rather than folded into the sentence: the person's words come back in their own person
+        // ("book me a flight"), and "I can't book me a flight" reads like a machine that did not listen.
+        text: u.what?.trim()
+          ? `I can't help with “${u.what.trim()}” here.${can.length ? ` What I can do as this agent: ${can.join(', ')}.` : ''}`
+          : `I can't do that here.${can.length ? ` What I can do as this agent: ${can.join(', ')}.` : ''}`,
+      };
+    }
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
     if (acted) return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
@@ -1052,10 +1108,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // only writer, and a fact the chain does not have is a fact discovery must not be told.
   // ACTIONS FIRST. The planner picks one tool; when an ask is "do this", a directory read listed ahead of
   // the capability that does it is a plausible-looking answer to a question nobody asked.
-  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS];
+  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS, UNSUPPORTED_TOOL];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session),
+    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session, input.surface),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.

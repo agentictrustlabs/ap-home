@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, UNSUPPORTED_TOOL, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -332,5 +332,42 @@ describe('the scope/authority firewall (spec 353 §4)', () => {
     const scope = { capabilities: ['treasury.payment.execute'], realm: { kind: 'org' as const } };
     expect(Object.keys(scope.realm)).toEqual(['kind']);
     expect(scopedActionTools(scope).map((t) => t.capability?.id)).toEqual(['treasury.payment.execute']);
+  });
+});
+
+describe('saying "this agent cannot do that here" (spec 353 S2)', () => {
+  it('the refusal tool is offered alongside the capabilities, so the planner is never cornered', () => {
+    // A planner that MUST pick a tool will pick the nearest one; asked to create a treasury with no
+    // treasury capability it created an organization. This is the way out.
+    expect(UNSUPPORTED_TOOL.id).toBe('ask.unsupported');
+    expect(UNSUPPORTED_TOOL.capability).toBeUndefined(); // saying no is not an action and needs no authority
+  });
+
+  it('states the refusal and lists what this agent CAN do — never composes prose around it', async () => {
+    const env2 = { ...env, HARNESS_AGENT_SA: HARNESS } as HarnessEnv;
+    const composer = { compose: vi.fn(async () => 'Perhaps you would like me to try something else!') };
+    const reply = await askReplyFor(env2, {
+      intent: { goal: 'book me a flight' }, addressee: WORKSPACE as `0x${string}`, composer,
+      result: {
+        runRef: 'r', plan: { steps: [] }, receipts: [{ status: 'executed', risk: 'informational' }],
+        outcome: 'completed', result: { unsupported: true },
+        steps: [{ step: { toolId: 'ask.unsupported', args: {} }, ok: true, result: { unsupported: true, what: 'book you a flight', available: ['treasury.payment.execute', 'organization.team.create'] } }],
+      } as never,
+    });
+    expect(reply.kind).toBe('answer');
+    expect(reply.kind === 'answer' ? reply.text : '').toBe("I can't help with “book you a flight” here. What I can do as this agent: make payments, create teams.");
+    expect(composer.compose).not.toHaveBeenCalled();
+  });
+
+  it('lists nothing rather than inventing when the agent offers nothing', async () => {
+    const env2 = { ...env, HARNESS_AGENT_SA: HARNESS } as HarnessEnv;
+    const reply = await askReplyFor(env2, {
+      intent: { goal: 'x' }, addressee: WORKSPACE as `0x${string}`,
+      result: {
+        runRef: 'r', plan: { steps: [] }, receipts: [], outcome: 'completed', result: {},
+        steps: [{ step: { toolId: 'ask.unsupported', args: {} }, ok: true, result: { unsupported: true, what: 'do that', available: [] } }],
+      } as never,
+    });
+    expect(reply.kind === 'answer' ? reply.text : '').toBe("I can't help with “do that” here.");
   });
 });
