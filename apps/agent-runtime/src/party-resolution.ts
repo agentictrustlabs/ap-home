@@ -133,7 +133,7 @@ export function candidateHint(c: EntityCandidate): string {
 export async function resolveParty(
   raw: unknown,
   lookups: PartyLookups,
-  where: { stepRef: string; toolId: string; argName: string; what: string; subject?: string },
+  where: { stepRef: string; toolId: string; argName: string; what: string; subject?: string; types?: readonly string[] },
 ): Promise<Address> {
   const value = String(raw ?? '').trim();
   if (isAddress(value)) {
@@ -148,6 +148,32 @@ export async function resolveParty(
   const outcome = await resolveEntity(partyProviders(lookups), {
     term: value, tiers: ['private'], ...(where.subject ? { subject: where.subject } : {}), limit: 8,
   });
+  // ── WHAT KIND OF AGENT THIS ARGUMENT IS ──────────────────────────────────────────────────────────
+  // "Send money to nathan" and "send nathan a message" are the same word; the difference lives in the
+  // CAPABILITY, and the typed suffix (ADR-0061) is what makes it decidable. Tiers, in the order a person
+  // means them: the first type anything answers to wins.
+  //
+  // This narrows and never picks. Two treasuries called nathan is still a question, and a capability whose
+  // preferred types match nothing gets asked with everything that DID answer — "nathan has no treasury"
+  // is an answer, not a licence to quietly pay some other Nathan.
+  if (where.types?.length && outcome.outcome === 'ambiguous') {
+    const suffix = (c: EntityCandidate) => (c.name ?? c.label ?? '').toLowerCase().split('.').pop() ?? '';
+    for (const type of where.types) {
+      const tier = outcome.candidates.filter((c) => suffix(c) === type);
+      if (tier.length === 1) {
+        const c = tier[0]!;
+        lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c) });
+        return c.agent.toLowerCase() as Address;
+      }
+      if (tier.length > 1) {
+        ask(`Which “${value}” do you mean?`, {
+          name: where.argName, label: where.what, type: 'choice', required: true,
+          choices: tier.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+          hint: `${tier.length} of them are what ${where.what} has to be — pick the one you mean`,
+        });
+      }
+    }
+  }
   if (outcome.outcome === 'certain') {
     // ONE match is still a decision, and the person never made it. Report what "nathan" became so the
     // surface can show it before a signature, rather than after — a certain resolution is the case where
@@ -180,10 +206,14 @@ export async function resolveParty(
   // knows about themselves. There is deliberately no default and no highlighted best: ranking these would
   // need a score, and a score is the thing this resolver refuses to invent (spec 353 §3, ADR-0013).
   const candidates = outcome.outcome === 'ambiguous' ? outcome.candidates : [];
+  // Nothing of the RIGHT KIND, when a kind was asked for: say so, and show what does exist. A person who
+  // hears "nathan has no treasury" knows what to do next; one who is silently offered nathan.me for a
+  // payment does not.
+  const wanted = where.types?.length ? `nothing called “${value}” is ${where.types[0] === 'me' ? 'a person' : `a ${where.types[0]}`} — ` : '';
   ask(`Which “${value}” do you mean?`, {
     name: where.argName, label: where.what, type: 'choice', required: true,
     choices: candidates.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
-    hint: `${candidates.length} agents you know answer to “${value}” — pick the one you mean`,
+    hint: `${wanted}${candidates.length} agents you know answer to “${value}” — pick the one you mean`,
   });
   throw new Error('unreachable');
 }

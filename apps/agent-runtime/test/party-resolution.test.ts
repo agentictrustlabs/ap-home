@@ -174,3 +174,67 @@ describe('reach through what you are both in (spec 353 S3, second half)', () => 
     expect((r.prompt as { fields: Array<{ hint?: string }> }).fields[0]!.hint).toContain('members of your organizations');
   });
 });
+
+describe('the typed suffix says WHICH nathan — the capability decides', () => {
+  const NATHAN = {
+    me: '0xnnnn000000000000000000000000000000000001'.replace('nnnn', '1111'),
+    org: '0xnnnn000000000000000000000000000000000002'.replace('nnnn', '1111'),
+    team: '0xnnnn000000000000000000000000000000000003'.replace('nnnn', '1111'),
+    treasury: '0xnnnn000000000000000000000000000000000004'.replace('nnnn', '1111'),
+  };
+  const allFour = () => lookups({
+    'nathan.me': NATHAN.me, 'nathan.org': NATHAN.org, 'nathan.team': NATHAN.team, 'nathan.treasury': NATHAN.treasury,
+  });
+  const at = (toolId: string, argName: string, types: readonly string[], what = 'the party') =>
+    ({ stepRef: 's0', toolId, argName, what, subject: ME, types });
+
+  it('“send money to nathan” means his TREASURY', async () => {
+    const r = await caught(resolveParty('nathan', allFour(), at('treasury.payment.execute', 'payee', ['treasury', 'org', 'me'], 'being paid')));
+    expect(r).toEqual({ ok: true, v: NATHAN.treasury });
+  });
+
+  it('“send nathan a message” means the PERSON', async () => {
+    const r = await caught(resolveParty('nathan', allFour(), at('messaging.direct.send', 'recipient', ['me', 'org'], 'the person to message')));
+    expect(r).toEqual({ ok: true, v: NATHAN.me });
+  });
+
+  it('the SAME word, four candidates, two capabilities, two different agents', async () => {
+    const pay = await caught(resolveParty('nathan', allFour(), at('treasury.payment.execute', 'payee', ['treasury'])));
+    const msg = await caught(resolveParty('nathan', allFour(), at('messaging.direct.send', 'recipient', ['me'])));
+    expect(pay).not.toEqual(msg);
+  });
+
+  it('falls to the NEXT type in order when the first answers to nothing', async () => {
+    // No treasury: an organization pays from its own balance, which is the declared second tier.
+    const l = lookups({ 'nathan.org': NATHAN.org, 'nathan.me': NATHAN.me });
+    const r = await caught(resolveParty('nathan', l, at('treasury.payment.execute', 'payer', ['treasury', 'org'])));
+    expect(r).toEqual({ ok: true, v: NATHAN.org });
+  });
+
+  it('NEVER picks through real ambiguity — two of the preferred type is still a question', async () => {
+    // A treasury the person keeps a link to, and a DIFFERENT one the naming service resolves the same
+    // name to. Both are `.treasury`, so the type says nothing about which; a stale row and a live name
+    // disagreeing is precisely when picking either would be worst.
+    const STALE = '0x2222000000000000000000000000000000000009';
+    const l = lookups({ 'nathan.treasury': NATHAN.treasury }, [{ orgAgent: STALE, orgName: 'nathan.treasury' }]);
+    const r = await caught(resolveParty('nathan', l, at('treasury.fund', 'treasury', ['treasury'], 'the treasury')));
+    expect(r.ok, 'two of the same type is a question, not a pick').toBe(false);
+    const field = (r as { prompt: { fields: Array<{ choices?: Array<{ value: string }> }> } }).prompt.fields[0]!;
+    expect(field.choices?.map((c) => c.value).sort()).toEqual([NATHAN.treasury, STALE].sort());
+  });
+
+  it('nothing of the right KIND is an ANSWER, not a licence to pay some other Nathan', async () => {
+    const l = lookups({ 'nathan.me': NATHAN.me, 'nathan.org': NATHAN.org });
+    const r = await caught(resolveParty('nathan', l, at('treasury.fund', 'treasury', ['treasury'], 'the treasury')));
+    expect(r.ok, 'it must ask rather than substitute').toBe(false);
+    const field = (r as { prompt: { fields: Array<{ hint?: string }> } }).prompt.fields[0]!;
+    expect(field.hint).toContain('is a treasury');
+    expect(field.hint).toContain('nathan');
+  });
+
+  it('an undeclared capability narrows nothing — silence is not a preference', async () => {
+    const r = await caught(resolveParty('nathan', allFour(), { stepRef: 's0', toolId: 'x.y', argName: 'p', what: 'the party', subject: ME }));
+    expect(r.ok).toBe(false);
+    expect((r as { prompt: { fields: Array<{ choices?: unknown[] }> } }).prompt.fields[0]!.choices).toHaveLength(4);
+  });
+});

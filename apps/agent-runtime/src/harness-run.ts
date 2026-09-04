@@ -874,6 +874,47 @@ const PARTY_WORD: Record<string, string> = {
 };
 
 /**
+ * WHAT KIND OF AGENT EACH PARTY IS — the typed suffix, used the way a person uses it.
+ *
+ * "Send money to nathan" means nathan.treasury and "send nathan a message" means nathan.me. Both are the
+ * same word, and the difference is not in the sentence — it is in the CAPABILITY. A suffix names the
+ * derived agent type (ADR-0061), so a capability can say which types it acts on, and a bare name stops
+ * being four-ways ambiguous the moment you know what is being asked.
+ *
+ * ORDERED, and read as tiers rather than as a ranking: take the first type that anything answers to. A
+ * message goes to a person; failing that, to an organization. This is not a score — it is a declared,
+ * deterministic property of the capability that can be stated in one sentence, which is exactly what a
+ * similarity score can never be (ADR-0013, spec 353 §3).
+ *
+ * Narrowing NEVER picks in the face of real ambiguity: two candidates of the same preferred type is still
+ * a question. And it never invents one — if nothing answers to the preferred types, the person is asked
+ * with everything that DID answer, so "nathan has no treasury" arrives as an answer rather than as a
+ * silent substitution of some other Nathan.
+ */
+const PARTY_TYPES: Record<string, readonly string[]> = {
+  // Money moves between things that hold it. An organization pays from its own balance, so `.org` is a
+  // real payer, not a fallback for a missing treasury.
+  'treasury.payment.execute:payer': ['treasury', 'org'],
+  // Paying a PERSON directly is ordinary, but "send money to nathan" means his treasury when he has one.
+  'treasury.payment.execute:payee': ['treasury', 'org', 'me'],
+  'treasury.fund:treasury': ['treasury'],
+  // An inbox belongs to a person first. Someone who means the organization says so.
+  'messaging.direct.send:recipient': ['me', 'org', 'team', 'circle', 'church', 'svc'],
+  // You are invited BY an organization and you are invited AS a person.
+  'organization.membership.invite:org': ['org', 'team', 'workspace', 'circle', 'church'],
+  'organization.membership.invite:invitee': ['me'],
+  // A team is chartered under a workspace or an organization; a treasury hangs under whoever holds it.
+  'organization.team.create:parent': ['workspace', 'org'],
+  'organization.create:parent': ['workspace', 'org', 'me'],
+  'treasury.create:parent': ['me', 'org', 'team'],
+};
+
+/** The agent types a capability's party argument means, in the order a person would mean them. */
+export function partyTypesFor(capabilityId: string, arg: string): readonly string[] | undefined {
+  return PARTY_TYPES[`${capabilityId}:${arg}`];
+}
+
+/**
  * The step's args as the ENFORCERS will need them.
  *
  * A requirement is built from what the planner wrote, and the planner writes what the person said:
@@ -886,7 +927,7 @@ async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
-  where?: { stepRef: string; toolId: string; subject?: string; required?: string[] },
+  where?: { stepRef: string; toolId: string; capabilityId?: string; subject?: string; required?: string[] },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
   for (const key of PARTY_ARGS) {
@@ -919,6 +960,10 @@ async function resolveStepArgs(
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
         // answer is an honest "unknown" — never a widening to a public search.
         ...(where.subject ? { subject: where.subject } : {}),
+        // WHAT KIND of agent this argument is, so "nathan" means his treasury when money moves and him
+        // when a message is sent. Undeclared ⇒ no narrowing: a capability that has not said what it acts
+        // on gets every candidate and, if there are several, a question.
+        ...(() => { const t = partyTypesFor(where.capabilityId ?? where.toolId, key); return t ? { types: t } : {}; })(),
       });
       continue;
     }
@@ -1286,7 +1331,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
     normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, onResolved: (r) => resolved.set(`${r.arg}:${r.agent}`, r) }, {
-      stepRef: 'pending', toolId,
+      stepRef: 'pending', toolId, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}),
       ...(input.person ? { subject: input.person } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],

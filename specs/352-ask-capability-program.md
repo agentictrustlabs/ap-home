@@ -77,6 +77,21 @@ REVERTED; team-create with credential + signature prompts; `treasury.fund`, `org
 | --- | --- | --- | --- |
 | **F1** | **Ask intake + intent classification** — utterance → `AskClassification` (capability candidates + confidence; *clarification-required* when ambiguous) | new port in `harness`; LLM binding in `orchestration-anthropic` | 350 harness |
 | **F2** | **Personal entity resolution** — "Alice" → SA address from **the asker's private tier** (vault relationships, rosters via delegated reads); typed; ambiguous ⇒ choice prompt; none ⇒ honest refusal | first consumer of the `context` package (351 P0.11) | `context` + `demo-mcp` |
+
+**F2 — the typed suffix is what makes a bare name decidable (shipped).** "Send nathan a message" and
+"send money to nathan" are the same word and two different agents. The difference is not in the sentence:
+it is in the CAPABILITY, and the typed suffix names the derived agent type (ADR-0061), so a capability
+declares which types its party arguments mean — money moves between `.treasury` and `.org`, an inbox
+belongs to `.me` first, an invitation is issued by an `.org`/`.team` and received by a `.me`. The
+declaration is ORDERED and read as tiers: the first type anything answers to wins.
+
+This is a narrowing, never a ranking. Two candidates of the same preferred type is still a question; a
+capability that has declared nothing narrows nothing (silence is not a preference); and when nothing
+answers to the preferred types the person is asked with everything that DID answer, so "nathan has no
+treasury" arrives as an answer rather than as a silent substitution of some other Nathan. What it chose is
+shown on the authority card before anyone signs — a rule that picks quietly is only as good as the
+person's ability to catch it being wrong. Proved in `scripts/verify-typed-parties.mts` and seven unit
+cases in `apps/demo-a2a/test/party-resolution.test.ts`.
 | **F3** | **Person-to-person payment** — `person.payment.send`: delegator is the PERSON's SA (the live scenario's delegator was a treasury); same enforcer stack | capability + scenario, no new contract | `delegation` ✅ + `demo-a2a` |
 | **F4** | **Confirmation-as-signature** — for risk ≥ high the confirmation IS the mandate-signing ceremony (§3.6); a chat "yes" alone never authorizes (Pydantic's boundary, analysis §2.8) | UX contract + gate test | `demo-a2a` + Home |
 | **F5** | **Report/record capability** — `organization.report.record`: a member's signed report lands in the MEMBER's vault; an A2A exchange offers it to the org; the org's policy accepts (append to its metric record) or asks its steward — the pending→accepted situation pattern | new capability, `apix:` exchange profile | `fabric`/`a2a` + `demo-mcp` |
