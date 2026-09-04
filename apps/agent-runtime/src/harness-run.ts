@@ -395,7 +395,13 @@ export function approvalDigestFor(input: { stepRef: string; mandateRef: string; 
  * a signature over anything else discharges nothing. What changes is only that a person present at the run
  * can answer it, which is what "a second party approves" means when the second party is standing there.
  */
-export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approvals: SuppliedApprovalV1[], supplied?: SuppliedInputV1[]): ApprovalPort {
+export function suppliedApprovalsPort(
+  deps: HarnessDeps, env: HarnessEnv, approvals: SuppliedApprovalV1[], supplied?: SuppliedInputV1[],
+  /** Who is present. An obligation that names no particular approver still has to name SOMEBODY in the
+   *  question, or the surface signs as nobody: the prompt went out with an empty `signer`, the answer came
+   *  back attributed to '', and the ERC-1271 check refused an approval the person had just given. */
+  person?: Address,
+): ApprovalPort {
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
   return {
     async request(req) {
@@ -425,7 +431,7 @@ export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approv
           prompt: {
             kind: 'signature', stepRef: req.stepRef, toolId: req.step.tool.id,
             prompt: `This needs a second party to approve it. Sign to approve ${req.step.capability.id}${req.step.capability.resource ? ` on ${req.step.capability.resource}` : ''}.`,
-            digest: want, signer: allowed[0] ?? '',
+            digest: want, signer: allowed[0] ?? person ?? '',
             payload: { obligation: ob.kind, imposedBy: ob.imposedBy, mandateRef: req.evidence.mandateRef, capability: req.step.capability.id },
           },
         };
@@ -853,7 +859,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
     normalizeArgs: ({ toolId, args }) => resolveStepArgs(args, env, deps, { stepRef: 'pending', toolId }),
-    ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied), receiptSink },
+    ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
     ...(presented ? {} : { onMissingMandate: 'report' as const }),

@@ -46,6 +46,23 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, pending]);
 
+  // Can this session AUTHORIZE anything here, or only ask? An agent can sit in your home's tree while its
+  // custodian is someone else's credential — say so on arrival rather than at the end of a ceremony.
+  useEffect(() => {
+    let live = true;
+    if (!session || !agentAddress) return;
+    void (async () => {
+      try {
+        const cred = await connectedCredential(resolveVia(profile?.credential, session.via), agentAddress as Address, session.token);
+        const ok = await canGrantAs(addressee, cred);
+        if (live) setCanAuthorize(ok);
+      } catch {
+        if (live) setCanAuthorize(null); // unknown is not "no" — the grant-time check is the one that decides
+      }
+    })();
+    return () => { live = false; };
+  }, [addressee, agentAddress, session?.token, session?.via, profile?.credential]);
+
   useEffect(() => {
     let live = true;
     if (!session || !agentAddress) return;
@@ -167,7 +184,11 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
         supplied = { stepRef: reply.resumeToken, data: Object.fromEntries(p.fields.map((f) => [f.name, answers[f.name] ?? ''])) };
       } else if (p.kind === 'signature') {
         const signature = await (await signAs(agentAddress as Address))(p.digest);
-        supplied = { stepRef: reply.resumeToken, signature: { digest: p.digest, signer: p.signer, signature, payload: p.payload } };
+        // Signed BY the person in front of us. A prompt that named no signer (an obligation with no
+        // particular approver) must not be answered as nobody — an approval attributed to '' verifies
+        // against nothing and is refused, which reads as "you approved and it was rejected".
+        const signer = p.signer || (agentAddress as string);
+        supplied = { stepRef: reply.resumeToken, signature: { digest: p.digest, signer, signature, payload: p.payload } };
       } else {
         supplied = { stepRef: reply.resumeToken, confirmed: true };
       }
@@ -185,7 +206,11 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
       <div className="ask-flyout-h">
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Asking {addresseeLabel}</div>
-          <div className="muted" style={{ fontSize: 11.5 }}>Follows the workspace you are in — switch it in the topbar.</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            {canAuthorize === false
+              ? 'You can ask questions here, but a different credential custodies this agent — only it can authorize changes.'
+              : 'Follows the workspace you are in — switch it in the topbar.'}
+          </div>
         </div>
         <button type="button" className="btn ghost" data-testid="ask-close" aria-label="Close Ask" onClick={onClose}><XIcon size={16} /></button>
       </div>
