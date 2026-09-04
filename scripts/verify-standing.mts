@@ -51,5 +51,23 @@ check('reaches the same requirement', n.kind === 'authority_required' && n.capab
 check('standing says they cannot grant', n.standing?.canGrant === false, `canGrant=${n.standing?.canGrant} relation=${n.standing?.relation}`);
 check('and SAYS SO in words a person can read', !!n.note && n.note.length > 20, n.note ?? '(no note)');
 
-console.log(`\n${failures === 0 ? '✓' : '✗'} S5: the same plan, two standings, derived from evidence — ${failures} failure(s).`);
+// ── the third standing, and the one S5 exists for: a MEMBER, who has standing to be there and no
+// standing to authorize. Nathan is a member (not a steward) of Rich Big Thompson Team.
+const TEAM = '0xfc1c328c26505d1aeab1ead4a46b3f74981f07a4';
+console.log(`\n── a MEMBER asks their team for something only a steward can authorize ──`);
+const m = await (async () => {
+  const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'nathan', client_id: 'demo-jp' }) }));
+  const env = await j(await fetch(`${HOME}/a2a/harness/ask`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' },
+    body: JSON.stringify({ session: signin.homeSession, addressee: TEAM, message: 'invite someone to this team' }),
+  }));
+  return (env.reply ?? env) as { kind?: string; error?: string; standing?: { relation: string; canGrant: boolean; because: string }; note?: string };
+})();
+console.log(`  kind=${m.kind} — ${m.error ?? m.note ?? ''}`);
+// Refused BEFORE the invitee question: a prompt is a demand on a person, and this one leads nowhere.
+check('refused rather than questioned', m.kind === 'refused', `${m.kind} ${JSON.stringify(m).slice(0, 140)}`);
+check('told they are a member, not a steward', /not as a steward/.test(m.error ?? m.note ?? ''), m.error ?? '(no reason)');
+check('and told WHO can', /steward has to authorize it/.test(m.error ?? m.note ?? ''), m.error ?? '(no route)');
+
+console.log(`\n${failures === 0 ? '✓' : '✗'} S5: the same plan, three standings, derived from evidence — ${failures} failure(s).`);
 if (failures) process.exit(1);

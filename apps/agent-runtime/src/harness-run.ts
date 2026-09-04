@@ -50,6 +50,7 @@ import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, type PartyLookups } from './party-resolution.js';
 import { preconditionRefusal } from './capability-preconditions.js';
+import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
 
 
@@ -1033,6 +1034,26 @@ export async function askReplyFor(env: HarnessEnv, input: {
         kind: 'refused', runRef: r.runRef, outcome: 'denied', receipts: r.receipts,
         error: `this needs a ${kind} and this surface cannot collect one — nothing was authorized`,
       };
+    }
+    // STANDING BEFORE THE QUESTION (spec 353 S5). A prompt is a demand on a person. Asking a member to
+    // look up an invitee's address for an invitation only a steward can authorize spends their effort on
+    // a refusal we could already see — the same wrong as collecting a signature that will not verify.
+    //
+    // Only on POSITIVE evidence: `member` means we read their links and they hold no stewardship there.
+    // `none` does NOT refuse — a person can custody an agent that no row of theirs mentions, and custody
+    // at grant time is the gate. Fail open on ambiguity, closed only on what was actually read.
+    const pendingCapability = r.prompt.toolId ?? '';
+    if (input.principal && input.deps?.readSubjectRecord && AUTHORITY_BEARING_CAPABILITIES.includes(pendingCapability)) {
+      const st = await deriveStanding(
+        { readSubjectRecord: input.deps.readSubjectRecord, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}) },
+        { principal: input.principal, subject: input.addressee },
+      ).catch(() => null);
+      if (st?.relation === 'member') {
+        return {
+          kind: 'refused', runRef: r.runRef, outcome: 'denied', receipts: r.receipts,
+          error: standingNote(st, CAPABILITY_WORDS[pendingCapability] ?? pendingCapability),
+        };
+      }
     }
     return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   }
