@@ -1,10 +1,14 @@
 // WHAT THE ASK MAY READ — the public agent knowledge base, through discovery, and nothing else.
 //
-// Two sources, and the difference matters. The DIRECTORY (discovery) answers "who is out there like X" —
-// it is a projection, and a projection lags: an agent created a minute ago is not in it yet. The NAMING
-// SERVICE answers "who holds exactly this name" from the chain, immediately. An ask that names an agent
-// gets the chain; an ask that describes one gets the directory. Reaching for the directory to answer an
-// exact name is how "fund alice2.treasury" came back as "no such agent" about an agent that existed.
+// WHAT IS NOT HERE, AND WHY. There is no name-resolution TOOL. There was, briefly, and it did the damage a
+// lookup offered as a peer to an action always does: a planner picks one tool, a lookup is applicable to
+// every ask that mentions anybody, and so "send 5 USDC from nathan.treasury to alice2.treasury" came back
+// as two resolved addresses and a paragraph explaining that no transfer had been made. The plan is about
+// WHAT TO DO. Resolution is how a capability reads its own arguments — plumbing, done inside the tool that
+// acts (`partyAddress`), against the chain, which is immediate where the directory lags.
+//
+// What remains here is genuine enquiry: which agents exist, what one is, what kinds there are. Those are
+// questions a person actually asks, not steps on the way to an action.
 //
 // ADR-0040 is the whole design here, in both directions:
 //
@@ -50,18 +54,10 @@ async function discovery(env: DiscoveryEnv, path: string, init?: RequestInit): P
  *  read what the chain already publishes. */
 export const ASK_DISCOVERY_TOOLS: ToolSpec[] = [
   {
-    id: 'resolve_agent_name',
-    description:
-      'Resolve an exact agent NAME (e.g. "alice2.treasury", "outreach.team", "bob.me") to its smart-agent '
-      + 'address, from the naming service ON CHAIN. Use this whenever the ask names an agent: it is '
-      + 'authoritative and immediate, where the directory reflects what has been indexed and lags a '
-      + 'newly-created agent. Returns null when nothing holds that name.',
-    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The full typed name, e.g. outreach.team' } }, required: ['name'] },
-  },
-  {
     id: 'find_agents',
     description:
-      'Search the PUBLIC agent directory for agents (people, organizations, teams, services) by name or ' +
+      'ANSWERS A QUESTION about who exists — never a step towards doing something. '
+      + 'Search the PUBLIC agent directory for agents (people, organizations, teams, services) by name or ' +
       'by what they do. `terms` are search words only — never the user\'s full question, and never who is ' +
       'asking. Returns public, on-chain-derived facts: name, address, kind, declared capabilities.',
     inputSchema: {
@@ -76,7 +72,9 @@ export const ASK_DISCOVERY_TOOLS: ToolSpec[] = [
   {
     id: 'get_agent',
     description:
-      'Read one agent from the PUBLIC directory by its typed name (e.g. "outreach.team") or its 0x smart-agent ' +
+      'ANSWERS A QUESTION about one agent — never a way to turn a name into an address for another tool '
+      + '(the capabilities take names directly). '
+      + 'Read one agent from the PUBLIC directory by its typed name (e.g. "outreach.team") or its 0x smart-agent ' +
       'address. Returns its public profile, declared type and capabilities. Use this when the ask names a ' +
       'specific agent.',
     inputSchema: { type: 'object', properties: { key: { type: 'string', description: 'A typed name or a 0x address.' } }, required: ['key'] },
@@ -96,16 +94,6 @@ export const ASK_DISCOVERY_TOOL_IDS = new Set(ASK_DISCOVERY_TOOLS.map((t) => t.i
 /** Invoke one discovery read. Public data only, in and out. */
 export function askDiscoveryInvoker(env: DiscoveryEnv & { resolveName?: (name: string) => Promise<string | null> }): ToolInvoker {
   return async (toolId, args) => {
-    if (toolId === 'resolve_agent_name') {
-      const name = String((args as { name?: unknown }).name ?? '').trim().toLowerCase();
-      if (!name) throw new Error('resolve_agent_name needs a name');
-      if (!env.resolveName) throw new Error('name resolution is not wired on this agent');
-      // The CHAIN is the answer here, not the index. An agent created a minute ago resolves; the
-      // directory may not have seen it yet, and answering "no such agent" about one that exists is
-      // worse than answering slowly.
-      const agent = await env.resolveName(name);
-      return { name, agent, found: !!agent };
-    }
     if (toolId === 'find_agents') {
       const terms = String((args as { terms?: unknown }).terms ?? '').trim();
       if (!terms) throw new Error('find_agents needs search terms');

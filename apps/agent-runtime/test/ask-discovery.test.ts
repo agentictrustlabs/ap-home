@@ -22,15 +22,11 @@ function fakeDiscovery(handler: (path: string, init?: RequestInit) => { status?:
 describe('the Ask reads the public directory, and only reads it', () => {
   it('every tool is informational — reading what the chain publishes needs no authority', () => {
     for (const t of ASK_DISCOVERY_TOOLS) expect(t.capability).toBeUndefined();
-    expect([...ASK_DISCOVERY_TOOL_IDS].sort()).toEqual(['find_agents', 'get_agent', 'list_agent_facets', 'resolve_agent_name']);
+    expect([...ASK_DISCOVERY_TOOL_IDS].sort()).toEqual(['find_agents', 'get_agent', 'list_agent_facets']);
   });
 
-  it('resolves an exact NAME from the chain, not the index — a new agent resolves before it is indexed', async () => {
-    const { env, seen } = fakeDiscovery(() => ({ body: { ok: true } }));
-    const invoke = askDiscoveryInvoker({ ...env, resolveName: async (n: string) => (n === 'alice2.treasury' ? '0xtreasury' : null) } as never);
-    expect(await invoke('resolve_agent_name', { name: 'Alice2.Treasury' }, ctx)).toEqual({ name: 'alice2.treasury', agent: '0xtreasury', found: true });
-    expect(await invoke('resolve_agent_name', { name: 'nobody.team' }, ctx)).toEqual({ name: 'nobody.team', agent: null, found: false });
-    expect(seen).toHaveLength(0); // the directory was not consulted at all
+  it('offers NO name-resolution tool — a lookup beside an action is what the planner picks instead of acting', () => {
+    expect([...ASK_DISCOVERY_TOOL_IDS]).not.toContain('resolve_agent_name');
   });
 
   it('has no write: every request it can make is a GET', async () => {

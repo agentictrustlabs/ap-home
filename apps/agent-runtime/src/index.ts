@@ -1240,8 +1240,9 @@ app.post('/harness/ask', async (c) => {
   // another intent, and the mandate does not travel.
   const intent = { goal: turn.message, context: { addressee, asker: who.sa } };
   const audit = buildAuditSink(c.env);
+  const askDeps = harnessDeps(c.env, audit);
   try {
-    const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, harnessDeps(c.env, audit), {
+    const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, runRef,
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
@@ -1260,7 +1261,10 @@ app.post('/harness/ask', async (c) => {
         })(toolId, args, ctx);
       },
     });
-    const reply = await askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee, composer: selectComposer(c.env) });
+    const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
+      intent, result, addressee, composer: selectComposer(c.env),
+      resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
+    });
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
     // caller to retry a refusal as though it were weather.

@@ -126,7 +126,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        payer: { type: 'string', description: 'The paying treasury or organization SA address' },
+        payer: { type: 'string', description: 'The paying treasury or organization — its address, or its name (e.g. nathan.treasury)' },
         asset: { type: 'string', description: 'ERC-20 token contract address' },
         payee: { type: 'string', description: 'Recipient address, or its agent name (e.g. bob.me)' },
         amount: { type: 'string', description: 'Amount in the token\'s smallest unit, as a decimal string' },
@@ -587,7 +587,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     const enforcers = harnessEnforcers(env);
     if (!enforcers.payment) throw new Error('harness: PAYMENT_ENFORCER is not configured');
     const asset = String(args.asset).toLowerCase() as Address;
-    const payer = String(args.payer ?? '').toLowerCase();
+    const payer = args.payer ? await partyAddress(args.payer, deps, 'the payer') : '';
     if (payer && payer !== (presented!.wire as Delegation).delegator.toLowerCase()) {
       throw new Error(`the payment is made by the mandate's delegator (${(presented!.wire as Delegation).delegator}); the plan named ${payer}`);
     }
@@ -636,6 +636,32 @@ export interface HarnessRunInput {
   mcpInvoke: ToolInvoker;
 }
 
+/**
+ * What the planner is told, on top of "choose a tool".
+ *
+ * The rule it exists to state is the one the tool shapes cannot: an ask is either a QUESTION or an
+ * INSTRUCTION, and a lookup is applicable to both. Given "send 5 USDC from nathan.treasury to
+ * alice2.treasury" alongside a directory read, a planner will resolve both names and stop — every step
+ * defensible, the money unmoved, and a fluent paragraph explaining that no transfer was made. That is not
+ * a hallucination; it is a planner doing the most obviously-safe thing with tools that did not say which
+ * of them ACTS.
+ *
+ * So: capabilities take the words people use, and looking something up is never the answer to an
+ * instruction.
+ */
+const ASK_PLANNER_SYSTEM =
+  'You are the planning component of an agent. Choose the tool that satisfies the goal and provide its '
+  + 'arguments. You may ONLY use the provided tools. Do not answer in prose — select a tool.\n\n'
+  + 'An ask is either a QUESTION about what exists, or an INSTRUCTION to do something.\n'
+  + '• An INSTRUCTION ("send", "pay", "fund", "create", "charter", "invite") is satisfied ONLY by the '
+  + 'capability that performs it. Never answer one with a directory lookup: the capabilities take agent '
+  + 'NAMES ("nathan.treasury", "bob.me") wherever they need an address and resolve them themselves, so '
+  + 'there is never a reason to look an address up first. If no capability performs what was asked, say '
+  + 'that plainly rather than doing something adjacent.\n'
+  + '• A QUESTION ("which teams…", "who is…", "what kinds…") is what the directory tools are for.\n\n'
+  + 'Missing details are not a reason to fall back to a lookup: the capability will ask the person for '
+  + 'what it needs. Choosing the tool that ACTS is what lets it.';
+
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
  *  is what the verifier will judge. */
 export const REQUIREMENT_TYPE_FOR = (capabilityId: string): string =>
@@ -650,6 +676,52 @@ export type AskReply =
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts'] }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts'] };
 
+/** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
+ *  the requirement is built so the two cannot disagree. */
+const RESOURCE_ARG_FOR: Record<string, string> = {
+  'treasury.payment.execute': 'asset',
+  'treasury.fund': 'asset',
+  'organization.membership.invite': 'org',
+};
+
+/** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
+ *  an address by the time a caveat encodes it. */
+const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder'] as const;
+
+/**
+ * The step's args as the ENFORCERS will need them.
+ *
+ * A requirement is built from what the planner wrote, and the planner writes what the person said:
+ * `payee: "alice2.treasury"`, `asset: "usdc"`. Both are correct English and neither can be encoded — the
+ * caveat wants twenty bytes. Resolving inside the invoker is too late: the person is asked to grant an
+ * authority whose limits name a string, and minting it throws. So the words become addresses HERE, once,
+ * before anything is shown or signed.
+ */
+async function resolveStepArgs(
+  args: Record<string, unknown>,
+  env: HarnessEnv,
+  resolveName?: (name: string) => Promise<string | null>,
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { ...args };
+  for (const key of PARTY_ARGS) {
+    const raw = String(out[key] ?? '').trim();
+    if (!raw || /^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
+    const resolved = resolveName ? await resolveName(raw.toLowerCase()) : null;
+    if (resolved) out[key] = resolved.toLowerCase();
+  }
+  // THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT.
+  //
+  // Asked to send USDC, a model wrote `0x036CbD53842c5426634e7929541eC2318f3dCF7e` — Base Sepolia's USDC,
+  // recalled from memory, address-shaped and confidently wrong for this chain. Accepting it would have put
+  // a contract that does not exist here inside a signed mandate's allowedTargets, and the person granting
+  // would have read "make payments" over a token nobody can name.
+  //
+  // This deployment has exactly ONE demo token, so which token is not a choice a planner gets to make.
+  // A deployment with several would make it a real choice, and would need a real check — not this.
+  if (env.MOCK_USDC) out.asset = String(env.MOCK_USDC).toLowerCase();
+  return out;
+}
+
 /** Turn a finished run into the one reply shape. Nothing here decides anything — it reads what the loop
  *  already concluded.
  *
@@ -658,14 +730,37 @@ export type AskReply =
  *  paraphrased — what was created, at what address, in which transaction is stated from the receipt, where
  *  precision is the point. No composer, or a composer that fails, ⇒ the raw result, unchanged: the evidence
  *  is identical either way and only its rendering degrades. */
-export async function askReplyFor(env: HarnessEnv, input: { intent: { goal: string }; result: RunResult; addressee: Address; composer?: AnswerComposer | null }): Promise<AskReply> {
+export async function askReplyFor(env: HarnessEnv, input: {
+  intent: { goal: string }; result: RunResult; addressee: Address;
+  composer?: AnswerComposer | null;
+  /** Resolve a NAME the planner passed where an address is needed. The requirement is built from the
+   *  step's args BEFORE any invoker runs, so "as nathan.treasury" has to become an address here or the
+   *  person is asked to grant authority as a string nothing can sign. */
+  resolveName?: (name: string) => Promise<string | null>;
+}): Promise<AskReply> {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
-    const requirement = mandateRequirementForStep({ required: r.required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
+    // Already normalised by the loop (`normalizeArgs`); re-run defensively for a caller that did not.
+    const args = await resolveStepArgs(r.required.args, env, input.resolveName);
+    // The resource was read out of an arg BEFORE the args were normalised, so it has to be re-read from
+    // the resolved ones — not merely repaired when it looks wrong. It looked fine: the planner's recalled
+    // token address is a perfectly well-formed address for another chain, and `locations` would have
+    // pinned the mandate to it while `limits` named the real one.
+    const resourceArg = RESOURCE_ARG_FOR[r.required.capability.id] ?? 'parent';
+    const resource = String(args[resourceArg] ?? r.required.capability.resource ?? '');
+    const required = {
+      ...r.required,
+      args,
+      capability: { ...r.required.capability, ...(resource ? { resource } : {}) },
+    };
+    const requirement = mandateRequirementForStep({ required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
     // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the
     // parent a team is chartered under), else the agent being asked. Never the person by default — a
     // team's authority is its workspace's — and never the token a payment moves.
-    const delegator = ((r.required.capability.authority ?? r.required.capability.resource ?? input.addressee) as string).toLowerCase() as Address;
+    const named = ((required.capability.authority ?? required.capability.resource ?? input.addressee) as string).trim();
+    const delegator = (/^0x[0-9a-fA-F]{40}$/.test(named)
+      ? named
+      : ((input.resolveName ? await input.resolveName(named.toLowerCase()) : null) ?? input.addressee)).toLowerCase() as Address;
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
@@ -723,7 +818,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
       } as never);
     },
   };
-  const { planner, kind } = selectPlanner(env as never);
+  const { planner, kind } = selectPlanner(env as never, { systemPrompt: ASK_PLANNER_SYSTEM });
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -735,6 +830,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),
+    // The person's words become this substrate's own ONCE, before the capability is extracted, before the
+    // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
+    // judging "alice2.treasury" against an allowlist of addresses.
+    normalizeArgs: ({ args }) => resolveStepArgs(args, env, deps.resolveName),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
