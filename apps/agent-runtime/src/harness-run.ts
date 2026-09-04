@@ -629,6 +629,17 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
     if (!deps.sendDirectMessage) throw new Error('messaging is not wired on this agent');
     const recipient = String(args.recipient ?? '').toLowerCase() as Address;
     if (!/^0x[0-9a-f]{40}$/.test(recipient)) throw new Error(`the recipient did not resolve to an agent (${String(args.recipient ?? '')})`);
+    // A planner that cannot find who was named will sometimes fill the field with whoever it DOES know —
+    // and the person it knows is the asker. "Send a message to zzz-nobody-here" came back addressed to
+    // Nathan. Harmless for a message and not harmless as a habit: an invented party is the failure the
+    // whole resolution tier exists to prevent, so it is a question rather than a plan.
+    if (recipient === person.toLowerCase()) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: 'That would send the message to you. Who did you mean?',
+        fields: [{ name: 'recipient', label: 'The person to message', type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
+      });
+    }
     const supplied = dataFor(ctx.supplied, stepRef);
     const text = String(supplied.message ?? args.message ?? '').trim();
     if (!text) {
@@ -805,12 +816,17 @@ async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
-  where?: { stepRef: string; toolId: string; subject?: string },
+  where?: { stepRef: string; toolId: string; subject?: string; required?: string[] },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
   for (const key of PARTY_ARGS) {
     const raw = String(out[key] ?? '').trim();
-    if (!raw || /^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
+    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
+    // A party the TOOL requires and the sentence did not name is a QUESTION. Skipping it because the field
+    // was empty let "send a direct message to zzz-nobody-here" sail past resolution into an authority
+    // request for a recipient that could not exist — failing at the last possible moment, after the person
+    // had granted. An OPTIONAL party (a funder that defaults to the asker) still skips.
+    if (!raw && !(where && (where.required ?? []).includes(key))) continue;
     if (where) {
       // Inside a run: resolve properly, and ASK when the words name several agents or none.
       out[key] = await resolveParty(raw, lookups, {
@@ -1019,7 +1035,12 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, args }) => resolveStepArgs(args, env, deps, { stepRef: 'pending', toolId, ...(input.person ? { subject: input.person } : {}) }),
+    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, deps, {
+      stepRef: 'pending', toolId,
+      ...(input.person ? { subject: input.person } : {}),
+      // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
+      required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],
+    }),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
