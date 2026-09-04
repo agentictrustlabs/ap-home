@@ -103,6 +103,8 @@ import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
+import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
+import { internalHeaders } from './internal-marker.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1223,7 +1225,9 @@ app.post('/harness/ask', async (c) => {
     stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
     // Only the asker may resume: the run carries their session's authority and their answers, and a run
     // someone else can pick up is a run someone else can finish.
-    if (stored && stored.asker.toLowerCase() !== String(who.sa).toLowerCase()) {
+    // A person's half-finished run is theirs; an unclaimed WORK ITEM (a plan step awaiting authority) is
+    // claimable by whoever can actually mint its mandate — which is the gate on advancing it either way.
+    if (stored && !claimableBy(stored, String(who.sa).toLowerCase() as Address)) {
       return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
     }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
@@ -1262,6 +1266,25 @@ app.post('/harness/ask', async (c) => {
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
       } else {
+        // A capability that ran for a PLAN STEP satisfies it with its RECEIPT — the run, the mandate and
+        // the transaction — rather than a note claiming it happened. The step stays open if this fails:
+        // an endeavor that reports work it cannot evidence is the thing this binding exists to prevent.
+        if (reply.kind === 'done' && stored?.origin) {
+          const r = reply.result as { txHash?: string; name?: string; agent?: string } | null;
+          const acted = reply.receipts.find((x) => x.status === 'executed' && x.risk !== 'informational');
+          const ev = receiptEvidence({
+            capability: acted?.capability?.id ?? 'the requested capability',
+            runRef, mandateRef: acted?.authority?.presentedRef ?? null, txHash: r?.txHash ?? null,
+            summary: r?.name ? `${r.name} (${r.agent ?? ''})` : 'Done.',
+          });
+          try {
+            await callInteractionsInternal(c.env, stored.origin.principal, 'internal.endeavor.satisfyStep', {
+              endeavorId: stored.origin.endeavorId, stepId: stored.origin.stepId, evidence: `${ev.note} ${ev.refs.join(' ')}`,
+            });
+          } catch (e) {
+            console.warn('[harness/ask] step satisfied on chain but not recorded on the endeavor:', e);
+          }
+        }
         await dropRun(c.env as never, addressee, runRef);
       }
     } catch (e) {
@@ -1889,6 +1912,18 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
 /** The harness's substrate on this Worker: chain reads, the service SA's signing + submission, the audit
  *  sink, and the child-agent genesis. Shared by `/harness/ask` and `/harness/run` — one wiring, so the
  *  conversational entry point and the programmatic one cannot drift apart. */
+/** Call an `internal.*` op on a principal's InteractionsDO from inside this Worker (spec 322 W3f — the
+ *  in-Worker delivery channel; never routable from outside). Marker-gated like every internal op. */
+async function callInteractionsInternal(env: Env, principal: string, op: string, payload: unknown): Promise<Record<string, unknown>> {
+  const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(principal.toLowerCase()));
+  const res = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, {
+    method: 'POST', headers: internalHeaders(env), body: JSON.stringify(payload),
+  }));
+  const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+  if (!res.ok || out.ok === false) throw new Error(String(out.error ?? `${op} failed (${res.status})`));
+  return out;
+}
+
 function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
   const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
   return {

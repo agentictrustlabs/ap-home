@@ -48,6 +48,7 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote } from './endeavor-authority-steps.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills, makeOrgApplySkill } from './messaging-skills.js';
@@ -1271,6 +1272,25 @@ export class A2aTaskDO {
       if (step.satisfied) continue;
       if (!firstTurn) await pace();
       firstTurn = false;
+      // AUTHORITY BEFORE WORK. A step that names a capability this substrate can exercise is not a
+      // writing task: it must not be satisfied by a paragraph saying it happened, and it must not be
+      // executed by an agent nobody authorized. It becomes work waiting on a person — a durable run
+      // (spec 350 W3) a steward finishes by granting the mandate — and the step stays OPEN until it does.
+      const needsAuthority = authorityCapabilityOf(step);
+      if (needsAuthority) {
+        const runRef = `run-${crypto.randomUUID()}`;
+        const checkpoint = checkpointForStep({ runRef, principal: principal as Address, endeavorId, step, goal });
+        try {
+          await this.state.storage.put(`harness:run:${runRef}`, checkpoint);
+          await this.interactionsInternal(principal, 'internal.endeavor.post', {
+            endeavorId, body: awaitingAuthorityNote({ capability: needsAuthority, principal: principal as Address, runRef, step }),
+          });
+        } catch (e) {
+          console.error('[endeavor step] could not park an authority-bearing step:', endeavorId, step.stepId, e);
+        }
+        continue; // NOT satisfied: an agent that cannot be authorized to do a thing must not report it done.
+      }
+
       let output: string;
       try {
         // A SPECIALIST FIRST when the step declared a capability and some host granted it. Null

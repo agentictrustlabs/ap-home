@@ -39,6 +39,11 @@ export interface HarnessRunCheckpointV1 {
   supplied: SuppliedInputV1[];
   /** What the run is waiting for, for a surface that lists pending work. */
   awaiting?: { kind: 'data' | 'signature' | 'confirmation'; prompt: string; stepRef: string };
+  /** Set when the run is a WORK ITEM nobody has picked up: `asker` is the principal rather than a person,
+   *  and any steward who can mint the mandate may claim it (`endeavor-authority-steps.claimableBy`). */
+  openToStewards?: boolean;
+  /** The plan step this run exists to satisfy. When it completes, the step's evidence is its RECEIPT. */
+  origin?: { endeavorId: string; stepId: string; principal: Address };
   createdAt: number;
   updatedAt: number;
 }
