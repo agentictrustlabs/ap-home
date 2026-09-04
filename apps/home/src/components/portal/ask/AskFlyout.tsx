@@ -235,7 +235,11 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
           </div>
         ))}
         {pending?.reply.kind === 'authority_required' && (
-          <AuthorityCard reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)} />
+          <AuthorityCard
+            reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
+            checkCustody={async (delegator) => canGrantAs(delegator, await connectedCredential(via, agentAddress as Address, session!.token))}
+            onRequest={(text) => { setPending(null); setQ(text); }}
+          />
         )}
         {pending?.reply.kind === 'prompt' && (
           <PromptCard
@@ -298,8 +302,49 @@ function ReplyView({ reply }: { reply: AskReply }) {
 
 /** The grant. Plain words first, the machine-readable underneath — a person should be able to refuse this
  *  for a reason. */
-function AuthorityCard({ reply, busy, onGrant, onCancel }: { reply: Extract<AskReply, { kind: 'authority_required' }>; busy: string | null; onGrant: () => void; onCancel: () => void }) {
+function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest }: {
+  reply: Extract<AskReply, { kind: 'authority_required' }>; busy: string | null;
+  onGrant: () => void; onCancel: () => void;
+  /** The way out of a dead end: prefill the composer with a request to whoever CAN grant. Prefilled and
+   *  never auto-sent — a message sent on someone's behalf without them reading it is its own overreach. */
+  onRequest: (text: string) => void;
+  /** Does the connected credential custody the delegator? The ONE thing that decides whether a grant here
+   *  can produce a valid mandate — asked of the chain, not of the record the agent read. */
+  checkCustody: (delegator: Address) => Promise<boolean>;
+}) {
   const d = describeRequirement(reply);
+  // TWO HALVES OF ONE HONEST ANSWER (spec 353 S5). The chain says whether this person can grant; the
+  // agent's derived standing says what they ARE and who would have to act instead. Either alone leaves a
+  // person stuck: "you can't" with no route, or "you're a member" with a button that will fail.
+  const [custody, setCustody] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void checkCustody(reply.delegator).then((ok) => { if (live) setCustody(ok); }).catch(() => { if (live) setCustody(null); });
+    return () => { live = false; };
+  }, [reply.delegator]);
+
+  if (custody === false) {
+    return (
+      <div className="ask-card" data-testid="ask-authority-blocked">
+        <div style={{ fontWeight: 600, fontSize: 13 }}>You can’t authorize this</div>
+        <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
+          {reply.note
+            ? reply.note
+            : `This needs ${CAPABILITY_WORDS[reply.capability] ?? reply.capability} as ${short(reply.delegator)}, which a different credential custodies.`}
+        </p>
+        <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>Nothing was authorized, and nothing happened.</p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          {reply.standing?.relation === 'member' && (
+            <button
+              type="button" className="btn primary" data-testid="ask-request-authority"
+              onClick={() => onRequest(`send a direct message to ${short(reply.delegator)} asking a steward to authorize ${CAPABILITY_WORDS[reply.capability] ?? reply.capability} for me`)}
+            >Ask a steward</button>
+          )}
+          <button type="button" className="btn ghost" onClick={onCancel}>Close</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="ask-card" data-testid="ask-authority">
       <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>
@@ -308,7 +353,9 @@ function AuthorityCard({ reply, busy, onGrant, onCancel }: { reply: Extract<AskR
         <strong>{short(d.delegator)}</strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
       </p>
       <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
-        You are granting it because your credential custodies {short(d.delegator)}. You can revoke it on chain at any time.
+        {reply.standing?.relation === 'steward'
+          ? <>You are granting it as a steward of {short(d.delegator)}. You can revoke it on chain at any time.</>
+          : <>You are granting it because your credential custodies {short(d.delegator)}. You can revoke it on chain at any time.</>}
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <BusyButton busy={busy === 'Granting authority…'} busyLabel="Granting…" onClick={onGrant} className="btn primary" data-testid="ask-grant">Grant &amp; continue</BusyButton>

@@ -41,7 +41,8 @@ export interface DiscoveryEnv {
 
 interface LookupRow {
   smartAgent?: string; name?: string | null; displayName?: string | null; description?: string | null;
-  skills?: string | null; facets?: string[]; shaclConforms?: boolean; registryStatus?: string | null;
+  /** ADR-0051: the public assertion is `capabilities`. The MCP row was renamed with it; one name, here too. */
+  capabilities?: string | null; facets?: string[]; shaclConforms?: boolean; registryStatus?: string | null;
   kind?: string | null;
   /** Spec 331 — the structured facets the matcher now ranks on, ahead of any lexical signal. */
   capabilityIds?: string[]; languages?: string | null; regions?: string | null; focusAreas?: string | null;
@@ -140,10 +141,10 @@ export async function fetchDiscoveryFacets(
       name: row.name ?? null,
       displayName: row.displayName ?? null,
       description: row.description ?? null,
-      skills: row.skills ?? null,
+      capabilities: row.capabilities ?? null,
       // Spec 331 — carried through so `rankConsultCandidates` can score STRUCTURE. The MCP parses
-      // `capabilityIds` out of `skills` server-side so every consumer agrees on what a declared
-      // capability id is; the `?? []` is the pre-migration server, not a silent default.
+      // `capabilityIds` out of the capability assertion server-side so every consumer agrees on what a
+      // declared capability id is; the `?? []` is the pre-migration server, not a silent default.
       capabilityIds: row.capabilityIds ?? [],
       languages: row.languages ?? null,
       regions: row.regions ?? null,
@@ -153,7 +154,7 @@ export async function fetchDiscoveryFacets(
       registered: row.registryStatus === 'active' || (row.facets ?? []).includes('registry'),
     };
     // Agent kind (person-only mandate) now arrives on the SAME row — no second capped `/names` read.
-    if (row.kind) out[sa].kind = row.kind;
+    if (row.kind) out[sa]!.kind = row.kind;
   }
   // Claimed-capability tier — enrich each member with its endorsement signal. One /trust read per member
   // (the member set is small and known — spec 329 routing), so this is bounded by the roster, not the KB.

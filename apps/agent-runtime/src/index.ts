@@ -105,6 +105,10 @@ import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
+import { chainStewardshipCheck } from './standing.js';
+import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
+import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
+const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1267,6 +1271,17 @@ app.post('/harness/ask', async (c) => {
       intent, result, addressee, composer: selectComposer(c.env), deps: askDeps,
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
+      // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
+      // hold and the chain confirms — the surface asserts no standing, and this decides nothing.
+      principal: who.sa as Address,
+      verifyStewardship: chainStewardshipCheck({
+        readContract: ((args: never) => askDeps.readContract(args)) as never,
+        chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
+        allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER,
+        vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+        isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+        ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+      }),
     });
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a

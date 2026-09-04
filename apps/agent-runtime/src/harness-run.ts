@@ -50,6 +50,7 @@ import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, type PartyLookups } from './party-resolution.js';
 import { preconditionRefusal } from './capability-preconditions.js';
+import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
 
 
 export interface HarnessEnv {
@@ -823,7 +824,12 @@ export const REQUIREMENT_TYPE_FOR = (capabilityId: string): string =>
  *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
 export type AskReply =
   | { kind: 'answer'; text: string; runRef: string }
-  | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string }
+  | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
+      /** What the ASKER is to the delegator, derived (spec 353 S5). Absent when nothing could read it —
+       *  which is not "no standing", so a surface must not render absence as a refusal. */
+      standing?: Standing; note?: string;
+      /** Why standing could not be read, when it could not. Never a refusal — the ask proceeds. */
+      standingUnavailable?: string }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts'] }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts'] };
@@ -952,6 +958,11 @@ export async function askReplyFor(env: HarnessEnv, input: {
    *  step's args BEFORE any invoker runs, so "as nathan.treasury" has to become an address here or the
    *  person is asked to grant authority as a string nothing can sign. */
   resolveName?: (name: string) => Promise<string | null>;
+  /** The person asking. Used ONLY to say, before a ceremony, what they are to the agent whose authority
+   *  the plan needs — never consulted by a gate (spec 353 §4). */
+  principal?: Address;
+  /** Verifies a stewardship wire on chain. Absent ⇒ a held wire is not upgraded to `steward` on its word. */
+  verifyStewardship?: StandingDeps['verifyStewardship'];
 }): Promise<AskReply> {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
@@ -983,11 +994,31 @@ export async function askReplyFor(env: HarnessEnv, input: {
     const delegator = (/^0x[0-9a-fA-F]{40}$/.test(named)
       ? named
       : ((input.resolveName ? await input.resolveName(named.toLowerCase()) : null) ?? input.addressee)).toLowerCase() as Address;
+    // WHO CAN GRANT THIS (spec 353 S5). The chain will decide either way; the point is to decide it BEFORE
+    // a person signs rather than after. A member who signs as an org they do not custody gets a `not-live`
+    // verdict that is accurate, unhelpful, and arrives once the work is already done.
+    let standing: Standing | undefined;
+    // An UNREADABLE standing is not "no standing", and it must not read as one. Absence gets a reason, so
+    // a surface (and whoever is debugging it) can tell "we looked and they are a member" apart from "we
+    // never looked", which are opposite facts that look identical when the field is simply missing.
+    let standingUnavailable: string | undefined;
+    if (!input.principal) standingUnavailable = 'the asker was not named to this reply';
+    else if (!input.deps?.readSubjectRecord) standingUnavailable = 'this agent cannot read the asker\'s links';
+    else {
+      const read = input.deps.readSubjectRecord;
+      standing = await deriveStanding(
+        { readSubjectRecord: read, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}) },
+        { principal: input.principal, subject: delegator },
+      ).catch((e: unknown) => { standingUnavailable = e instanceof Error ? e.message : String(e); return undefined; });
+    }
+    const note = standing ? standingNote(standing, CAPABILITY_WORDS[r.required.capability.id] ?? 'authority') : '';
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
       capability: r.required.capability.id, stepRef: r.required.stepRef,
       summary: `${r.required.capability.id} on ${delegator}`,
+      ...(standing ? { standing } : {}), ...(note ? { note } : {}),
+      ...(standingUnavailable ? { standingUnavailable } : {}),
     };
   }
   if (r.outcome === 'suspended' && r.prompt) {

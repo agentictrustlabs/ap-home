@@ -6,6 +6,8 @@
 // with a common label can be paid by a sentence that named a friend. Spec 352 §7 says it plainly — "Alice"
 // resolves in MY private tier or refuses; a global people search is a different ask (279/338).
 //
+// Shapes come from ONE parser (`relationship-rows.ts`): the record is a map keyed by address, and the
+// hand-rolled `.find` here used to throw straight into a catch — reporting "no links" for "unreadable".
 // The private tier here is the asker's `relationships.data` — the same record the Home's switcher renders
 // (ADR-0025: person↔agent links are private vault credentials, never on-chain edges). It is read through
 // the asker's OWN InteractionsDO under their own interactions grant, in-Worker: no client-asserted list, no
@@ -19,6 +21,7 @@
 // organization that appears in the asker's own private tree, and that link is a private vault credential
 // they hold (ADR-0025) — it IS the evidence that they belong. No public enumeration of who is in what, no
 // app-supplied membership claim (spec 353 §2), and nothing about the roster leaves the ask that used it.
+import { relationshipRows } from './relationship-rows.js';
 import type { EntityCandidate, EntityProvider, EntityQuery } from '@agenticprimitives/context';
 
 /** One row of the asker's private tree, as `relationships.data` stores it. */
@@ -60,21 +63,18 @@ export function relationshipsProvider(deps: PrivateTierDeps): EntityProvider {
     async candidates(query: EntityQuery): Promise<EntityCandidate[]> {
       if (!query.subject) return []; // enforced by the resolver too; stated here because it is the rule
       const doc = await deps.readSubjectRecord(query.subject, 'relationships.data');
-      const rows = ((doc as { rows?: RelatedAgentRow[]; orgs?: RelatedAgentRow[] } | null)?.rows
-        ?? (doc as { orgs?: RelatedAgentRow[] } | null)?.orgs
-        ?? (Array.isArray(doc) ? (doc as RelatedAgentRow[]) : [])) as RelatedAgentRow[];
+      const rows = relationshipRows(doc);
       const out: EntityCandidate[] = [];
       for (const r of rows) {
-        const agent = String(r.orgAgent ?? r.agent ?? '').toLowerCase();
-        if (!/^0x[0-9a-f]{40}$/.test(agent)) continue;
-        const name = String(r.orgName ?? r.name ?? '');
+        const agent = r.agent;
+        const name = r.name === agent ? '' : r.name;
         const match = rowMatches(query.term, name, name);
         if (!match) continue;
         out.push({
           agent,
           label: name || agent,
           ...(name.includes('.') ? { name } : {}),
-          ...(r.kind ?? r.purpose ? { kind: String(r.kind ?? r.purpose) } : {}),
+          ...(r.kind ? { kind: r.kind } : {}),
           provenance: { tier: 'private', source: 'relationships', subject: query.subject, match },
         });
       }
@@ -122,13 +122,10 @@ export function rosterProvider(deps: PrivateTierDeps, opts: { maxOrgs?: number }
     async candidates(query: EntityQuery): Promise<EntityCandidate[]> {
       if (!query.subject) return [];
       const tree = await deps.readSubjectRecord(query.subject, 'relationships.data');
-      const rows = ((tree as { rows?: RelatedAgentRow[]; orgs?: RelatedAgentRow[] } | null)?.rows
-        ?? (tree as { orgs?: RelatedAgentRow[] } | null)?.orgs
-        ?? (Array.isArray(tree) ? (tree as RelatedAgentRow[]) : [])) as RelatedAgentRow[];
+      const rows = relationshipRows(tree);
       const orgs = rows
-        .filter((r) => ROSTERED_KINDS.has(String(r.kind ?? r.purpose ?? '').toLowerCase()))
-        .map((r) => ({ agent: String(r.orgAgent ?? r.agent ?? '').toLowerCase(), name: String(r.orgName ?? r.name ?? '') }))
-        .filter((o) => /^0x[0-9a-f]{40}$/.test(o.agent))
+        .filter((r) => ROSTERED_KINDS.has((r.kind ?? '').toLowerCase()))
+        .map((r) => ({ agent: r.agent, name: r.name }))
         .slice(0, maxOrgs);
 
       const found = await Promise.all(orgs.map(async (org) => {

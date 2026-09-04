@@ -175,6 +175,42 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       ...(l.status ? { status: l.status } : {}),
     });
   }
+  // ── THE RECONCILE THIS FILE ALREADY PROMISED ──────────────────────────────────────────────────
+  // The POST above writes new links through to the person's AUTHORITATIVE vault doc, and says links
+  // minted without a person session "surface in the doc at the person's next reconcile-capable
+  // ceremony". Nothing performed that ceremony, so the doc held only the links written since
+  // write-through landed, while this KV projection held everything (25 links in the Home, 3 in the
+  // record). Every consumer that correctly reads the RECORD — the Ask's private tier, standing, roster
+  // reach — therefore read a near-empty tree and reported "no links" for a person with two dozen.
+  //
+  // This is that ceremony: the person's own home view, under their own session, mirrors anything the
+  // projection has and the record lacks. Additive and idempotent — it writes entries, never removes
+  // them, and the record stays the authority (ADR-0055). Not a read fallback (ADR-0013): the read
+  // still has one answer; this is a WRITE that makes the record catch up with what the person already
+  // authorized.
+  if (!clientId && token && orgs.length) {
+    try {
+      const { readRelationshipsDoc, mergeRelationshipEntry } = await import('../lib/relationships-doc');
+      const doc = await readRelationshipsDoc(env, person, token).catch(() => null);
+      if (doc) {
+        const have = new Set(Object.keys(doc.orgs ?? {}).map((k) => k.toLowerCase()));
+        const missing = orgs.filter((o) => !have.has(String(o.orgAgent).toLowerCase()));
+        // Bounded: a person with hundreds of links catches up over a few visits rather than turning one
+        // page load into a hundred vault writes.
+        for (const o of missing.slice(0, 30)) {
+          const wire = o.stewardshipDelegation ?? o.membershipDelegation ?? null;
+          await mergeRelationshipEntry(env, person, token, {
+            org: String(o.orgAgent),
+            relationship: o.relationship === 'member' ? 'member' : 'steward',
+            ...(o.orgName ? { orgName: String(o.orgName) } : {}),
+            ...(o.kind ? { kind: String(o.kind) } : {}),
+            ...(o.parent ? { parent: String(o.parent) } : {}),
+            ...(wire ? { delegations: [wire] } : {}),
+          }).catch(() => undefined); // one entry's failure must not cost the person their home view
+        }
+      }
+    } catch { /* the view is the job here; the reconcile is opportunistic */ }
+  }
   return jsonCors({ orgs }, request);
 };
 
@@ -413,7 +449,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   // spec 323 W1 — mirror into the person's AUTHORITATIVE vault doc when this write rides their own
   // home session (the DO op is self-gated; the external-custodian sig path has no person session,
-  // so its links surface in the doc at the person's next reconcile-capable ceremony).
+  // so its links surface in the doc at the person’s next home view — see the GET reconcile above).
   if (bearer) {
     const { mergeRelationshipEntry } = await import('../lib/relationships-doc');
     await mergeRelationshipEntry(env, person, bearer, {

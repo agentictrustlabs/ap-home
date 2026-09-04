@@ -54,7 +54,11 @@ export type AskPrompt =
 
 export type AskReply =
   | { kind: 'answer'; text: string; runRef: string }
-  | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string }
+  | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
+      /** What the ASKER is to the delegator, derived by the agent from evidence the chain confirms
+       *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */
+      standing?: { relation: 'self' | 'steward' | 'member' | 'none'; because: string; canGrant: boolean };
+      note?: string }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[] }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
