@@ -134,8 +134,10 @@ describe('release stepper state', () => {
 
 describe('field-row mapping', () => {
   it('resolves the owning field for a nested pointer', () => {
-    expect(fieldLabelForPointer('/skills/2/id')).toBe('Skills');
-    expect(sectionIdForPointer('/capabilities/streaming')).toBe('capabilities');
+    expect(fieldLabelForPointer('/skills/2/id')).toBe('Advertised capabilities'); // ADR-0051: the label follows the vocabulary
+    // The A2A card's `capabilities` block is PROTOCOL features (streaming, push) — not the agent's
+    // capabilities in the ADR-0051 sense. The section was renamed so the two cannot be read as one thing.
+    expect(sectionIdForPointer('/capabilities/streaming')).toBe('protocol-features');
     expect(fieldLabelForPointer('/nope')).toBe('/nope');
   });
 
