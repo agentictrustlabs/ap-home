@@ -8,6 +8,7 @@
 // principal, so the reducer's participant gate passes) and the steward reviews/edits/adopts it.
 // Authority is unchanged (ADR-0041): drafting composes no MCP tools and grants nothing.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
+import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
 
 export interface EndeavorPlanDraftInput {
@@ -74,7 +75,23 @@ const DRAFT_TOOLS: ToolSpec[] = [
   },
 ];
 
-const PLAN_CONTRACT =
+/**
+ * The capabilities this substrate can exercise under a mandate, as the planner is told about them. A step
+ * that names one is not routed and not written about: it becomes work waiting on a steward's authority
+ * (`endeavor-authority-steps.ts`). The list is the coordination side's own — an unrelated tool appearing
+ * in the harness must never silently change what a plan step is taken to mean.
+ */
+const AUTHORITY_ROSTER =
+  'Some steps are actions THIS organization performs itself, under an authority a steward grants — not ' +
+  'work anyone writes and not work to route. When a step IS one of these, set `capabilityIri` to the ' +
+  'matching entry below, exactly:' +
+  AUTHORITY_BEARING_CAPABILITIES.map((c) => ` urn:ap:cap:${c}`).join(';') + '. ' +
+  'Use one ONLY when the step\'s whole purpose is that action (chartering a team or organization, ' +
+  'inviting a member, making a payment) — never for planning, drafting or deciding to do it. Such a step ' +
+  'will WAIT until a steward authorizes it, so do not also write a step that describes doing it by hand. ' +
+  'Never invent an ap capability: only the entries listed here exist. ';
+
+export const PLAN_CONTRACT =
   "You are an organization's coordination planner. Given a goal, break it into a small, concrete, " +
   'ordered plan of 3-7 steps that a team could actually execute. Middle steps do the work ' +
   '(kind: contribution) and a final step confirms the outcome (kind: validation). ' +
@@ -94,6 +111,12 @@ const PLAN_CONTRACT =
   'entry that matches the work EXACTLY; if nothing matches, or there is no roster, use the exact ' +
   'string "none". Never invent an IRI and never leave the field out — a step that needs no ' +
   'specialist says "none", which is an answer, not a blank. ' +
+  // THE ORGANIZATION'S OWN ACTIONS. The roster above routes a step to somebody ELSE's specialist; these
+  // are things this organization does ITSELF, under an authority a steward grants. Until this list was
+  // here no plan could name one — so a step reading "charter the team" was a writing task, satisfied by a
+  // paragraph saying it had happened (spec 334 §6 / 350 W3). Naming it makes the step wait for authority
+  // instead, which is the honest outcome: the plan may SAY what must be done; only a mandate permits it.
+  AUTHORITY_ROSTER +
   'Call draft_plan exactly once with the steps. Never answer in prose.';
 
 /** Deterministic fallback (no LLM configured) — a generic gather → do → confirm skeleton so the

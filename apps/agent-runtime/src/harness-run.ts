@@ -73,7 +73,16 @@ export interface HarnessEnv {
 export const CHILD_AGENT_KINDS = [
   { capability: 'organization.team.create', tld: 'team', noun: 'team', parentNoun: 'a workspace or organization' },
   { capability: 'organization.create', tld: 'org', noun: 'organization', parentNoun: 'a person (their own realm)' },
+  { capability: 'treasury.create', tld: 'treasury', noun: 'treasury', parentNoun: 'a person or an organization' },
 ] as const;
+
+/** The KIND a created agent is recorded as in its owner's tree. Usually the noun; a treasury is named for
+ *  WHOSE it is, because that is how the Home lists it (`person-treasury` under you, `org-treasury` inside
+ *  the organization) — recording a bare "treasury" would put it in neither. */
+export function recordedKind(noun: string, parent: string, person?: string): string {
+  if (noun !== 'treasury') return noun;
+  return person && parent.toLowerCase() === person.toLowerCase() ? 'person-treasury' : 'org-treasury';
+}
 
 export const CHILD_AGENT_TLD: Record<string, string> = Object.fromEntries(CHILD_AGENT_KINDS.map((k) => [k.capability, k.tld]));
 
@@ -119,7 +128,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       properties: {
         payer: { type: 'string', description: 'The paying treasury or organization SA address' },
         asset: { type: 'string', description: 'ERC-20 token contract address' },
-        payee: { type: 'string', description: 'Recipient address' },
+        payee: { type: 'string', description: 'Recipient address, or its agent name (e.g. bob.me)' },
         amount: { type: 'string', description: 'Amount in the token\'s smallest unit, as a decimal string' },
       },
       required: ['payer', 'asset', 'payee', 'amount'],
@@ -130,9 +139,51 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     risk: 'high',
   },
   INVITE_TOOL,
+  {
+    id: 'treasury.fund',
+    description:
+      'Fund a treasury with DEMO USDC (a faucet mint, not a transfer — no one is debited). Requires a '
+      + 'mandate from the funder, because the mint is made in their name. Args: funder (the SA whose '
+      + 'authority this needs — normally the person asking), treasury (its ADDRESS or its NAME, e.g. '
+      + '"alice2.treasury" — either works), amount (smallest units as a decimal string — USDC has 6 '
+      + 'decimals, so 12.11 USDC is "12110000"). Use this whenever the ask is to fund, top up or add '
+      + 'demo USDC to a treasury: it takes the name directly, so no lookup is needed first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        funder: { type: 'string', description: 'The funding SA (whose authority this needs)' },
+        asset: { type: 'string', description: 'The demo USDC contract address (ask the agent if unknown)' },
+        treasury: { type: 'string', description: 'The treasury SA to credit' },
+        amount: { type: 'string', description: 'Amount in the token\'s SMALLEST units (12.11 USDC = "12110000"). Use `usdc` instead if the ask says a decimal figure.' },
+        usdc: { type: 'string', description: 'Amount in whole USDC as the person said it, e.g. "12.11". Use this when the ask names a decimal figure — do not convert it yourself.' },
+      },
+      // `funder` is OPTIONAL on purpose. The planner chooses ONE tool (that is what the planner IS), so a
+      // capability whose required args it cannot fill from the sentence is a capability it will not
+      // choose — it picked the lookup and answered instead. Whose authority this needs is not the
+      // planner's to decide anyway: it is the mandate's delegator, and the surface asks the person
+      // standing in that realm.
+      // Either unit, never a guess. "fund alice2.treasury with 12.11 USDC" made the planner hesitate over
+      // a field asking for 12110000 and answer with a paragraph instead; two differently-named arguments
+      // remove the ambiguity rather than resolving it silently, which is the only acceptable way to be
+      // unsure about an amount of money.
+      required: ['treasury'],
+    },
+    // It acts on the TOKEN and needs the FUNDER's authority — the same split a payment has.
+    capability: { id: 'treasury.fund', action: 'fund', resourceArg: 'asset', authorityArg: 'funder' },
+    risk: 'low',
+  },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
     id: capability,
-    description: `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, custodied by the connected user and stewarded by its parent. Requires a mandate from the parent. Args: parent (the parent SA address — the mandate's delegator), label (the ${noun}'s name: lowercase letters, digits, hyphens; omit if the ask did not name it — the person will be asked).`,
+    description:
+      `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, `
+      + `custodied by the connected user and stewarded by its parent. Requires a mandate from the parent. `
+      + `Args: parent (the parent SA address — the mandate's delegator), label (the ${noun}'s name: lowercase letters, `
+      + `digits, hyphens; omit if the ask did not name it — the person will be asked). `
+      // These tools are NOT interchangeable and the planner must not treat them as a menu of near-misses:
+      // asked for a treasury with no treasury tool, it picked organization.create and chartered an
+      // organization the person then could not find where they looked for it (2026-09-04).
+      + `ONLY for a ${noun}: a team, an organization, a treasury and a service are different kinds of agent, `
+      + `and each has its own tool. If the ask names a kind that has no tool here, say so — never charter the nearest one.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -240,7 +291,7 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
 
     const g = await genesis.build({ credential: credential!, salt, label, tld, parent, stewardship: { salt: stewardshipSalt, validUntil } });
     if (await genesis.isDeployed(g.child)) {
-      return { agent: g.child, name: g.name, kind: noun, parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true };
+      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true };
     }
     // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
     const holder = await genesis.resolveName(name);
@@ -269,7 +320,7 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
     if (!same(hash, signed.digest)) throw new Error(`the signed digest ${signed.digest} is not the hash of the supplied userOp (${hash})`);
     if (signed.signer.toLowerCase() !== signerOf(credential!).toLowerCase()) throw new Error(`the signature is not from the credential that will custody the ${noun}`);
     const { txHash } = await genesis.submit({ ...op, signature: signed.signature as Hex });
-    return { txHash, agent: g.child, name: g.name, kind: noun, parent, custodian: credential, person, stewardshipDelegation: g.stewardship };
+    return { txHash, agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship };
   };
 }
 
@@ -298,6 +349,10 @@ export interface HarnessDeps {
   audit: AuditSink;
   /** The team-genesis substrate; absent ⇒ `organization.team.create` fails as unconfigured (never silently). */
   teamGenesis?: TeamGenesisDeps;
+  /** Resolve an agent NAME to its address, on chain. Injected so a capability can take "alice2.treasury"
+   *  where it needs an address: asking a planner to chain a lookup into a later step's args is a
+   *  coordination problem we do not need to have, and it answered with a paragraph instead of acting. */
+  resolveName?: (name: string) => Promise<string | null>;
   now?: () => number;
 }
 
@@ -445,18 +500,87 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
   };
 }
 
+/**
+ * An address, or a NAME that resolves to one.
+ *
+ * People say "fund alice2.treasury", not "fund 0x5ef5…". Requiring an address here made the planner chain
+ * a lookup into a later step's arguments, and when it did not it simply answered — reporting the address
+ * it had found and that nothing had happened. A capability that accepts the words a person used needs no
+ * such chain, and the resolution is the chain's own (immediate, unlike the directory).
+ */
+async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
+  const raw = String(value ?? '').trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase() as Address;
+  if (!raw) throw new Error(`${what} is required`);
+  if (!deps.resolveName) throw new Error(`${what} must be an address on this deployment (no name resolution wired)`);
+  const resolved = await deps.resolveName(raw.toLowerCase());
+  if (!resolved) throw new Error(`no agent holds the name "${raw}" — check it, or give the address`);
+  return resolved.toLowerCase() as Address;
+}
+
+/** The amount, from whichever unit the ask used. Never inferred from a bare number: `amount` is smallest
+ *  units, `usdc` is whole USDC, and neither one present is an error rather than a zero. */
+export function fundingAmount(args: Record<string, unknown>): bigint {
+  const raw = String(args.amount ?? '').trim();
+  if (raw) {
+    if (!/^\d+$/.test(raw)) throw new Error(`amount must be whole smallest units (got "${raw}") — use the usdc argument for a decimal figure`);
+    return BigInt(raw);
+  }
+  const human = String(args.usdc ?? '').trim();
+  if (!human) throw new Error('how much? give `usdc` (e.g. "12.11") or `amount` in smallest units');
+  if (!/^\d+(\.\d{1,6})?$/.test(human)) throw new Error(`"${human}" is not an amount of USDC (up to 6 decimal places)`);
+  const [whole, frac = ''] = human.split('.');
+  return BigInt(whole!) * 1_000_000n + BigInt((frac + '000000').slice(0, 6));
+}
+
+const MINT_ABI = [{ type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] }] as const;
+
+/**
+ * `treasury.fund` — the demo faucet, done in the FUNDER's name.
+ *
+ * The Home's Fund button has the person's own SA call `mint` on the demo token; through the Ask the same
+ * call is made by this agent redeeming the funder's mandate, so the authority is explicit and the receipt
+ * says whose it was. A mint credits without debiting anyone, which is why this is `low` risk and a payment
+ * is `high` — the ladder should not demand a second party to hand out demo money.
+ */
+export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation): ToolInvoker {
+  return async (_toolId, args, ctx) => {
+    const wire = presented.wire as Delegation;
+    const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
+    const dm = env.DELEGATION_MANAGER as Address;
+    // The demo token is a DEPLOYMENT fact, not something to ask a planner to remember: default it, and
+    // let an explicit arg override only if someone means a different token.
+    const asset = (String(args.asset || env.MOCK_USDC || '')).toLowerCase() as Address;
+    if (!/^0x[0-9a-f]{40}$/.test(asset)) throw new Error('treasury.fund: no demo token is configured on this deployment');
+    const funder = String(args.funder ?? '').toLowerCase();
+    if (funder && funder !== wire.delegator.toLowerCase()) throw new Error(`the funding is made by the mandate's delegator (${wire.delegator}); the plan named ${funder}`);
+    const treasury = await partyAddress(args.treasury, deps, 'the treasury to fund');
+    const amount = fundingAmount(args);
+    const digest = intentDigest(ctx.intent);
+    const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
+    const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, amount] });
+    const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, mint] });
+    const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
+    const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
+    return { txHash, treasury, asset, amount: amount.toString(), funder: wire.delegator };
+  };
+}
+
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
 export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address): ToolInvoker {
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
       return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
     }
+    if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const dm = env.DELEGATION_MANAGER as Address;
@@ -467,7 +591,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     if (payer && payer !== (presented!.wire as Delegation).delegator.toLowerCase()) {
       throw new Error(`the payment is made by the mandate's delegator (${(presented!.wire as Delegation).delegator}); the plan named ${payer}`);
     }
-    const payee = String(args.payee) as Address;
+    const payee = await partyAddress(args.payee, deps, 'the payee');
     const amount = BigInt(String(args.amount));
     const wire = presented!.wire as Delegation;
     const digest = intentDigest(ctx.intent);
@@ -605,7 +729,9 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
   // Ask is not a way around it. Nothing on this list writes to the knowledge base — the indexer is its
   // only writer, and a fact the chain does not have is a fact discovery must not be told.
-  const tools = [...ASK_DISCOVERY_TOOLS, ...HARNESS_ACTION_TOOLS];
+  // ACTIONS FIRST. The planner picks one tool; when an ask is "do this", a directory read listed ahead of
+  // the capability that does it is a plausible-looking answer to a question nobody asked.
+  const tools = [...HARNESS_ACTION_TOOLS, ...ASK_DISCOVERY_TOOLS];
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),

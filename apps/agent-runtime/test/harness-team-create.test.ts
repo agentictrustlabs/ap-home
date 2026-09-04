@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, inviteInvoker, askReplyFor, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -268,5 +268,23 @@ describe('inviting a member (organization.membership.invite)', () => {
     expect('error' in (await caught(inv(undefined, { org: ORG, invitee: ORG }))) ? (await caught(inv(undefined, { org: ORG, invitee: ORG }))).error : '').toContain('cannot invite itself');
     const self = await caught(inv(undefined, { org: ORG, invitee: PERSON }));
     expect('error' in self ? self.error : '').toContain('already the steward');
+  });
+});
+
+describe('how much to fund (an amount is never guessed)', () => {
+  it('takes smallest units, or whole USDC — each in its own argument', () => {
+    expect(fundingAmount({ amount: '12110000' })).toBe(12_110_000n);
+    expect(fundingAmount({ usdc: '12.11' })).toBe(12_110_000n);
+    expect(fundingAmount({ usdc: '5' })).toBe(5_000_000n);
+    expect(fundingAmount({ usdc: '0.000001' })).toBe(1n);
+  });
+
+  it('refuses a decimal in the smallest-units field rather than reading it as units', () => {
+    expect(() => fundingAmount({ amount: '12.11' })).toThrow(/whole smallest units/);
+  });
+
+  it('refuses to invent an amount when none was given', () => {
+    expect(() => fundingAmount({})).toThrow(/how much/);
+    expect(() => fundingAmount({ usdc: 'a lot' })).toThrow(/not an amount/);
   });
 });

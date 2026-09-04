@@ -1283,7 +1283,7 @@ export class A2aTaskDO {
         try {
           await this.state.storage.put(`harness:run:${runRef}`, checkpoint);
           await this.interactionsInternal(principal, 'internal.endeavor.post', {
-            endeavorId, body: awaitingAuthorityNote({ capability: needsAuthority, principal: principal as Address, runRef, step }),
+            endeavorId, bodyText: awaitingAuthorityNote({ capability: needsAuthority, principal: principal as Address, runRef, step }),
           });
         } catch (e) {
           console.error('[endeavor step] could not park an authority-bearing step:', endeavorId, step.stepId, e);

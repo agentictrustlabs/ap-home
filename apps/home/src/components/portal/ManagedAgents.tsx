@@ -10,7 +10,7 @@ import { ExplorerLink } from '../shared/ExplorerLink';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { AGENT_NAME_PARENT } from '../../lib/domain';
-import { typedTldForKind, createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { typedTldForKind, createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
@@ -117,6 +117,14 @@ export function FundForm({
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
+  // Whether THIS session signs without a device prompt. `null` until known — the note says nothing rather
+  // than guessing, because guessing is how it came to promise "no wallet prompt" to a wallet home.
+  const [promptless, setPromptless] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void signsWithoutPrompt(via, token).then((v) => { if (live) setPromptless(v); }).catch(() => { if (live) setPromptless(null); });
+    return () => { live = false; };
+  }, [via, token]);
 
   async function go() {
     const n = Number(amt);
@@ -151,7 +159,13 @@ export function FundForm({
           Cancel
         </button>
       </div>
-      <p className="onboarding-note" style={{ margin: 0 }}>Mints demo USDC to this treasury — gasless, no wallet prompt.</p>
+      {/* Say what THIS session will actually do. "no wallet prompt" was written for KMS homes and read as
+          a promise by everyone: a wallet home signs the mint with its own credential, and a seeded demo
+          person signs at the Home. Gas is sponsored either way; the signature is not always free. */}
+      <p className="onboarding-note" style={{ margin: 0 }}>
+        Mints demo USDC to this treasury — gas is sponsored.{' '}
+        {promptless === null ? '' : promptless ? 'Your home signs it: no wallet prompt.' : 'Your wallet will ask you to sign it.'}
+      </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
     </div>
   );

@@ -1,5 +1,11 @@
 // WHAT THE ASK MAY READ — the public agent knowledge base, through discovery, and nothing else.
 //
+// Two sources, and the difference matters. The DIRECTORY (discovery) answers "who is out there like X" —
+// it is a projection, and a projection lags: an agent created a minute ago is not in it yet. The NAMING
+// SERVICE answers "who holds exactly this name" from the chain, immediately. An ask that names an agent
+// gets the chain; an ask that describes one gets the directory. Reaching for the directory to answer an
+// exact name is how "fund alice2.treasury" came back as "no such agent" about an agent that existed.
+//
 // ADR-0040 is the whole design here, in both directions:
 //
 //   READ  — the KB holds ONLY public, on-chain-derivable facts. Reading all of it reveals nothing that
@@ -44,6 +50,15 @@ async function discovery(env: DiscoveryEnv, path: string, init?: RequestInit): P
  *  read what the chain already publishes. */
 export const ASK_DISCOVERY_TOOLS: ToolSpec[] = [
   {
+    id: 'resolve_agent_name',
+    description:
+      'Resolve an exact agent NAME (e.g. "alice2.treasury", "outreach.team", "bob.me") to its smart-agent '
+      + 'address, from the naming service ON CHAIN. Use this whenever the ask names an agent: it is '
+      + 'authoritative and immediate, where the directory reflects what has been indexed and lags a '
+      + 'newly-created agent. Returns null when nothing holds that name.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The full typed name, e.g. outreach.team' } }, required: ['name'] },
+  },
+  {
     id: 'find_agents',
     description:
       'Search the PUBLIC agent directory for agents (people, organizations, teams, services) by name or ' +
@@ -79,8 +94,18 @@ export const ASK_DISCOVERY_TOOLS: ToolSpec[] = [
 export const ASK_DISCOVERY_TOOL_IDS = new Set(ASK_DISCOVERY_TOOLS.map((t) => t.id));
 
 /** Invoke one discovery read. Public data only, in and out. */
-export function askDiscoveryInvoker(env: DiscoveryEnv): ToolInvoker {
+export function askDiscoveryInvoker(env: DiscoveryEnv & { resolveName?: (name: string) => Promise<string | null> }): ToolInvoker {
   return async (toolId, args) => {
+    if (toolId === 'resolve_agent_name') {
+      const name = String((args as { name?: unknown }).name ?? '').trim().toLowerCase();
+      if (!name) throw new Error('resolve_agent_name needs a name');
+      if (!env.resolveName) throw new Error('name resolution is not wired on this agent');
+      // The CHAIN is the answer here, not the index. An agent created a minute ago resolves; the
+      // directory may not have seen it yet, and answering "no such agent" about one that exists is
+      // worse than answering slowly.
+      const agent = await env.resolveName(name);
+      return { name, agent, found: !!agent };
+    }
     if (toolId === 'find_agents') {
       const terms = String((args as { terms?: unknown }).terms ?? '').trim();
       if (!terms) throw new Error('find_agents needs search terms');

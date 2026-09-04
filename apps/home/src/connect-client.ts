@@ -1693,14 +1693,9 @@ export async function nameManagedAgent(
     return nameManagedAgentSocial(input, sessionToken, onStep);
   }
 
-  let signHash: SignHash;
-  if (viaLc === 'wallet') {
-    const owner = await connectWallet();
-    signHash = (h) => personalSign(owner, h);
-  } else {
-    if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
-    signHash = passkeySignHash;
-  }
+  const signer = await personSignHash(input.person, viaLc, sessionToken);
+  if (typeof signer !== 'function') return { ok: false, error: signer.error };
+  const signHash: SignHash = signer;
 
   const claim = await buildClaimCallData(input.label, input.agent, onStep, true, {
     agentKind: input.kind === 'org' ? 'org' : 'service',
@@ -1946,6 +1941,36 @@ const MINT_ABI = [
  *  `mint(treasury, amount)` in ONE gasless sponsored userOp. The home SA is the single SA EVERY credential
  *  can sign for — passkey (passkeySignHash), wallet (personalSign), and SOCIAL (googleSignHash signs for
  *  the home SA, spec 235 §5.4). No wallet transaction → no MetaMask/Blockaid prompt. */
+/**
+ * The signer for a ceremony this PERSON authorizes.
+ *
+ * A seeded demo person has a wallet CREDENTIAL but no wallet in this browser — their custodian key is held
+ * by the Home. `createManagedAgent` learned that; `fundTreasury` and `nameManagedAgent` did not, so funding
+ * a demo persona's treasury opened MetaMask under a blurb promising no wallet prompt, and the popup was for
+ * an account that does not custody anything here. One helper, so the next ceremony cannot forget it.
+ */
+async function personSignHash(person: Address, via: string, sessionToken: string): Promise<SignHash | { error: string }> {
+  const viaLc = (via ?? '').toLowerCase();
+  if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
+    return googleSignHash(person, sessionToken); // C_sub signs for the home SA (the whole KMS family)
+  }
+  if (viaLc === 'wallet') {
+    if (sessionToken && (await isDemoCustodyHome(sessionToken))) return demoCustodySignHash(sessionToken);
+    const owner = await connectWallet();
+    return (h: Hex) => personalSign(owner, h);
+  }
+  if (!loadPasskey()) return { error: 'Your passkey isn’t on this device — sign in to your home first.' };
+  return passkeySignHash;
+}
+
+/** Does this session sign without a device prompt? (KMS homes and Home-custodied demo personas.) */
+export async function signsWithoutPrompt(via: string, sessionToken: string): Promise<boolean> {
+  const viaLc = (via ?? '').toLowerCase();
+  if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') return true;
+  if (viaLc === 'wallet') return !!sessionToken && (await isDemoCustodyHome(sessionToken).catch(() => false));
+  return false;
+}
+
 export async function fundTreasury(
   input: { treasury: Address; usdc: number; person: Address; via: string },
   sessionToken: string,
@@ -1954,17 +1979,9 @@ export async function fundTreasury(
   if (!(input.usdc > 0)) return { ok: false, error: 'Enter an amount greater than 0.' };
   const amount = BigInt(Math.round(input.usdc * 1_000_000)); // USDC has 6 decimals
 
-  let signHash: SignHash;
-  const viaLc = input.via.toLowerCase();
-  if (viaLc === 'wallet') {
-    const owner = await connectWallet();
-    signHash = (h) => personalSign(owner, h);
-  } else if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
-    signHash = googleSignHash(input.person, sessionToken); // C_sub signs for the home SA (whole KMS family)
-  } else {
-    if (!loadPasskey()) return { ok: false, error: 'Your passkey isn’t on this device — sign in to your home first.' };
-    signHash = passkeySignHash;
-  }
+  const signer = await personSignHash(input.person, input.via, sessionToken);
+  if (typeof signer !== 'function') return { ok: false, error: signer.error };
+  const signHash: SignHash = signer;
 
   onStep?.(`Funding ${input.usdc} USDC…`);
   const mintData = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [input.treasury, amount] });

@@ -1232,6 +1232,7 @@ app.post('/harness/ask', async (c) => {
     }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
   }
+  let satisfied: { stepId: string; ok: boolean; error?: string } | undefined;
   const turn = mergeTurn(stored, { ...(body.message ? { message: body.message } : {}), presented: body.presented ?? null, ...(body.supplied ? { supplied: body.supplied } : {}) });
   if ('error' in turn) return c.json({ ok: false, error: turn.error }, 409);
   // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
@@ -1249,7 +1250,14 @@ app.post('/harness/ask', async (c) => {
       // delegation and is not reachable from this surface.
       mcpInvoke: async (toolId, args, ctx) => {
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
-        return askDiscoveryInvoker(c.env as never)(toolId, args, ctx);
+        return askDiscoveryInvoker({
+          ...(c.env as unknown as Record<string, unknown>),
+          resolveName: async (name: string) => {
+            if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) throw new Error('naming is not configured');
+            const client = new AgentNamingClient({ rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID), registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+            return client.resolveName(name);
+          },
+        })(toolId, args, ctx);
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee, composer: selectComposer(c.env) });
@@ -1262,6 +1270,11 @@ app.post('/harness/ask', async (c) => {
         await saveRun(c.env as never, {
           runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
           presented: turn.presented, supplied: turn.supplied,
+          // WHY THIS RUN EXISTS survives every turn. Rebuilding the checkpoint from the turn alone
+          // dropped it, so a work item claimed from an endeavor forgot which step it was for by the
+          // second turn — and completed on chain with nothing to satisfy.
+          ...(stored?.origin ? { origin: stored.origin } : {}),
+          ...(stored?.openToStewards ? { openToStewards: true } : {}),
           ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } } : {}),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
@@ -1270,6 +1283,7 @@ app.post('/harness/ask', async (c) => {
         // the transaction — rather than a note claiming it happened. The step stays open if this fails:
         // an endeavor that reports work it cannot evidence is the thing this binding exists to prevent.
         if (reply.kind === 'done' && stored?.origin) {
+          satisfied = { stepId: stored.origin.stepId, ok: false };
           const r = reply.result as { txHash?: string; name?: string; agent?: string } | null;
           const acted = reply.receipts.find((x) => x.status === 'executed' && x.risk !== 'informational');
           const ev = receiptEvidence({
@@ -1281,7 +1295,11 @@ app.post('/harness/ask', async (c) => {
             await callInteractionsInternal(c.env, stored.origin.principal, 'internal.endeavor.satisfyStep', {
               endeavorId: stored.origin.endeavorId, stepId: stored.origin.stepId, evidence: `${ev.note} ${ev.refs.join(' ')}`,
             });
+            satisfied = { stepId: stored.origin.stepId, ok: true };
           } catch (e) {
+            // The capability RAN. Saying so and failing to record it are different facts, and a caller
+            // that cannot tell them apart will report work as lost that actually happened.
+            satisfied = { stepId: stored.origin.stepId, ok: false, error: e instanceof Error ? e.message : String(e) };
             console.warn('[harness/ask] step satisfied on chain but not recorded on the endeavor:', e);
           }
         }
@@ -1292,7 +1310,7 @@ app.post('/harness/ask', async (c) => {
       // rather than failing a run that already happened.
       console.warn('[harness/ask] checkpoint not saved:', e);
     }
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required' });
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -1930,6 +1948,11 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
+    resolveName: async (name: string) => {
+      if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+      const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+      return client.resolveName(name);
+    },
     executeAsServiceSa: async (sender, callData) => {
       // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
       // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.

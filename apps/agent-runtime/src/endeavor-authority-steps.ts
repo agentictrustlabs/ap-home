@@ -28,6 +28,7 @@ export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
   'organization.team.create',
   'organization.create',
   'organization.membership.invite',
+  'treasury.create',
   'treasury.payment.execute',
 ];
 
@@ -55,11 +56,20 @@ export function authorityCapabilityOf(step: WorkStep): string | null {
   return null;
 }
 
-/** The ask a steward will be answering. The step's own words, because the step is what was planned and
- *  adopted — restating it in ours would put the harness to work on a question nobody agreed. */
-export function askForStep(step: WorkStep, goal: string): string {
+/**
+ * The ask a steward will be answering. The step's OWN words lead, because the step is what was planned and
+ * adopted — restating it in ours would put the harness to work on a question nobody agreed to.
+ *
+ * But the words alone are not the ask. A plan step is written for people ("Create the corridor
+ * organization under the authorized steward"), and handed to the harness as prose it planned a READ and
+ * answered the question rather than doing the thing. The step had already declared which capability it
+ * needs; dropping that on the way across threw away the only structure we had. So the ask carries both:
+ * the sentence that was adopted, and the capability and principal it was adopted as.
+ */
+export function askForStep(step: WorkStep, goal: string, capability?: string, principal?: Address): string {
   const d = step.description.trim();
-  return d.length >= 12 ? d : `${d} (for: ${goal})`.trim();
+  const words = d.length >= 12 ? d : `${d} (for: ${goal})`.trim();
+  return capability ? `${words}\n\nDo this by exercising ${capability}${principal ? ` as ${principal}` : ''}.` : words;
 }
 
 /** The checkpoint a waiting step becomes. `asker` is the PRINCIPAL, not a person: nobody has picked this
@@ -70,7 +80,7 @@ export function checkpointForStep(input: {
   const now = input.now ?? Date.now();
   return {
     runRef: input.runRef,
-    message: askForStep(input.step, input.goal),
+    message: askForStep(input.step, input.goal, authorityCapabilityOf(input.step) ?? undefined, input.principal),
     addressee: input.principal,
     asker: input.principal,
     presented: null,

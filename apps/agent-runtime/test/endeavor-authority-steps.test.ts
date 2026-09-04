@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   authorityCapabilityOf, askForStep, checkpointForStep, claimableBy, awaitingAuthorityNote, receiptEvidence,
-  type WorkStep,
+  AUTHORITY_BEARING_CAPABILITIES, type WorkStep,
 } from '../src/endeavor-authority-steps.js';
 
 const PRINCIPAL = '0x3b99f2b452766de5df0dbcdfc676f27257151333' as const;
@@ -30,9 +30,18 @@ describe('recognising a step that needs authority', () => {
 describe('the run a waiting step becomes', () => {
   const cp = checkpointForStep({ runRef: 'run-1', principal: PRINCIPAL, endeavorId: 'end_x', step: step(), goal: 'stand up the corridor', now: 5 });
 
-  it("asks the step's OWN words — the plan is what was adopted", () => {
-    expect(cp.message).toBe('Charter the corridor team under the workspace');
+  it("asks the step's OWN words, plus the capability it was adopted as", () => {
+    expect(cp.message).toContain('Charter the corridor team under the workspace');
     expect(askForStep(step({ description: 'do it' }), 'stand up the corridor')).toBe('do it (for: stand up the corridor)');
+  });
+
+  it('names the capability and the principal — prose alone made the harness ANSWER instead of act', () => {
+    const withCap = checkpointForStep({
+      runRef: 'run-2', principal: PRINCIPAL, endeavorId: 'end_x', goal: 'g', now: 5,
+      step: step({ capabilityRequirements: [{ capabilityIri: 'urn:ap:cap:organization.team.create' }] }),
+    });
+    expect(withCap.message).toContain('organization.team.create');
+    expect(withCap.message).toContain(PRINCIPAL);
   });
 
   it('belongs to nobody yet, and remembers the step it exists to satisfy', () => {
@@ -72,5 +81,20 @@ describe('the evidence a satisfied step carries', () => {
     const ev = receiptEvidence({ capability: 'organization.membership.invite', runRef: 'run-2', mandateRef: null, txHash: null, summary: 'Invited 0x8c5c.' });
     expect(ev.refs).toEqual(['urn:ap:receipt:run:run-2']);
     expect(ev.note).not.toContain('on chain');
+  });
+});
+
+describe('the planner can NAME an authority-bearing step (without it, the binding is inert)', () => {
+  it('tells the planner the organization\'s own actions, as ap capability IRIs it may not invent', async () => {
+    const { PLAN_CONTRACT } = await import('../src/endeavor-plan-skill.js');
+    for (const c of AUTHORITY_BEARING_CAPABILITIES) expect(PLAN_CONTRACT).toContain(`urn:ap:cap:${c}`);
+    expect(PLAN_CONTRACT).toMatch(/Never invent an ap capability/);
+    expect(PLAN_CONTRACT).toMatch(/WAIT until a steward authorizes/);
+  });
+
+  it('and what the planner writes is what the work loop recognises — the two lists cannot drift', () => {
+    for (const c of AUTHORITY_BEARING_CAPABILITIES) {
+      expect(authorityCapabilityOf({ stepId: 'step_1', kind: 'contribution', description: 'x', capabilityRequirements: [{ capabilityIri: `urn:ap:cap:${c}` }] })).toBe(c);
+    }
   });
 });
