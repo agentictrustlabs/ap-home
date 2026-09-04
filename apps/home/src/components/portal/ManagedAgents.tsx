@@ -516,6 +516,16 @@ export function OrganizationsManager({
                     <CreateAgentForm kind="org-treasury" parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Create org treasury" />
                   )}
                 </div>
+                {/* Charter INSIDE this organization — a team, a workspace, a service. The parent is the org,
+                    so the child's stewardship grant points at it and its typed name lands under the org's
+                    authority. Chartering was only possible from the person's own realm before, which made a
+                    team under an organization something you could ask for but not click. */}
+                <div style={{ marginTop: '.5rem', paddingTop: '.5rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
+                  <CreateAgentForm
+                    choices={creatableKinds('org', claimable).filter((c) => c.kind !== 'org-treasury')}
+                    parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="＋ Charter inside this organization"
+                  />
+                </div>
               </div>
             );
           })}
