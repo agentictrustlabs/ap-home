@@ -386,8 +386,11 @@ export interface HarnessDeps {
   resolveName?: (name: string) => Promise<string | null>;
   /** Send a direct message through the sender's own interactions plane. */
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
-  /** Public directory search, for a bare label that is nobody's exact name ("alice"). */
+  /** Public directory search — for QUESTIONS about who exists (`find_agents`), never to fill a party in an
+   *  action: a directory hit proves an agent exists, not that this person knows them (spec 352 §7). */
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
+  /** Read one record from a subject's own vault — the asker's private tier (spec 353 §3). */
+  readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
   now?: () => number;
 }
 
@@ -551,9 +554,11 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
  */
 async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
   const raw = String(value ?? '').trim();
-  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase() as Address;
+  if (/^0[xX][0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase() as Address;
   if (!raw) throw new Error(`${what} is required`);
-  if (!deps.resolveName) throw new Error(`${what} must be an address on this deployment (no name resolution wired)`);
+  // By the time an invoker reads an argument the normaliser has already resolved it (and asked, if it had
+  // to). This is the last-resort exact-name read for a caller that bypassed it — never a search.
+  if (!deps.resolveName || !raw.includes('.')) throw new Error(`${what} did not resolve to an agent ("${raw}")`);
   const resolved = await deps.resolveName(raw.toLowerCase());
   if (!resolved) throw new Error(`no agent holds the name "${raw}" — check it, or give the address`);
   return resolved.toLowerCase() as Address;
@@ -800,7 +805,7 @@ async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
-  where?: { stepRef: string; toolId: string },
+  where?: { stepRef: string; toolId: string; subject?: string },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
   for (const key of PARTY_ARGS) {
@@ -808,7 +813,12 @@ async function resolveStepArgs(
     if (!raw || /^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
     if (where) {
       // Inside a run: resolve properly, and ASK when the words name several agents or none.
-      out[key] = await resolveParty(raw, lookups, { stepRef: where.stepRef, toolId: where.toolId, argName: key, what: PARTY_WORD[key] ?? key });
+      out[key] = await resolveParty(raw, lookups, {
+        stepRef: where.stepRef, toolId: where.toolId, argName: key, what: PARTY_WORD[key] ?? key,
+        // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
+        // answer is an honest "unknown" — never a widening to a public search.
+        ...(where.subject ? { subject: where.subject } : {}),
+      });
       continue;
     }
     // Outside a run (building a requirement to display): resolve what is certain, leave the rest as
@@ -1009,7 +1019,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, args }) => resolveStepArgs(args, env, deps, { stepRef: 'pending', toolId }),
+    normalizeArgs: ({ toolId, args }) => resolveStepArgs(args, env, deps, { stepRef: 'pending', toolId, ...(input.person ? { subject: input.person } : {}) }),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.

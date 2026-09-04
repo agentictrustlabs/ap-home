@@ -1978,6 +1978,13 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       if (out.code === 'recipient_not_in_wire') return { ok: false as const, error: 'your messaging authorization does not cover this recipient yet — open Messages once and it will be extended' };
       return { ok: false as const, error: out.error ?? `the message could not be sent (${res.status})` };
     },
+    // The asker's PRIVATE tier: their own relationships, read through their own InteractionsDO under their
+    // own interactions grant, in-Worker. No client-asserted list, and nothing about who they know leaves
+    // their tier (ADR-0025).
+    readSubjectRecord: async (subject: string, recordType: string) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
+      return (out as { data?: unknown } | null)?.data ?? null;
+    },
     findAgents: async (terms: string) => {
       const out = await askDiscoveryInvoker(env as never)('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
       return ((out as { agents?: unknown[] } | null)?.agents ?? []) as Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>;

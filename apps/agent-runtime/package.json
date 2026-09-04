@@ -24,6 +24,7 @@
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/content-storage": "workspace:*",
+    "@agenticprimitives/context": "workspace:*",
     "@agenticprimitives/coordination": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/edge-runtime": "workspace:*",
