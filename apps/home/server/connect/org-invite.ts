@@ -68,8 +68,33 @@ export async function callerFromInviteAuth(env: FnContext['env'], request: Reque
 
 /** Steward-control gate (same as the inbox `?agent` scope): the org is in the person's managed set. */
 export async function controlsOrg(env: FnContext['env'], request: Request, org: string): Promise<boolean> {
+  return !!(await stewardControl(env, request, org));
+}
+
+/**
+ * The same gate, returning WHAT IT VERIFIED: the caller and the org's stewardship wire.
+ *
+ * A write to an agent-keyed org record (`org.invite:agent:<sa>`) rides the caller's session AND that wire
+ * — `orgVault`'s own doc says absent means "fails closed at the agent". Every route here had already
+ * verified the wire in order to answer "may you?", then dropped it on the floor and called
+ * `orgVault(env, org)` with neither, so the write was refused with `unauthorized: bridge envelope
+ * missing`. `org-decide.ts` fixed its own instance by taking the wire from the request BODY; that works,
+ * but it asks the client for something the server just proved to itself, and every new route gets to
+ * rediscover the same failure. Returning it from the gate means answering "may you?" and "with what?" in
+ * one place.
+ */
+export async function stewardControl(
+  env: FnContext['env'],
+  request: Request,
+  org: string,
+): Promise<{ person: string; stewardship: unknown; session: string } | null> {
   const caller = await callerFromInviteAuth(env, request);
-  return !!caller && stewardsOrg(env, caller.person, org);
+  if (!caller) return null;
+  const raw = await env.AUTH_CODES.get(`related:${caller.person}:${org.toLowerCase()}`);
+  const link = raw ? (JSON.parse(raw) as { stewardshipDelegation?: IncomingDelegation }) : null;
+  if (!(await verifyStewardship(env, org.toLowerCase(), caller.person, link?.stewardshipDelegation))) return null;
+  const auth = request.headers.get('authorization') ?? '';
+  return { person: caller.person, stewardship: link?.stewardshipDelegation, session: auth.startsWith('Bearer ') ? auth.slice(7) : '' };
 }
 
 async function stewardsOrg(env: FnContext['env'], person: string, org: string): Promise<boolean> {

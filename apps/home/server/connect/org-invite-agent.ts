@@ -7,7 +7,7 @@
 // with the same recorded grant. The grant is only ever honored for its exact delegate — fail-closed.
 import type { FnContext } from '../_lib/server-broker';
 import { orgVault } from '../lib/org-vault';
-import { controlsOrg } from './org-invite';
+import { stewardControl } from './org-invite';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -31,17 +31,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // throw — the chain read behind the stewardship check, a vault that was never enabled — arrived as the
   // same blank failure, and the caller could not tell "you may not" from "it broke" from "not set up yet".
   // A store that cannot say what went wrong makes every invitation a guess.
-  let controls: boolean;
+  let control: Awaited<ReturnType<typeof stewardControl>>;
   try {
-    controls = await controlsOrg(env, request, org);
+    control = await stewardControl(env, request, org);
   } catch (e) {
     return json({ error: 'could not verify that you steward this organization', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
-  if (!controls) return json({ error: 'you must steward this organization to invite' }, 403);
+  if (!control) return json({ error: 'you must steward this organization to invite' }, 403);
 
   let vault: Awaited<ReturnType<typeof orgVault>>;
   try {
-    vault = await orgVault(env, org);
+    // The session and the stewardship wire the gate just verified: `org.invite:agent:<sa>` is an
+    // AGENT-KEYED record and fails closed at the agent without both.
+    vault = await orgVault(env, org, control.session || undefined, control.stewardship);
   } catch (e) {
     return json({ error: 'could not open the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
