@@ -33,6 +33,7 @@
     "@agenticprimitives/home": "workspace:*",
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
+    "@agenticprimitives/surface-catalog": "workspace:*",
     "@agenticprimitives/orchestration": "workspace:*",
     "@agenticprimitives/orchestration-anthropic": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",

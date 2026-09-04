@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, canGrantAs, describeRequirement, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
+import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { connectedCredential } from './credential';
@@ -150,7 +150,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
     setQ('');
     setAnswers({});
     setThread((t) => [...t, { role: 'you', text: message }]);
-    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], ...(realm ? { surface: { realm } } : {}) }, 'Thinking…');
+    // The scope is computed per ask, not per session: it is the agent's published vocabulary ∩ what this
+    // flyout can finish, and the agent being asked may not offer what the last one did.
+    const surface = await homeScope(realm);
+    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface }, 'Thinking…');
   };
 
   /** Grant the authority the agent said it needs — signed by the credential that custodies the DELEGATOR

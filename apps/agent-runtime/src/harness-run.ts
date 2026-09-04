@@ -49,6 +49,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, type PartyLookups } from './party-resolution.js';
+import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
@@ -1148,6 +1149,44 @@ export function surfaceCanRender(capabilityId: string, ceremonies?: string[]): b
   if (!ceremonies?.length) return true;
   const renders = new Set([...ASSUMED_CEREMONIES, ...ceremonies]);
   return (CAPABILITY_CEREMONIES[capabilityId] ?? []).every((c) => renders.has(c));
+}
+
+/**
+ * THE ASK VOCABULARY THIS AGENT PUBLISHES — spec 353 S2, the ∩ a surface computes its scope from.
+ *
+ * PROJECTED from the same tool declarations the planner composes with, never a second list. The moment
+ * this is hand-kept it drifts: the vocabulary advertises a capability the planner cannot pick, or the
+ * planner offers one the vocabulary never named, and both lists are separately right.
+ *
+ * Vocabulary is DISCLOSURE. A capability appearing here permits nothing — the mandate decides authority,
+ * and this list is not consulted by any gate (spec 353 §4).
+ */
+export function askDescriptors(): SurfaceDescriptor[] {
+  return HARNESS_ACTION_TOOLS.filter((t) => t.id !== UNSUPPORTED_TOOL.id).map((t) => {
+    const id = t.capability?.id ?? t.id;
+    return {
+      id,
+      protocol: 'a2a' as const,
+      ...(t.description ? { description: t.description } : {}),
+      inputSchema: t.inputSchema as Record<string, unknown>,
+      authorization: {
+        mode: 'agentic-delegation' as const,
+        riskTier: (t.risk ?? 'medium') as SurfaceRiskTier,
+        // What this one may ASK A PERSON for, beyond its risk floor. `organization.team.create` is medium
+        // and still needs a signature — see CAPABILITY_CEREMONIES.
+        ...(CAPABILITY_CEREMONIES[id]?.length ? { ceremonies: CAPABILITY_CEREMONIES[id] as SurfaceCeremony[] } : {}),
+      },
+      // `key-required`, not `never-retry`: every authority-bearing step here derives its on-chain nonce
+      // from the intent, so the SAME ask retried settles once and a second submission reverts. Retrying
+      // is safe with the same key and is not safe without one.
+      operations: { rateLimitProfile: 'harness', maxBodyBytes: 65536, timeoutMs: 30000, idempotency: 'key-required' as const, cache: 'no-store' as const },
+    };
+  });
+}
+
+/** The vocabulary as a surface consumes it: every capability, with the ceremonies it may ask for. */
+export function askVocabulary(): AskCapabilityLike[] {
+  return buildAskVocabulary(askDescriptors());
 }
 
 /**

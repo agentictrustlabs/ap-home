@@ -95,6 +95,58 @@ export interface AskSurface {
   realm?: { kind?: 'person' | 'org' | 'service' };
 }
 
+/**
+ * WHAT THIS SURFACE CAN RENDER — the Home's half of the scope, and the honest half.
+ *
+ * The flyout collects data fields, a confirmation, and a signature from the connected credential. It has
+ * nowhere to collect a SECOND PARTY's approval, so it does not claim one. A capability whose ceremonies
+ * include `approval` is therefore not offered here — correctly: a plan that reaches it would suspend on a
+ * prompt this surface cannot answer, after the person has already been asked for everything else.
+ */
+export const HOME_CEREMONIES = ['data', 'confirmation', 'signature'] as const;
+
+/** One agent's published Ask vocabulary. Disclosure only — every id still needs a mandate. */
+export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[] }
+
+/**
+ * The scope this surface declares: the INTERSECTION of what the agent publishes and what this app can
+ * finish (spec 353 S2/S4).
+ *
+ * Generated, never hand-kept. A curated list here would be a fourth place capability ids live, and the
+ * one that silently shrinks what a person can do when somebody forgets to add to it. If the vocabulary
+ * cannot be read we send NO capability list at all — silence is correctly not a narrowing (a surface that
+ * has not said what it can do is not narrowed by its silence), so a fetch failure costs honesty, never
+ * function.
+ */
+let vocabularyMemo: { at: number; caps: AskVocabularyEntry[] } | null = null;
+const VOCABULARY_TTL_MS = 5 * 60_000;
+
+export async function homeScope(realm?: { kind?: 'person' | 'org' | 'service' }): Promise<AskSurface> {
+  const ceremonies = [...HOME_CEREMONIES];
+  const surface: AskSurface = { ceremonies, ...(realm ? { realm } : {}) };
+  try {
+    // Cache-first, and the cache holds the canonical answer rather than a cheaper substitute for it
+    // (ADR-0013). A capability list changes when the agent is redeployed, so minutes is the right
+    // granularity — and a stale list can only ever narrow, never widen, what the agent will do.
+    const fresh = vocabularyMemo && Date.now() - vocabularyMemo.at < VOCABULARY_TTL_MS ? vocabularyMemo.caps : null;
+    if (fresh) {
+      const renders = new Set<string>(ceremonies);
+      return { ...surface, capabilities: fresh.filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x))).map((c) => c.id) };
+    }
+    const r = await fetch('/a2a/harness/vocabulary');
+    if (!r.ok) return surface;
+    const body = (await r.json()) as { capabilities?: AskVocabularyEntry[] };
+    if (body.capabilities) vocabularyMemo = { at: Date.now(), caps: body.capabilities };
+    const renders = new Set<string>(ceremonies);
+    const usable = (body.capabilities ?? []).filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x)));
+    // An empty intersection is a real answer and must not read as "no scope declared": send the empty
+    // list, and the agent offers nothing rather than everything.
+    return usable.length || body.capabilities?.length ? { ...surface, capabilities: usable.map((c) => c.id) } : surface;
+  } catch {
+    return surface;
+  }
+}
+
 export interface AskTurnState {
   message: string;
   addressee: Address;

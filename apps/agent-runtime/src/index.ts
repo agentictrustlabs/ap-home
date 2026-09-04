@@ -109,6 +109,7 @@ import { chainStewardshipCheck } from './standing.js';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
+import { askVocabulary } from './harness-run.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1207,6 +1208,14 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
  * namespace the action enters, which for a team is its workspace and for an organization is the person.
  * They are usually the same agent (you ask the realm you stand in) and they are never assumed to be.
  */
+// GET /harness/vocabulary — what this agent can be asked to DO, and what each capability may ask a
+// person for. A surface reads this to declare an HONEST scope: it offers the intersection of what the
+// agent has and what it can itself finish (spec 353 S2/S4).
+//
+// Disclosure, not authority. Every id here still needs a mandate, and no gate consults this list
+// (spec 353 §4) — publishing it grants exactly nothing, which is why it can be read without a session.
+app.get('/harness/vocabulary', (c) => c.json({ ok: true, capabilities: askVocabulary() }));
+
 app.post('/harness/ask', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
