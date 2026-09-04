@@ -22,7 +22,7 @@ import { ask, mintMandate, canGrantAs, describeRequirement, CAPABILITY_WORDS, ty
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { connectedCredential } from './credential';
-import { createdAgentOf, recordCreatedAgent } from '../../../home/ask-record';
+import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
 
 type Entry =
   | { role: 'you'; text: string }
@@ -92,6 +92,15 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
       if (reply.kind === 'done' && session) {
+        // An invitation's private half: the signed grant goes into the ORG's vault, where the invitee's
+        // join looks for it. Without this the ask says "invited" and the invitee finds nothing.
+        const invitation = invitationOf(reply.result);
+        if (invitation) {
+          const stored = await recordInvitation(invitation, session.token);
+          setThread((t) => [...t, stored.ok
+            ? { role: 'agent', text: 'The invitation is stored — they will pick it up when they join.' }
+            : { role: 'agent', text: `The invitation was signed, but storing it in the organization failed (${stored.error}) — they will not find it until that write succeeds.` }]);
+        }
         const created = createdAgentOf(reply.result);
         if (created && !created.alreadyCreated) {
           const saved = await recordCreatedAgent(created, session.token);

@@ -28,6 +28,39 @@ export interface CreatedAgent {
   alreadyCreated?: boolean;
 }
 
+/** An invitation the harness produced: a signed org → invitee access grant that must be STORED in the
+ *  organization's vault, or the invitee finds nothing when they join. */
+export interface IssuedInvitation {
+  org: Address;
+  invitee: Address;
+  memberAccessDelegation: DelegationWire;
+  invited: true;
+}
+
+export function invitationOf(result: unknown): IssuedInvitation | null {
+  const r = result as Partial<IssuedInvitation> | null;
+  if (!r || typeof r !== 'object' || r.invited !== true) return null;
+  return r.org && r.invitee && r.memberAccessDelegation ? (r as IssuedInvitation) : null;
+}
+
+/**
+ * Store an invitation in the organization's vault — the private half, the same route the invite panel
+ * posts to (`/connect/org-invite/agent`, steward-gated server-side). The a2a holds no delegation to that
+ * vault and must not: it produced the signed grant, and the grant is what proves the invitation.
+ */
+export async function recordInvitation(inv: IssuedInvitation, sessionToken: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch('/connect/org-invite/agent', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({ org: inv.org.toLowerCase(), agent: inv.invitee.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation }),
+  }).catch((e: unknown) => ({ ok: false, status: 0, json: async () => ({ error: String(e) }) }) as unknown as Response);
+  if (!res.ok) {
+    const b = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: b.error ?? `HTTP ${res.status}` };
+  }
+  return { ok: true };
+}
+
 /** Is this `done` result an agent that needs recording? */
 export function createdAgentOf(result: unknown): CreatedAgent | null {
   const r = result as Partial<CreatedAgent> | null;

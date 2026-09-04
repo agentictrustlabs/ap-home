@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, askReplyFor, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, askReplyFor, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -228,5 +228,45 @@ describe('composing the answer (spec 350 §3.7)', () => {
     expect(none).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
     const broken = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations), composer: { compose: async () => { throw new Error('down'); } } });
     expect(broken).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
+  });
+});
+
+describe('inviting a member (organization.membership.invite)', () => {
+  const ORG = WORKSPACE;
+  const INVITEE = '0x4444444444444444444444444444444444444444';
+  const orgWire: Delegation = { ...wire, delegator: ORG };
+  const inv = (supplied?: InvokeContext['supplied'], args: Record<string, unknown> = { org: ORG, invitee: INVITEE }) =>
+    inviteInvoker(env, { ref: '0xm', wire: orgWire }, PERSON)('organization.membership.invite', args, ctxWith(supplied));
+  const caught = async (p: Promise<unknown>) => { try { return { ok: true as const, v: await p }; } catch (e) { return isInputRequired(e) ? { ok: false as const, prompt: e.request } : { ok: false as const, error: (e as Error).message }; } };
+
+  it('asks WHO when the ask did not name an address', async () => {
+    const r = await caught(inv(undefined, { org: ORG, invitee: 'alice' }));
+    expect(r.prompt).toMatchObject({ kind: 'data', fields: [{ name: 'invitee', type: 'address' }] });
+  });
+
+  it('the invitation is issued by the mandate\'s delegator, never another organization', async () => {
+    const r = await caught(inv(undefined, { org: PERSON, invitee: INVITEE }));
+    expect('error' in r ? r.error : '').toContain("issued by the mandate's delegator");
+  });
+
+  it('asks the steward to sign the grant — and the grant is what the invitee will hold', async () => {
+    const r = await caught(inv());
+    expect(r.prompt).toMatchObject({ kind: 'signature', signer: ORG, payload: { org: ORG, invitee: INVITEE, scope: 'vault:org.profile' } });
+    const again = await caught(inv());
+    expect((again.prompt as { digest: string }).digest).toBe((r.prompt as { digest: string }).digest); // deterministic: a resume rebuilds what was signed
+  });
+
+  it('returns the SIGNED grant for the surface to store — an invitation nobody stored is a promise nobody can find', async () => {
+    const asked = await caught(inv());
+    const p = asked.prompt as { digest: string };
+    const done = await caught(inv([{ stepRef: 's0', signature: { digest: p.digest, signer: ORG, signature: '0xsig' } }]));
+    expect(done.ok).toBe(true);
+    expect(done.v).toMatchObject({ org: ORG, invitee: INVITEE, invited: true, memberAccessDelegation: { delegator: ORG, delegate: INVITEE, signature: '0xsig' } });
+  });
+
+  it('refuses the invitations that mean nothing', async () => {
+    expect('error' in (await caught(inv(undefined, { org: ORG, invitee: ORG }))) ? (await caught(inv(undefined, { org: ORG, invitee: ORG }))).error : '').toContain('cannot invite itself');
+    const self = await caught(inv(undefined, { org: ORG, invitee: PERSON }));
+    expect('error' in self ? self.error : '').toContain('already the steward');
   });
 });

@@ -38,8 +38,9 @@ import {
 } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
-  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
-  type Delegation, type EnforcerAddresses, type MandateRequirementV1,
+  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
+  encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
+  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1,
 } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -76,22 +77,59 @@ export const CHILD_AGENT_KINDS = [
 
 export const CHILD_AGENT_TLD: Record<string, string> = Object.fromEntries(CHILD_AGENT_KINDS.map((k) => [k.capability, k.tld]));
 
+/**
+ * `organization.membership.invite` — the org-side half of joining (spec 321 W2b).
+ *
+ * Membership is not something an organization can impose: the invitee redeems it. So the capability an
+ * organization grants is the INVITATION, and what it produces is a pre-signed org → invitee access grant
+ * that the invitee's join picks up. The steward's credential signs it (the org validates its custodians'
+ * signatures, ERC-1271), which is a §3.5 signature prompt like any other.
+ *
+ * The private half — storing the grant in the ORG's vault — is the surface's, exactly as recording a
+ * created agent is: this agent holds no delegation to that vault, and an invitation nobody stored is a
+ * promise nobody can find.
+ */
+export const ORG_INVITE_CAPABILITY = 'organization.membership.invite' as const;
+
+export const INVITE_TOOL: ToolSpec = {
+  id: ORG_INVITE_CAPABILITY,
+  description:
+    'Invite an agent to join an organization or team as a member. Requires a mandate from the organization. '
+    + 'Produces a signed access grant the invitee redeems when they join — it does NOT make them a member by itself. '
+    + 'Args: org (the organization or team SA — whose authority this needs), invitee (the person\'s SA address; '
+    + 'use the directory tools first when the ask names someone rather than an address).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      org: { type: 'string', description: 'The organization or team SA address' },
+      invitee: { type: 'string', description: 'The invitee\'s smart-agent address (0x…)' },
+    },
+    required: ['org', 'invitee'],
+  },
+  capability: { id: ORG_INVITE_CAPABILITY, action: 'invite', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+};
+
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
-    description: 'Pay an ERC-20 amount from the PAYER (the mandate\'s delegator — an org or treasury) to a payee. Requires a payment mandate. Args: asset (token address), payee (address), amount (smallest units, as a string).',
+    description: 'Pay an ERC-20 amount from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), asset (token address), payee (recipient SA), amount (smallest units as a decimal string; USDC has 6 decimals, so 100 USDC is "100000000").',
     inputSchema: {
       type: 'object',
       properties: {
+        payer: { type: 'string', description: 'The paying treasury or organization SA address' },
         asset: { type: 'string', description: 'ERC-20 token contract address' },
         payee: { type: 'string', description: 'Recipient address' },
         amount: { type: 'string', description: 'Amount in the token\'s smallest unit, as a decimal string' },
       },
-      required: ['asset', 'payee', 'amount'],
+      required: ['payer', 'asset', 'payee', 'amount'],
     },
-    capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset' },
+    // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
+    // authority as an ERC-20 contract, which nothing can sign.
+    capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer' },
     risk: 'high',
   },
+  INVITE_TOOL,
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
     id: capability,
     description: `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, custodied by the connected user and stewarded by its parent. Requires a mandate from the parent. Args: parent (the parent SA address — the mandate's delegator), label (the ${noun}'s name: lowercase letters, digits, hyphens; omit if the ask did not name it — the person will be asked).`,
@@ -288,29 +326,122 @@ export function approvalDigestFor(input: { stepRef: string; mandateRef: string; 
 }
 
 /**
- * W2 approval port: approvals arrive WITH the ask, pre-signed by an approver. Each must (1) be over this
- * step's authority digest, (2) verify ERC-1271 against the approver, (3) come from a party the obligation
- * names. Anything short of all three is a refusal, not a pending — there is no one to wait for.
+ * The approval port. An approval is a signature over THIS step's authority evidence, verified ERC-1271
+ * against the approver, from a party the obligation names — all three, or it is not an approval.
+ *
+ * Approvals reach it two ways, and they are the same signature either way: pre-supplied with the ask
+ * (`approvals`, how a script drives it), or SIGNED IN THE CONVERSATION — when nothing is supplied yet, the
+ * port asks (spec 350 §3.5) rather than refusing an obligation nobody was given the chance to discharge.
+ *
+ * The asking is not a softening of the ladder. The digest is the same, the ERC-1271 check is the same, and
+ * a signature over anything else discharges nothing. What changes is only that a person present at the run
+ * can answer it, which is what "a second party approves" means when the second party is standing there.
  */
-export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approvals: SuppliedApprovalV1[]): ApprovalPort {
+export function suppliedApprovalsPort(deps: HarnessDeps, env: HarnessEnv, approvals: SuppliedApprovalV1[], supplied?: SuppliedInputV1[]): ApprovalPort {
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
   return {
     async request(req) {
       const want = approvalDigestFor({ stepRef: req.stepRef, mandateRef: req.evidence.mandateRef, intentDigest: req.evidence.intentDigest, capability: req.step.capability.id, action: req.step.capability.action, ...(req.step.capability.resource ? { resource: req.step.capability.resource } : {}) });
+      // A signature answered into THIS step counts as an approval when it is over the approval digest.
+      const answered = (supplied ?? [])
+        .filter((s) => s.stepRef === req.stepRef && s.signature && s.signature.digest.toLowerCase() === want.toLowerCase())
+        .map((s) => ({ approver: s.signature!.signer as Address, digest: s.signature!.digest as Hex, signature: s.signature!.signature as Hex }));
+      const pool = [...approvals, ...answered];
       const records: string[] = [];
       for (const ob of req.obligations) {
         const allowed = (ob.dischargeableBy.agents ?? []).map((a) => a.toLowerCase());
-        const candidates = approvals.filter((a) => a.digest.toLowerCase() === want.toLowerCase() && (allowed.length === 0 || allowed.includes(a.approver.toLowerCase())));
+        const candidates = pool.filter((a) => a.digest.toLowerCase() === want.toLowerCase() && (allowed.length === 0 || allowed.includes(a.approver.toLowerCase())));
         let discharged = false;
+        let sawInvalid = false;
         for (const a of candidates) {
           if (!validator) break;
           const ok = await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [a.approver, a.digest, a.signature] }).catch(() => false);
           if (ok === true) { records.push(`approval:${a.approver.toLowerCase()}:${a.digest}`); discharged = true; break; }
+          sawInvalid = true;
         }
-        if (!discharged) return { status: 'refused', reason: `obligation ${ob.kind} (${ob.imposedBy}) not discharged: no valid approval over this step's authority digest from a permitted approver` };
+        if (discharged) continue;
+        // A signature was offered and did not verify: that is a refusal, not a question to ask again.
+        if (sawInvalid) return { status: 'refused', reason: `obligation ${ob.kind} (${ob.imposedBy}) not discharged: the approval did not verify against its approver` };
+        return {
+          status: 'pending', resumeToken: req.stepRef,
+          prompt: {
+            kind: 'signature', stepRef: req.stepRef, toolId: req.step.tool.id,
+            prompt: `This needs a second party to approve it. Sign to approve ${req.step.capability.id}${req.step.capability.resource ? ` on ${req.step.capability.resource}` : ''}.`,
+            digest: want, signer: allowed[0] ?? '',
+            payload: { obligation: ob.kind, imposedBy: ob.imposedBy, mandateRef: req.evidence.mandateRef, capability: req.step.capability.id },
+          },
+        };
       }
       return { status: 'discharged', records };
     },
+  };
+}
+
+/** The MCP server whose vault scope an org→member access grant names. Must match the Home's
+ *  `MCP_SERVER_ID`, or the grant reads as scoped to a server nobody consults. */
+const MCP_SERVER_ID = 'demo-mcp';
+/** spec 322 W3 — the org record a member may read once they join. */
+const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org.profile';
+
+/**
+ * Build the org → invitee access grant this invitation carries — the SAME shape the Home's invite panel
+ * signs (`issueOrganizationResourceAccessDelegation`): read scope on the org's profile record, time-bounded,
+ * value 0. Deterministic in its salt and window so a resume rebuilds exactly what was signed.
+ */
+function buildInviteGrant(env: HarnessEnv, org: Address, invitee: Address, salt: bigint, validUntil: number): Delegation {
+  const enforcers = harnessEnforcers(env);
+  const caveats: Caveat[] = [
+    buildVaultRecordScopeCaveat([{ server: MCP_SERVER_ID, resources: [ORG_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
+    buildCaveat(enforcers.timestamp, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(enforcers.value, encodeValueTerms(0n)),
+  ];
+  return { delegator: org, delegate: invitee, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+}
+
+/**
+ * `organization.membership.invite`. Derives the grant, asks the steward to sign it, and returns it for the
+ * surface to store in the org's vault. It does NOT make anyone a member: the invitee redeems it on join,
+ * which is the whole reason the org-side capability is the INVITATION and not the membership.
+ */
+export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    const wire = presented.wire as Delegation;
+    const org = String(args.org ?? '').toLowerCase() as Address;
+    const invitee = String(args.invitee ?? '').toLowerCase() as Address;
+    if (org !== wire.delegator.toLowerCase()) throw new Error(`the invitation is issued by the mandate's delegator (${wire.delegator}); the plan named ${org || 'no organization'}`);
+    if (!/^0x[0-9a-f]{40}$/.test(invitee)) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId, prompt: 'Who should be invited? Give their agent address.',
+        fields: [{ name: 'invitee', label: 'Invitee', type: 'address', required: true, hint: 'their smart-agent address (0x…) — search the directory if you only have a name' }],
+      });
+    }
+    if (invitee === org) throw new Error('an organization cannot invite itself');
+    if (person && invitee === person.toLowerCase()) throw new Error('you are already the steward of this organization — an invitation to yourself grants nothing');
+
+    const digest = intentDigest(ctx.intent);
+    const chainId = Number(env.CHAIN_ID);
+    const dm = env.DELEGATION_MANAGER as Address;
+    const ts = wire.caveats.find((c) => c.enforcer.toLowerCase() === harnessEnforcers(env).timestamp.toLowerCase());
+    if (!ts) throw new Error('the mandate carries no timestamp caveat');
+    const validUntil = Number(decodeTimestampTerms(ts.terms as Hex).validAfter) + 365 * 24 * 3600;
+    const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:invite:${invitee}`)));
+    const grant = buildInviteGrant(env, org, invitee, salt, validUntil);
+    const grantDigest = hashDelegation(grant, chainId, dm);
+
+    const signed = signatureFor(ctx.supplied, stepRef, grantDigest);
+    if (!signed) {
+      throw new InputRequired({
+        kind: 'signature', stepRef, toolId,
+        prompt: `Sign the invitation from ${org} to ${invitee} — it lets them read this organization when they join.`,
+        digest: grantDigest, signer: org,
+        payload: { org, invitee, scope: ORG_PROFILE_RESOURCE_SCOPE, validUntil },
+      });
+    }
+    // The invitation is the SIGNED grant. Storing it is the surface's half (the org's vault); returning
+    // it unsigned-but-claimed would be an invitation that verifies nowhere.
+    const wireOut: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
+    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true };
   };
 }
 
@@ -320,7 +451,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute')) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
       return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
@@ -331,6 +463,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     const enforcers = harnessEnforcers(env);
     if (!enforcers.payment) throw new Error('harness: PAYMENT_ENFORCER is not configured');
     const asset = String(args.asset).toLowerCase() as Address;
+    const payer = String(args.payer ?? '').toLowerCase();
+    if (payer && payer !== (presented!.wire as Delegation).delegator.toLowerCase()) {
+      throw new Error(`the payment is made by the mandate's delegator (${(presented!.wire as Delegation).delegator}); the plan named ${payer}`);
+    }
     const payee = String(args.payee) as Address;
     const amount = BigInt(String(args.amount));
     const wire = presented!.wire as Delegation;
@@ -402,9 +538,10 @@ export async function askReplyFor(env: HarnessEnv, input: { intent: { goal: stri
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
     const requirement = mandateRequirementForStep({ required: r.required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
-    // The DELEGATOR is the resource the step names — the parent whose authority the action needs — and
-    // falls back to the agent being asked. Never the person: a team's authority is its workspace's.
-    const delegator = ((r.required.capability.resource ?? input.addressee) as string).toLowerCase() as Address;
+    // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the
+    // parent a team is chartered under), else the agent being asked. Never the person by default — a
+    // team's authority is its workspace's — and never the token a payment moves.
+    const delegator = ((r.required.capability.authority ?? r.required.capability.resource ?? input.addressee) as string).toLowerCase() as Address;
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
@@ -472,7 +609,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),
-    ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? []), receiptSink },
+    ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
     ...(presented ? {} : { onMissingMandate: 'report' as const }),
