@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, UNSUPPORTED_TOOL, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, UNSUPPORTED_TOOL, CAPABILITY_CEREMONIES, surfaceCanRender, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -369,5 +369,58 @@ describe('saying "this agent cannot do that here" (spec 353 S2)', () => {
       } as never,
     });
     expect(reply.kind === 'answer' ? reply.text : '').toBe("I can't help with “do that” here.");
+  });
+});
+
+describe('ceremony negotiation (spec 353 S4)', () => {
+  const env2 = { ...env, HARNESS_AGENT_SA: HARNESS } as HarnessEnv;
+
+  it('every capability that will ask for a signature says so — risk alone does not predict it', () => {
+    // team-create is MEDIUM and still needs one, because an agent's genesis is signed by its custodian.
+    expect(CAPABILITY_CEREMONIES['organization.team.create']).toContain('signature');
+    expect(CAPABILITY_CEREMONIES['treasury.payment.execute']).toContain('signature');
+  });
+
+  it('a surface that cannot collect a signature is not OFFERED what needs one', () => {
+    const ids = scopedActionTools({ ceremonies: ['data', 'confirmation'] }).map((t) => t.capability?.id ?? t.id);
+    expect(ids).toEqual([]); // every action here binds authority a person signs
+    expect(scopedActionTools({ ceremonies: ['data', 'confirmation', 'signature'] }).length).toBeGreaterThan(0);
+  });
+
+  it('silence is not a narrowing — a surface that has not said what it renders gets everything', () => {
+    expect(scopedActionTools({}).length).toBeGreaterThan(0);
+    expect(surfaceCanRender('treasury.payment.execute', undefined)).toBe(true);
+    expect(surfaceCanRender('treasury.payment.execute', [])).toBe(true);
+  });
+
+  it('a run that WOULD suspend on an undeclared prompt is refused, with the ceremony named', async () => {
+    const prompt = { kind: 'signature', stepRef: 's0', toolId: 'treasury.payment.execute', prompt: 'Sign', digest: '0xd', signer: '0xs' } as const;
+    const reply = await askReplyFor(env2, {
+      intent: { goal: 'pay' }, addressee: WORKSPACE as `0x${string}`,
+      surface: { ceremonies: ['data', 'confirmation'] },
+      result: { runRef: 'r', plan: { steps: [] }, steps: [], receipts: [], outcome: 'suspended', resumeToken: 's0', prompt } as never,
+    });
+    expect(reply).toMatchObject({ kind: 'refused', error: expect.stringContaining('cannot collect') });
+    expect(reply.kind === 'refused' ? reply.error : '').toContain('signature');
+  });
+
+  it('a prompt the surface DID declare still suspends normally', async () => {
+    const prompt = { kind: 'signature', stepRef: 's0', toolId: 'x', prompt: 'Sign', digest: '0xd', signer: '0xs' } as const;
+    const reply = await askReplyFor(env2, {
+      intent: { goal: 'pay' }, addressee: WORKSPACE as `0x${string}`,
+      surface: { ceremonies: ['data', 'confirmation', 'signature'] },
+      result: { runRef: 'r', plan: { steps: [] }, steps: [], receipts: [], outcome: 'suspended', resumeToken: 's0', prompt } as never,
+    });
+    expect(reply.kind).toBe('prompt');
+  });
+
+  it('a data prompt is always answerable — a conversation that cannot ask a question is not one', async () => {
+    const prompt = { kind: 'data', stepRef: 's0', toolId: 'x', prompt: 'What name?', fields: [] } as const;
+    const reply = await askReplyFor(env2, {
+      intent: { goal: 'x' }, addressee: WORKSPACE as `0x${string}`,
+      surface: { ceremonies: ['signature'] },
+      result: { runRef: 'r', plan: { steps: [] }, steps: [], receipts: [], outcome: 'suspended', resumeToken: 's0', prompt } as never,
+    });
+    expect(reply.kind).toBe('prompt');
   });
 });

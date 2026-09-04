@@ -942,6 +942,8 @@ async function resolveStepArgs(
  *  is identical either way and only its rendering degrades. */
 export async function askReplyFor(env: HarnessEnv, input: {
   intent: { goal: string }; result: RunResult; addressee: Address;
+  /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
+  surface?: AskScopeV1;
   composer?: AnswerComposer | null;
   /** Read-only checks that spare a person a ceremony whose outcome is already knowable (spec 352 §2).
    *  Absent ⇒ no early refusal; the chain still decides. */
@@ -988,7 +990,21 @@ export async function askReplyFor(env: HarnessEnv, input: {
       summary: `${r.required.capability.id} on ${delegator}`,
     };
   }
-  if (r.outcome === 'suspended' && r.prompt) return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
+  if (r.outcome === 'suspended' && r.prompt) {
+    // CEREMONY NEGOTIATION (spec 353 S4). Offering only what a surface can finish catches this at plan
+    // time; this catches the rest — a capability that asks for something its risk tier never implied, or a
+    // surface whose declaration and behaviour have drifted. A run that suspends on a prompt nobody can
+    // answer is not waiting, it is stuck, and stuck reads to a person as broken rather than as unsupported.
+    const kind = r.prompt.kind;
+    const declared = input.surface?.ceremonies;
+    if (declared?.length && !new Set([...ASSUMED_CEREMONIES, ...declared]).has(kind)) {
+      return {
+        kind: 'refused', runRef: r.runRef, outcome: 'denied', receipts: r.receipts,
+        error: `this needs a ${kind} and this surface cannot collect one — nothing was authorized`,
+      };
+    }
+    return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
+  }
   if (r.outcome === 'completed') {
     // "None of these" is stated, never composed: a model asked to phrase a refusal will soften it into a
     // suggestion, and the useful part is the list of what this agent CAN do — which is not its to invent.
@@ -1048,6 +1064,41 @@ export interface AskScopeV1 {
 }
 
 /**
+ * WHAT EACH CAPABILITY WILL ASK A PERSON FOR — spec 353 S4.
+ *
+ * Risk implies a floor (a payment is high, so somebody signs), but it does not predict everything:
+ * `organization.team.create` is MEDIUM and still needs a signature, because an agent's genesis is signed
+ * by the credential that will custody it. A ceremony list derived from risk alone would have declared that
+ * capability renderable by a surface that cannot collect a signature, and the run would have suspended on
+ * a prompt nobody could answer — the Mastra failure class, arriving through the UX door instead of the
+ * storage one.
+ *
+ * So each capability states what it may ask for. `data` and `confirmation` are assumed of every surface (a
+ * conversation that cannot ask a question is not a conversation); only the ceremonies BEYOND that are
+ * listed, because those are the ones an app can genuinely lack.
+ */
+export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
+  'organization.team.create': ['signature'],        // the child's genesis
+  'organization.create': ['signature'],
+  'treasury.create': ['signature'],
+  'organization.membership.invite': ['signature'],  // the org signs the invitation grant
+  'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
+  'treasury.fund': ['signature'],                   // the mandate
+  'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
+};
+
+/** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
+const ASSUMED_CEREMONIES = ['data', 'confirmation'];
+
+/** Can this surface complete this capability? Silence means yes — a surface that has not said what it
+ *  renders is not narrowed by its silence (the same rule as `capabilities`). */
+export function surfaceCanRender(capabilityId: string, ceremonies?: string[]): boolean {
+  if (!ceremonies?.length) return true;
+  const renders = new Set([...ASSUMED_CEREMONIES, ...ceremonies]);
+  return (CAPABILITY_CEREMONIES[capabilityId] ?? []).every((c) => renders.has(c));
+}
+
+/**
  * The action tools this ask may compose: what this agent offers, narrowed by what the SURFACE says it can
  * complete and by the realm the person is standing in. Narrowing only — a surface that names a capability
  * this agent does not have gets nothing extra, and a realm never grants.
@@ -1061,6 +1112,9 @@ export function scopedActionTools(surface?: AskScopeV1): ToolSpec[] {
   const kind = surface?.realm?.kind;
   if (kind === 'org') tools = tools.filter((t) => t.id !== 'organization.create');
   if (kind === 'service') tools = tools.filter((t) => !CHILD_AGENT_TLD[t.id] && t.id !== ORG_INVITE_CAPABILITY);
+  // Do not OFFER what this surface cannot finish. A plan built from a capability whose ceremony nobody can
+  // render is a plan that strands mid-run, after the person has already been asked for things.
+  tools = tools.filter((t) => surfaceCanRender(t.capability?.id ?? t.id, surface?.ceremonies));
   return tools;
 }
 

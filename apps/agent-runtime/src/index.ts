@@ -1265,6 +1265,7 @@ app.post('/harness/ask', async (c) => {
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
       intent, result, addressee, composer: selectComposer(c.env), deps: askDeps,
+      ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
     });
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
