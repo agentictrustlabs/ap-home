@@ -49,6 +49,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, type PartyLookups } from './party-resolution.js';
+import { preconditionRefusal } from './capability-preconditions.js';
 
 
 export interface HarnessEnv {
@@ -130,9 +131,17 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         payer: { type: 'string', description: 'The paying treasury or organization — its address, or its name (e.g. nathan.treasury)' },
         asset: { type: 'string', description: 'ERC-20 token contract address' },
         payee: { type: 'string', description: 'Recipient address, or its agent name (e.g. bob.me)' },
-        amount: { type: 'string', description: 'Amount in the token\'s smallest unit, as a decimal string' },
+        amount: { type: 'string', description: 'Amount in the token\'s SMALLEST units (2 USDC = "2000000"). Use `usdc` instead when the ask says a decimal figure.' },
+        usdc: { type: 'string', description: 'Amount in whole USDC as the person said it, e.g. "2" or "12.11". Use this when the ask names a plain figure — do not convert it yourself.' },
       },
-      required: ['payer', 'asset', 'payee', 'amount'],
+      // Either unit, never a guess — the same vocabulary `treasury.fund` uses. A capability that
+      // understood only smallest-units left "send 2 usdc" with no amount at all, which made the
+      // insufficient-funds check silently pass and walked the person into a ceremony that could not work.
+      //
+      // `payer` is REQUIRED: a payment must say who pays. Left optional it defaulted to whoever was being
+      // asked, so "from nathan.treasury" was checked — and refused — against Nathan's own empty account.
+      // Whose money moves is not a detail to infer.
+      required: ['payer', 'payee'],
     },
     // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
     // authority as an ERC-20 contract, which nothing can sign.
@@ -140,6 +149,27 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     risk: 'high',
   },
   INVITE_TOOL,
+  {
+    id: 'messaging.direct.send',
+    description:
+      'Send a DIRECT MESSAGE to another agent — a person, an organization, anyone with an inbox. Use this '
+      + 'whenever the ask is to message, write to, tell or DM somebody. Args: recipient (their ADDRESS or '
+      + 'their NAME, e.g. "alice" or "alice.me" — either works, and no lookup is needed first), message '
+      + '(the text to send; omit it if the ask did not say what to write and the person will be asked).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        recipient: { type: 'string', description: 'Who to message — an address or an agent name' },
+        message: { type: 'string', description: 'The message text. Omit when the ask did not say it.' },
+      },
+      required: ['recipient'],
+    },
+    // Sending as you is acting as you: bounded by a mandate like anything else, and bound to THIS message
+    // by the intent digest. Low risk — a message is never authority (ADR-0041) and can be followed by
+    // another one — so the ladder asks for no second party.
+    capability: { id: 'messaging.direct.send', action: 'send', resourceArg: 'recipient', authorityArg: 'sender' },
+    risk: 'low',
+  },
   {
     id: 'treasury.fund',
     description:
@@ -354,6 +384,8 @@ export interface HarnessDeps {
    *  where it needs an address: asking a planner to chain a lookup into a later step's args is a
    *  coordination problem we do not need to have, and it answered with a paragraph instead of acting. */
   resolveName?: (name: string) => Promise<string | null>;
+  /** Send a direct message through the sender's own interactions plane. */
+  sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Public directory search, for a bare label that is nobody's exact name ("alice"). */
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   now?: () => number;
@@ -577,13 +609,43 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
   };
 }
 
+/**
+ * `messaging.direct.send` — the Home's message box, said out loud.
+ *
+ * The message goes through the SENDER's own interactions plane (`messaging.send`), which is where a direct
+ * message already lives: one conversation per counterparty, bodies in each side's vault (ADR-0055). This
+ * capability adds no storage and no second path — it resolves who was meant, asks for the words if the ask
+ * did not carry them, and hands both to the plane that already does this.
+ */
+export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation, person: Address | undefined, session: string | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    if (!person || !session) throw new Error('a direct message is sent as you, and there is no signed-in person on this run');
+    if (!deps.sendDirectMessage) throw new Error('messaging is not wired on this agent');
+    const recipient = String(args.recipient ?? '').toLowerCase() as Address;
+    if (!/^0x[0-9a-f]{40}$/.test(recipient)) throw new Error(`the recipient did not resolve to an agent (${String(args.recipient ?? '')})`);
+    const supplied = dataFor(ctx.supplied, stepRef);
+    const text = String(supplied.message ?? args.message ?? '').trim();
+    if (!text) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId, prompt: 'What should the message say?',
+        fields: [{ name: 'message', label: 'Message', type: 'text', required: true, hint: 'they will see it in their inbox, from you' }],
+      });
+    }
+    const out = await deps.sendDirectMessage({ sender: person, recipient, bodyText: text, session });
+    if (!out.ok) throw new Error(out.error);
+    return { sent: true, recipient, from: person, message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
+  };
+}
+
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string): ToolInvoker {
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
@@ -601,7 +663,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
       throw new Error(`the payment is made by the mandate's delegator (${(presented!.wire as Delegation).delegator}); the plan named ${payer}`);
     }
     const payee = await partyAddress(args.payee, deps, 'the payee');
-    const amount = BigInt(String(args.amount));
+    const amount = fundingAmount(args);
     const wire = presented!.wire as Delegation;
     const digest = intentDigest(ctx.intent);
 
@@ -622,6 +684,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
       if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) };
       return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
     });
+    // Again, at the moment of acting: the balance may have moved since the preview, and a revert with no
+    // reason is a worse answer than a sentence with the numbers in it.
+    const late = await preconditionRefusal({ capability: 'treasury.payment.execute', args: { ...args, payer: wire.delegator }, env, deps });
+    if (late) throw new Error(late);
     const transfer = encodeFunctionData({ abi: TRANSFER_ABI, functionName: 'transfer', args: [payee, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, transfer] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
@@ -640,6 +706,22 @@ export interface HarnessRunInput {
   supplied?: SuppliedInputV1[];
   /** The connected user (the session's SA). What they create, they custody. */
   person?: Address;
+  /** Their Home session — the interactions plane authenticates a direct message with it. */
+  session?: string;
+  /**
+   * WHAT THE SURFACE SUPPORTS, and where the person is standing (spec 352 §2).
+   *
+   * The Ask is asked from inside an app, and the app knows things this agent does not: which product
+   * capabilities it can actually complete a ceremony for, and what realm the person has selected. Handing
+   * a planner every capability this substrate CAN do — including ones whose surface has no way to finish
+   * them — invites a plan the person cannot follow through.
+   *
+   * SCOPING IS DISCLOSURE, NEVER AUTHORITY. A surface may only NARROW: it cannot add a capability, and
+   * naming one does not permit it. The mandate is still the gate, verified per step against the chain
+   * (spec 338's rule, one layer up: showing a capability does not permit it, and hiding one does not
+   * protect it).
+   */
+  surface?: AskScopeV1;
   runRef?: string;
   /** The MCP-backed invoker for informational tools (the existing orchestrate path). */
   mcpInvoke: ToolInvoker;
@@ -691,16 +773,18 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.payment.execute': 'asset',
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
+  'messaging.direct.send': 'recipient',
 };
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
  *  an address by the time a caveat encodes it. */
-const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder'] as const;
+const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder', 'recipient'] as const;
 
 /** What to call each of them when asking a person which one they meant. */
 const PARTY_WORD: Record<string, string> = {
   payer: 'paying from', payee: 'being paid', treasury: 'the treasury', invitee: 'being invited',
   parent: 'the parent', org: 'the organization', workspace: 'the workspace', funder: 'funding it',
+  recipient: 'the person to message',
 };
 
 /**
@@ -732,6 +816,16 @@ async function resolveStepArgs(
     const resolved = raw.includes('.') && lookups.resolveName ? await lookups.resolveName(raw.toLowerCase()).catch(() => null) : null;
     if (resolved) out[key] = resolved.toLowerCase();
   }
+  // ONE UNIT, ONCE. The planner may say `usdc: "2"` or `amount: "2000000"` — both are honest readings of
+  // "2 usdc" — but everything downstream (the caveat's ceiling, the balance check, the invoker) must see
+  // exactly one. Converting here means the delegation package never learns a token symbol and no reader
+  // has to guess which field to trust; leaving it to them is how `stepLimits` came to throw on an amount
+  // the person had plainly stated.
+  if (out.usdc !== undefined && out.amount === undefined) {
+    out.amount = fundingAmount(out).toString();
+    delete out.usdc;
+  }
+
   // THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT.
   //
   // Asked to send USDC, a model wrote `0x036CbD53842c5426634e7929541eC2318f3dCF7e` — Base Sepolia's USDC,
@@ -756,6 +850,9 @@ async function resolveStepArgs(
 export async function askReplyFor(env: HarnessEnv, input: {
   intent: { goal: string }; result: RunResult; addressee: Address;
   composer?: AnswerComposer | null;
+  /** Read-only checks that spare a person a ceremony whose outcome is already knowable (spec 352 §2).
+   *  Absent ⇒ no early refusal; the chain still decides. */
+  deps?: HarnessDeps;
   /** Resolve a NAME the planner passed where an address is needed. The requirement is built from the
    *  step's args BEFORE any invoker runs, so "as nathan.treasury" has to become an address here or the
    *  person is asked to grant authority as a string nothing can sign. */
@@ -776,6 +873,13 @@ export async function askReplyFor(env: HarnessEnv, input: {
       args,
       capability: { ...r.required.capability, ...(resource ? { resource } : {}) },
     };
+    // BEFORE asking anyone to authorize this: is it already impossible? Walking a person through a
+    // signature for a payment their account cannot cover is the same wrong as asking them to grant
+    // authority they do not hold — knowable in advance, and cruel to discover afterwards.
+    if (input.deps) {
+      const refusal = await preconditionRefusal({ capability: required.capability.id, args, env, deps: input.deps, addressee: input.addressee });
+      if (refusal) return { kind: 'refused', runRef: r.runRef, outcome: 'denied', error: refusal, receipts: r.receipts };
+    }
     const requirement = mandateRequirementForStep({ required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
     // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the
     // parent a team is chartered under), else the agent being asked. Never the person by default — a
@@ -805,6 +909,53 @@ export async function askReplyFor(env: HarnessEnv, input: {
   }
   return { kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts };
 }
+
+/**
+ * WHAT THE APP CAN DO, AND WHERE THE PERSON IS STANDING — spec 353's `AskScopeV1`, the scope half of an ask.
+ *
+ * An Ask never happens in a vacuum: it happens inside an app, with a connected user, acting in a selected
+ * context. All three are already substrate facts, and the app knows them before the harness runs.
+ *
+ * SCOPE IS HONESTY; THE MANDATE IS AUTHORITY. This decides what the conversation OFFERS, how it phrases
+ * things and how it refuses. It decides nothing about what is permitted, and it is consumed BEFORE the
+ * authority stage: it is not a parameter of `verifyMandateForStep`, of the `PolicyEvaluator`, or of any
+ * gate. Threading it into a verifier is the drift to refuse (353 §4).
+ *
+ * WHAT IS DELIBERATELY ABSENT: roles, memberships, entitlements, policy verdicts. An app-asserted role is
+ * a client-supplied authorization claim — the exact pattern ADR-0041 forbids and Pydantic warns about —
+ * so standing is DERIVED here from vault and chain, never accepted from the payload. An earlier cut of
+ * this carried `role: 'steward' | 'member'` from the Home; it is removed rather than ignored, because a
+ * field that exists gets used.
+ */
+export interface AskScopeV1 {
+  /** Capability ids this app can carry to completion. Absent ⇒ everything this agent offers. */
+  capabilities?: string[];
+  /** Prompt kinds and ceremonies this surface can actually render (350 §3.5 kinds, plus
+   *  'mandate-signature'). A run that would suspend on one the app cannot render should refuse at plan
+   *  time rather than strand (353 S4 — not yet enforced). */
+  ceremonies?: string[];
+  /** The realm the person selected, as the app understands it — the delegator candidate and the private
+   *  tier. NOT their standing in it. */
+  realm?: { kind?: 'person' | 'org' | 'service' };
+}
+
+/**
+ * The action tools this ask may compose: what this agent offers, narrowed by what the SURFACE says it can
+ * complete and by the realm the person is standing in. Narrowing only — a surface that names a capability
+ * this agent does not have gets nothing extra, and a realm never grants.
+ */
+export function scopedActionTools(surface?: AskScopeV1): ToolSpec[] {
+  let tools = HARNESS_ACTION_TOOLS;
+  const declared = surface?.capabilities?.length ? new Set(surface.capabilities) : null;
+  if (declared) tools = tools.filter((t) => declared.has(t.capability?.id ?? t.id));
+  // A person's own realm charters organizations; an organization charters what lives inside it. Offering
+  // `organization.create` while standing in a service is offering a plan whose parent makes no sense.
+  const kind = surface?.realm?.kind;
+  if (kind === 'org') tools = tools.filter((t) => t.id !== 'organization.create');
+  if (kind === 'service') tools = tools.filter((t) => !CHILD_AGENT_TLD[t.id] && t.id !== ORG_INVITE_CAPABILITY);
+  return tools;
+}
+
 
 /** Run one ask under a mandate. Everything the loop decided is on the receipts; nothing here re-decides. */
 export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string }> {
@@ -849,10 +1000,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // only writer, and a fact the chain does not have is a fact discovery must not be told.
   // ACTIONS FIRST. The planner picks one tool; when an ask is "do this", a directory read listed ahead of
   // the capability that does it is a plausible-looking answer to a question nobody asked.
-  const tools = [...HARNESS_ACTION_TOOLS, ...ASK_DISCOVERY_TOOLS];
+  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person),
+    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.

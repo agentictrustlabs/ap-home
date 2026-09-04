@@ -1207,6 +1207,7 @@ app.post('/harness/ask', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
+    surface?: HarnessRunInput['surface'];
   } | null;
   if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
@@ -1243,7 +1244,8 @@ app.post('/harness/ask', async (c) => {
   const askDeps = harnessDeps(c.env, audit);
   try {
     const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
-      intent, presented: turn.presented, person: who.sa as Address, runRef,
+      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef,
+      ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
       // (ADR-0040 — public, on-chain-derivable facts only, and the indexer is the KB's only writer). A
@@ -1262,7 +1264,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
-      intent, result, addressee, composer: selectComposer(c.env),
+      intent, result, addressee, composer: selectComposer(c.env), deps: askDeps,
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
     });
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
@@ -1960,6 +1962,22 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // Public directory search — the second place a bare label like "alice" might answer from. Public,
     // on-chain-derived facts only (ADR-0040); the asker's private relationships are not consulted and
     // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
+    // A direct message rides the SENDER's own interactions plane — the same `messaging.send` the Home's
+    // message box posts to, so there is one conversation per counterparty and one place the bodies live.
+    sendDirectMessage: async ({ sender, recipient, bodyText, session }) => {
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
+      const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/messaging.send`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText }),
+      }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; messageId?: string };
+      if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
+      // The plane's own vocabulary, translated once: "no wire" is a ceremony the person has not done, and
+      // saying that is more use than repeating a code.
+      if (out.code === 'wire_absent') return { ok: false as const, error: 'messaging is not enabled on your home yet — turn it on in Messages, then ask again' };
+      if (out.code === 'recipient_not_in_wire') return { ok: false as const, error: 'your messaging authorization does not cover this recipient yet — open Messages once and it will be extended' };
+      return { ok: false as const, error: out.error ?? `the message could not be sent (${res.status})` };
+    },
     findAgents: async (terms: string) => {
       const out = await askDiscoveryInvoker(env as never)('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
       return ((out as { agents?: unknown[] } | null)?.agents ?? []) as Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>;

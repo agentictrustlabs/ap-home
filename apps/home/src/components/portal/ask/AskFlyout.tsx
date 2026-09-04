@@ -31,7 +31,13 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: Address; addresseeLabel: string; onClose: () => void }) {
+export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
+  addressee: Address; addresseeLabel: string;
+  /** Where the person is standing, as this app understands it — the agent narrows what it OFFERS to it,
+   *  and derives standing itself (spec 353 §4). */
+  realm?: { kind?: 'person' | 'org' | 'service' };
+  onClose: () => void;
+}) {
   const { session, profile, agentAddress } = useSession();
   const [thread, setThread] = useState<Entry[]>([]);
   const [q, setQ] = useState('');
@@ -144,7 +150,7 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
     setQ('');
     setAnswers({});
     setThread((t) => [...t, { role: 'you', text: message }]);
-    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [] }, 'Thinking…');
+    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], ...(realm ? { surface: { realm } } : {}) }, 'Thinking…');
   };
 
   /** Grant the authority the agent said it needs — signed by the credential that custodies the DELEGATOR

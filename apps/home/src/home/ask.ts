@@ -79,9 +79,22 @@ export interface SuppliedInput {
  * question, re-verifies the stored mandate on chain, re-applies the ladder and re-checks the approval,
  * every turn. The checkpoint carries inputs, never conclusions.
  */
+/** What THIS app can carry to completion, and where the person is standing. The agent narrows what it
+ *  offers to this — it can never widen it, and naming a capability does not permit it (the mandate still
+ *  decides). Sent so a plan is never made of steps this surface has no ceremony for. */
+export interface AskSurface {
+  capabilities?: string[];
+  ceremonies?: string[];
+  /** Where the person is standing — NOT what they are to it. Standing (steward, member, role) is the
+   *  agent's to derive from vault and chain: an app that asserts it is supplying an authorization claim,
+   *  which is the pattern ADR-0041 forbids (spec 353 §4). */
+  realm?: { kind?: 'person' | 'org' | 'service' };
+}
+
 export interface AskTurnState {
   message: string;
   addressee: Address;
+  surface?: AskSurface;
   runRef: string;
   presented: DelegationWire | null;
   supplied: SuppliedInput[];
@@ -111,6 +124,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     session: session.token,
     addressee: state.addressee,
     runRef: state.runRef,
+    ...(state.surface ? { surface: state.surface } : {}),
     ...(state.resumable ? {} : { message: state.message }),
     ...(state.presented ? { presented: state.presented } : {}),
     supplied: state.supplied,

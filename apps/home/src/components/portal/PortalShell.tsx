@@ -91,7 +91,15 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
         </main>
       </div>
       <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />
-      {askOpen && canAsk && <AskFlyout addressee={askAddressee!} addresseeLabel={askLabel} onClose={() => setAskOpen(false)} />}
+      {askOpen && canAsk && (
+        <AskFlyout
+          addressee={askAddressee!} addresseeLabel={askLabel}
+          // The app knows where you are standing and what you are to this agent; the Ask should not have
+          // to infer it from a sentence.
+          realm={{ kind: active.kind }}
+          onClose={() => setAskOpen(false)}
+        />
+      )}
     </div>
   );
 }

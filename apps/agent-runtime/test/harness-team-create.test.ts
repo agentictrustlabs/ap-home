@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -286,5 +286,51 @@ describe('how much to fund (an amount is never guessed)', () => {
   it('refuses to invent an amount when none was given', () => {
     expect(() => fundingAmount({})).toThrow(/how much/);
     expect(() => fundingAmount({ usdc: 'a lot' })).toThrow(/not an amount/);
+  });
+});
+
+describe('what the surface says it supports (spec 352 §2 — scoping is disclosure, never authority)', () => {
+  const ids = (s?: Parameters<typeof scopedActionTools>[0]) => scopedActionTools(s).map((t) => t.capability?.id ?? t.id);
+
+  it('offers everything when the surface says nothing', () => {
+    expect(ids()).toEqual(expect.arrayContaining(['treasury.payment.execute', 'organization.create', 'messaging.direct.send']));
+  });
+
+  it('a surface NARROWS to what it can carry to completion', () => {
+    expect(ids({ capabilities: ['messaging.direct.send'] })).toEqual(['messaging.direct.send']);
+  });
+
+  it('a surface cannot ADD a capability by naming one — narrowing only', () => {
+    expect(ids({ capabilities: ['treasury.liquidate.everything'] })).toEqual([]);
+  });
+
+  it('the realm narrows too: an organization charters what lives inside it, not another organization', () => {
+    expect(ids({ realm: { kind: 'org' } })).not.toContain('organization.create');
+    expect(ids({ realm: { kind: 'org' } })).toContain('organization.team.create');
+  });
+
+  it('a service realm charters no agents and invites nobody', () => {
+    const svc = ids({ realm: { kind: 'service' } });
+    expect(svc).not.toContain('organization.team.create');
+    expect(svc).not.toContain('organization.membership.invite');
+    expect(svc).toContain('treasury.payment.execute'); // a service can still be asked to pay under a mandate
+  });
+});
+
+describe('the scope/authority firewall (spec 353 §4)', () => {
+  it('scope is not a parameter of any gate — it is consumed before authority, and threading it in is the drift to refuse', async () => {
+    // Structural, not aspirational: the verifier and the policy evaluator are built without it, so a PR
+    // that wanted to use scope in a decision would have to change their signatures — visibly.
+    const src = await import('node:fs').then((fs) => fs.promises.readFile(new URL('../src/harness-run.ts', import.meta.url), 'utf8'));
+    const afterVerifier = src.slice(src.indexOf('delegationMandateVerifier({'));
+    expect(afterVerifier.slice(0, 600)).not.toMatch(/surface|AskScopeV1/);
+    expect(src).not.toMatch(/riskLadderPolicy\([^)]*surface/);
+  });
+
+  it('carries no standing: an app may say WHERE you are, never WHAT you are to it', () => {
+    // `role` was carried for one commit and is removed rather than ignored — a field that exists gets used.
+    const scope = { capabilities: ['treasury.payment.execute'], realm: { kind: 'org' as const } };
+    expect(Object.keys(scope.realm)).toEqual(['kind']);
+    expect(scopedActionTools(scope).map((t) => t.capability?.id)).toEqual(['treasury.payment.execute']);
   });
 });
