@@ -42,7 +42,8 @@ export interface AskField {
   label: string;
   type: 'text' | 'address' | 'number' | 'boolean' | 'choice' | 'credential';
   required?: boolean;
-  choices?: Array<{ value: string; label: string }>;
+  /** For `choice`. `hint` is what tells two candidates apart — kind, address, where they are known from. */
+  choices?: Array<{ value: string; label: string; hint?: string }>;
   pattern?: string;
   hint?: string;
 }
@@ -58,7 +59,10 @@ export type AskReply =
       /** What the ASKER is to the delegator, derived by the agent from evidence the chain confirms
        *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */
       standing?: { relation: 'self' | 'steward' | 'member' | 'none'; because: string; canGrant: boolean };
-      note?: string }
+      note?: string;
+      /** What the words became. "send nathan a message" is authorized against an ADDRESS; this is where a
+       *  person sees which one, before they sign rather than after. */
+      parties?: Array<{ arg: string; raw: string; agent: string; label?: string; hint?: string }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[] }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };

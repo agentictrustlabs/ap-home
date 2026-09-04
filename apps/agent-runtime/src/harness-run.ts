@@ -50,6 +50,7 @@ import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
+import type { ResolvedParty } from './party-resolution.js';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
@@ -830,6 +831,9 @@ export type AskReply =
       /** What the ASKER is to the delegator, derived (spec 353 S5). Absent when nothing could read it —
        *  which is not "no standing", so a surface must not render absence as a refusal. */
       standing?: Standing; note?: string;
+      /** WHO the words became. A person authorizing "send nathan a message" is authorizing it against an
+       *  ADDRESS, and this is the only place they can see which one before they sign. Display only. */
+      parties?: ResolvedParty[];
       /** Why standing could not be read, when it could not. Never a refusal — the ask proceeds. */
       standingUnavailable?: string }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
@@ -965,6 +969,8 @@ export async function askReplyFor(env: HarnessEnv, input: {
   principal?: Address;
   /** Verifies a stewardship wire on chain. Absent ⇒ a held wire is not upgraded to `steward` on its word. */
   verifyStewardship?: StandingDeps['verifyStewardship'];
+  /** What the run's party words resolved to, for the surface to show back before a signature. */
+  resolved?: ResolvedParties;
 }): Promise<AskReply> {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
@@ -1021,6 +1027,12 @@ export async function askReplyFor(env: HarnessEnv, input: {
       summary: `${r.required.capability.id} on ${delegator}`,
       ...(standing ? { standing } : {}), ...(note ? { note } : {}),
       ...(standingUnavailable ? { standingUnavailable } : {}),
+      // Only the parties this STEP actually names — a run that resolved three things does not get to
+      // show all three under a mandate that covers one.
+      ...(() => {
+        const named = [...(input.resolved?.values() ?? [])].filter((p) => Object.values(args).some((v) => String(v).toLowerCase() === p.agent));
+        return named.length ? { parties: named } : {};
+      })(),
     };
   }
   if (r.outcome === 'suspended' && r.prompt) {
@@ -1211,7 +1223,12 @@ export function scopedActionTools(surface?: AskScopeV1): ToolSpec[] {
 
 
 /** Run one ask under a mandate. Everything the loop decided is on the receipts; nothing here re-decides. */
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string }> {
+/** What the run's party words became, keyed so the same party resolved twice is recorded once. Display
+ *  only — nothing reads it to decide anything. */
+export type ResolvedParties = Map<string, ResolvedParty>;
+
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties }> {
+  const resolved: ResolvedParties = new Map();
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
   const enforcers = harnessEnforcers(env);
@@ -1262,7 +1279,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, deps, {
+    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, onResolved: (r) => resolved.set(`${r.arg}:${r.agent}`, r) }, {
       stepRef: 'pending', toolId,
       ...(input.person ? { subject: input.person } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
@@ -1276,5 +1293,5 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,
   });
-  return { result, plannerKind: kind };
+  return { result, plannerKind: kind, resolved };
 }

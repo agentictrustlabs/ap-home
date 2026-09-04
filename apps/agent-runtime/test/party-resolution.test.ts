@@ -49,6 +49,35 @@ describe('resolving who a person meant', () => {
     expect(field?.choices?.map((c) => c.value).sort()).toEqual([ALICE_ME, ALICE_ORG].sort());
   });
 
+  it('every candidate is DISTINGUISHABLE — a list of identical labels is not a choice', async () => {
+    const l = lookups({ 'alice.me': ALICE_ME, 'alice.org': ALICE_ORG });
+    const r = await caught(resolveParty('alice', l, where));
+    const field = (r.prompt as { fields: Array<{ choices?: Array<{ label: string; hint?: string }> }> }).fields[0]!;
+    const choices = field.choices ?? [];
+    // Each row carries something the others do not: the person is about to authorize an action against
+    // ONE of these, and "the second Alice" is not a thing anyone knows about themselves.
+    for (const c of choices) expect(c.hint, `no hint on ${c.label}`).toBeTruthy();
+    expect(new Set(choices.map((c) => `${c.label}|${c.hint}`)).size).toBe(choices.length);
+    // The address is part of it — a name alone can be claimed by two agents.
+    for (const c of choices) expect(c.hint).toMatch(/0x[0-9a-f]{6}/);
+  });
+
+  it('reports what a CERTAIN resolution decided — nobody was asked, so it must be shown', async () => {
+    const seen: Array<{ arg: string; raw: string; agent: string; label?: string }> = [];
+    const l = { ...lookups({ 'alice.me': ALICE_ME }), onResolved: (r: typeof seen[number]) => seen.push(r) };
+    expect(await caught(resolveParty('alice', l, where))).toEqual({ ok: true, v: ALICE_ME });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ arg: where.argName, raw: 'alice', agent: ALICE_ME, label: 'alice.me' });
+  });
+
+  it('an address given outright is reported with NO label — nothing was resolved to name', async () => {
+    const seen: Array<{ agent: string; label?: string }> = [];
+    const l = { ...lookups(), onResolved: (r: typeof seen[number]) => seen.push(r) };
+    await caught(resolveParty(ALICE_ME, l, where));
+    expect(seen[0]).toMatchObject({ agent: ALICE_ME });
+    expect(seen[0]!.label).toBeUndefined();
+  });
+
   it('NOTHING answers ⇒ ask, and say WHERE we looked', async () => {
     const r = await caught(resolveParty('alice', lookups(), where));
     expect(r.prompt).toMatchObject({ prompt: expect.stringContaining('could not find') });

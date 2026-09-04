@@ -1256,7 +1256,7 @@ app.post('/harness/ask', async (c) => {
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit);
   try {
-    const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+    const { result, resolved } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef,
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
@@ -1283,6 +1283,8 @@ app.post('/harness/ask', async (c) => {
       // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
       // hold and the chain confirms — the surface asserts no standing, and this decides nothing.
       principal: who.sa as Address,
+      // What the person's words became, so the authority card can show it before they sign.
+      resolved,
       verifyStewardship: chainStewardshipCheck({
         readContract: ((args: never) => askDeps.readContract(args)) as never,
         chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,

@@ -41,6 +41,11 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
   const { session, profile, agentAddress } = useSession();
   const [thread, setThread] = useState<Entry[]>([]);
   const [q, setQ] = useState('');
+  // WHAT THE PERSON PICKED, in this surface's own words. After choosing "nathan.me" from four Nathans the
+  // answer travels as an address, so the next card would show a bare 0x… — asking someone to re-verify a
+  // choice they just made, against a string that tells them nothing. This is the surface remembering its
+  // own UI, never a claim about the chain: it labels only values it displayed a label for.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState<{ reply: AskReply; state: AskTurnState } | null>(null);
@@ -240,6 +245,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
         {pending?.reply.kind === 'authority_required' && (
           <AuthorityCard
             reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
+            chosen={chosen}
             checkCustody={async (delegator) => canGrantAs(delegator, await connectedCredential(via, agentAddress as Address, session!.token))}
             onRequest={(text) => { setPending(null); setQ(text); }}
           />
@@ -247,6 +253,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
         {pending?.reply.kind === 'prompt' && (
           <PromptCard
             prompt={pending.reply.prompt} answers={answers} setAnswers={setAnswers} busy={busy}
+            onChoose={(value, label) => setChosen((m) => ({ ...m, [value.toLowerCase()]: label }))}
             onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
           />
         )}
@@ -305,12 +312,14 @@ function ReplyView({ reply }: { reply: AskReply }) {
 
 /** The grant. Plain words first, the machine-readable underneath — a person should be able to refuse this
  *  for a reason. */
-function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest }: {
+function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest, chosen }: {
   reply: Extract<AskReply, { kind: 'authority_required' }>; busy: string | null;
   onGrant: () => void; onCancel: () => void;
   /** The way out of a dead end: prefill the composer with a request to whoever CAN grant. Prefilled and
    *  never auto-sent — a message sent on someone's behalf without them reading it is its own overreach. */
   onRequest: (text: string) => void;
+  /** Labels this surface showed for values the person picked, so a chosen party is not shown as an address. */
+  chosen: Record<string, string>;
   /** Does the connected credential custody the delegator? The ONE thing that decides whether a grant here
    *  can produce a valid mandate — asked of the chain, not of the record the agent read. */
   checkCustody: (delegator: Address) => Promise<boolean>;
@@ -355,6 +364,24 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
         To do this, {short(reply.delegate)} needs permission to <strong>{CAPABILITY_WORDS[reply.capability] ?? reply.capability}</strong> as{' '}
         <strong>{short(d.delegator)}</strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
       </p>
+      {/* WHO IT RESOLVED TO. When several agents answered to the name the person picked one and knows what
+          they picked. When exactly ONE did, nobody was asked anything — which is precisely the case where a
+          wrong resolution goes unnoticed until after the signature. So the words and what they became are
+          shown together, and a person who typed "nathan" can see which Nathan they are about to authorize. */}
+      {!!reply.parties?.length && (
+        <div style={{ marginTop: 8 }} data-testid="ask-parties">
+          {reply.parties.map((p) => (
+            <div key={`${p.arg}:${p.agent}`} style={{ fontSize: 12, marginTop: 2 }}>
+              <span className="muted">{p.arg}: </span>
+              <strong>{p.label ?? chosen[p.agent.toLowerCase()] ?? short(p.agent as Address)}</strong>
+              {p.hint && <span className="muted" style={{ fontSize: 11 }}> — {p.hint}</span>}
+              {!p.label && p.raw && p.raw.toLowerCase() !== p.agent.toLowerCase() && (
+                <span className="muted" style={{ fontSize: 11 }}> (you said “{p.raw}”)</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
         {reply.standing?.relation === 'steward'
           ? <>You are granting it as a steward of {short(d.delegator)}. You can revoke it on chain at any time.</>
@@ -369,9 +396,11 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
 }
 
 /** A question for the person. Never a credential field — this surface answered those already. */
-function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel }: {
+function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onChoose }: {
   prompt: AskPrompt; answers: Record<string, string>; setAnswers: (v: Record<string, string>) => void;
   busy: string | null; onAnswer: () => void; onCancel: () => void;
+  /** Remember the label this surface showed for a chosen value, so the next card can say it back. */
+  onChoose: (value: string, label: string) => void;
 }) {
   const ready = prompt.kind !== 'data' || prompt.fields.every((f) => !f.required || (answers[f.name] ?? '').trim().length > 0);
   return (
@@ -380,12 +409,41 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel }: {
       {prompt.kind === 'data' && prompt.fields.map((f: AskField) => (
         <div key={f.name} style={{ marginTop: 8 }}>
           <label className="muted" style={{ fontSize: 11.5, display: 'block' }} htmlFor={`ask-f-${f.name}`}>{f.label}</label>
-          <input
-            id={`ask-f-${f.name}`} className="input" data-testid={`ask-field-${f.name}`} value={answers[f.name] ?? ''}
-            onChange={(e) => setAnswers({ ...answers, [f.name]: e.target.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter' && ready && !busy) onAnswer(); }}
-          />
-          {f.hint && <div className="muted" style={{ fontSize: 11 }}>{f.hint}</div>}
+          {f.hint && <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{f.hint}</div>}
+          {/* A CHOICE IS SHOWN, NOT DESCRIBED. The agent had already worked out which agents could be
+              meant and sent them; rendering that as a text box asked the person to retype something they
+              could not see, and to know which "Nathan" was which without being told. Each row carries what
+              tells them apart, and nothing is preselected — the agent deliberately does not rank these
+              (that would need a score it refuses to invent), so neither does this. */}
+          {f.type === 'choice' && f.choices?.length ? (
+            <div role="radiogroup" aria-label={f.label} data-testid={`ask-choices-${f.name}`}>
+              {f.choices.map((c) => {
+                const picked = answers[f.name] === c.value;
+                return (
+                  <button
+                    key={c.value} type="button" role="radio" aria-checked={picked}
+                    data-testid={`ask-choice-${c.value}`}
+                    onClick={() => { setAnswers({ ...answers, [f.name]: c.value }); onChoose(c.value, c.label); }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', marginTop: 4, padding: '7px 9px',
+                      borderRadius: 7, cursor: 'pointer', font: 'inherit',
+                      border: `1px solid ${picked ? 'var(--accent, #2563eb)' : 'var(--border, #d8dbe0)'}`,
+                      background: picked ? 'var(--accent-soft, #eff4ff)' : 'transparent',
+                    }}
+                  >
+                    <span style={{ fontSize: 12.5, fontWeight: picked ? 600 : 500 }}>{c.label}</span>
+                    {c.hint && <span className="muted" style={{ fontSize: 11, display: 'block', marginTop: 1 }}>{c.hint}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <input
+              id={`ask-f-${f.name}`} className="input" data-testid={`ask-field-${f.name}`} value={answers[f.name] ?? ''}
+              onChange={(e) => setAnswers({ ...answers, [f.name]: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && ready && !busy) onAnswer(); }}
+            />
+          )}
         </div>
       ))}
       {prompt.kind === 'signature' && (

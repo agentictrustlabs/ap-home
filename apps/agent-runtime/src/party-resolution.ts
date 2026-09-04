@@ -35,6 +35,20 @@ export interface PartyLookups {
   resolveName?: (name: string) => Promise<string | null>;
   /** Read one record from a subject's own vault — the private tier. */
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** Told what a party's words RESOLVED TO, so a surface can show it back before anyone signs. The
+   *  resolver is the only place that knows both halves — "nathan" and the address it became — and by the
+   *  time an argument reaches a mandate the words are gone. Display only; it decides nothing. */
+  onResolved?: (r: ResolvedParty) => void;
+}
+
+/** What one party's words became. `label` is absent when the person gave an address outright — there was
+ *  nothing to resolve, and inventing a name for it would be the surface claiming knowledge it lacks. */
+export interface ResolvedParty {
+  arg: string;
+  raw: string;
+  agent: string;
+  label?: string;
+  hint?: string;
 }
 
 const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
@@ -90,6 +104,28 @@ export async function partyCandidates(raw: string, lookups: PartyLookups, subjec
   return outcome.outcome === 'ambiguous' ? outcome.candidates : [];
 }
 
+/** Where a candidate came from, said the way a person would say it. */
+const FOUND_IN: Record<string, string> = {
+  relationships: 'you are linked to them',
+  roster: 'a member of one of your organizations',
+  naming: 'the naming service',
+};
+
+/**
+ * What tells two agents with the same name apart. Kind first (a person and a team called the same thing
+ * is the common case), then the address — truncated, because the middle of an address distinguishes
+ * nothing and a full one crowds out the parts that do.
+ */
+export function candidateHint(c: EntityCandidate): string {
+  const bits: string[] = [];
+  if (c.name && c.name !== c.label) bits.push(c.name);
+  if (c.kind) bits.push(c.kind);
+  bits.push(`${c.agent.slice(0, 8)}…${c.agent.slice(-4)}`);
+  const from = FOUND_IN[c.provenance.source];
+  if (from) bits.push(from);
+  return bits.join(' · ');
+}
+
 /**
  * The address the person meant, or a question. `stepRef`/`toolId` place the question on the step that
  * needs it; `argName` is what a resume will answer; `subject` is WHOSE tier this is.
@@ -100,7 +136,10 @@ export async function resolveParty(
   where: { stepRef: string; toolId: string; argName: string; what: string; subject?: string },
 ): Promise<Address> {
   const value = String(raw ?? '').trim();
-  if (isAddress(value)) return value.toLowerCase() as Address;
+  if (isAddress(value)) {
+    lookups.onResolved?.({ arg: where.argName, raw: value, agent: value.toLowerCase() });
+    return value.toLowerCase() as Address;
+  }
   const ask = (prompt: string, field: InputFieldV1): never => {
     throw new InputRequired({ kind: 'data', stepRef: where.stepRef, toolId: where.toolId, prompt, fields: [field] });
   };
@@ -109,7 +148,14 @@ export async function resolveParty(
   const outcome = await resolveEntity(partyProviders(lookups), {
     term: value, tiers: ['private'], ...(where.subject ? { subject: where.subject } : {}), limit: 8,
   });
-  if (outcome.outcome === 'certain') return outcome.candidate.agent.toLowerCase() as Address;
+  if (outcome.outcome === 'certain') {
+    // ONE match is still a decision, and the person never made it. Report what "nathan" became so the
+    // surface can show it before a signature, rather than after — a certain resolution is the case where
+    // nobody is asked anything, which is exactly when a wrong one goes unnoticed.
+    const c = outcome.candidate;
+    lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c) });
+    return c.agent.toLowerCase() as Address;
+  }
   if (outcome.outcome === 'unknown') {
     // Say where we looked. "I could not find them" without that leaves a person correcting the wrong thing.
     const said: Record<string, string> = {
@@ -127,11 +173,17 @@ export async function resolveParty(
     );
   }
   // SEVERAL. Never pick: the person is the only one who knows which one they meant.
+  //
+  // And a list of four things all called "Nathan" is not a choice. Each one carries what tells it APART —
+  // its full name, what KIND of agent it is, its address, and WHERE we know it from — because the person
+  // is about to authorize something against one of them, and "the second Nathan" is not a thing anyone
+  // knows about themselves. There is deliberately no default and no highlighted best: ranking these would
+  // need a score, and a score is the thing this resolver refuses to invent (spec 353 §3, ADR-0013).
   const candidates = outcome.outcome === 'ambiguous' ? outcome.candidates : [];
   ask(`Which “${value}” do you mean?`, {
     name: where.argName, label: where.what, type: 'choice', required: true,
-    choices: candidates.map((c) => ({ value: c.agent, label: c.label })),
-    hint: `${candidates.length} agents you know answer to “${value}”`,
+    choices: candidates.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+    hint: `${candidates.length} agents you know answer to “${value}” — pick the one you mean`,
   });
   throw new Error('unreachable');
 }
