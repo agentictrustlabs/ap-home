@@ -67,18 +67,29 @@ export interface SuppliedInput {
   confirmed?: boolean;
 }
 
-/** The state one ask carries between turns: the sentence, the run, the mandate, and the answers so far.
- *  Every turn re-sends all of it — the agent re-plans and re-verifies from scratch each time, which is
- *  the point: a resume is never a continuation past a gate. */
+/**
+ * The state one ask carries between turns.
+ *
+ * Spec 350 W3 made most of it the AGENT'S to remember: once a run has suspended, the agent holds the
+ * question, the mandate and every answer under `runRef`, and a resume needs only the runRef plus what is
+ * new. So `resumable` marks the point where this surface stops re-sending the mandate — it is authority,
+ * and authority sitting in browser memory across turns is a window nobody needed to leave open.
+ *
+ * What does NOT change: a resume is a full re-run through every gate. The agent re-plans the stored
+ * question, re-verifies the stored mandate on chain, re-applies the ladder and re-checks the approval,
+ * every turn. The checkpoint carries inputs, never conclusions.
+ */
 export interface AskTurnState {
   message: string;
   addressee: Address;
   runRef: string;
   presented: DelegationWire | null;
   supplied: SuppliedInput[];
+  /** Set once the agent has checkpointed this run: later turns send the runRef and the new answers only. */
+  resumable?: boolean;
 }
 
-async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; error?: string; detail?: string }> {
+async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string }> {
   await ensureCsrfToken();
   const r = await fetch('/a2a/harness/ask', {
     method: 'POST', credentials: 'include',
@@ -89,15 +100,28 @@ async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; err
 }
 
 /** Ask once. The first turn carries only the sentence; later turns carry what the agent asked for. */
-export async function ask(session: { token: string }, state: AskTurnState): Promise<AskReply> {
+export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean }> {
+  // What is NEW goes up; what the agent already holds does not. Once a run is checkpointed the question
+  // and the earlier answers are its own, so this turn carries the runRef and whatever the person just did.
+  //
+  // A mandate is the exception, and it has to be: the turn that GRANTS one is a turn on a run that is
+  // already resumable, so "the agent is holding this run" cannot mean "it has this". Dropping it here
+  // sent the run back to asking for authority it had just been given, forever.
   const res = await post({
-    session: session.token, addressee: state.addressee, message: state.message, runRef: state.runRef,
-    presented: state.presented, supplied: state.supplied,
+    session: session.token,
+    addressee: state.addressee,
+    runRef: state.runRef,
+    ...(state.resumable ? {} : { message: state.message }),
+    ...(state.presented ? { presented: state.presented } : {}),
+    supplied: state.supplied,
   });
   if (!res.ok || !res.reply) {
-    return { kind: 'refused', runRef: state.runRef, outcome: 'failed', error: res.detail ?? res.error ?? 'the agent could not be reached', receipts: [] };
+    return {
+      reply: { kind: 'refused', runRef: state.runRef, outcome: 'failed', error: res.detail ?? res.error ?? 'the agent could not be reached', receipts: [] },
+      resumable: false,
+    };
   }
-  return res.reply;
+  return { reply: res.reply, resumable: !!res.resumable };
 }
 
 const PAYMENT_TYPE = 'urn:ap:rar:treasury.payment.execute';

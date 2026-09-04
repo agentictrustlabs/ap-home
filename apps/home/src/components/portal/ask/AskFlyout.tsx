@@ -71,7 +71,12 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
     setErr(null);
     setBusy(label);
     try {
-      const reply = await ask(session, state);
+      const { reply, resumable } = await ask(session, state);
+      // Once the agent holds this run, later turns carry the runRef and the new answers only — the
+      // mandate stops living here between turns.
+      const carried: AskTurnState = resumable
+        ? { ...state, runRef: reply.runRef, resumable: true, presented: null, supplied: [] }
+        : { ...state, runRef: reply.runRef };
       // A `credential` field is ours to fill: the person is signed in, and what they create they custody.
       if (reply.kind === 'prompt' && reply.prompt.kind === 'data') {
         const fields = reply.prompt.fields;
@@ -79,7 +84,7 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
         const others = fields.filter((f) => f.type !== 'credential');
         if (credField) {
           const credential = await connectedCredential(via, agentAddress as Address, session.token);
-          const next: AskTurnState = { ...state, runRef: reply.runRef, supplied: [...state.supplied, { stepRef: reply.resumeToken, data: { [credField.name]: credential } }] };
+          const next: AskTurnState = { ...carried, supplied: [...carried.supplied, { stepRef: reply.resumeToken, data: { [credField.name]: credential } }] };
           if (others.length === 0) return turn(next, 'Working…');   // nothing left to ask a human
           setPending({ reply: { ...reply, prompt: { ...reply.prompt, fields: others } }, state: next });
           setBusy(null);
@@ -87,7 +92,7 @@ export function AskFlyout({ addressee, addresseeLabel, onClose }: { addressee: A
         }
       }
       setThread((t) => [...t, { role: 'agent', reply }]);
-      setPending(reply.kind === 'prompt' || reply.kind === 'authority_required' ? { reply, state: { ...state, runRef: reply.runRef } } : null);
+      setPending(reply.kind === 'prompt' || reply.kind === 'authority_required' ? { reply, state: carried } : null);
       // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.

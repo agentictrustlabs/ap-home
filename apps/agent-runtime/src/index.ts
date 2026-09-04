@@ -102,6 +102,7 @@ import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
 import { selectComposer } from './orchestration.js';
+import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1205,20 +1206,39 @@ app.post('/harness/ask', async (c) => {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
   } | null;
-  if (!body?.session || !body.message?.trim() || !body.addressee) return c.json({ ok: false, error: 'session, addressee and message required' }, 400);
+  if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
+    return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
+  }
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   const addressee = body.addressee.toLowerCase() as Address;
+
+  // ── spec 350 W3 — the durable run. A resume names the runRef; everything the person already said and
+  // granted comes from the checkpoint, so it need not live in the browser between turns. It is re-planned
+  // and re-verified from scratch regardless: the checkpoint carries inputs, never conclusions.
+  const runRef = body.runRef ?? `run-${crypto.randomUUID()}`;
+  let stored: HarnessRunCheckpointV1 | null = null;
+  if (body.runRef) {
+    stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+    // Only the asker may resume: the run carries their session's authority and their answers, and a run
+    // someone else can pick up is a run someone else can finish.
+    if (stored && stored.asker.toLowerCase() !== String(who.sa).toLowerCase()) {
+      return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
+    }
+    if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
+  }
+  const turn = mergeTurn(stored, { ...(body.message ? { message: body.message } : {}), presented: body.presented ?? null, ...(body.supplied ? { supplied: body.supplied } : {}) });
+  if ('error' in turn) return c.json({ ok: false, error: turn.error }, 409);
   // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
   // so authority granted for this ask covers this ask — retyping the same words in another realm is
   // another intent, and the mandate does not travel.
-  const intent = { goal: body.message.trim(), context: { addressee, asker: who.sa } };
+  const intent = { goal: turn.message, context: { addressee, asker: who.sa } };
   const audit = buildAuditSink(c.env);
   try {
     const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, harnessDeps(c.env, audit), {
-      intent, presented: body.presented ?? null, person: who.sa as Address,
-      ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
+      intent, presented: turn.presented, person: who.sa as Address, runRef,
+      ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
       // (ADR-0040 — public, on-chain-derivable facts only, and the indexer is the KB's only writer). A
       // question is answered from that evidence or not at all; the private vault stays behind its own
@@ -1229,7 +1249,27 @@ app.post('/harness/ask', async (c) => {
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, { intent, result, addressee, composer: selectComposer(c.env) });
-    return c.json({ ok: true, addressee, reply });
+    // Checkpoint what the person has given us when the run is still owed something; forget it the moment
+    // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
+    // caller to retry a refusal as though it were weather.
+    try {
+      if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
+        const now = Date.now();
+        await saveRun(c.env as never, {
+          runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
+          presented: turn.presented, supplied: turn.supplied,
+          ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } } : {}),
+          createdAt: stored?.createdAt ?? now, updatedAt: now,
+        });
+      } else {
+        await dropRun(c.env as never, addressee, runRef);
+      }
+    } catch (e) {
+      // A checkpoint that failed to save costs the person the tab, not the run's correctness — say so
+      // rather than failing a run that already happened.
+      console.warn('[harness/ask] checkpoint not saved:', e);
+    }
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required' });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

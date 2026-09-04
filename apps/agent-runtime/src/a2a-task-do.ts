@@ -825,6 +825,34 @@ export class A2aTaskDO {
     // Deliberately NOT an A2A skill on the public card — its authorization model is "the org's own
     // substrate observed a triggering post", not a caller delegation, so a public `message/send`
     // can never reach it (fail-closed by path: the JSON-RPC dispatcher below has no such method).
+    // ── spec 350 W3 — the harness run checkpoint. An ask that stopped to ask a person outlives the tab
+    // it was asked in. Serving-plane memory of an unfinished conversation (ADR-0055: wiping it costs a
+    // rebuild, never a bereavement — the receipts are the evidence, the mandate is re-mintable, and an
+    // agent an ask created is on chain the moment it exists). Internal-only: the run's own authority is
+    // re-verified on every resume, so this store decides nothing.
+    if (url.pathname.startsWith('/internal/harness-run/')) {
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const op = url.pathname.slice('/internal/harness-run/'.length);
+      const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string } } | null;
+      const key = (ref: string) => `harness:run:${ref}`;
+      if (op === 'save') {
+        const cp = body?.checkpoint;
+        if (!cp?.runRef) return Response.json({ ok: false, error: 'checkpoint.runRef required' }, { status: 400 });
+        await this.state.storage.put(key(cp.runRef), cp);
+        return Response.json({ ok: true });
+      }
+      if (op === 'load') {
+        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
+        return Response.json({ ok: true, checkpoint: (await this.state.storage.get(key(body.runRef))) ?? null });
+      }
+      if (op === 'drop') {
+        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
+        await this.state.storage.delete(key(body.runRef));
+        return Response.json({ ok: true });
+      }
+      return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });
+    }
+
     if (url.pathname === '/internal/discussion-respond') {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;
