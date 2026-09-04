@@ -118,6 +118,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const v = await verifyDelegation(env, grant);
   if (!v.ok) return json({ error: `grant proof failed: ${v.reason}` }, 401);
 
-  await env.AUTH_CODES.put(key(person, purpose), JSON.stringify({ grant, validUntil }));
+  // The row dies with the grant. A read already refuses an expired one, so an outliving row is not a
+  // security hole — but it is a signed credential kept past every use it could have, which is not a thing
+  // to store on purpose. KV's floor is 60s.
+  const ttl = Math.max(60, validUntil - Math.floor(Date.now() / 1000));
+  await env.AUTH_CODES.put(key(person, purpose), JSON.stringify({ grant, validUntil }), { expirationTtl: ttl });
   return json({ ok: true });
 };
