@@ -27,10 +27,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!isAddress(org) || !isAddress(agent) || !mad?.signature) return json({ error: 'org + agent + signed memberAccessDelegation required' }, 400);
   if ((mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
   if ((mad.delegate ?? '').toLowerCase() !== agent) return json({ error: 'memberAccessDelegation delegate must be the invited agent' }, 400);
-  if (!(await controlsOrg(env, request, org))) return json({ error: 'you must steward this organization to invite' }, 403);
+  // Each leg says which leg it was. This route answered a well-formed request with an EMPTY 500: any
+  // throw — the chain read behind the stewardship check, a vault that was never enabled — arrived as the
+  // same blank failure, and the caller could not tell "you may not" from "it broke" from "not set up yet".
+  // A store that cannot say what went wrong makes every invitation a guess.
+  let controls: boolean;
+  try {
+    controls = await controlsOrg(env, request, org);
+  } catch (e) {
+    return json({ error: 'could not verify that you steward this organization', detail: String(e instanceof Error ? e.message : e) }, 502);
+  }
+  if (!controls) return json({ error: 'you must steward this organization to invite' }, 403);
 
-  const vault = await orgVault(env, org);
+  let vault: Awaited<ReturnType<typeof orgVault>>;
+  try {
+    vault = await orgVault(env, org);
+  } catch (e) {
+    return json({ error: 'could not open the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
+  }
   if (!vault) return json({ error: 'org vault not enabled — a steward must enable channel/vault storage first' }, 409);
-  await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending' });
+  try {
+    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending' });
+  } catch (e) {
+    return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
+  }
   return json({ ok: true });
 };
