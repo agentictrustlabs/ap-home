@@ -25,7 +25,7 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { CHAIN, CHAIN_ID, CONTRACTS } from '../lib/chain';
 import { toWire, type DelegationWire } from '../lib/delegation';
-import { ensureCsrfToken, csrfHeaders } from '../csrf';
+import { ensureCsrfToken, csrfHeaders, invalidateCsrfCache } from '../csrf';
 import type { SignHash } from './resolution';
 import type { AskCredential } from '../components/portal/ask/credential';
 
@@ -163,12 +163,23 @@ export interface AskTurnState {
 }
 
 async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string }> {
-  await ensureCsrfToken();
-  const r = await fetch('/a2a/harness/ask', {
-    method: 'POST', credentials: 'include',
-    headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify(body),
-  });
+  const send = async () => {
+    await ensureCsrfToken();
+    return fetch('/a2a/harness/ask', {
+      method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeaders() },
+      body: JSON.stringify(body),
+    });
+  };
+  let r = await send();
+  // A REJECTED TOKEN IS RECOVERABLE, and it must be recovered here. A stale one — a cookie left by the
+  // apex host, a server-side rotation — made every ask fail with "csrf invalid" and stay failed, because
+  // nothing ever asked for a new one. This is a bounded retry of the SAME request after re-minting, not a
+  // second mechanism (ADR-0013): one more attempt, then the error stands.
+  if (r.status === 403) {
+    invalidateCsrfCache();
+    r = await send();
+  }
   return (await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))) as never;
 }
 

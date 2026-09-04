@@ -14,12 +14,28 @@
 const CSRF_COOKIE = 'agentic-csrf';
 let cached: string | null = null;
 
-function readCookie(name: string): string | null {
+/**
+ * EVERY cookie with this name, not the first.
+ *
+ * `agentic-csrf` is shared across `faithnet.me` and `www.faithnet.me` — cookies ignore the host prefix —
+ * and a host-scoped cookie can sit alongside a domain-scoped one under the SAME name. `document.cookie`
+ * then returns both, in an order nothing promises, and reading only the first pinned whichever came out
+ * on top: a token minted for the apex, sent from www, rejected as `csrf invalid` on every request forever.
+ * Re-minting did not help, because the mint wrote the OTHER cookie.
+ */
+function readCookies(name: string): string[] {
+  const out: string[] = [];
   for (const p of document.cookie.split(';')) {
     const [k, ...rest] = p.trim().split('=');
-    if (k === name) return rest.join('=');
+    if (k === name) out.push(rest.join('='));
   }
-  return null;
+  return out;
+}
+
+/** The cookie token minted for THIS origin, if any of them was. */
+function readCookie(name: string): string | null {
+  const all = readCookies(name).map((v) => { try { return decodeURIComponent(v); } catch { return v; } });
+  return all.find((v) => forThisOrigin(v)) ?? all[0] ?? null;
 }
 
 /** The origin a token was minted for (`base64url(JSON{origin,ts,…}).base64url(hmac)`), or null. */
@@ -47,8 +63,7 @@ export async function ensureCsrfToken(): Promise<string> {
   // SEC-012: if the cookie has changed (server-rotated) since we cached, drop
   // the cache and re-read. Module-cache is a hot-path optimization, not the
   // truth — the cookie is (when it was minted for THIS origin).
-  const fromCookie = readCookie(CSRF_COOKIE);
-  const cookieToken = fromCookie ? decodeURIComponent(fromCookie) : null;
+  const cookieToken = readCookie(CSRF_COOKIE);
   if (cached && cookieToken === cached) return cached;
   if (forThisOrigin(cookieToken)) {
     cached = cookieToken;
@@ -65,9 +80,10 @@ export function csrfHeaders(): Record<string, string> {
   // SEC-012: prefer the COOKIE value over the module cache when it is ours — if rotation
   // happened mid-session, the cookie has the new value and the cache is stale. A cookie
   // minted for another local origin is ignored in favour of our own cached token.
-  const fromCookie = readCookie(CSRF_COOKIE);
-  const cookieToken = fromCookie ? decodeURIComponent(fromCookie) : null;
-  const token = forThisOrigin(cookieToken) ? cookieToken : forThisOrigin(cached) ? cached : cookieToken ?? cached;
-  if (!token) throw new Error('csrfHeaders: call ensureCsrfToken() first.');
+  const cookieToken = readCookie(CSRF_COOKIE);
+  // A token stamped for ANOTHER origin is not a last resort — it is a request the server will reject with
+  // certainty. Sending it anyway turns a recoverable "mint me a new one" into a permanent `csrf invalid`.
+  const token = forThisOrigin(cookieToken) ? cookieToken : forThisOrigin(cached) ? cached : null;
+  if (!token) throw new Error('csrfHeaders: no token for this origin — call ensureCsrfToken() first.');
   return { 'X-CSRF-Token': token };
 }

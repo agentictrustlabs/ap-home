@@ -48,7 +48,7 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
-import { resolveParty, type PartyLookups } from './party-resolution.js';
+import { resolveParty, ownAgentsOfType, candidateHint, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
 import { preconditionRefusal } from './capability-preconditions.js';
@@ -864,7 +864,7 @@ const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'w
  * The counterpart args are deliberately absent: `payer`, `funder`, `parent`, `org` and `treasury` are very
  * often the asker, and asking there would be noise.
  */
-const NEVER_THE_ASKER = new Set(['recipient', 'payee', 'invitee']);
+export const NEVER_THE_ASKER = new Set(['recipient', 'payee', 'invitee']);
 
 /** What to call each of them when asking a person which one they meant. */
 const PARTY_WORD: Record<string, string> = {
@@ -927,9 +927,52 @@ async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
-  where?: { stepRef: string; toolId: string; capabilityId?: string; subject?: string; required?: string[] },
+  where?: { stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[] },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
+  // ── WHOSE AGENT ACTS ─────────────────────────────────────────────────────────────────────────────
+  // The acting party is the one whose authority the step spends, and it is the argument most likely to be
+  // silently wrong: it is rarely spoken aloud ("send alice 20 USDC" names neither the sender nor the
+  // payer), so it gets defaulted, and a default nobody checks becomes an authority request naming the
+  // wrong agent.
+  //
+  // Two failures this closes, both from one omission — nobody had ever set it:
+  //   · messaging declares `authorityArg: 'sender'` and no `sender` argument existed, so the delegator
+  //     fell through to the RESOURCE and Nathan was asked to authorize a message AS ALICE, its recipient.
+  //   · a payment took the realm the person was standing in — their person SA — as the payer, and died on
+  //     a balance check against an account that holds no money and never could.
+  if (where?.authorityArg && where.subject) {
+    const arg = where.authorityArg;
+    const current = String(out[arg] ?? '').trim();
+    // Unspoken ⇒ the person asking. Acting as yourself is the only reading of "send alice a message".
+    if (!current) out[arg] = where.subject.toLowerCase();
+    const types = partyTypesFor(where.capabilityId ?? where.toolId, arg);
+    const isAsker = String(out[arg] ?? '').toLowerCase() === where.subject.toLowerCase();
+    // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
+    // one of THEIR agents that is — the typed suffix already says which. Never a widening: their tree only.
+    if (types?.length && isAsker && !types.includes('me')) {
+      for (const type of types) {
+        const mine = await ownAgentsOfType(where.subject, type, lookups);
+        if (mine.length === 1) {
+          const c = mine[0]!;
+          lookups.onResolved?.({ arg, raw: PARTY_WORD[arg] ?? arg, agent: c.agent, label: c.label, hint: candidateHint(c) });
+          out[arg] = c.agent;
+          break;
+        }
+        if (mine.length > 1) {
+          // Two of yours could pay. Which one is yours to say, not ours to rank.
+          throw new InputRequired({
+            kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+            prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${PARTY_WORD[arg] ?? arg}?`,
+            fields: [{
+              name: arg, label: PARTY_WORD[arg] ?? arg, type: 'choice', required: true,
+              choices: mine.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+            }],
+          });
+        }
+      }
+    }
+  }
   for (const key of PARTY_ARGS) {
     const raw = String(out[key] ?? '').trim();
     if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
@@ -1049,7 +1092,14 @@ export async function askReplyFor(env: HarnessEnv, input: {
     // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the
     // parent a team is chartered under), else the agent being asked. Never the person by default — a
     // team's authority is its workspace's — and never the token a payment moves.
-    const named = ((required.capability.authority ?? required.capability.resource ?? input.addressee) as string).trim();
+    // A capability that DECLARES whose authority it spends does not get to fall through to the thing it
+    // acts on. That fallthrough is how "send alice a message" became a request to authorize it AS ALICE:
+    // messaging declares `authorityArg: 'sender'`, nothing set a sender, and the resource — the recipient
+    // — was next in line. Acting-party resolution now always fills it; this makes the old route
+    // unreachable rather than merely unused.
+    const declaresAuthority = !!HARNESS_ACTION_TOOLS.find((t) => (t.capability?.id ?? t.id) === r.required!.capability.id)?.capability?.authorityArg;
+    const fallback = declaresAuthority ? input.addressee : (required.capability.resource ?? input.addressee);
+    const named = ((required.capability.authority ?? fallback) as string).trim();
     const delegator = (/^0x[0-9a-fA-F]{40}$/.test(named)
       ? named
       : ((input.resolveName ? await input.resolveName(named.toLowerCase()) : null) ?? input.addressee)).toLowerCase() as Address;
@@ -1330,8 +1380,17 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, onResolved: (r) => resolved.set(`${r.arg}:${r.agent}`, r) }, {
+    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, onResolved: (r) => {
+      // The SAME party can be reported twice — once resolved from words or from the asker's own tree, and
+      // once again as the plain address it now is. Keep whichever knows its name: overwriting a labelled
+      // record with a bare address is how "nathan.treasury" became "0x2c47…" on the card a person reads
+      // before signing.
+      const key = `${r.arg}:${r.agent}`;
+      if (r.label || !resolved.has(key)) resolved.set(key, r);
+    } }, {
       stepRef: 'pending', toolId, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}),
+      // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
+      ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],

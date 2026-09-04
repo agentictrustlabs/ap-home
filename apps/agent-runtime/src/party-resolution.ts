@@ -25,6 +25,7 @@
 import { InputRequired, type InputFieldV1 } from '@agenticprimitives/orchestration';
 import { resolveEntity, type EntityCandidate, type EntityProvider } from '@agenticprimitives/context';
 import type { Address } from 'viem';
+import { relationshipRows } from './relationship-rows.js';
 import { relationshipsProvider, rosterProvider } from './private-context.js';
 
 /** The roots a bare label might live under, most-likely first. A person is the common case for "alice". */
@@ -102,6 +103,34 @@ export async function partyCandidates(raw: string, lookups: PartyLookups, subjec
   const outcome = await resolveEntity(partyProviders(lookups), { term: raw, tiers: ['private'], ...(subject ? { subject } : {}), limit: 8 });
   if (outcome.outcome === 'certain') return [outcome.candidate];
   return outcome.outcome === 'ambiguous' ? outcome.candidates : [];
+}
+
+/**
+ * THE ASKER'S OWN AGENT OF A GIVEN TYPE — "pay from my treasury", without them having to say it.
+ *
+ * A person standing in their own realm says "send alice 20 USDC" and means the thing of theirs that holds
+ * money. What arrives is their PERSON address, because that is the realm they are standing in, and a
+ * person SA holds no USDC — so the ask died on a balance check against an account that was never meant to
+ * pay. The typed suffix already says which of their agents is the payer; this is that lookup, over their
+ * own tree only.
+ *
+ * Their own tier, and no widening: this answers "which of YOUR agents", never "which agent anywhere".
+ */
+export async function ownAgentsOfType(
+  subject: string,
+  type: string,
+  lookups: PartyLookups,
+): Promise<EntityCandidate[]> {
+  if (!lookups.readSubjectRecord) return [];
+  const doc = await lookups.readSubjectRecord(subject, 'relationships.data');
+  return relationshipRows(doc)
+    .filter((r) => r.name.toLowerCase().split('.').pop() === type)
+    .map((r) => ({
+      agent: r.agent,
+      label: r.name,
+      name: r.name,
+      provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'own-agent' },
+    }));
 }
 
 /** Where a candidate came from, said the way a person would say it. */
