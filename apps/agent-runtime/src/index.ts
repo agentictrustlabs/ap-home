@@ -1957,6 +1957,13 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
       return client.resolveName(name);
     },
+    // Public directory search — the second place a bare label like "alice" might answer from. Public,
+    // on-chain-derived facts only (ADR-0040); the asker's private relationships are not consulted and
+    // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
+    findAgents: async (terms: string) => {
+      const out = await askDiscoveryInvoker(env as never)('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
+      return ((out as { agents?: unknown[] } | null)?.agents ?? []) as Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>;
+    },
     executeAsServiceSa: async (sender, callData) => {
       // The service SA executes the redemption. Its custodian is the interactions-session key — a KMS
       // account; the userOp is sponsored by the paymaster and relayed like every other server-side op.

@@ -48,6 +48,7 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
+import { resolveParty, type PartyLookups } from './party-resolution.js';
 
 
 export interface HarnessEnv {
@@ -353,6 +354,8 @@ export interface HarnessDeps {
    *  where it needs an address: asking a planner to chain a lookup into a later step's args is a
    *  coordination problem we do not need to have, and it answered with a paragraph instead of acting. */
   resolveName?: (name: string) => Promise<string | null>;
+  /** Public directory search, for a bare label that is nobody's exact name ("alice"). */
+  findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   now?: () => number;
 }
 
@@ -688,6 +691,12 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
  *  an address by the time a caveat encodes it. */
 const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder'] as const;
 
+/** What to call each of them when asking a person which one they meant. */
+const PARTY_WORD: Record<string, string> = {
+  payer: 'paying from', payee: 'being paid', treasury: 'the treasury', invitee: 'being invited',
+  parent: 'the parent', org: 'the organization', workspace: 'the workspace', funder: 'funding it',
+};
+
 /**
  * The step's args as the ENFORCERS will need them.
  *
@@ -700,13 +709,21 @@ const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'w
 async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
-  resolveName?: (name: string) => Promise<string | null>,
+  lookups: PartyLookups,
+  where?: { stepRef: string; toolId: string },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
   for (const key of PARTY_ARGS) {
     const raw = String(out[key] ?? '').trim();
     if (!raw || /^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
-    const resolved = resolveName ? await resolveName(raw.toLowerCase()) : null;
+    if (where) {
+      // Inside a run: resolve properly, and ASK when the words name several agents or none.
+      out[key] = await resolveParty(raw, lookups, { stepRef: where.stepRef, toolId: where.toolId, argName: key, what: PARTY_WORD[key] ?? key });
+      continue;
+    }
+    // Outside a run (building a requirement to display): resolve what is certain, leave the rest as
+    // written — there is nobody to ask here, and a silent guess is the thing to avoid.
+    const resolved = raw.includes('.') && lookups.resolveName ? await lookups.resolveName(raw.toLowerCase()).catch(() => null) : null;
     if (resolved) out[key] = resolved.toLowerCase();
   }
   // THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT.
@@ -741,7 +758,7 @@ export async function askReplyFor(env: HarnessEnv, input: {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {
     // Already normalised by the loop (`normalizeArgs`); re-run defensively for a caller that did not.
-    const args = await resolveStepArgs(r.required.args, env, input.resolveName);
+    const args = await resolveStepArgs(r.required.args, env, { ...(input.resolveName ? { resolveName: input.resolveName } : {}) });
     // The resource was read out of an arg BEFORE the args were normalised, so it has to be re-read from
     // the resolved ones — not merely repaired when it looks wrong. It looked fine: the planner's recalled
     // token address is a perfectly well-formed address for another chain, and `locations` would have
@@ -833,7 +850,9 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.
-    normalizeArgs: ({ args }) => resolveStepArgs(args, env, deps.resolveName),
+    // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
+    // only the loop knows which step it was normalising for.
+    normalizeArgs: ({ toolId, args }) => resolveStepArgs(args, env, deps, { stepRef: 'pending', toolId }),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied), receiptSink },
     presented,
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.

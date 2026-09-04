@@ -16,6 +16,7 @@ export function BusyButton({
   title,
   'aria-label': ariaLabel,
   'aria-pressed': ariaPressed,
+  'data-testid': testId,
 }: {
   busy: boolean;
   /** Label while busy (defaults to children). Name the work: "Sending…", "Signing…". */
@@ -28,10 +29,15 @@ export function BusyButton({
   title?: string;
   'aria-label'?: string;
   'aria-pressed'?: boolean;
+  /** Forwarded so a test can address the button it is going to press. It was NOT forwarded, so every
+   *  `data-testid` written on a BusyButton silently addressed nothing — a Playwright click on the Ask's
+   *  "Grant & continue" waited five minutes for an element that could never exist. */
+  'data-testid'?: string;
 }) {
   return (
     <button
       type="button"
+      {...(testId ? { 'data-testid': testId } : {})}
       className={className}
       style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', ...style }}
       disabled={busy || disabled}
