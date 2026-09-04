@@ -891,7 +891,13 @@ async function resolveStepArgs(
   const out: Record<string, unknown> = { ...args };
   for (const key of PARTY_ARGS) {
     const raw = String(out[key] ?? '').trim();
-    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) continue;
+    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
+      // Nothing to resolve — and still worth reporting. An address here is usually the answer a person
+      // just PICKED from a list of four Nathans; showing them a bare 0x… on the next card asks them to
+      // re-verify a choice they made a moment ago against a string that tells them nothing.
+      lookups.onResolved?.({ arg: key, raw, agent: raw.toLowerCase() });
+      continue;
+    }
     // A party the TOOL requires and the sentence did not name is a QUESTION. Skipping it because the field
     // was empty let "send a direct message to zzz-nobody-here" sail past resolution into an authority
     // request for a recipient that could not exist — failing at the last possible moment, after the person
