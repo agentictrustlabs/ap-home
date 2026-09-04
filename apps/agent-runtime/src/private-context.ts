@@ -11,10 +11,14 @@
 // the asker's OWN InteractionsDO under their own interactions grant, in-Worker: no client-asserted list, no
 // second copy, and nothing about who they know leaves their tier.
 //
-// WHAT THIS DOES NOT REACH YET, said plainly: the ROSTERS of organizations they belong to. Alice known to
-// Nathan only as a fellow member of a team he is in, with no link of her own in his tree, is not found
-// here — the person is asked instead of guessed at. Reading a roster requires standing in that org, which
-// is a second private read against a different subject (spec 353 S3, Ask-2).
+// TWO PRIVATE READS, TWO SUBJECTS. The asker's own links are the first. The second is the ROSTER of an
+// organization they belong to — because most people you can name are known to you through something you
+// are both in, not through a link you keep to them personally.
+//
+// The standing gate falls out of the data rather than being asserted: a roster is read ONLY for an
+// organization that appears in the asker's own private tree, and that link is a private vault credential
+// they hold (ADR-0025) — it IS the evidence that they belong. No public enumeration of who is in what, no
+// app-supplied membership claim (spec 353 §2), and nothing about the roster leaves the ask that used it.
 import type { EntityCandidate, EntityProvider, EntityQuery } from '@agenticprimitives/context';
 
 /** One row of the asker's private tree, as `relationships.data` stores it. */
@@ -87,6 +91,73 @@ export function relationshipsProvider(deps: PrivateTierDeps): EntityProvider {
  * search of the public tier: the person named this agent themselves. A BARE label is different and does
  * not come here; it belongs to the tiers that know who this person knows.
  */
+/** One row of an organization's `directory.data` — a member who published themselves to that community. */
+interface DirectoryListing {
+  smartAgent?: string;
+  agent?: string;
+  name?: string;
+  displayName?: string;
+  title?: string;
+  localName?: string;
+}
+
+/** Agent-ish kinds whose members are worth searching. A treasury has no roster; a church does. */
+const ROSTERED_KINDS = new Set(['org', 'organization', 'team', 'workspace', 'circle', 'church']);
+
+/**
+ * The people the asker can reach THROUGH something they are both in.
+ *
+ * Reads the asker's tree for the organizations they belong to, then each of those organizations' member
+ * directories. Bounded (a handful of organizations, a handful of matches) because this runs inside one
+ * conversational turn, and a resolver that takes ten seconds is a resolver people route around.
+ *
+ * Every candidate says WHERE it was found ("Alice Okoro — in Northern Colorado Field"), because when two
+ * Alices come back the shared organization is exactly what tells the person which one they meant.
+ */
+export function rosterProvider(deps: PrivateTierDeps, opts: { maxOrgs?: number } = {}): EntityProvider {
+  const maxOrgs = opts.maxOrgs ?? 8;
+  return {
+    source: 'roster',
+    tier: 'private',
+    async candidates(query: EntityQuery): Promise<EntityCandidate[]> {
+      if (!query.subject) return [];
+      const tree = await deps.readSubjectRecord(query.subject, 'relationships.data');
+      const rows = ((tree as { rows?: RelatedAgentRow[]; orgs?: RelatedAgentRow[] } | null)?.rows
+        ?? (tree as { orgs?: RelatedAgentRow[] } | null)?.orgs
+        ?? (Array.isArray(tree) ? (tree as RelatedAgentRow[]) : [])) as RelatedAgentRow[];
+      const orgs = rows
+        .filter((r) => ROSTERED_KINDS.has(String(r.kind ?? r.purpose ?? '').toLowerCase()))
+        .map((r) => ({ agent: String(r.orgAgent ?? r.agent ?? '').toLowerCase(), name: String(r.orgName ?? r.name ?? '') }))
+        .filter((o) => /^0x[0-9a-f]{40}$/.test(o.agent))
+        .slice(0, maxOrgs);
+
+      const found = await Promise.all(orgs.map(async (org) => {
+        // One organization's failure is not the search's: a directory that is not enabled yet simply has
+        // nobody in it as far as this ask is concerned.
+        const doc = await deps.readSubjectRecord(org.agent, 'directory.data').catch(() => null);
+        const listings = ((doc as { listings?: DirectoryListing[] } | null)?.listings ?? []) as DirectoryListing[];
+        const out: EntityCandidate[] = [];
+        for (const l of listings) {
+          const agent = String(l.smartAgent ?? l.agent ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(agent) || agent === lc(query.subject ?? '')) continue; // never the asker
+          const name = String(l.name ?? '');
+          const display = String(l.displayName ?? l.title ?? l.localName ?? '');
+          const match = rowMatches(query.term, name, display);
+          if (!match) continue;
+          out.push({
+            agent,
+            label: `${display || name || agent}${org.name ? ` — in ${org.name}` : ''}`,
+            ...(name.includes('.') ? { name } : {}),
+            provenance: { tier: 'private', source: 'roster', subject: org.agent, match },
+          });
+        }
+        return out;
+      }));
+      return found.flat();
+    },
+  };
+}
+
 export function exactNameProvider(resolveName: (name: string) => Promise<string | null>): EntityProvider {
   return {
     source: 'naming',

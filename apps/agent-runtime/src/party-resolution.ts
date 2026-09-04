@@ -25,7 +25,7 @@
 import { InputRequired, type InputFieldV1 } from '@agenticprimitives/orchestration';
 import { resolveEntity, type EntityCandidate, type EntityProvider } from '@agenticprimitives/context';
 import type { Address } from 'viem';
-import { relationshipsProvider } from './private-context.js';
+import { relationshipsProvider, rosterProvider } from './private-context.js';
 
 /** The roots a bare label might live under, most-likely first. A person is the common case for "alice". */
 export const PARTY_ROOTS = ['me', 'org', 'team', 'treasury', 'workspace', 'svc', 'circle', 'church', 'registry'] as const;
@@ -72,7 +72,12 @@ function typedRootProvider(resolveName: (name: string) => Promise<string | null>
 /** The providers a party lookup may consult, in order — private ones only. */
 export function partyProviders(lookups: PartyLookups): EntityProvider[] {
   const providers: EntityProvider[] = [];
-  if (lookups.readSubjectRecord) providers.push(relationshipsProvider({ readSubjectRecord: lookups.readSubjectRecord }));
+  if (lookups.readSubjectRecord) {
+    const tier = { readSubjectRecord: lookups.readSubjectRecord };
+    // Own links first: an agent the person keeps a link to is more certainly "theirs" than one they merely
+    // share a room with, and first-wins dedupe keeps that label when both find the same agent.
+    providers.push(relationshipsProvider(tier), rosterProvider(tier));
+  }
   if (lookups.resolveName) providers.push(typedRootProvider(lookups.resolveName));
   return providers;
 }
@@ -107,7 +112,12 @@ export async function resolveParty(
   if (outcome.outcome === 'certain') return outcome.candidate.agent.toLowerCase() as Address;
   if (outcome.outcome === 'unknown') {
     // Say where we looked. "I could not find them" without that leaves a person correcting the wrong thing.
-    const where_ = outcome.looked.map((l) => (l.source === 'relationships' ? 'the agents you are linked to' : 'the naming service')).join(' or ');
+    const said: Record<string, string> = {
+    relationships: 'the agents you are linked to',
+    roster: 'the members of your organizations',
+    naming: 'the naming service',
+  };
+  const where_ = [...new Set(outcome.looked.map((l) => said[l.source] ?? l.source))].join(', ');
     ask(
       `I could not find “${value}”. Which agent do you mean?`,
       {

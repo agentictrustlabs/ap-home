@@ -70,8 +70,8 @@ describe('resolving who a person meant', () => {
 
   it('consults ONLY private providers — a public directory hit is not evidence this person knows them', () => {
     const providers = partyProviders(lookups({}, []));
-    expect(providers.map((p) => p.tier)).toEqual(['private', 'private']);
-    expect(providers.map((p) => p.source)).toEqual(['relationships', 'naming']);
+    expect(providers.every((p) => p.tier === 'private')).toBe(true);
+    expect(providers.map((p) => p.source)).toEqual(['relationships', 'roster', 'naming']);
   });
 
   it('an empty reference is a question, never a zero address', async () => {
@@ -84,5 +84,64 @@ describe('resolving who a person meant', () => {
     const found = await partyCandidates('alice', l, ME);
     expect(found.map((c) => c.agent).sort()).toEqual([ALICE_ME, ALICE_ORG].sort());
     for (const c of found) expect(c.provenance.tier).toBe('private');
+  });
+});
+
+describe('reach through what you are both in (spec 353 S3, second half)', () => {
+  const ORG = '0xbbbb000000000000000000000000000000000001';
+  const ALICE = '0xaaaa000000000000000000000000000000000009';
+  /** The asker's tree holds the org; the ORG's directory holds its members. Two subjects, two reads. */
+  const shared = (listings: Array<Record<string, unknown>>, kind = 'org') => ({
+    resolveName: vi.fn(async () => null),
+    readSubjectRecord: vi.fn(async (subject: string, record: string) => {
+      if (subject === ME && record === 'relationships.data') return { rows: [{ orgAgent: ORG, orgName: 'Northern Colorado Field', kind }] };
+      if (subject === ORG && record === 'directory.data') return { listings };
+      return null;
+    }),
+  });
+
+  it('finds someone through an organization they are BOTH in, and says where', async () => {
+    const l = shared([{ smartAgent: ALICE, name: 'alice.me', displayName: 'Alice Okoro' }]);
+    const r = await caught(resolveParty('alice', l, where));
+    expect(r).toEqual({ ok: true, v: ALICE });
+    const found = await partyCandidates('alice', l, ME);
+    expect(found[0]!.label).toBe('Alice Okoro — in Northern Colorado Field');
+    expect(found[0]!.provenance).toMatchObject({ tier: 'private', source: 'roster', subject: ORG });
+  });
+
+  it('reads a roster ONLY for an organization in the asker\'s own tree — the link IS the standing', async () => {
+    const l = shared([{ smartAgent: ALICE, name: 'alice.me' }]);
+    await caught(resolveParty('alice', l, where));
+    const subjects = l.readSubjectRecord.mock.calls.map((c) => c[0]);
+    expect(new Set(subjects)).toEqual(new Set([ME, ORG])); // never an org they are not in
+  });
+
+  it('never returns the asker themselves from a roster', async () => {
+    const l = shared([{ smartAgent: ME, name: 'alice.me', displayName: 'Alice Okoro' }]);
+    expect((await caught(resolveParty('alice', l, where))).ok).toBe(false);
+  });
+
+  it('an organization with no directory yet is simply empty — one failure is not the search\'s', async () => {
+    const l = {
+      resolveName: vi.fn(async () => null),
+      readSubjectRecord: vi.fn(async (subject: string, record: string) => {
+        if (subject === ME && record === 'relationships.data') return { rows: [{ orgAgent: ORG, orgName: 'NCF', kind: 'org' }] };
+        throw new Error('storage not enabled');
+      }),
+    };
+    const r = await caught(resolveParty('alice', l, where));
+    expect(r.prompt).toMatchObject({ prompt: expect.stringContaining('could not find') });
+  });
+
+  it('a treasury has no roster to read', async () => {
+    const l = shared([{ smartAgent: ALICE, name: 'alice.me' }], 'person-treasury');
+    await caught(resolveParty('alice', l, where));
+    expect(l.readSubjectRecord.mock.calls.map((c) => c[0])).not.toContain(ORG);
+  });
+
+  it('says it looked in the members of your organizations when nothing is found', async () => {
+    const l = shared([]);
+    const r = await caught(resolveParty('nobody', l, where));
+    expect((r.prompt as { fields: Array<{ hint?: string }> }).fields[0]!.hint).toContain('members of your organizations');
   });
 });

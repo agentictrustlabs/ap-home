@@ -767,7 +767,11 @@ const ASK_PLANNER_SYSTEM =
   + 'that plainly rather than doing something adjacent.\n'
   + '• A QUESTION ("which teams…", "who is…", "what kinds…") is what the directory tools are for.\n\n'
   + 'Missing details are not a reason to fall back to a lookup: the capability will ask the person for '
-  + 'what it needs. Choosing the tool that ACTS is what lets it.';
+  + 'what it needs. Choosing the tool that ACTS is what lets it.\n\n'
+  + 'NEVER use an address from the context as a recipient, payee or invitee. The context tells you who is '
+  + 'ASKING and which agent they are addressing — not who they are talking about. Pass the words the '
+  + 'person used ("alice", "alice.me") and let the capability resolve them; if the ask names nobody, pass '
+  + 'nothing and it will ask.';
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
  *  is what the verifier will judge. */
@@ -795,6 +799,19 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
  *  an address by the time a caveat encodes it. */
 const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder', 'recipient'] as const;
+
+/**
+ * Parties that are never the asker.
+ *
+ * A planner given the asker's address in the intent context will reach for it when it cannot find who was
+ * named — "send a direct message to zzz-nobody-here" came back addressed to Nathan, and so did "send a
+ * message to alice", because an address it could see beat a name it had to resolve. Paying, inviting or
+ * messaging YOURSELF is not a plausible reading of any of those sentences, so it is a question.
+ *
+ * The counterpart args are deliberately absent: `payer`, `funder`, `parent`, `org` and `treasury` are very
+ * often the asker, and asking there would be noise.
+ */
+const NEVER_THE_ASKER = new Set(['recipient', 'payee', 'invitee']);
 
 /** What to call each of them when asking a person which one they meant. */
 const PARTY_WORD: Record<string, string> = {
@@ -829,6 +846,15 @@ async function resolveStepArgs(
     if (!raw && !(where && (where.required ?? []).includes(key))) continue;
     if (where) {
       // Inside a run: resolve properly, and ASK when the words name several agents or none.
+      // A party that arrived as the asker's own address was not resolved from the sentence — it was
+      // borrowed from the context. Ask before that becomes an authority request naming the wrong person.
+      if (NEVER_THE_ASKER.has(key) && where.subject && raw.toLowerCase() === where.subject.toLowerCase()) {
+        throw new InputRequired({
+          kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+          prompt: `That would be you. Who is ${PARTY_WORD[key] ?? key}?`,
+          fields: [{ name: key, label: PARTY_WORD[key] ?? key, type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
+        });
+      }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: PARTY_WORD[key] ?? key,
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
