@@ -104,7 +104,7 @@ export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
   risk: 'low',
 };
 
-/** A grant that has not expired and targets the type being looked for. */
+/** A grant of the right type that has not expired. SHAPE ONLY — see `verifiedGrants` for the rest. */
 export function usableGrants(held: unknown, type: string, now = Date.now()): HeldResolutionGrantV1[] {
   const rows = Array.isArray((held as { grants?: unknown[] } | null)?.grants)
     ? ((held as { grants: unknown[] }).grants as HeldResolutionGrantV1[])
@@ -115,4 +115,51 @@ export function usableGrants(held: unknown, type: string, now = Date.now()): Hel
     // An expired grant is not a weaker grant, it is not a grant. The owner set the window.
     return !g.expiresAt || Date.parse(g.expiresAt) > now;
   });
+}
+
+/**
+ * THE GRANTS THIS PERSON CAN ACTUALLY USE — checked, not merely held.
+ *
+ * The record lives in the HOLDER'S OWN VAULT, which the holder can write. So the record is not the
+ * evidence: the signed grant inside it is. Without this check, "I hold a grant from Alice" was a
+ * sentence anyone could write about themselves, and the privacy of an unlisted agent rested entirely on
+ * its address not being in any public place — true, and not the same as being enforced.
+ *
+ * Three things are checked and each rules out a different forgery:
+ *   · the ISSUER signed this exact grant (ERC-1271, re-derived from the canonical body) — so a
+ *     self-written record naming someone else's treasury is refused;
+ *   · the grant names THIS asker as its subject — it is recipient-bound (spec 338 §4), so one person's
+ *     grant passed to another does not work;
+ *   · the target it permits is the target being reached — so a valid grant cannot be re-pointed.
+ *
+ * What is still NOT checked here: revocation. The status lives in the issuer's vault (`statusRef`) and
+ * reading it from this side is the next step — until then a revoked grant keeps working until it expires,
+ * which the caller should say plainly rather than imply otherwise.
+ */
+export async function verifiedGrants(
+  held: unknown,
+  type: string,
+  ctx: {
+    asker: string;
+    chainId: number;
+    /** ERC-1271 / ECDSA signature check, as the mandate path does it. */
+    verifySignature: (input: { signer: string; digest: string; signature: string }) => Promise<boolean>;
+    /** Canonical bytes of the grant as signed. */
+    digestOf: (grant: unknown) => string;
+    now?: number;
+  },
+): Promise<HeldResolutionGrantV1[]> {
+  const caip = (a: string) => `eip155:${ctx.chainId}:${a.toLowerCase()}`;
+  const out: HeldResolutionGrantV1[] = [];
+  for (const held1 of usableGrants(held, type, ctx.now)) {
+    const g = held1.grant as { issuer?: string; subject?: string; targetAgent?: string; proof?: { signature?: string } } | undefined;
+    if (!g?.proof?.signature) continue;
+    if (String(g.subject ?? '').toLowerCase() !== caip(ctx.asker)) continue;
+    if (String(g.targetAgent ?? '').toLowerCase() !== caip(held1.targetAgent)) continue;
+    const issuer = String(g.issuer ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0];
+    if (!issuer || issuer.toLowerCase() !== held1.owner.toLowerCase()) continue;
+    const ok = await ctx.verifySignature({ signer: issuer, digest: ctx.digestOf(g), signature: g.proof.signature }).catch(() => false);
+    if (ok) out.push(held1);
+  }
+  return out;
 }

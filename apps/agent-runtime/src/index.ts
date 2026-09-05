@@ -109,6 +109,7 @@ import { chainStewardshipCheck } from './standing.js';
 import { charteredAgentsReader } from './chartered-agents.js';
 import { relationshipRows } from './relationship-rows.js';
 import { grantBody } from '@agenticprimitives/agent-resolution';
+import { verifiedGrants } from './resolution-invitation.js';
 import { RELATIONSHIP_TYPE } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -2219,6 +2220,24 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // actionable state; "the read failed" is a transient one; and neither is "there is nothing here". A
     // caller that can only see null has to guess which, and guessing produced "the roster could not be
     // read just now" for an organization whose roster simply does not live in its vault yet.
+    // A HELD GRANT IS CHECKED BEFORE IT IS USED. The record sits in the asker's own vault, which the
+    // asker can write, so what counts is the ISSUER's signature inside it — verified on chain here, the
+    // same way a mandate's is. Without this, "I hold a grant from Alice" was a sentence anyone could
+    // write about themselves.
+    verifyGrant: async (held: unknown, type: string, asker: string) => {
+      const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+      if (!validator) return [];
+      const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+      return verifiedGrants(held, type, {
+        asker, chainId: Number(env.CHAIN_ID),
+        digestOf: (grant) => keccak256(toBytes(JSON.stringify(grantBody(grant as never)))),
+        verifySignature: async ({ signer, digest, signature }) =>
+          (await pub.readContract({
+            address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig',
+            args: [signer as Address, digest as Hex, signature as Hex],
+          }).catch(() => false)) === true,
+      });
+    },
     // A request for a way to reach an unlisted agent, written into the OWNER's own vault so their Home
     // can show it as a decision. It confers nothing — the answer is theirs to give (spec 338 §7).
     appendSubjectRecord: async (subject: string, recordType: string, entry: unknown) => {

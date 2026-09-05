@@ -27,7 +27,7 @@ import { resolveEntity, type EntityCandidate, type EntityProvider } from '@agent
 import type { Address } from 'viem';
 import { VALUE_ARGS as ONTOLOGY_VALUE_ARGS } from '@agenticprimitives/ontology';
 import { relationshipRows } from './relationship-rows.js';
-import { RESOLUTION_GRANTS_RECORD, usableGrants } from './resolution-invitation.js';
+import { RESOLUTION_GRANTS_RECORD } from './resolution-invitation.js';
 import { relationshipsProvider, rosterProvider } from './private-context.js';
 
 /** The roots a bare label might live under, most-likely first. A person is the common case for "alice". */
@@ -45,6 +45,9 @@ export interface PartyLookups {
   /** The agents chartered under `owner` of a given type, read from the on-chain `ap:charteredUnder`
    *  edges (spec 355 W2). PUBLIC: this is the half that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
+  /** The held grants this asker can actually use — signature checked against the issuer, bound to them,
+   *  and pointed at the target they name (spec 338 §4). Absent ⇒ held grants are not used. */
+  verifyGrant?: (held: unknown, type: string, asker: string) => Promise<Array<{ targetAgent: string; owner: string; ownerName?: string; label?: string }>>;
 }
 
 /** What one party's words became. `label` is absent when the person gave an address outright — there was
@@ -206,7 +209,13 @@ export async function ownedAgentsOfType(
   // follows still needs the asker's own mandate, judged by the verifier like any other.
   if (lookups.readSubjectRecord && asker) {
     const held = await lookups.readSubjectRecord(asker, RESOLUTION_GRANTS_RECORD).catch(() => null);
-    for (const g of usableGrants(held, type)) {
+    // CHECKED, not merely held: the record is in the asker's own vault, so the record is not the
+    // evidence — the issuer's signature inside it is. Without a verifier configured, a held grant is not
+    // trusted at all rather than trusted blindly.
+    const grants = lookups.verifyGrant
+      ? await lookups.verifyGrant(held, type, asker).catch(() => [])
+      : [];
+    for (const g of grants) {
       if (g.owner.toLowerCase() !== low || seen.has(g.targetAgent.toLowerCase())) continue;
       seen.add(g.targetAgent.toLowerCase());
       out.push({

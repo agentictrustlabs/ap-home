@@ -432,6 +432,8 @@ export interface HarnessDeps {
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
+  /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
+  verifyGrant?: (held: unknown, type: string, asker: string) => Promise<Array<{ targetAgent: string; owner: string; ownerName?: string; label?: string }>>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
