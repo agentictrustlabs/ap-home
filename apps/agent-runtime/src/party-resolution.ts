@@ -41,6 +41,9 @@ export interface PartyLookups {
    *  resolver is the only place that knows both halves — "nathan" and the address it became — and by the
    *  time an argument reaches a mandate the words are gone. Display only; it decides nothing. */
   onResolved?: (r: ResolvedParty) => void;
+  /** The agents chartered under `owner` of a given type, read from the on-chain `ap:charteredUnder`
+   *  edges (spec 355 W2). PUBLIC: this is the half that answers for someone else's agents. */
+  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
 }
 
 /** What one party's words became. `label` is absent when the person gave an address outright — there was
@@ -161,17 +164,38 @@ export async function ownedAgentsOfType(
   asker?: string,
 ): Promise<EntityCandidate[]> {
   const subject = asker ?? owner;
-  if (!lookups.readSubjectRecord) return [];
-  const doc = await lookups.readSubjectRecord(subject, 'relationships.data').catch(() => null);
   const low = owner.toLowerCase();
-  return relationshipRows(doc)
-    .filter((r) => r.parent?.toLowerCase() === low && r.name.toLowerCase().split('.').pop() === type)
-    .map((r) => ({
-      agent: r.agent,
-      label: r.name,
-      name: r.name,
-      provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'owned-by' },
-    }));
+  const seen = new Set<string>();
+  const out: EntityCandidate[] = [];
+
+  // ON CHAIN FIRST (spec 355 W2): `ap:charteredUnder` edges are PUBLIC and chain-reproducible, so this is
+  // the half that works for a stranger — Nathan can be routed to Alice's treasury without reading
+  // anything of hers. Not a fallback chain: both sources answer the same question ("what does this agent
+  // hold of this kind"), and the CALLER decides what to do with one answer or several.
+  for (const c of await (lookups.charteredAgents?.(low, type) ?? Promise.resolve([])).catch(() => [])) {
+    if (seen.has(c.agent)) continue;
+    seen.add(c.agent);
+    out.push({
+      agent: c.agent, label: c.name ?? c.agent, ...(c.name ? { name: c.name } : {}),
+      provenance: { tier: 'public' as const, source: 'chartered-under', subject: low, match: 'owned-by' },
+    });
+  }
+
+  // Then the asker's own tier, which knows agents whose edge has not been recorded yet — every agent
+  // created before W2, and any whose owner chose not to publish the link.
+  if (lookups.readSubjectRecord) {
+    const doc = await lookups.readSubjectRecord(subject, 'relationships.data').catch(() => null);
+    for (const r of relationshipRows(doc)) {
+      if (r.parent?.toLowerCase() !== low || r.name.toLowerCase().split('.').pop() !== type) continue;
+      if (seen.has(r.agent)) continue;
+      seen.add(r.agent);
+      out.push({
+        agent: r.agent, label: r.name, name: r.name,
+        provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'owned-by' },
+      });
+    }
+  }
+  return out;
 }
 
 /** Where a candidate came from, said the way a person would say it. */

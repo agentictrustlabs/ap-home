@@ -423,6 +423,9 @@ export interface HarnessDeps {
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   /** Read one record from a subject's own vault — the asker's private tier (spec 353 §3). */
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
+   *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
+  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
   /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
   now?: () => number;

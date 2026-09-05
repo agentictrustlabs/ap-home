@@ -106,6 +106,8 @@ import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } fro
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck } from './standing.js';
+import { charteredAgentsReader } from './chartered-agents.js';
+import { RELATIONSHIP_TYPE } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
@@ -2005,6 +2007,21 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       if (out.code === 'recipient_not_in_wire') return { ok: false as const, error: 'your messaging authorization does not cover this recipient yet — open Messages once and it will be extended' };
       return { ok: false as const, error: out.error ?? `the message could not be sent (${res.status})` };
     },
+    // The PUBLIC half of "what does this agent hold": `ap:charteredUnder` edges on chain (spec 355 W2).
+    // Both parties signed them, so this answers for someone else's treasury without reading anything of
+    // theirs — the gap that made "send alice 20 USDC" unroutable for anyone but Alice.
+    charteredAgents: charteredAgentsReader({
+      readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
+      relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
+      ...(env.AGENT_RELATIONSHIP ? { relationships: env.AGENT_RELATIONSHIP as Address } : {}),
+      reverseName: async (agent: string) => {
+        if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+        return new AgentNamingClient({
+          rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID),
+          registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+        }).reverseResolve(agent as Address).catch(() => null);
+      },
+    }),
     // The asker's PRIVATE tier: their own relationships, read through their own InteractionsDO under their
     // own interactions grant, in-Worker. No client-asserted list, and nothing about who they know leaves
     // their tier (ADR-0025).

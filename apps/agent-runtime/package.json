@@ -34,6 +34,7 @@
     "@agenticprimitives/key-custody": "workspace:*",
     "@agenticprimitives/mcp-runtime": "workspace:*",
     "@agenticprimitives/surface-catalog": "workspace:*",
+    "@agenticprimitives/agent-relationships": "workspace:*",
     "@agenticprimitives/ontology": "workspace:*",
     "@agenticprimitives/orchestration": "workspace:*",
     "@agenticprimitives/orchestration-anthropic": "workspace:*",
