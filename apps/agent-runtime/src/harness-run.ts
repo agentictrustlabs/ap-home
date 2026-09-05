@@ -1070,8 +1070,17 @@ async function resolveStepArgs(
         // on gets every candidate and, if there are several, a question.
         ...(() => { const t = partyTypesFor(where.capabilityId ?? where.toolId, key); return t ? { types: t } : {}; })(),
         // What the ask was FOR, so a request raised from this dead end can carry it and be finished in
-        // one press later.
-        ...(String(out.usdc ?? '').trim() ? { pendingAmount: String(out.usdc).trim() } : {}),
+        // one press later. EITHER UNIT: the planner writes `usdc: "3"` or `amount: "3000000"` and both
+        // are honest readings of "3 usdc" — reading only the first meant the amount was dropped exactly
+        // when the sentence had named one.
+        ...(() => {
+          const whole = String(out.usdc ?? '').trim();
+          if (/^\d+(\.\d+)?$/.test(whole)) return { pendingAmount: whole };
+          const smallest = String(out.amount ?? '').trim();
+          if (!/^\d+$/.test(smallest)) return {};
+          const n = Number(smallest) / 1e6;
+          return Number.isFinite(n) && n > 0 ? { pendingAmount: String(n) } : {};
+        })(),
       });
       continue;
     }
