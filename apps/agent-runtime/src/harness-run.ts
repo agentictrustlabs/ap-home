@@ -47,6 +47,7 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
+import { KB_QUESTION_TOOL, kbQuestionAvailable } from './kb-question.js';
 import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
@@ -1614,7 +1615,14 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // Membership is a QUESTION, and its answer is private — so it sits with the informational tools (no
   // mandate, nothing changes) rather than among the capabilities, and it is offered whatever the surface
   // declared: a scope narrows what may be DONE, never what may be asked.
-  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS, MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL];
+  // `kb.question` is offered only where a model can write the query (spec 357 W3). Listing a tool the
+  // agent cannot run would have the planner pick it and the step fail — and a tool that degraded to a
+  // keyword search instead would answer a different question than the one it advertised (ADR-0013).
+  const tools = [
+    ...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS,
+    ...(kbQuestionAvailable(env as never) ? [KB_QUESTION_TOOL] : []),
+    MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL,
+  ];
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session, input.surface, input.addressee),

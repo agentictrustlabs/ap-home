@@ -101,6 +101,7 @@ import {
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
+import { KB_QUESTION_TOOL, kbQuestionInvoker } from './kb-question.js';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
@@ -1572,6 +1573,9 @@ app.post('/harness/ask', async (c) => {
       // question is answered from that evidence or not at all; the private vault stays behind its own
       // delegation and is not reachable from this surface.
       mcpInvoke: async (toolId, args, ctx) => {
+        // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
+        // the query it ran comes back with the answer.
+        if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker(c.env as never)(toolId, args, ctx);
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
         return askDiscoveryInvoker({
           ...(c.env as unknown as Record<string, unknown>),
