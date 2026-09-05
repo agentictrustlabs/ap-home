@@ -56,6 +56,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
   // choice they just made, against a string that tells them nothing. This is the surface remembering its
   // own UI, never a claim about the chain: it labels only values it displayed a label for.
   const [chosen, setChosen] = useState<Record<string, string>>({});
+  /** "Someone has asked you for a way to reach your treasury." Reported, never acted on. */
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState<{ reply: AskReply; state: AskTurnState } | null>(null);
@@ -109,7 +111,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     setErr(null);
     setBusy(label);
     try {
-      const { reply, resumable } = await ask(session, state);
+      const { reply, resumable, waiting } = await ask(session, state);
       // Once the agent holds this run, later turns carry the runRef and the new answers only — the
       // mandate stops living here between turns.
       const carried: AskTurnState = resumable
@@ -131,6 +133,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
       }
       setThread((t) => [...t, { role: 'agent', reply }]);
       setPending(reply.kind === 'prompt' || reply.kind === 'authority_required' ? { reply, state: carried } : null);
+      // SOMEBODY IS WAITING ON THEM. Said once per turn, after the answer — never instead of it, and
+      // never as a card that has to be dismissed before they can carry on with what they came to do.
+      if (waiting) setWaiting(waiting);
       // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
@@ -252,6 +257,17 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
             {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} />}
           </div>
         ))}
+        {/* Somebody is waiting on a decision only they can make. A line, with the place to make it — not
+            a card in the way of what they came here to do. */}
+        {waiting && (
+          <div className="ask-msg agent" data-testid="ask-waiting" style={{ fontSize: 12, opacity: 0.9 }}>
+            {waiting.split(/(https?:\/\/\S+)/).map((part, i) => (
+              /^https?:\/\//.test(part)
+                ? <a key={i} href={part} style={{ textDecoration: 'underline' }}>{part.replace(/^https?:\/\//, '')}</a>
+                : <span key={i}>{part}</span>
+            ))}
+          </div>
+        )}
         {pending?.reply.kind === 'authority_required' && (
           <AuthorityCard
             reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)}

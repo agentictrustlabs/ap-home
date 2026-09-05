@@ -10,7 +10,19 @@ import type { ToolInvoker } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import { RESOLUTION_REQUESTS_RECORD, RESOLUTION_SENT_RECORD, type ResolutionInvitationRequestV1, type SentResolutionRequestV1 } from './resolution-invitation.js';
 
+/**
+ * WHERE TO GO TO DO SOMETHING ABOUT IT. A message that describes an action without saying where to take
+ * it makes the reader hunt for the page, and most will not — the request then sits unanswered and looks
+ * to the asker like it was ignored. The Home's own origin, so the link works wherever this is deployed.
+ */
+export function actionLink(homeOrigin: string | undefined, path: string): string {
+  const base = (homeOrigin ?? '').split(',')[0]?.trim().replace(/\/$/, '');
+  return base ? `${base}${path}` : path;
+}
+
 export interface ResolutionRequestDeps {
+  /** The Home this agent's people use, for links a person can actually follow. */
+  homeOrigin?: string;
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) =>
     Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Appends the typed request to the OWNER's own request record, so their Home can act on it. */
@@ -66,7 +78,8 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // Then the human-readable half, so it appears where they read things.
     // The note says what to DO, including the case where they have none of that kind — which is the
     // common one for a first payment, and the one where "approve it in your Home" reads as nonsense.
-    const note = `I'd like a way to reach your ${wants} — ${purpose}. Open your Home (Requests): if you have a ${wants}, approving there lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
+    const where = actionLink(deps.homeOrigin, wants === 'treasury' ? '/treasuries' : '/agents');
+    const note = `I'd like a way to reach your ${wants} — ${purpose}. Decide here: ${where} — if you have a ${wants}, approving lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
     const sent = session ? await deps.sendDirectMessage?.({ sender: person, recipient: owner, bodyText: note, session }) : undefined;
 
     return {

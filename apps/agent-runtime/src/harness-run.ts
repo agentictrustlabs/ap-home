@@ -60,6 +60,8 @@ import { deriveStanding, standingNote, type Standing, type StandingDeps } from '
 
 
 export interface HarnessEnv {
+  /** The Home origins this agent serves — the first is used for links a person can follow. */
+  ALLOWED_ORIGINS?: string;
   CHAIN_ID: string;
   RPC_URL?: string;
   DELEGATION_MANAGER: string;
@@ -729,6 +731,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
           ...(deps.appendSubjectRecord ? { appendSubjectRecord: deps.appendSubjectRecord } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
+          ...(env.ALLOWED_ORIGINS ? { homeOrigin: env.ALLOWED_ORIGINS } : {}),
         },
         person, session,
       )(toolId, args, ctx);
@@ -1439,6 +1442,34 @@ export function askDescriptors(): SurfaceDescriptor[] {
  *  PLAIN WORDS for it. The words travel with the capability because a surface that keeps its own list
  *  keeps a list that goes stale: the Home's copy was missing three, so a person granting authority to send
  *  a message read "needs permission to messaging.direct.send", which is the id, not a sentence. */
+/**
+ * WHAT IS WAITING ON THIS PERSON — surfaced when they open the Ask, not left for them to remember.
+ *
+ * A request lands in someone's records and a message lands in their inbox, and both rely on them going
+ * to look. The one surface they DID open is this one, so it is the right place to say "someone is waiting
+ * on you" — once, briefly, and only about things that are genuinely theirs to decide.
+ *
+ * It reports; it never acts. Nothing here approves anything, and the words point at where the decision is
+ * made rather than pretending it can be made in a sentence.
+ */
+export async function waitingOn(
+  deps: { readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown> },
+  person: string | undefined,
+  homeOrigin?: string,
+): Promise<string | null> {
+  if (!person || !deps.readSubjectRecord) return null;
+  const doc = await deps.readSubjectRecord(person, 'resolution.requests').catch(() => null);
+  const rows = (doc as { requests?: Array<{ kind?: string; requester?: string; wants?: string; status?: string }> } | null)?.requests ?? [];
+  const pending = rows.filter((r) => r.kind !== 'resolution.invitation.sent' && !!r.requester && (r.status ?? 'pending') === 'pending');
+  if (!pending.length) return null;
+  const where = (homeOrigin ?? '').split(',')[0]?.trim().replace(/\/$/, '');
+  const what = pending.length === 1
+    ? `Someone has asked you for a way to reach your ${pending[0]!.wants ?? 'agent'}.`
+    : `${pending.length} people have asked you for a way to reach agents of yours.`;
+  // WHERE, not just what. A notice that does not say where to go is one more thing to work out.
+  return `${what}${where ? ` You decide at ${where}/treasuries.` : ''}`;
+}
+
 export function askVocabulary(): Array<AskCapabilityLike & { label: string }> {
   return buildAskVocabulary(askDescriptors()).map((c) => ({ ...c, label: CAPABILITY_WORDS[c.id] ?? c.id }));
 }

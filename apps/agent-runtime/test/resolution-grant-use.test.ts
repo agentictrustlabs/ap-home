@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { grantAllows, verifiedGrants } from '../src/resolution-invitation.js';
+import { waitingOn } from '../src/harness-run.js';
 
 const CHAIN = 34348;
 const ALICE = '0x00000000000000000000000000000000000000a1';
@@ -77,5 +78,36 @@ describe('verifiedGrants — a reference is worth what the gate says it is', () 
     const resolve = vi.fn(async () => TARGET);
     expect(await verifiedGrants(held, 'org', { asker: NATHAN, resolve })).toHaveLength(0);
     expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe('waitingOn — what is pending, said on the surface they actually opened', () => {
+  const person = '0x00000000000000000000000000000000000000a1';
+  const reader = (requests: unknown[]) => ({ readSubjectRecord: async () => ({ requests }) });
+  const pending = { kind: 'resolution.invitation.request', requester: '0x00000000000000000000000000000000000000b1', wants: 'treasury', status: 'pending' };
+
+  it('names what was asked, and WHERE the decision is made', async () => {
+    const out = await waitingOn(reader([pending]), person, 'https://www.faithnet.me');
+    expect(out).toMatch(/asked you for a way to reach your treasury/);
+    expect(out, 'a notice with no destination is one more thing to work out').toContain('https://www.faithnet.me/treasuries');
+  });
+
+  it('counts them when there are several', async () => {
+    const out = await waitingOn(reader([pending, { ...pending, requester: '0x00000000000000000000000000000000000000c1' }]), person, 'https://h');
+    expect(out).toMatch(/^2 people have asked/);
+  });
+
+  it('says nothing when nothing is pending — including for what they already answered', async () => {
+    expect(await waitingOn(reader([]), person)).toBeNull();
+    expect(await waitingOn(reader([{ ...pending, status: 'approved' }]), person)).toBeNull();
+  });
+
+  it('ignores the OTHER end of an exchange — a request you sent is not one waiting on you', async () => {
+    expect(await waitingOn(reader([{ kind: 'resolution.invitation.sent', owner: person, wants: 'treasury' }]), person)).toBeNull();
+  });
+
+  it('says nothing rather than failing when the record cannot be read', async () => {
+    const broken = { readSubjectRecord: async () => { throw new Error('vault down'); } };
+    await expect(waitingOn(broken, person)).resolves.toBeNull();
   });
 });

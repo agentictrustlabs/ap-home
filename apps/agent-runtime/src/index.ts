@@ -114,7 +114,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary } from './harness-run.js';
+import { askVocabulary, waitingOn } from './harness-run.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1505,7 +1505,8 @@ app.post('/resolution/grant', async (c) => {
   // TELL THEM. A grant delivered silently into someone's vault is a thing they have no reason to look
   // for: they asked days ago, and nothing about their Home changed. The answer travels the way the
   // question did — as a message from the person who decided, sent on their own interactions plane.
-  const note = `You can reach my ${wants} now — I've sent you a way to it. It lets you send there; it gives you no control over it.`;
+  const backTo = (c.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim().replace(/\/$/, '') ?? '';
+  const note = `You can reach my ${wants} now — I've sent you a way to it. Finish what you were doing here: ${backTo}/treasuries — it lets you send there; it gives you no control over it.`;
   const messaged = await (async () => {
     try {
       const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
@@ -1648,7 +1649,11 @@ app.post('/harness/ask', async (c) => {
       // rather than failing a run that already happened.
       console.warn('[harness/ask] checkpoint not saved:', e);
     }
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}) });
+    // WHAT IS WAITING ON THEM, said once on the surface they actually opened. Someone asked them days
+    // ago; the message is in an inbox they may not have read and the card is on a page they may not have
+    // visited. Reported alongside the answer, never instead of it, and it decides nothing.
+    const waiting = await waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null);
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

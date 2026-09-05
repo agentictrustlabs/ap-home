@@ -167,7 +167,7 @@ export interface AskTurnState {
   resumable?: boolean;
 }
 
-async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string }> {
+async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string; waiting?: string }> {
   const send = async () => {
     await ensureCsrfToken();
     return fetch('/a2a/harness/ask', {
@@ -189,7 +189,7 @@ async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; res
 }
 
 /** Ask once. The first turn carries only the sentence; later turns carry what the agent asked for. */
-export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean }> {
+export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean; waiting?: string }> {
   // What is NEW goes up; what the agent already holds does not. Once a run is checkpointed the question
   // and the earlier answers are its own, so this turn carries the runRef and whatever the person just did.
   //
@@ -211,7 +211,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
       resumable: false,
     };
   }
-  return { reply: res.reply, resumable: !!res.resumable };
+  return { reply: res.reply, resumable: !!res.resumable, ...(res.waiting ? { waiting: res.waiting } : {}) };
 }
 
 const PAYMENT_TYPE = 'urn:ap:rar:treasury.payment.execute';
