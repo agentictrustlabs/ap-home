@@ -130,11 +130,9 @@ export function usableGrants(held: unknown, type: string, now = Date.now()): Hel
  *     self-written record naming someone else's treasury is refused;
  *   · the grant names THIS asker as its subject — it is recipient-bound (spec 338 §4), so one person's
  *     grant passed to another does not work;
- *   · the target it permits is the target being reached — so a valid grant cannot be re-pointed.
+ *   · the target it permits is the target being reached — so a valid grant cannot be re-pointed;
+ *   · the issuer has not WITHDRAWN it (see `revokedBy`).
  *
- * What is still NOT checked here: revocation. The status lives in the issuer's vault (`statusRef`) and
- * reading it from this side is the next step — until then a revoked grant keeps working until it expires,
- * which the caller should say plainly rather than imply otherwise.
  */
 export async function verifiedGrants(
   held: unknown,
@@ -146,6 +144,8 @@ export async function verifiedGrants(
     verifySignature: (input: { signer: string; digest: string; signature: string }) => Promise<boolean>;
     /** Canonical bytes of the grant as signed. */
     digestOf: (grant: unknown) => string;
+    /** The grant ids this issuer has withdrawn, read from THEIR record. Absent ⇒ revocation unchecked. */
+    revokedBy?: (issuer: string) => Promise<string[]>;
     now?: number;
   },
 ): Promise<HeldResolutionGrantV1[]> {
@@ -159,7 +159,16 @@ export async function verifiedGrants(
     const issuer = String(g.issuer ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0];
     if (!issuer || issuer.toLowerCase() !== held1.owner.toLowerCase()) continue;
     const ok = await ctx.verifySignature({ signer: issuer, digest: ctx.digestOf(g), signature: g.proof.signature }).catch(() => false);
-    if (ok) out.push(held1);
+    if (!ok) continue;
+    // WITHDRAWN IS NOT WEAKER, IT IS OVER. Checked against the issuer's own status, which is the only
+    // side that can say — the holder keeps the record either way. A status that cannot be READ refuses:
+    // the point of revocation is that someone changed their mind, and "I could not ask" is exactly the
+    // case where that matters most.
+    if (ctx.revokedBy) {
+      const revoked = await ctx.revokedBy(issuer).catch(() => null);
+      if (revoked === null || revoked.includes(held1.grantId)) continue;
+    }
+    out.push(held1);
   }
   return out;
 }

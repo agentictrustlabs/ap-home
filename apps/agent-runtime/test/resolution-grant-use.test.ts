@@ -62,6 +62,23 @@ describe('using a resolution grant', () => {
     expect(await verifiedGrants(held({ expiresAt: '2020-01-01T00:00:00Z' }), 'treasury', ctx())).toHaveLength(0);
   });
 
+  it('REFUSES one the issuer has WITHDRAWN', async () => {
+    const c = { ...ctx(), revokedBy: async () => ['apd1_x'] };
+    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(0);
+  });
+
+  it('accepts one when the issuer has withdrawn a DIFFERENT grant', async () => {
+    const c = { ...ctx(), revokedBy: async () => ['apd1_other'] };
+    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(1);
+  });
+
+  it('REFUSES when the status cannot be read — "I could not ask" is not permission', async () => {
+    // The point of revocation is that someone changed their mind. An unreadable status is exactly the
+    // case where honouring the grant anyway is worst.
+    const c = { ...ctx(), revokedBy: async () => { throw new Error('vault unreachable'); } };
+    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(0);
+  });
+
   it('checks the signature against the ISSUER, over the canonical body', async () => {
     const c = ctx();
     await verifiedGrants(held(), 'treasury', c);

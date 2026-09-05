@@ -1581,7 +1581,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1966,6 +1966,40 @@ export class InteractionsDO {
             await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
             return json({ ok: true });
           });
+        }
+        if (op === 'internal.resolution.revoke') {
+          // THE OTHER HALF OF ISSUING. A grant you cannot take back is one you should think much harder
+          // about giving, so revocation is what makes disclosure safe to do at all. The issuer's own row
+          // is the status of record (`statusRef` points here); a checker reads it before honouring a
+          // grant, and a revoked one stops working without waiting for its expiry.
+          const grantId = String((body as { grantId?: string }).grantId ?? '');
+          if (!grantId) return json({ error: 'grantId required' }, 400);
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+            const rows = Array.isArray(doc?.requests) ? doc.requests : [];
+            let found = false;
+            const next = rows.map((r) => {
+              const row = r as { grantId?: string };
+              if (row.grantId !== grantId) return r;
+              found = true;
+              return { ...row, status: 'revoked', revokedAt: new Date().toISOString() };
+            });
+            if (!found) return json({ ok: false, error: 'no grant of yours by that id' }, 404);
+            await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
+            return json({ ok: true, grantId });
+          });
+        }
+        if (op === 'internal.resolution.status') {
+          // Which of this principal's issued grants are no longer good. Read by the agent in-Worker when
+          // someone tries to USE one — never handed to the holder, who would then be the one reporting
+          // whether their own grant had been revoked.
+          const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+          const rows = Array.isArray(doc?.requests) ? doc.requests : [];
+          const revoked = rows
+            .filter((r) => (r as { status?: string }).status === 'revoked')
+            .map((r) => (r as { grantId?: string }).grantId)
+            .filter((x): x is string => !!x);
+          return json({ ok: true, revoked });
         }
         if (op === 'internal.resolution.request') {
           // spec 338 §7 — someone ASKS this principal for a way to reach an unlisted agent of theirs.

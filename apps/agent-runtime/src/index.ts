@@ -1250,6 +1250,34 @@ app.get('/resolution/grants', async (c) => {
   return c.json({ ok: true, grants: Array.isArray(r.data?.grants) ? r.data.grants : [] });
 });
 
+// POST /resolution/revoke — take back a way to reach something of yours.
+//
+// The half that makes issuing safe: a grant you cannot withdraw is one you should think much harder
+// about giving. It takes effect at USE — the holder keeps the record, and it stops working.
+app.post('/resolution/revoke', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; grantId?: string } | null;
+  if (!body?.session || !body.grantId) return c.json({ ok: false, error: 'session and grantId are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const out = await callInteractionsInternal(c.env, who.sa, 'internal.resolution.revoke', { grantId: body.grantId })
+    .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  const r = out as { ok?: boolean; error?: string };
+  if (r.ok === false) return c.json({ ok: false, error: r.error ?? 'the grant could not be revoked' }, 404);
+  return c.json({ ok: true, grantId: body.grantId });
+});
+
+// GET /resolution/issued — what you have disclosed, and to whom. You cannot withdraw what you cannot see.
+app.get('/resolution/issued', async (c) => {
+  const who = await verifyHomeSession(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '', c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const out = await callInteractionsInternal(c.env, who.sa, 'internal.coordination.vaultRead', { recordType: 'resolution.requests' })
+    .catch(() => ({ ok: false }));
+  const r = out as { ok?: boolean; data?: { requests?: Array<Record<string, unknown>> } };
+  if (r.ok === false) return c.json({ ok: false, issued: [], error: 'the record could not be read' });
+  const issued = (r.data?.requests ?? []).filter((x) => !!x.grantId && x.kind !== 'resolution.invitation.sent');
+  return c.json({ ok: true, issued });
+});
+
 // POST /resolution/grant — the OWNER answers: hand one requester a way to resolve ONE unlisted agent.
 //
 // Two things are checked and neither is optional. The issuer must OWN the target — a person may only
@@ -2230,6 +2258,13 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
       return verifiedGrants(held, type, {
         asker, chainId: Number(env.CHAIN_ID),
+        // REVOKED IS NOT USABLE. Read from the ISSUER's own record, in-Worker — never from the holder,
+        // who would then be the one reporting whether their own grant had been withdrawn.
+        revokedBy: async (issuer: string) => {
+          const st = await callInteractionsInternal(env, issuer, 'internal.resolution.status', {}).catch(() => null);
+          const ids = (st as { revoked?: string[] } | null)?.revoked;
+          return Array.isArray(ids) ? ids : [];
+        },
         digestOf: (grant) => keccak256(toBytes(JSON.stringify(grantBody(grant as never)))),
         verifySignature: async ({ signer, digest, signature }) =>
           (await pub.readContract({
