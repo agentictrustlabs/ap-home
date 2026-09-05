@@ -14,7 +14,7 @@ import { BusyButton } from '../shared/BusyButton';
 import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
 import { useManagedAgents } from './ManagedAgents';
-import { resolveVia } from '../../home/onboarding';
+import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import { connectedCredential } from './ask/credential';
 import type { Address } from '@agenticprimitives/types';
 
@@ -34,11 +34,20 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
 
   const load = useCallback(async () => {
     if (!token) return;
+    // THE GRANT MUST NAME THE RECORD. Requests live in a record family added after most people signed
+    // their interactions grant, and a grant that does not name a record cannot write it — so someone
+    // asking for a way to reach you would be refused at your vault, through no fault of theirs. The
+    // surface that depends on a record family is the right place to make sure the grant covers it: the
+    // person is here, and re-issuing is one signature their Home already knows how to collect.
+    if (agentAddress && session) {
+      await activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session.via), { token })
+        .catch(() => undefined);
+    }
     const r = await fetch('/a2a/resolution/requests', { headers: { authorization: `Bearer ${token}` } });
     const b = (await r.json().catch(() => ({}))) as { requests?: PendingRequest[]; error?: string };
     if (!r.ok) { setErr(b.error ?? `could not read requests (${r.status})`); setRows([]); return; }
     setRows(b.requests ?? []);
-  }, [token]);
+  }, [token, agentAddress, session, profile?.credential]);
   useEffect(() => { void load(); }, [load]);
 
   if (!session || !token) return null;

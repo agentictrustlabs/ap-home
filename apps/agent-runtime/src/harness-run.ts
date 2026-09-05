@@ -53,7 +53,7 @@ import type { ResolvedParty } from './party-resolution.js';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { resolutionRequestInvoker } from './resolution-request.js';
-import { partyRole, suffixesFor, COUNTERPARTY_ARGS } from '@agenticprimitives/ontology';
+import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES } from '@agenticprimitives/ontology';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
@@ -914,7 +914,18 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
  *  an address by the time a caveat encodes it. */
-const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'workspace', 'funder', 'recipient'] as const;
+/**
+ * The arguments that name an AGENT and must become an address before anything is signed — every argument
+ * any capability declares as a party, plus the two the estate carries that no capability names yet.
+ *
+ * Derived from the ontology binding rather than listed here, because listing them here is how the newest
+ * capability got missed: `resolution.invitation.request` took an `owner`, nothing resolved it, and the
+ * mandate refused to mint with "not an address or CAIP-10 account: alice.me" — after the person had
+ * already been asked to grant. A capability that declares its parties now gets them resolved by saying so.
+ */
+const PARTY_ARGS: readonly string[] = [
+  ...new Set([...PARTY_ROLES.map((r) => r.arg), 'workspace', 'funder']),
+];
 
 /**
  * Parties that are never the asker.

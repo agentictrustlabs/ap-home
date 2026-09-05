@@ -38,7 +38,14 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // The DECISION record first: a message they might miss is not a request they can act on, and the Home
     // reads this record to show the Approve button.
     const stored = await deps.appendSubjectRecord?.(owner, RESOLUTION_REQUESTS_RECORD, request);
-    if (stored && !stored.ok) throw new Error(`the request could not be recorded for them: ${stored.error ?? 'unknown'}`);
+    if (stored && !stored.ok) {
+      // `record_scope_denied` is not a failure of the request — it means their storage does not yet cover
+      // this kind of record, which only they can change. Say that, rather than a code.
+      const why = /record_scope_denied|scope/i.test(stored.error ?? '')
+        ? 'their Home has not enabled this kind of request yet — they need to open it once, then ask again'
+        : stored.error ?? 'unknown';
+      throw new Error(`the request could not be recorded for them: ${why}`);
+    }
 
     // Then the human-readable half, so it appears where they read things.
     const note = `I'd like a way to reach your ${wants} — ${purpose}. Approve it in your Home (Requests) and I'll be able to send there. It gives me no control over it.`;
