@@ -1203,7 +1203,7 @@ async function resolveStepArgs(
  * a note that fails to close costs a card, not a payment, and failing the run over it would be worse.
  */
 async function settleFinishedRequests(
-  input: { deps?: HarnessDeps; principal?: Address; resolved?: ResolvedParties },
+  input: { deps?: HarnessDeps; principal?: Address; resolved?: ResolvedParties; session?: string },
   r: RunResult,
 ): Promise<void> {
   const settle = input.deps?.settleResolutionRequest;
@@ -1211,13 +1211,29 @@ async function settleFinishedRequests(
   const paid = r.receipts.filter((rc) => rc.toolId === 'treasury.payment.execute' && rc.status === 'executed');
   if (!paid.length) return;
   const txHash = (r.result as { txHash?: string } | null)?.txHash;
-  const seen = new Set<string>();
-  for (const p of input.resolved?.values() ?? []) {
-    // The args that MOVE VALUE, from the ontology binding (spec 355) — not a hand-kept list of arg names
-    // that would drift the first time a capability names its payee something else.
-    if (!VALUE_ARGS.has(p.arg) || !p.ownedBy || seen.has(p.ownedBy)) continue;
-    seen.add(p.ownedBy);
-    await settle(input.principal, { owner: p.ownedBy, wants: 'treasury', ...(txHash ? { txHash } : {}) }).catch(() => undefined);
+
+  // The args that MOVE VALUE, from the ontology binding (spec 355) — not a hand-kept list of arg names
+  // that would drift the first time a capability names its payee something else.
+  const paidTo = [...(input.resolved?.values() ?? [])].filter((p) => VALUE_ARGS.has(p.arg));
+  if (!paidTo.length) return;
+
+  // WHOSE NOTE THIS CLOSES IS A QUESTION ABOUT WHERE THE MONEY WENT, not about how the payee was
+  // phrased. `ownedBy` is there when the run followed someone's disclosure to get the address — but a
+  // person who answered "which treasury?" by picking one, or who pasted the address outright, paid the
+  // very same agent and is owed the same finished card. So when the resolution did not carry an owner,
+  // ask the records that can say: a held grant whose target IS this payee names the person who gave it.
+  const owners = new Set(paidTo.map((p) => p.ownedBy).filter((o): o is string => !!o));
+  const unattributed = paidTo.filter((p) => !p.ownedBy).map((p) => p.agent.toLowerCase());
+  if (unattributed.length && input.deps?.verifyGrant && input.deps.readSubjectRecord && input.session) {
+    const held = await input.deps.readSubjectRecord(input.principal, 'resolution.grants').catch(() => null);
+    const grants = await input.deps.verifyGrant(held, 'treasury', input.principal, input.session).catch(() => []);
+    for (const g of grants) {
+      if (g.targetAgent && unattributed.includes(g.targetAgent.toLowerCase())) owners.add(g.owner.toLowerCase());
+    }
+  }
+
+  for (const owner of owners) {
+    await settle(input.principal, { owner, wants: 'treasury', ...(txHash ? { txHash } : {}) }).catch(() => undefined);
   }
 }
 
@@ -1240,6 +1256,9 @@ export async function askReplyFor(env: HarnessEnv, input: {
   verifyStewardship?: StandingDeps['verifyStewardship'];
   /** What the run's party words resolved to, for the surface to show back before a signature. */
   resolved?: ResolvedParties;
+  /** The asker's Home session — carried so a finished payment can ask the resolver gate whose disclosure
+   *  it used, which is what says whose note it just closed. */
+  session?: string;
 }): Promise<AskReply> {
   const r = input.result;
   if (r.outcome === 'authority-required' && r.required) {

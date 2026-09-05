@@ -1592,6 +1592,9 @@ app.post('/harness/ask', async (c) => {
       principal: who.sa as Address,
       // What the person's words became, so the authority card can show it before they sign.
       resolved,
+      // Their own session — a finished payment asks the gate whose disclosure reached the payee, which is
+      // what says whose "finish this" note has nothing left to wait on.
+      ...(body.session ? { session: String(body.session) } : {}),
       verifyStewardship: chainStewardshipCheck({
         readContract: ((args: never) => askDeps.readContract(args)) as never,
         chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
