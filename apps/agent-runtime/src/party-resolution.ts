@@ -255,8 +255,8 @@ export async function resolveParty(
     lookups.onResolved?.({ arg: where.argName, raw: value, agent: value.toLowerCase() });
     return value.toLowerCase() as Address;
   }
-  const ask = (prompt: string, field: InputFieldV1): never => {
-    throw new InputRequired({ kind: 'data', stepRef: where.stepRef, toolId: where.toolId, prompt, fields: [field] });
+  const ask = (prompt: string, field: InputFieldV1, suggest?: { label: string; message: string }): never => {
+    throw new InputRequired({ kind: 'data', stepRef: where.stepRef, toolId: where.toolId, prompt, fields: [field], ...(suggest ? { suggest } : {}) });
   };
   if (!value) ask(`Who is ${where.what}?`, { name: where.argName, label: where.what, type: 'text', required: true, hint: 'an agent name (alice.me) or address' });
 
@@ -315,6 +315,12 @@ export async function resolveParty(
           // cannot add to is a dead end with instructions on it.
           allowOther: true,
           hint: `a ${where.types[0]} may exist under another name — give it in full (e.g. ${value}2.${where.types[0]}) to send there instead`,
+        }, {
+          // THE WAY OUT OF THE DEAD END. Their ${where.types[0]} may exist and simply be unlisted — that
+          // is a choice its owner made, and the answer is to ask them, not to guess harder. Offered as a
+          // follow-up the person can send, because they should not have to know the phrasing.
+          label: `Ask ${value} for a way to reach their ${where.types[0]}`,
+          message: `ask ${value} for a way to pay their ${where.types[0]}`,
         });
       }
       if (tier.length === 1) {

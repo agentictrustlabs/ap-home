@@ -50,8 +50,11 @@ export interface AskField {
   hint?: string;
 }
 
+/** A follow-up the agent suggests when a question has no good answer on hand. Prefilled, never sent. */
+export interface AskSuggestion { label: string; message: string }
+
 export type AskPrompt =
-  | { kind: 'data'; stepRef: string; toolId: string; prompt: string; fields: AskField[] }
+  | { kind: 'data'; stepRef: string; toolId: string; prompt: string; fields: AskField[] ; suggest?: AskSuggestion }
   | { kind: 'signature'; stepRef: string; toolId: string; prompt: string; digest: Hex; signer: string; payload?: unknown }
   | { kind: 'confirmation'; stepRef: string; toolId: string; prompt: string; summary: unknown };
 

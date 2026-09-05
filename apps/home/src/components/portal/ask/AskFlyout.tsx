@@ -254,6 +254,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
           <PromptCard
             prompt={pending.reply.prompt} answers={answers} setAnswers={setAnswers} busy={busy}
             onChoose={(value, label) => setChosen((m) => ({ ...m, [value.toLowerCase()]: label }))}
+            onSuggest={(message) => { setPending(null); setQ(message); }}
             onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
           />
         )}
@@ -396,11 +397,13 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
 }
 
 /** A question for the person. Never a credential field — this surface answered those already. */
-function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onChoose }: {
+function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onChoose, onSuggest }: {
   prompt: AskPrompt; answers: Record<string, string>; setAnswers: (v: Record<string, string>) => void;
   busy: string | null; onAnswer: () => void; onCancel: () => void;
   /** Remember the label this surface showed for a chosen value, so the next card can say it back. */
   onChoose: (value: string, label: string) => void;
+  /** Prefill the composer with the agent's suggested follow-up. Never sends it. */
+  onSuggest: (message: string) => void;
 }) {
   const ready = prompt.kind !== 'data' || prompt.fields.every((f) => !f.required || (answers[f.name] ?? '').trim().length > 0);
   return (
@@ -471,6 +474,16 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
             : 'Signing this creates the agent and makes your credential its custodian.'}
           {' '}The agent re-derives what you signed and refuses it if it differs.
         </p>
+      )}
+      {/* THE WAY OUT. When the answer is not among the choices — their treasury is unlisted, so nobody
+          can name it — the question is a dead end unless it offers the next ask. Prefilled, never sent:
+          the person reads it and presses send, which is the same rule the "ask a steward" route follows. */}
+      {prompt.kind === 'data' && prompt.suggest && (
+        <button
+          type="button" className="btn ghost" data-testid="ask-suggest"
+          style={{ marginTop: 8, fontSize: 12 }} disabled={!!busy}
+          onClick={() => onSuggest(prompt.suggest!.message)}
+        >{prompt.suggest.label}</button>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <BusyButton busy={!!busy} busyLabel={busy ?? 'Working…'} disabled={!ready} onClick={onAnswer} className="btn primary" data-testid="ask-answer">
