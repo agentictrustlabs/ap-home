@@ -1237,6 +1237,18 @@ app.get('/resolution/requests', async (c) => {
   return c.json({ ok: true, requests: Array.isArray(r.data?.requests) ? r.data.requests : [] });
 });
 
+// GET /resolution/grants — the ways this person has been GIVEN to reach unlisted agents. Their own
+// record, their own session. Each entry permits discovery of one agent and nothing else (ADR-0056).
+app.get('/resolution/grants', async (c) => {
+  const who = await verifyHomeSession(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '', c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const out = await callInteractionsInternal(c.env, who.sa, 'internal.coordination.vaultRead', { recordType: 'resolution.grants' })
+    .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  const r = out as { ok?: boolean; needsEnable?: boolean; error?: string; data?: { grants?: unknown[] } };
+  if (r.ok === false) return c.json({ ok: false, grants: [], ...(r.needsEnable ? { needsEnable: true } : {}), error: r.error ?? 'unreadable' });
+  return c.json({ ok: true, grants: Array.isArray(r.data?.grants) ? r.data.grants : [] });
+});
+
 // POST /resolution/grant — the OWNER answers: hand one requester a way to resolve ONE unlisted agent.
 //
 // Two things are checked and neither is optional. The issuer must OWN the target — a person may only

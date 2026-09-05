@@ -76,8 +76,15 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
     agents.filter((a) => (a.kind ?? '').includes(wants) || (a.name ?? '').endsWith(`.${wants}`));
 
   async function approve(req: PendingRequest) {
-    const target = pickedFor[req.requester] ?? candidatesFor(req.wants)[0]?.agent;
-    if (!target) { setErr('You have no agent of that kind to give them a way to reach.'); return; }
+    const options = candidatesFor(req.wants);
+    // NO SILENT DEFAULT when there is a choice. Which agent gets disclosed is the whole decision, and
+    // defaulting to the first one means a mis-click discloses an agent the person never picked — the
+    // exact error this feature exists to prevent, made by the feature. One option needs no choosing.
+    const target = options.length === 1 ? options[0]!.agent : pickedFor[req.requester];
+    if (!target) {
+      setErr(options.length ? 'Pick which one they may reach.' : 'You have no agent of that kind to give them a way to reach.');
+      return;
+    }
     setBusy(req.requester); setErr('');
     try {
       // Signed by the person deciding — that signature is what makes the grant theirs rather than the
@@ -119,16 +126,18 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
             {options.length > 1 && (
               <select
                 className="input" style={{ marginTop: 8, fontSize: 12 }} data-testid={`resolution-target-${req.requester.toLowerCase()}`}
-                value={pickedFor[req.requester] ?? options[0]!.agent}
+                value={pickedFor[req.requester] ?? ''}
                 onChange={(e) => setPickedFor({ ...pickedFor, [req.requester]: e.target.value })}
               >
+                <option value="">Which one may they reach?</option>
                 {options.map((o) => <option key={o.agent} value={o.agent}>{o.name || `unnamed ${req.wants} · ${o.agent.slice(0, 10)}…`}</option>)}
               </select>
             )}
             {!options.length && <p style={{ ...mutedText, fontSize: 11.5 }}>You have no {req.wants} to share.</p>}
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <BusyButton
-                busy={busy === req.requester} busyLabel="Granting…" disabled={!options.length}
+                busy={busy === req.requester} busyLabel="Granting…"
+                disabled={!options.length || (options.length > 1 && !pickedFor[req.requester])}
                 className="btn primary" data-testid={`resolution-approve-${req.requester.toLowerCase()}`}
                 onClick={() => void approve(req)}
               >Give them a way to reach it</BusyButton>
