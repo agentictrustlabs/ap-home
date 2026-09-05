@@ -306,6 +306,50 @@ export async function listVaultObjectRows(
   return res.results ?? [];
 }
 
+/**
+ * The rows a SELECTOR matches — spec 356 §2.3, the query that runs IN the store.
+ *
+ * `resource IN (…)` for singletons, `resource LIKE 'prefix%'` for keyed families, `LIMIT` always. The
+ * alternative — list every resource and fetch each — moves a person's whole vault to the caller to
+ * answer a question about three records of it, and turns one authorization into hundreds.
+ *
+ * An EMPTY selector matches nothing and does not touch the database. That is deliberate: a query that
+ * quietly meant "everything" when its selector failed to compile is precisely the bug this shape exists
+ * to make impossible. `LIKE` needs its wildcards escaped — a resource prefix is caller-influenced, and
+ * an unescaped `%` in one would silently widen the match.
+ */
+export async function queryVaultObjectRows(
+  db: D1Database,
+  owner: string,
+  select: { exact?: string[]; prefixes?: string[] },
+  limit = 200,
+): Promise<VaultObjectRow[]> {
+  const clauses: string[] = [];
+  const binds: unknown[] = [owner.toLowerCase()];
+  const exact = (select.exact ?? []).filter((e) => e.length > 0);
+  if (exact.length) {
+    clauses.push(`resource IN (${exact.map(() => '?').join(', ')})`);
+    binds.push(...exact);
+  }
+  for (const prefix of (select.prefixes ?? []).filter((p) => p.length > 0)) {
+    clauses.push("resource LIKE ? ESCAPE '\\'");
+    binds.push(`${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  if (!clauses.length) return [];
+  binds.push(Math.max(1, Math.min(limit, 500)));
+  const res = await db
+    .prepare(
+      `SELECT owner_address, resource, classification, ciphertext_b64, wrapped_dek_b64, crypto_meta, updated_at
+         FROM vault_objects
+        WHERE owner_address = ? AND deleted_at IS NULL AND (${clauses.join(' OR ')})
+        ORDER BY resource
+        LIMIT ?`,
+    )
+    .bind(...binds)
+    .all<VaultObjectRow>();
+  return res.results ?? [];
+}
+
 // ─── spec 278 P4 — per-person vault key bindings ──────────────────────────
 
 export interface VaultKeyBindingRow {

@@ -15,7 +15,8 @@
 // This adapter never selects a backend; it just seals/opens under the wrapper
 // it is handed (see the per-person construction note at `createDemoVault`).
 
-import type { Vault, VaultObject, VaultReadRequest, VaultWriteRequest, VaultRef, VaultClassification, DekWrapper } from '@agenticprimitives/vault';
+import type { Vault, VaultObject, VaultReadRequest, VaultWriteRequest,
+  VaultQueryRequest, VaultRef, VaultClassification, DekWrapper } from '@agenticprimitives/vault';
 import { sealEnvelope, openEnvelope, projectFields } from '@agenticprimitives/vault';
 import {
   type Profile,
@@ -28,6 +29,7 @@ import {
   putVaultObjectRow,
   tombstoneVaultObjectRow,
   listVaultObjectRows,
+  queryVaultObjectRows,
 } from './db.js';
 
 export const RESOURCE_PROFILE = 'profile';
@@ -127,6 +129,39 @@ export function createDemoVault(db: D1Database, wrapper: DekWrapper): Vault {
         return;
       }
       await seal(req.owner, req.resource, req.classification ?? classificationFor(req.resource), req.data);
+    },
+
+    /**
+     * Spec 356 §2.3 — the selector is evaluated in D1, and only matching rows are opened.
+     *
+     * No seed-on-read here, unlike `read`: seeding invents a record because a caller named one, and a
+     * QUERY names a shape rather than a record. Answering "you have 1 profile" to someone who has none,
+     * by creating it, would make the count a side effect of asking.
+     */
+    async query<T = unknown>(req: VaultQueryRequest): Promise<VaultObject<T>[]> {
+      const rows = await queryVaultObjectRows(db, req.owner, req.select, req.limit);
+      const out: VaultObject<T>[] = [];
+      for (const row of rows) {
+        const data = await openEnvelope<T>({
+          envelope: {
+            owner: row.owner_address,
+            resource: row.resource,
+            classification: row.classification as VaultClassification,
+            crypto: JSON.parse(row.crypto_meta),
+          },
+          ciphertext: b64decode(row.ciphertext_b64),
+          wrappedDek: b64decode(row.wrapped_dek_b64),
+          wrapper,
+        });
+        out.push({
+          owner: row.owner_address,
+          resource: row.resource,
+          classification: row.classification as VaultClassification,
+          data: projectFields(data, req.fields) as T,
+          updatedAt: row.updated_at,
+        });
+      }
+      return out;
     },
 
     async list(owner: string): Promise<VaultRef[]> {
