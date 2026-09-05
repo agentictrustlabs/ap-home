@@ -6,6 +6,7 @@ import { useSession } from '../../../src/context/session';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { TreasuriesRollup } from '../../../src/components/portal/ManagedAgents';
+import { ResolutionRequests } from '../../../src/components/portal/ResolutionRequests';
 
 export default function TreasuriesPage() {
   const { session, agentAddress } = useSession();
@@ -15,6 +16,9 @@ export default function TreasuriesPage() {
       title={a?.label ?? 'Treasuries'}
       description={`${a?.blurb ?? 'Funds and giving your agents steward'} — stewarded transparently, on your terms.`}
     >
+      {/* Decisions before inventory: someone waiting on a way to pay you belongs above the list of what
+          you hold, and an unnamed treasury is unreachable until you answer them (spec 338 §7). */}
+      <ResolutionRequests />
       <TreasuriesRollup token={session?.token ?? null} person={agentAddress ?? null} via={session?.via ?? ''} />
     </SectionShell>
   );
