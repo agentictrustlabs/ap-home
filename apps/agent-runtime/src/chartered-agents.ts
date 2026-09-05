@@ -17,6 +17,7 @@ const ZERO32 = `0x${'0'.repeat(64)}` as Hex;
 const ACTIVE = 3;
 
 const EDGES_BY_OBJECT_ABI = [{ type: 'function', name: 'getEdgesByObject', stateMutability: 'view', inputs: [{ name: 'object_', type: 'address' }], outputs: [{ type: 'bytes32[]' }] }] as const;
+const HAS_ROLE_ABI = [{ type: 'function', name: 'hasRole', stateMutability: 'view', inputs: [{ name: 'edgeId', type: 'bytes32' }, { name: 'role', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 const GET_EDGE_ABI = [{ type: 'function', name: 'getEdge', stateMutability: 'view', inputs: [{ name: 'edgeId', type: 'bytes32' }], outputs: [
   { type: 'tuple', components: [
     { name: 'edgeId', type: 'bytes32' }, { name: 'subject', type: 'address' }, { name: 'object_', type: 'address' },
@@ -34,6 +35,9 @@ export interface CharteredDeps {
   reverseName?: (agent: string) => Promise<string | null>;
   /** Bound: an agent with hundreds of children answers with the first page, never a stalled request. */
   maxEdges?: number;
+  /** `ap:primaryPayee` — read per edge so a resolver can stop asking which one to pay. Optional: without
+   *  it nothing is marked, and the person is asked, which is the behaviour that always worked. */
+  primaryRole?: Hex;
 }
 
 /**
@@ -44,12 +48,12 @@ export interface CharteredDeps {
  * (ADR-0061). An agent with no name is skipped — it cannot be shown to a person as a choice.
  */
 export function charteredAgentsReader(deps: CharteredDeps) {
-  return async (owner: string, type: string): Promise<Array<{ agent: string; name?: string }>> => {
+  return async (owner: string, type: string): Promise<Array<{ agent: string; name?: string; primary?: boolean }>> => {
     if (!deps.relationships) return [];
     const ids = (await deps.readContract({
       address: deps.relationships, abi: EDGES_BY_OBJECT_ABI, functionName: 'getEdgesByObject', args: [owner],
     } as never).catch(() => [])) as Hex[];
-    const out: Array<{ agent: string; name?: string }> = [];
+    const out: Array<{ agent: string; name?: string; primary?: boolean }> = [];
     for (const id of (ids ?? []).slice(0, deps.maxEdges ?? 40)) {
       if (!id || id === ZERO32) continue;
       const e = (await deps.readContract({ address: deps.relationships, abi: GET_EDGE_ABI, functionName: 'getEdge', args: [id] } as never).catch(() => null)) as
@@ -59,7 +63,12 @@ export function charteredAgentsReader(deps: CharteredDeps) {
       if (Number(e.status) !== ACTIVE) continue;
       const name = deps.reverseName ? await deps.reverseName(e.subject).catch(() => null) : null;
       if (!name || name.toLowerCase().split('.').pop() !== type) continue;
-      out.push({ agent: e.subject.toLowerCase(), name });
+      // WHICH ONE THEY WANT PAID. A preference the owner set on their own edge, public because the edge
+      // is — it saves the payer a question and permits nothing.
+      const primary = deps.primaryRole
+        ? (await deps.readContract({ address: deps.relationships, abi: HAS_ROLE_ABI, functionName: 'hasRole', args: [id, deps.primaryRole] } as never).catch(() => false)) === true
+        : false;
+      out.push({ agent: e.subject.toLowerCase(), name, ...(primary ? { primary: true } : {}) });
     }
     return out;
   };

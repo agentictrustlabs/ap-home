@@ -12,8 +12,9 @@ import { baseSepolia } from 'viem/chains';
 import { AGENT_NAME_PARENT } from '../../lib/domain';
 import { typedTldForKind, createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
+import { PrimaryPayee } from './PrimaryPayee';
 import { emitControlEvent } from '../../home/control-plane';
-import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, type Via } from '../../home/onboarding';
+import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../../home/onboarding';
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
@@ -602,7 +603,17 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
               personal.map((t) => (
                 <TreasuryCard key={t.agent} name={t.name} address={t.agent}
                   person={person} via={via} token={token} refreshKey={version} onFunded={reload}
-                  nameSlot={<NameAgentForm agent={t.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
+                  nameSlot={
+                    <>
+                      <NameAgentForm agent={t.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />
+                      {/* WHICH ONE RECEIVES. Holding several is ordinary; only you know which is the one
+                          to be paid into, and saying so spares every payer a question about your accounts. */}
+                      <PrimaryPayee
+                        treasury={t.agent} person={person} via={via} token={token}
+                        signHash={async (d) => (await signHashFor(via as Via, person as `0x${string}`, { token }))(d)}
+                      />
+                    </>
+                  } />
               ))
             ) : null}
             {/* ALWAYS offered, not only when there are none. Holding one treasury is not a reason to be

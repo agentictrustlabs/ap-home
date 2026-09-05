@@ -64,6 +64,25 @@ describe('charteredAgentsReader', () => {
     await expect(call(ALICE, 'treasury')).resolves.toEqual([]);
   });
 
+  it('marks the treasury its owner chose to be paid into', async () => {
+    const r = reader([edge()]);
+    const call = charteredAgentsReader({
+      readContract: (async (a: { functionName: string }) =>
+        a.functionName === 'getEdgesByObject' ? [`0x${'1'.padStart(64, '0')}`]
+        : a.functionName === 'hasRole' ? true
+        : edge()) as never,
+      relationships: REL, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
+      primaryRole: `0x${'ab'.repeat(32)}`,
+      reverseName: async () => 'alice2.treasury',
+    });
+    expect(await call(ALICE, 'treasury')).toEqual([{ agent: T2, name: 'alice2.treasury', primary: true }]);
+    void r;
+  });
+
+  it('marks nothing when the role is not configured — silence is not a preference', async () => {
+    expect((await reader([edge()]).call(ALICE, 'treasury'))[0]).not.toHaveProperty('primary');
+  });
+
   it('is inert when no relationship contract is configured', async () => {
     const readContract = vi.fn();
     const call = charteredAgentsReader({ readContract: readContract as never, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER });

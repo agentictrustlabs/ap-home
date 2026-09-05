@@ -44,7 +44,7 @@ export interface PartyLookups {
   onResolved?: (r: ResolvedParty) => void;
   /** The agents chartered under `owner` of a given type, read from the on-chain `ap:charteredUnder`
    *  edges (spec 355 W2). PUBLIC: this is the half that answers for someone else's agents. */
-  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
+  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean }>>;
   /** The held grants this asker can actually use — signature checked against the issuer, bound to them,
    *  and pointed at the target they name (spec 338 §4). Absent ⇒ held grants are not used. */
   verifyGrant?: (held: unknown, type: string, asker: string) => Promise<Array<{ targetAgent: string; owner: string; ownerName?: string; label?: string }>>;
@@ -194,12 +194,17 @@ export async function ownedAgentsOfType(
   // the half that works for a stranger — Nathan can be routed to Alice's treasury without reading
   // anything of hers. Not a fallback chain: both sources answer the same question ("what does this agent
   // hold of this kind"), and the CALLER decides what to do with one answer or several.
-  for (const c of await (lookups.charteredAgents?.(low, type) ?? Promise.resolve([])).catch(() => [])) {
+  const chartered = await (lookups.charteredAgents?.(low, type) ?? Promise.resolve([])).catch(() => []);
+  // THEY SAID WHICH ONE. When the owner has marked a primary payee, that IS the answer — asking the payer
+  // to choose between someone else's accounts puts the decision on the person who knows least about it.
+  // The others stay reachable by name; this only stops the question.
+  const primary = chartered.filter((c) => c.primary);
+  for (const c of (primary.length === 1 ? primary : chartered)) {
     if (seen.has(c.agent)) continue;
     seen.add(c.agent);
     out.push({
       agent: c.agent, label: c.name ?? c.agent, ...(c.name ? { name: c.name } : {}),
-      provenance: { tier: 'public' as const, source: 'chartered-under', subject: low, match: 'owned-by' },
+      provenance: { tier: 'public' as const, source: 'chartered-under', subject: low, match: c.primary ? 'primary-payee' : 'owned-by' },
     });
   }
 
