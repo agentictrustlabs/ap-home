@@ -15,7 +15,10 @@ import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
 
 interface SentRequest { kind?: string; owner?: string; ownerName?: string; wants?: string; amount?: string; status?: string }
-interface HeldGrant { targetAgent?: string; owner?: string; ownerName?: string; targetType?: string; expiresAt?: string }
+/** A REFERENCE, not an address. The holder is told whose agent they may reach and which grant says so;
+ *  where it is comes from the resolver, per use (spec 338 §4) — so this surface cannot show it either,
+ *  and should not pretend to. */
+interface HeldGrant { grantId?: string; owner?: string; ownerName?: string; targetType?: string; expiresAt?: string }
 
 /** What the composed ask should say, in the person's own voice. */
 export function completionAsk(g: HeldGrant, amount?: string): string {
@@ -70,11 +73,17 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
     <SectionShell title="Ready to send">
       {err && <p style={errorText}>{err}</p>}
       {rows.map(({ grant, amount }) => (
-        <div key={grant.targetAgent} style={cardSty} data-testid={`ready-to-send-${(grant.targetAgent ?? '').toLowerCase()}`}>
+        <div
+          key={grant.grantId} style={cardSty}
+          data-testid={`ready-to-send-${(grant.grantId ?? '').toLowerCase()}`}
+          data-owner={(grant.owner ?? '').toLowerCase()}
+        >
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             {grant.ownerName ?? 'They'} gave you a way to reach their {grant.targetType}
           </div>
-          <div style={{ marginTop: 4 }}><AddressChip address={grant.targetAgent ?? ''} /></div>
+          {/* No address, deliberately: you hold a way IN, not a location. It is looked up when you send,
+              and it stops being looked up if they withdraw it. */}
+          <div style={{ marginTop: 4 }}><AddressChip address={grant.owner ?? ''} /></div>
           <p style={{ ...mutedText, fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
             {amount
               ? `You were sending ${amount} USDC. Finish it below — you will still authorize the payment itself.`
@@ -82,7 +91,7 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
           </p>
           <button
             type="button" className="btn primary" style={{ marginTop: 10, fontSize: 12 }}
-            data-testid={`ready-to-send-go-${(grant.targetAgent ?? '').toLowerCase()}`}
+            data-testid={`ready-to-send-go-${(grant.grantId ?? '').toLowerCase()}`}
             onClick={() => {
               const message = completionAsk(grant, amount);
               if (onAsk) onAsk(message);
