@@ -51,7 +51,20 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
   }, [token]);
   useEffect(() => { void load(); }, [load]);
 
-  if (!session || !rows?.length) return null;
+  if (!session) return null;
+  // Rendered even when empty, quietly. "Nobody has given you a way to reach anything" is a real state and
+  // an invisible component is indistinguishable from a broken one — which cost an afternoon establishing
+  // whether this had deployed at all.
+  if (!rows?.length) {
+    return (
+      <SectionShell title="Ready to send">
+        {err && <p style={errorText}>{err}</p>}
+        <p style={{ ...mutedText, fontSize: 11.5 }} data-testid="ready-to-send-empty">
+          Nothing waiting. When someone gives you a way to reach an agent of theirs, it appears here.
+        </p>
+      </SectionShell>
+    );
+  }
 
   return (
     <SectionShell title="Ready to send">
