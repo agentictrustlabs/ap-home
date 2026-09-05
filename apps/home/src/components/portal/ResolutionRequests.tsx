@@ -20,7 +20,9 @@ import { connectedCredential } from './ask/credential';
 import type { Address } from '@agenticprimitives/types';
 
 interface PendingRequest {
-  requester: string; owner: string; wants: string; purpose?: string;
+  /** Absent on a `sent` row — this component renders only the requests addressed TO you. */
+  requester?: string;
+  kind?: string; owner?: string; wants?: string; purpose?: string;
   requestedAt?: string; status?: string; grantId?: string;
 }
 
@@ -66,7 +68,13 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
   useEffect(() => { void load(); }, [load]);
 
   if (!session || !token) return null;
-  const pending = (rows ?? []).filter((x) => (x.status ?? 'pending') === 'pending');
+  // ONLY REQUESTS ADDRESSED TO YOU. The record family holds both ends of an exchange — what someone
+  // asked of you, and what you are waiting on from them — and rendering a "sent" row here read its
+  // absent `requester` and threw, taking the whole section down with it. The crash was invisible: the
+  // page kept working and the card below simply never appeared, which cost an afternoon of grepping
+  // bundles to decide whether that card had even deployed.
+  const pending = (rows ?? []).filter((x) =>
+    x.kind !== 'resolution.invitation.sent' && !!x.requester && (x.status ?? 'pending') === 'pending');
   // A storage problem is shown even with nothing pending: it is the reason nothing is pending.
   if (!pending.length && !storageNote) return null;
 
@@ -76,16 +84,17 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
     agents.filter((a) => (a.kind ?? '').includes(wants) || (a.name ?? '').endsWith(`.${wants}`));
 
   async function approve(req: PendingRequest) {
-    const options = candidatesFor(req.wants);
+    const requester = req.requester ?? '';
+    const options = candidatesFor(req.wants ?? 'treasury');
     // NO SILENT DEFAULT when there is a choice. Which agent gets disclosed is the whole decision, and
     // defaulting to the first one means a mis-click discloses an agent the person never picked — the
     // exact error this feature exists to prevent, made by the feature. One option needs no choosing.
-    const target = options.length === 1 ? options[0]!.agent : pickedFor[req.requester];
+    const target = options.length === 1 ? options[0]!.agent : pickedFor[requester];
     if (!target) {
       setErr(options.length ? 'Pick which one they may reach.' : 'You have no agent of that kind to give them a way to reach.');
       return;
     }
-    setBusy(req.requester); setErr('');
+    setBusy(requester); setErr('');
     try {
       // Signed by the person deciding — that signature is what makes the grant theirs rather than the
       // server's. The route verifies it against their agent on chain before delivering anything.
@@ -111,13 +120,14 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
       {err && <p style={errorText}>{err}</p>}
       {storageNote && <p style={errorText} data-testid="resolution-storage-note">{storageNote}</p>}
       {pending.map((req) => {
-        const options = candidatesFor(req.wants);
+        const requester = req.requester!;
+        const options = candidatesFor(req.wants ?? 'treasury');
         return (
-          <div key={`${req.requester}:${req.wants}`} style={cardSty} data-testid={`resolution-request-${req.requester.toLowerCase()}`}>
+          <div key={`${requester}:${req.wants}`} style={cardSty} data-testid={`resolution-request-${requester.toLowerCase()}`}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>
               Someone wants a way to reach your {req.wants}
             </div>
-            <div style={{ marginTop: 4 }}><AddressChip address={req.requester} /></div>
+            <div style={{ marginTop: 4 }}><AddressChip address={requester} /></div>
             {req.purpose && <p style={{ fontSize: 12.5, margin: '6px 0 0' }}>“{req.purpose}”</p>}
             <p style={{ ...mutedText, fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
               Approving lets them <strong>find</strong> the agent you pick — nothing more. They will be able to send to it.
@@ -125,9 +135,9 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
             </p>
             {options.length > 1 && (
               <select
-                className="input" style={{ marginTop: 8, fontSize: 12 }} data-testid={`resolution-target-${req.requester.toLowerCase()}`}
-                value={pickedFor[req.requester] ?? ''}
-                onChange={(e) => setPickedFor({ ...pickedFor, [req.requester]: e.target.value })}
+                className="input" style={{ marginTop: 8, fontSize: 12 }} data-testid={`resolution-target-${requester.toLowerCase()}`}
+                value={pickedFor[requester] ?? ''}
+                onChange={(e) => setPickedFor({ ...pickedFor, [requester]: e.target.value })}
               >
                 <option value="">Which one may they reach?</option>
                 {options.map((o) => <option key={o.agent} value={o.agent}>{o.name || `unnamed ${req.wants} · ${o.agent.slice(0, 10)}…`}</option>)}
@@ -142,7 +152,7 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
                   You have no {req.wants} yet — that is why they could not reach one. Create one and come back to this
                   card; nothing is sent until you do.
                 </p>
-                <a className="btn ghost" style={{ fontSize: 12, display: 'inline-block', marginTop: 6 }} href="/treasuries" data-testid={`resolution-create-${req.requester.toLowerCase()}`}>
+                <a className="btn ghost" style={{ fontSize: 12, display: 'inline-block', marginTop: 6 }} href="/treasuries" data-testid={`resolution-create-${requester.toLowerCase()}`}>
                   Create a {req.wants}
                 </a>
               </div>
@@ -150,8 +160,8 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <BusyButton
                 busy={busy === req.requester} busyLabel="Granting…"
-                disabled={!options.length || (options.length > 1 && !pickedFor[req.requester])}
-                className="btn primary" data-testid={`resolution-approve-${req.requester.toLowerCase()}`}
+                disabled={!options.length || (options.length > 1 && !pickedFor[requester])}
+                className="btn primary" data-testid={`resolution-approve-${requester.toLowerCase()}`}
                 onClick={() => void approve(req)}
               >Give them a way to reach it</BusyButton>
             </div>
