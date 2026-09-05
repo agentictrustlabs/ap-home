@@ -64,6 +64,7 @@ export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
     + 'you?". Use this when a payment or message cannot be routed because the thing it should reach is '
     + 'unlisted: it sends the person a request THEY decide on, and if they agree you are given a way to '
     + 'resolve that agent. It moves no money and grants no authority over anything. '
+    + 'IT NOTIFIES THEM ITSELF — do NOT also send a direct message; this one step is the whole ask. '
     + 'Args: owner (the person to ask — a name or address), wants (what kind of theirs: "treasury"), '
     + 'purpose (why, in your own words).',
   inputSchema: {

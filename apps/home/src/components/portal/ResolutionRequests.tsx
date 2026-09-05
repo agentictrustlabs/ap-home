@@ -31,6 +31,7 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [pickedFor, setPickedFor] = useState<Record<string, string>>({});
+  const [storageNote, setStorageNote] = useState('');
   /** One re-issue per mount — see the note in `load`. */
   const reissued = useRef(false);
 
@@ -49,8 +50,12 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
     // renders is one nobody will keep open.
     if (agentAddress && session && !reissued.current) {
       reissued.current = true;
-      await activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session.via), { token }, true)
-        .catch(() => undefined);
+      const re = await activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session.via), { token }, true)
+        .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+      // NOT swallowed. A silent failure here looks identical to success and leaves the person unable to
+      // receive requests they were never told they could not receive.
+      if (!re.ok) setStorageNote(`Requests to reach your agents can't be received yet: ${re.error}`);
+      else setStorageNote('');
     }
     const r = await fetch('/a2a/resolution/requests', { headers: { authorization: `Bearer ${token}` } });
     const b = (await r.json().catch(() => ({}))) as { requests?: PendingRequest[]; error?: string };
@@ -61,7 +66,8 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
 
   if (!session || !token) return null;
   const pending = (rows ?? []).filter((x) => (x.status ?? 'pending') === 'pending');
-  if (!pending.length) return null;
+  // A storage problem is shown even with nothing pending: it is the reason nothing is pending.
+  if (!pending.length && !storageNote) return null;
 
   /** The agents this person could disclose — theirs, of the kind asked for. An UNNAMED one is the usual
    *  answer here: it is unlisted precisely because it has no name, which is why a grant is needed. */
@@ -93,6 +99,7 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
   return (
     <SectionShell title={title}>
       {err && <p style={errorText}>{err}</p>}
+      {storageNote && <p style={errorText} data-testid="resolution-storage-note">{storageNote}</p>}
       {pending.map((req) => {
         const options = candidatesFor(req.wants);
         return (
