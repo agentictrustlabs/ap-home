@@ -851,6 +851,9 @@ const ASK_PLANNER_SYSTEM =
   + 'members, membership, rosters, "who is in" or "who belongs to".\n\n'
   + 'Missing details are not a reason to fall back to a lookup: the capability will ask the person for '
   + 'what it needs. Choosing the tool that ACTS is what lets it.\n\n'
+  + 'NEVER INVENT A PLACEHOLDER. If the ask does not say an amount, a name or a recipient, OMIT that '
+  + 'argument entirely — it will be asked for. Writing "<UNKNOWN>", "TBD" or a guessed number puts that '
+  + 'value inside the authority the person is asked to sign.\n\n'
   + 'NEVER use an address from the context as a recipient, payee or invitee. The context tells you who is '
   + 'ASKING and which agent they are addressing — not who they are talking about. Pass the words the '
   + 'person used ("alice", "alice.me") and let the capability resolve them; if the ask names nobody, pass '
@@ -1086,9 +1089,23 @@ async function resolveStepArgs(
     message: { label: 'Message', hint: 'what to say' },
     label: { label: 'Name', hint: 'lowercase letters, digits and hyphens' },
   };
+  // A PLACEHOLDER IS NOT AN ANSWER. Asked to "send money to alice" with no figure, the planner filled the
+  // amount with the literal string "<UNKNOWN>" — so the argument was present, this check passed, and the
+  // person was shown a mandate whose ceiling was a placeholder. An argument counts as given only if it is
+  // the KIND of value it is supposed to be; for a quantity that means a number.
+  const NUMERIC = new Set(['amount', 'usdc']);
+  const given = (k: string): boolean => {
+    const v = String(out[k] ?? '').trim();
+    if (!v) return false;
+    if (/^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(v)) return false;
+    if (NUMERIC.has(k)) return /^\d+(\.\d+)?$/.test(v);
+    return true;
+  };
   if (where?.required?.length) {
     const missing = where.required.filter((k) => !PARTY_ARGS.includes(k)
-      && (ALTERNATIVES[k] ?? [k]).every((alt) => String(out[alt] ?? '').trim() === ''));
+      && (ALTERNATIVES[k] ?? [k]).every((alt) => !given(alt)));
+    // A placeholder must not survive into the step either: it would be encoded into a caveat.
+    for (const k of NUMERIC) if (String(out[k] ?? '').trim() && !given(k)) delete out[k];
     if (missing.length) {
       const fields: InputFieldV1[] = missing.map((k) => ({
         name: (ALTERNATIVES[k]?.[1] ?? k),
