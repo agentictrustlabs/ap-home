@@ -67,14 +67,21 @@ export interface ResolvedParty {
   ownedBy?: string;
 }
 
-/** The owner a candidate was reached THROUGH, when it was reached through one. Both sources answer
- *  "what does this agent hold" on someone's behalf, so both name that someone in `provenance.subject`. */
+/** The owner a candidate was reached THROUGH, when it was reached through one.
+ *
+ *  Read off an EXPLICIT field, never off `provenance.subject`: for a private-tier read the subject is
+ *  WHOSE TIER WAS READ, which for a held grant is the ASKER. Taking it as the owner named Nathan as the
+ *  owner of Bob's treasury — the settle it fed then looked for a note from Nathan to himself, found none,
+ *  and closed nothing, silently and plausibly. Provenance says where an answer came from; it does not say
+ *  what the answer is about. */
 function ownerOf(c: EntityCandidate): string | undefined {
-  const via = c.provenance?.source;
-  if (via !== 'chartered-under' && via !== 'resolution-grant') return undefined;
-  const subject = String(c.provenance?.subject ?? '').toLowerCase();
-  return /^0x[0-9a-f]{40}$/.test(subject) ? subject : undefined;
+  const owner = String((c as OwnedCandidate).ownedBy ?? '').toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(owner) ? owner : undefined;
 }
+
+/** A candidate that is HELD BY somebody — what `ownedAgentsOfType` answers with. The owner is stated,
+ *  because the question it answers ("what does THIS agent hold") has an owner in it. */
+type OwnedCandidate = EntityCandidate & { ownedBy?: string };
 
 const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
 
@@ -200,11 +207,11 @@ export async function ownedAgentsOfType(
   type: string,
   lookups: PartyLookups,
   asker?: string,
-): Promise<EntityCandidate[]> {
+): Promise<OwnedCandidate[]> {
   const subject = asker ?? owner;
   const low = owner.toLowerCase();
   const seen = new Set<string>();
-  const out: EntityCandidate[] = [];
+  const out: OwnedCandidate[] = [];
 
   // ON CHAIN FIRST (spec 355 W2): `ap:charteredUnder` edges are PUBLIC and chain-reproducible, so this is
   // the half that works for a stranger — Nathan can be routed to Alice's treasury without reading
@@ -220,6 +227,7 @@ export async function ownedAgentsOfType(
     seen.add(c.agent);
     out.push({
       agent: c.agent, label: c.name ?? c.agent, ...(c.name ? { name: c.name } : {}),
+      ownedBy: low,
       provenance: { tier: 'public' as const, source: 'chartered-under', subject: low, match: c.primary ? 'primary-payee' : 'owned-by' },
     });
   }
@@ -242,6 +250,7 @@ export async function ownedAgentsOfType(
       seen.add(g.targetAgent.toLowerCase());
       out.push({
         agent: g.targetAgent.toLowerCase(),
+        ownedBy: g.owner.toLowerCase(),
         // It has NO NAME — that is why a grant was needed. Say whose it is instead.
         // "alice.me's treasury" — the owner's name, because the target has none and an address alone
         // does not tell the holder who they are about to pay.
