@@ -30,7 +30,14 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     const wants = String((args as { wants?: unknown }).wants ?? 'treasury').trim().toLowerCase();
     const purpose = String((args as { purpose?: unknown }).purpose ?? '').trim() || 'to send you money';
 
-    const amount = String((args as { usdc?: unknown }).usdc ?? '').trim();
+    // The figure, from the argument when the planner passed it and from the words when it did not.
+    // Reading the sentence is a heuristic and I have been avoiding those — this one is narrow enough to
+    // defend: it extracts a number the PERSON typed, into a field whose only use is prefilling a later
+    // ask, and which never reaches a caveat or a gate. Losing it costs them the one-press finish, which
+    // is the whole point of recording it.
+    const fromArg = String((args as { usdc?: unknown }).usdc ?? '').trim();
+    const spoken = /(\d+(?:\.\d+)?)\s*usdc/i.exec(String((args as { purpose?: unknown }).purpose ?? ''))?.[1];
+    const amount = /^\d+(\.\d+)?$/.test(fromArg) ? fromArg : (spoken ?? '');
     const at = new Date().toISOString();
     const request: ResolutionInvitationRequestV1 = {
       v: 1, kind: 'resolution.invitation.request',
