@@ -137,6 +137,41 @@ export async function ownAgentsOfType(
     }));
 }
 
+/**
+ * THE AGENTS SOMEONE OWNS, of a given type — the relationship, not the name.
+ *
+ * "Send money to alice" means alice's TREASURY. Finding it by guessing the name `alice.treasury` was
+ * wrong in principle and wrong in fact: her treasury is called `alice2.treasury`, and a treasury's name
+ * has no obligation to resemble its owner's. What actually connects them is the OWNERSHIP relationship —
+ * resolve the person first, then ask what they hold.
+ *
+ * Read from the asker's own tree, where an agent records its parent. That covers everything they are
+ * linked to — their own treasuries, and those of the organizations they steward. It does NOT cover a
+ * stranger's: the link between alice.me and alice2.treasury lives in ALICE's private records
+ * (ADR-0025), and is in no public place today — not the relationship registry (no edges exist), not the
+ * directory (no owner field), not the naming service (whose "parent" is the TLD). Until a person's
+ * treasury is a public fact, nobody else can be routed to it, and the honest move is to ask.
+ */
+export async function ownedAgentsOfType(
+  owner: string,
+  type: string,
+  lookups: PartyLookups,
+  asker?: string,
+): Promise<EntityCandidate[]> {
+  const subject = asker ?? owner;
+  if (!lookups.readSubjectRecord) return [];
+  const doc = await lookups.readSubjectRecord(subject, 'relationships.data').catch(() => null);
+  const low = owner.toLowerCase();
+  return relationshipRows(doc)
+    .filter((r) => r.parent?.toLowerCase() === low && r.name.toLowerCase().split('.').pop() === type)
+    .map((r) => ({
+      agent: r.agent,
+      label: r.name,
+      name: r.name,
+      provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'owned-by' },
+    }));
+}
+
 /** Where a candidate came from, said the way a person would say it. */
 const FOUND_IN: Record<string, string> = {
   relationships: 'you are linked to them',
@@ -201,6 +236,29 @@ export async function resolveParty(
       //
       // Only for money: a message falling from `.me` to `.org` is the same conversation with the same
       // person's organization, and asking about it would be noise.
+      // NOT OF THIS TYPE — so ask what the ones we DID find OWN. "Send money to alice" names the person;
+      // her treasury is a thing she HOLDS, and the two are connected by a relationship, not by their
+      // names resembling each other. Resolve the person, then follow the link.
+      if (!tier.length && rank === 0) {
+        const owned = (await Promise.all(all.map((c) => ownedAgentsOfType(c.agent, type, lookups, where.subject).catch(() => []))))
+          .flat()
+          .filter((c, i, xs) => xs.findIndex((y) => y.agent === c.agent) === i);
+        if (owned.length === 1) {
+          const c = owned[0]!;
+          lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent, label: c.label, hint: candidateHint(c) });
+          return c.agent.toLowerCase() as Address;
+        }
+        if (owned.length > 1) {
+          // Several of theirs. Which one is theirs to say — a person may hold more than one treasury and
+          // nothing about the ask distinguishes them.
+          ask(`Which ${type} should be ${where.what}?`, {
+            name: where.argName, label: where.what, type: 'choice', required: true,
+            choices: owned.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+            allowOther: true,
+            hint: `“${value}” holds ${owned.length} ${type}s — pick the one you mean`,
+          });
+        }
+      }
       if (tier.length && rank > 0 && VALUE_ARGS.has(where.argName)) {
         ask(`Nothing called “${value}” is a ${where.types[0]}. Who should be ${where.what}?`, {
           name: where.argName, label: where.what, type: 'choice', required: true,

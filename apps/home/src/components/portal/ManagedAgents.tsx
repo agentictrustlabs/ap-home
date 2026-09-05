@@ -583,7 +583,10 @@ export function OrganizationsManager({
 export function TreasuriesRollup({ token, person, via }: { token: string | null; person: string | null; via: string }) {
   const { agents, loaded, version, reload } = useManagedAgents(token);
   if (!token || !person) return null;
-  const personal = agents.find((a) => a.kind === 'person-treasury');
+  // ALL of them. A person may hold several — the Ask can charter one in a sentence, and creating
+  // alice3.treasury while alice2.treasury existed made the new one vanish from the page that is supposed
+  // to list it. Org treasuries were always a list here; personal ones were a single `find`.
+  const personal = agents.filter((a) => a.kind === 'person-treasury');
   const orgTreasuries = agents.filter((a) => a.kind === 'org-treasury');
   const orgName = (orgAgent: string) => agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(orgAgent))?.name ?? 'organization';
 
@@ -595,10 +598,12 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
         <>
           <h3 className="subhead">Personal</h3>
           <div className="manage-grid">
-            {personal ? (
-              <TreasuryCard name={personal.name} address={personal.agent}
-                person={person} via={via} token={token} refreshKey={version} onFunded={reload}
-                nameSlot={<NameAgentForm agent={personal.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
+            {personal.length ? (
+              personal.map((t) => (
+                <TreasuryCard key={t.agent} name={t.name} address={t.agent}
+                  person={person} via={via} token={token} refreshKey={version} onFunded={reload}
+                  nameSlot={<NameAgentForm agent={t.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
+              ))
             ) : (
               <div className="manage-card">
                 <div className="manage-card-head">

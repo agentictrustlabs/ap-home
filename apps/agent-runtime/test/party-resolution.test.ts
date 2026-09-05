@@ -266,3 +266,48 @@ describe('the typed suffix says WHICH nathan — the capability decides', () => 
     expect((r as { prompt: { fields: Array<{ choices?: unknown[] }> } }).prompt.fields[0]!.choices).toHaveLength(4);
   });
 });
+
+describe('a person is not their treasury — follow the relationship (the user\'s rule)', () => {
+  const ALICE = '0xaaaa000000000000000000000000000000000011';
+  const T2 = '0xaaaa000000000000000000000000000000000012';
+  const T3 = '0xaaaa000000000000000000000000000000000013';
+  const pay = (types: readonly string[] = ['treasury', 'me']) =>
+    ({ stepRef: 's0', toolId: 'treasury.payment.execute', argName: 'payee', what: 'being paid', subject: ME, types });
+
+  /** The asker's tree: alice.me, and treasuries whose PARENT is alice — the ownership link. */
+  const treeWith = (treasuries: string[]) => ({
+    resolveName: vi.fn(async (n: string) => (n === 'alice.me' ? ALICE : null)),
+    readSubjectRecord: vi.fn(async (_s: string, r: string) => r === 'relationships.data' ? {
+      orgs: Object.fromEntries([
+        [ALICE, { org: ALICE, orgName: 'alice.me', kind: 'person' }],
+        ...treasuries.map((t, i) => [t, { org: t, orgName: `alice${i + 2}.treasury`, kind: 'person-treasury', parent: ALICE }]),
+      ]),
+    } : null),
+  });
+
+  it('“pay alice” finds the treasury she HOLDS, whatever it is called', async () => {
+    // The name is alice2.treasury — nothing resembling "alice.treasury" exists, and guessing that name
+    // was the old, wrong mechanism.
+    const r = await caught(resolveParty('alice', treeWith([T2]), pay()));
+    expect(r).toEqual({ ok: true, v: T2 });
+  });
+
+  it('asks WHICH when she holds more than one', async () => {
+    const r = await caught(resolveParty('alice', treeWith([T2, T3]), pay()));
+    expect(r.ok).toBe(false);
+    const field = (r as { prompt: { fields: Array<{ choices?: Array<{ value: string }>; allowOther?: boolean }> } }).prompt.fields[0]!;
+    expect(field.choices?.map((c) => c.value).sort()).toEqual([T2, T3].sort());
+    expect(field.allowOther, 'and a name that is not listed is still a valid answer').toBe(true);
+  });
+
+  it('holds none ⇒ the honest question, never a silent substitution to the person', async () => {
+    const r = await caught(resolveParty('alice', treeWith([]), pay()));
+    expect(r.ok).toBe(false);
+    expect((r as { prompt: { prompt: string } }).prompt.prompt).toMatch(/is a treasury/);
+  });
+
+  it('a MESSAGE still goes to the person — ownership is followed only for what the capability wants', async () => {
+    const r = await caught(resolveParty('alice', treeWith([T2]), { ...pay(['me', 'org']), toolId: 'messaging.direct.send', argName: 'recipient', what: 'the person to message' }));
+    expect(r).toEqual({ ok: true, v: ALICE });
+  });
+});

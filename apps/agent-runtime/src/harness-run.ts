@@ -1003,13 +1003,16 @@ async function resolveStepArgs(
           break;
         }
         if (mine.length > 1) {
-          // Two of yours could pay. Which one is yours to say, not ours to rank.
+          // Two of yours could pay — a person may hold several treasuries, and creating one in a sentence
+          // makes that ordinary. Which one is yours to say, not ours to rank.
           throw new InputRequired({
             kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
             prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${PARTY_WORD[arg] ?? arg}?`,
             fields: [{
               name: arg, label: PARTY_WORD[arg] ?? arg, type: 'choice', required: true,
               choices: mine.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+              // One of theirs may not be in their tree yet; a full name is always a valid answer.
+              allowOther: true,
             }],
           });
         }
