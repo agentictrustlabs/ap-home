@@ -1010,12 +1010,14 @@ async function resolveStepArgs(
     // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
     // one of THEIR agents that is — the typed suffix already says which. Never a widening: their tree only.
     if (types?.length && isAsker && !types.includes('me')) {
+      let found = false;
       for (const type of types) {
         const mine = await ownAgentsOfType(where.subject, type, lookups);
         if (mine.length === 1) {
           const c = mine[0]!;
           lookups.onResolved?.({ arg, raw: PARTY_WORD[arg] ?? arg, agent: c.agent, label: c.label, hint: candidateHint(c) });
           out[arg] = c.agent;
+          found = true;
           break;
         }
         if (mine.length > 1) {
@@ -1032,6 +1034,21 @@ async function resolveStepArgs(
             }],
           });
         }
+      }
+      // NONE OF THEIRS IS OF THE RIGHT KIND — and the person SA it was defaulted to is NOT a fallback.
+      // The capability says a payer is a treasury or an organization precisely because a person agent is
+      // neither, and leaving it in place is how a payment came out of someone's PERSON agent while their
+      // seven treasuries sat untouched. It succeeded, which was the worst part: the money left an account
+      // nobody meant to spend from and the run said "done".
+      if (!found) {
+        throw new InputRequired({
+          kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+          prompt: `You have no ${types[0]} to be ${PARTY_WORD[arg] ?? arg}. Which agent should be?`,
+          fields: [{
+            name: arg, label: PARTY_WORD[arg] ?? arg, type: 'text', required: true,
+            hint: `give a name (yours2.${types[0]}) or an address — a ${types[0]} is what holds what would be spent`,
+          }],
+        });
       }
     }
   }

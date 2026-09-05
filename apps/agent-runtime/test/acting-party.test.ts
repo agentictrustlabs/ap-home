@@ -41,6 +41,25 @@ describe('the asker’s own agent of a type', () => {
     expect(await ownAgentsOfType(NATHAN, 'treasury', tier([ROWS[1]!]))).toEqual([]);
   });
 
+  it('finds an UNNAMED treasury by its kind — the name is not the only evidence', async () => {
+    // The live failure: seven treasuries, every one created without a name, and the resolver reported the
+    // person owned none — so a payment came out of their PERSON agent and reported success.
+    const unnamed = [{ org: '0x00000000000000000000000000000000000000a9', orgName: '', relationship: 'steward', kind: 'person-treasury' }];
+    const found = await ownAgentsOfType(NATHAN, 'treasury', tier(unnamed));
+    expect(found.map((c) => c.agent)).toEqual(['0x00000000000000000000000000000000000000a9']);
+    expect(found[0]!.label, 'and it is labelled by what it IS, having nothing else').toMatch(/unnamed treasury/);
+  });
+
+  it('matches an org treasury by kind too', async () => {
+    const orgT = [{ org: '0x00000000000000000000000000000000000000aa', orgName: '', kind: 'org-treasury' }];
+    expect(await ownAgentsOfType(NATHAN, 'treasury', tier(orgT))).toHaveLength(1);
+  });
+
+  it('does not match a different kind that merely ends in the same word', async () => {
+    const notATreasury = [{ org: '0x00000000000000000000000000000000000000ab', orgName: '', kind: 'organization' }];
+    expect(await ownAgentsOfType(NATHAN, 'treasury', tier(notATreasury))).toEqual([]);
+  });
+
   it('without a private tier it answers nothing — it never widens to a public lookup', async () => {
     expect(await ownAgentsOfType(NATHAN, 'treasury', {})).toEqual([]);
   });

@@ -133,14 +133,32 @@ export async function ownAgentsOfType(
 ): Promise<EntityCandidate[]> {
   if (!lookups.readSubjectRecord) return [];
   const doc = await lookups.readSubjectRecord(subject, 'relationships.data');
-  return relationshipRows(doc)
-    .filter((r) => r.name.toLowerCase().split('.').pop() === type)
-    .map((r) => ({
-      agent: r.agent,
-      label: r.name,
-      name: r.name,
-      provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'own-agent' },
-    }));
+  return relationshipRows(doc).filter((r) => isOfType(r, type)).map((r) => asCandidate(r, type, subject, 'own-agent'));
+}
+
+/**
+ * Is this one of the person's agents of that kind?
+ *
+ * THE NAME IS NOT THE ONLY EVIDENCE, and relying on it lost seven treasuries. An UNNAMED agent has no
+ * suffix to read — that is the whole point of being unnamed — so its row's `kind` (`person-treasury`,
+ * `org-treasury`) is what says what it is. Reading only the suffix meant a person who had created every
+ * treasury without a name owned, as far as this resolver could tell, none at all.
+ */
+function isOfType(r: { name: string; kind?: string }, type: string): boolean {
+  if (r.name.toLowerCase().split('.').pop() === type) return true;
+  const kind = (r.kind ?? '').toLowerCase();
+  return kind === type || kind.endsWith(`-${type}`);
+}
+
+/** A row as a candidate. An unnamed agent is labelled by WHAT it is, since it has nothing else. */
+function asCandidate(r: { agent: string; name: string; kind?: string }, type: string, subject: string, match: string): EntityCandidate {
+  const named = r.name.includes('.');
+  return {
+    agent: r.agent,
+    label: named ? r.name : `unnamed ${type} · ${r.agent.slice(0, 8)}…${r.agent.slice(-4)}`,
+    ...(named ? { name: r.name } : {}),
+    provenance: { tier: 'private' as const, source: 'relationships', subject, match },
+  };
 }
 
 /**
@@ -207,13 +225,9 @@ export async function ownedAgentsOfType(
   if (lookups.readSubjectRecord) {
     const doc = await lookups.readSubjectRecord(subject, 'relationships.data').catch(() => null);
     for (const r of relationshipRows(doc)) {
-      if (r.parent?.toLowerCase() !== low || r.name.toLowerCase().split('.').pop() !== type) continue;
-      if (seen.has(r.agent)) continue;
+      if (r.parent?.toLowerCase() !== low || !isOfType(r, type) || seen.has(r.agent)) continue;
       seen.add(r.agent);
-      out.push({
-        agent: r.agent, label: r.name, name: r.name,
-        provenance: { tier: 'private' as const, source: 'relationships', subject, match: 'owned-by' },
-      });
+      out.push(asCandidate(r, type, subject, 'owned-by'));
     }
   }
   return out;
