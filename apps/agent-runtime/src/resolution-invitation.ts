@@ -60,10 +60,13 @@ export interface HeldResolutionGrantV1 {
 export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
   id: 'resolution.invitation.request',
   description:
-    'ASK SOMEONE FOR A WAY TO REACH AN AGENT OF THEIRS THAT HAS NO PUBLIC NAME — most often "how do I pay '
-    + 'you?". Use this when a payment or message cannot be routed because the thing it should reach is '
-    + 'unlisted: it sends the person a request THEY decide on, and if they agree you are given a way to '
-    + 'resolve that agent. It moves no money and grants no authority over anything. '
+    'ASK SOMEONE FOR A WAY TO REACH AN AGENT OF THEIRS THAT HAS NO PUBLIC NAME. '
+    + 'NEVER THE FIRST STEP FOR A PAYMENT OR A MESSAGE: if the ask is to send money or write to someone, '
+    + 'choose the capability that DOES that — it resolves who is meant and asks for whatever it needs. '
+    + 'This one is for the case where that has already failed because the thing to reach is unlisted, or '
+    + 'where the person explicitly asks for an introduction, an invitation, or a way to reach something. '
+    + 'It sends the owner a request THEY decide on; if they agree you are given a way to resolve that '
+    + 'agent. It moves no money and grants no authority over anything. '
     + 'IT NOTIFIES THEM ITSELF — do NOT also send a direct message; this one step is the whole ask. '
     + 'Args: owner (the person to ask — a name or address), wants (what kind of theirs: "treasury"), '
     + 'purpose (why, in your own words).',

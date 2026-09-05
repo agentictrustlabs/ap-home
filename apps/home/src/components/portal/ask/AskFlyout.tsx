@@ -431,7 +431,9 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
                       background: picked ? 'var(--accent-soft, #eff4ff)' : 'transparent',
                     }}
                   >
-                    <span style={{ fontSize: 12.5, fontWeight: picked ? 600 : 500 }}>{c.label}</span>
+                    {/* An explicit colour: inheriting one rendered the label the same shade as the card
+                        it sits on, so the choices were invisible and the person picked blind. */}
+                    <span style={{ fontSize: 12.5, fontWeight: picked ? 600 : 500, color: 'var(--text, #14181f)' }}>{c.label}</span>
                     {c.hint && <span className="muted" style={{ fontSize: 11, display: 'block', marginTop: 1 }}>{c.hint}</span>}
                   </button>
                 );
@@ -461,8 +463,13 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
       ))}
       {prompt.kind === 'signature' && (
         <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
-          Signing this creates the agent and makes your credential its custodian. The agent re-derives what
-          you signed and refuses it if it differs.
+          {/* WHAT IS BEING SIGNED, not what was being signed the day this was written. A person approving
+              a payment was told "this creates the agent and makes your credential its custodian", which
+              describes a different act entirely — the one copy this card had. */}
+          {/approve|second party/i.test(prompt.prompt)
+            ? 'You are approving someone else’s step, as the second party its risk requires. It authorizes that one step and nothing further.'
+            : 'Signing this creates the agent and makes your credential its custodian.'}
+          {' '}The agent re-derives what you signed and refuses it if it differs.
         </p>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>

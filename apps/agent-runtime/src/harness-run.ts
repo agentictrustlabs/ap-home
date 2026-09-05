@@ -175,7 +175,11 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       // `payer` is REQUIRED: a payment must say who pays. Left optional it defaulted to whoever was being
       // asked, so "from nathan.treasury" was checked — and refused — against Nathan's own empty account.
       // Whose money moves is not a detail to infer.
-      required: ['payer', 'payee'],
+      // AMOUNT IS REQUIRED, and saying so here is what makes it a QUESTION rather than a crash: the
+      // loop asks the person for a declared argument it lacks (§3.5), while the mandate handler — which
+      // only sees the step at signing time — can do nothing but throw "args.amount is required to bound
+      // the authority it needs", which is true, unactionable, and arrives after the person has typed.
+      required: ['payer', 'payee', 'amount'],
     },
     // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
     // authority as an ERC-20 contract, which nothing can sign.
@@ -1070,6 +1074,36 @@ async function resolveStepArgs(
     const resolved = raw.includes('.') && lookups.resolveName ? await lookups.resolveName(raw.toLowerCase()).catch(() => null) : null;
     if (resolved) out[key] = resolved.toLowerCase();
   }
+  // ANYTHING THE TOOL DECLARED AND THE SENTENCE DID NOT GIVE IS A QUESTION (§3.5).
+  //
+  // Party arguments are asked for above. Everything else was nobody's job, so "send money to alice" —
+  // which names no figure — reached the mandate handler and died there on "args.amount is required to
+  // bound the authority it needs": true, unactionable, and after the person had already typed. The loop
+  // can just ask. `amount` and `usdc` are the same requirement in two units, so either satisfies it.
+  const ALTERNATIVES: Record<string, readonly string[]> = { amount: ['amount', 'usdc'] };
+  const WORD_FOR_ARG: Record<string, { label: string; hint: string }> = {
+    amount: { label: 'How much', hint: 'in whole USDC, e.g. 10 or 12.50' },
+    message: { label: 'Message', hint: 'what to say' },
+    label: { label: 'Name', hint: 'lowercase letters, digits and hyphens' },
+  };
+  if (where?.required?.length) {
+    const missing = where.required.filter((k) => !PARTY_ARGS.includes(k)
+      && (ALTERNATIVES[k] ?? [k]).every((alt) => String(out[alt] ?? '').trim() === ''));
+    if (missing.length) {
+      const fields: InputFieldV1[] = missing.map((k) => ({
+        name: (ALTERNATIVES[k]?.[1] ?? k),
+        label: WORD_FOR_ARG[k]?.label ?? k,
+        type: 'text' as const, required: true,
+        ...(WORD_FOR_ARG[k]?.hint ? { hint: WORD_FOR_ARG[k]!.hint } : {}),
+      }));
+      throw new InputRequired({
+        kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+        prompt: missing.length === 1 && missing[0] === 'amount' ? 'How much should I send?' : 'I need a little more to do that.',
+        fields,
+      });
+    }
+  }
+
   // ONE UNIT, ONCE. The planner may say `usdc: "2"` or `amount: "2000000"` — both are honest readings of
   // "2 usdc" — but everything downstream (the caveat's ceiling, the balance check, the invoker) must see
   // exactly one. Converting here means the delegation package never learns a token symbol and no reader
