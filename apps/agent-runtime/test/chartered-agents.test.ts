@@ -64,23 +64,40 @@ describe('charteredAgentsReader', () => {
     await expect(call(ALICE, 'treasury')).resolves.toEqual([]);
   });
 
-  it('marks the treasury its owner chose to be paid into', async () => {
-    const r = reader([edge()]);
+  it('marks the one its owner chose, WHEN there is a choice to make', async () => {
+    const T3 = '0x00000000000000000000000000000000000000a4';
+    const ids = [`0x${'1'.padStart(64, '0')}`, `0x${'2'.padStart(64, '0')}`];
+    const call = charteredAgentsReader({
+      readContract: (async (a: { functionName: string; args: unknown[] }) =>
+        a.functionName === 'getEdgesByObject' ? ids
+        : a.functionName === 'hasRole' ? a.args[0] === ids[1]
+        : edge({ subject: a.args[0] === ids[0] ? T2 : T3 })) as never,
+      relationships: REL, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
+      primaryRole: `0x${'ab'.repeat(32)}`,
+      reverseName: async (agent: string) => (agent === T2 ? 'alice2.treasury' : 'alice3.treasury'),
+    });
+    expect(await call(ALICE, 'treasury')).toEqual([
+      { agent: T2, name: 'alice2.treasury' },
+      { agent: T3, name: 'alice3.treasury', primary: true },
+    ]);
+  });
+
+  it('does not ask about the role when there is only ONE — the answer would change nothing', async () => {
+    // Every edge is chain reads inside a request that also verifies mandates and resolves grants. Asking
+    // a question whose answer cannot matter is how that budget was spent and the person left watching
+    // "Working…" forever.
+    const hasRole = vi.fn(async () => true);
     const call = charteredAgentsReader({
       readContract: (async (a: { functionName: string }) =>
         a.functionName === 'getEdgesByObject' ? [`0x${'1'.padStart(64, '0')}`]
-        : a.functionName === 'hasRole' ? true
+        : a.functionName === 'hasRole' ? hasRole()
         : edge()) as never,
       relationships: REL, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
       primaryRole: `0x${'ab'.repeat(32)}`,
       reverseName: async () => 'alice2.treasury',
     });
-    expect(await call(ALICE, 'treasury')).toEqual([{ agent: T2, name: 'alice2.treasury', primary: true }]);
-    void r;
-  });
-
-  it('marks nothing when the role is not configured — silence is not a preference', async () => {
-    expect((await reader([edge()]).call(ALICE, 'treasury'))[0]).not.toHaveProperty('primary');
+    expect(await call(ALICE, 'treasury')).toEqual([{ agent: T2, name: 'alice2.treasury' }]);
+    expect(hasRole).not.toHaveBeenCalled();
   });
 
   it('is inert when no relationship contract is configured', async () => {

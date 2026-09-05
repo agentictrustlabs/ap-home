@@ -53,8 +53,13 @@ export function charteredAgentsReader(deps: CharteredDeps) {
     const ids = (await deps.readContract({
       address: deps.relationships, abi: EDGES_BY_OBJECT_ABI, functionName: 'getEdgesByObject', args: [owner],
     } as never).catch(() => [])) as Hex[];
-    const out: Array<{ agent: string; name?: string; primary?: boolean }> = [];
-    for (const id of (ids ?? []).slice(0, deps.maxEdges ?? 40)) {
+    // EVERY EDGE IS CHAIN READS, and this runs inside one request that also verifies mandates and
+    // resolves grants. Reading the edge, reverse-resolving its name and asking for a role — three reads
+    // apiece over forty edges — spent the request's whole budget and left the person watching "Working…"
+    // forever. So: a tighter cap, and the role is asked ONLY when there is a choice to disambiguate,
+    // which is the only time the answer changes anything.
+    const matched: Array<{ id: Hex; agent: string; name: string }> = [];
+    for (const id of (ids ?? []).slice(0, deps.maxEdges ?? 12)) {
       if (!id || id === ZERO32) continue;
       const e = (await deps.readContract({ address: deps.relationships, abi: GET_EDGE_ABI, functionName: 'getEdge', args: [id] } as never).catch(() => null)) as
         { subject?: string; relationshipType?: string; status?: number } | null;
@@ -63,12 +68,16 @@ export function charteredAgentsReader(deps: CharteredDeps) {
       if (Number(e.status) !== ACTIVE) continue;
       const name = deps.reverseName ? await deps.reverseName(e.subject).catch(() => null) : null;
       if (!name || name.toLowerCase().split('.').pop() !== type) continue;
-      // WHICH ONE THEY WANT PAID. A preference the owner set on their own edge, public because the edge
-      // is — it saves the payer a question and permits nothing.
-      const primary = deps.primaryRole
-        ? (await deps.readContract({ address: deps.relationships, abi: HAS_ROLE_ABI, functionName: 'hasRole', args: [id, deps.primaryRole] } as never).catch(() => false)) === true
-        : false;
-      out.push({ agent: e.subject.toLowerCase(), name, ...(primary ? { primary: true } : {}) });
+      matched.push({ id, agent: e.subject.toLowerCase(), name });
+    }
+    if (matched.length < 2 || !deps.primaryRole) return matched.map(({ agent, name }) => ({ agent, name }));
+
+    // WHICH ONE THEY WANT PAID — asked only now, when there is more than one and the answer decides
+    // whether the payer is questioned about somebody else's accounts.
+    const out: Array<{ agent: string; name?: string; primary?: boolean }> = [];
+    for (const m of matched) {
+      const primary = (await deps.readContract({ address: deps.relationships, abi: HAS_ROLE_ABI, functionName: 'hasRole', args: [m.id, deps.primaryRole] } as never).catch(() => false)) === true;
+      out.push({ agent: m.agent, name: m.name, ...(primary ? { primary: true } : {}) });
     }
     return out;
   };
