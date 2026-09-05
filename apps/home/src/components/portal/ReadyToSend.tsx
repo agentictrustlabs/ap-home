@@ -70,7 +70,7 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
     <SectionShell title="Ready to send">
       {err && <p style={errorText}>{err}</p>}
       {rows.map(({ grant, amount }) => (
-        <div key={grant.targetAgent} style={cardSty} data-testid={`ready-to-send-${(grant.owner ?? '').toLowerCase()}`}>
+        <div key={grant.targetAgent} style={cardSty} data-testid={`ready-to-send-${(grant.targetAgent ?? '').toLowerCase()}`}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             {grant.ownerName ?? 'They'} gave you a way to reach their {grant.targetType}
           </div>
@@ -82,7 +82,7 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
           </p>
           <button
             type="button" className="btn primary" style={{ marginTop: 10, fontSize: 12 }}
-            data-testid={`ready-to-send-go-${(grant.owner ?? '').toLowerCase()}`}
+            data-testid={`ready-to-send-go-${(grant.targetAgent ?? '').toLowerCase()}`}
             onClick={() => {
               const message = completionAsk(grant, amount);
               if (onAsk) onAsk(message);
