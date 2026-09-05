@@ -51,6 +51,7 @@ import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { resolveParty, ownAgentsOfType, candidateHint, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
+import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
@@ -139,8 +140,11 @@ export const INVITE_TOOL: ToolSpec = {
 export const UNSUPPORTED_TOOL: ToolSpec = {
   id: 'ask.unsupported',
   description:
-    'Choose this when NO other tool performs what was asked. It is the correct answer, not a failure: '
-    + 'better to say plainly that this agent cannot do a thing here than to do something adjacent to it. '
+    'Choose this ONLY for an instruction that would CHANGE something and that no other tool performs. It '
+    + 'is the correct answer for that, not a failure: better to say plainly that this agent cannot do a '
+    + 'thing here than to do something adjacent to it. '
+    + 'NEVER choose it for a question — anything asking to see, list, find, show or describe is answered '
+    + 'with the directory tools, and "nothing found" is a real answer that this tool must not pre-empt. '
     + 'Args: what (what the person asked for, in their words).',
   inputSchema: {
     type: 'object',
@@ -419,6 +423,8 @@ export interface HarnessDeps {
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   /** Read one record from a subject's own vault — the asker's private tier (spec 353 §3). */
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
+  readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
   now?: () => number;
 }
 
@@ -684,7 +690,7 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address): ToolInvoker {
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
@@ -692,6 +698,16 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
+    }
+    if (toolId === MEMBERSHIP_LIST_TOOL.id) {
+      return membershipListInvoker(
+        {
+          ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+          ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
+          ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
+        },
+        (addressee ?? person ?? ('0x' as Address)), person,
+      )(toolId, args, ctx);
     }
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
@@ -770,6 +786,9 @@ export interface HarnessRunInput {
    * protect it).
    */
   surface?: AskScopeV1;
+  /** The agent being asked. Informational tools that read an organization's own records default to it —
+   *  "who are the members" asked OF an organization means that one. */
+  addressee?: Address;
   runRef?: string;
   /** The MCP-backed invoker for informational tools (the existing orchestrate path). */
   mcpInvoke: ToolInvoker;
@@ -798,13 +817,33 @@ const ASK_PLANNER_SYSTEM =
   + 'there is never a reason to look an address up first. If no capability performs what was asked, choose '
   + '`ask.unsupported` — saying so is the correct answer, and a directory lookup is NOT a way of saying it. '
   + 'A capability missing from your tools does not exist here, however obviously related another one looks.\n'
-  + '• A QUESTION ("which teams…", "who is…", "what kinds…") is what the directory tools are for.\n\n'
+  + '• A QUESTION is what the directory tools are for — and the IMPERATIVE MOOD DOES NOT MAKE ONE AN '
+  + 'INSTRUCTION. "Show me the members", "list the teams", "give me her address" and "who is…" are all the '
+  + 'same request: to SEE something. Answer them with the directory tools. If those return nothing, that '
+  + 'is the answer — say so. NEVER choose `ask.unsupported` for a request to see, list, find, show or '
+  + 'describe: `ask.unsupported` is only for an instruction that would CHANGE something this agent cannot '
+  + 'change.\n\n'
+  + 'MEMBERSHIP IS NOT IN THE DIRECTORY. Who belongs to an organization, team, circle or church is private '
+  + 'and the public directory has never held it, so searching there returns nothing and that nothing means '
+  + 'only that you looked in the wrong place. Use `organization.membership.list` for every ask about '
+  + 'members, membership, rosters, "who is in" or "who belongs to".\n\n'
   + 'Missing details are not a reason to fall back to a lookup: the capability will ask the person for '
   + 'what it needs. Choosing the tool that ACTS is what lets it.\n\n'
   + 'NEVER use an address from the context as a recipient, payee or invitee. The context tells you who is '
   + 'ASKING and which agent they are addressing — not who they are talking about. Pass the words the '
   + 'person used ("alice", "alice.me") and let the capability resolve them; if the ask names nobody, pass '
   + 'nothing and it will ask.';
+
+/** What a presented mandate is FOR, in the words the planner knows the capability by. Read from the wire's
+ *  own caveats — the mandate says what it covers, and nothing here has to be told. */
+export function mandateCapabilityWords(presented: { caveats?: Array<{ enforcer?: string; terms?: string }> } | null): string | null {
+  const terms = (presented?.caveats ?? []).map((c) => String(c.terms ?? '')).join(' ');
+  for (const id of Object.keys(CAPABILITY_WORDS)) {
+    // The capability id is encoded in the caveat terms; finding it there is enough to name it.
+    if (terms.includes(Buffer.from(id).toString('hex'))) return CAPABILITY_WORDS[id]!;
+  }
+  return null;
+}
 
 /** Plain words for the capabilities an agent offers, for a refusal that says what it CAN do. An id with no
  *  word falls back to the id — an unfamiliar capability must still be readable, never silently dropped. */
@@ -1363,7 +1402,18 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
       } as never);
     },
   };
-  const { planner, kind } = selectPlanner(env as never, { systemPrompt: ASK_PLANNER_SYSTEM });
+  // AUTHORITY ALREADY IN HAND. A turn that presents a mandate is the turn AFTER a person granted one for
+  // this ask — and re-planning from scratch let it drift to a different tool, so the grant bought nothing
+  // and the person was told "I can't help with that" one step after being told it needed their signature.
+  // Saying what the mandate covers is guidance, never authority: the verifier still judges the step, and a
+  // plan that ignores this is refused by the same gates as any other.
+  const holding = input.presented ? mandateCapabilityWords(input.presented) : null;
+  const systemPrompt = holding
+    ? `${ASK_PLANNER_SYSTEM}
+
+The person has ALREADY granted authority to ${holding} for this exact ask. That is the capability to use; do not choose another, and do not choose ask.unsupported.`
+    : ASK_PLANNER_SYSTEM;
+  const { planner, kind } = selectPlanner(env as never, { systemPrompt });
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -1371,10 +1421,13 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // only writer, and a fact the chain does not have is a fact discovery must not be told.
   // ACTIONS FIRST. The planner picks one tool; when an ask is "do this", a directory read listed ahead of
   // the capability that does it is a plausible-looking answer to a question nobody asked.
-  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS, UNSUPPORTED_TOOL];
+  // Membership is a QUESTION, and its answer is private — so it sits with the informational tools (no
+  // mandate, nothing changes) rather than among the capabilities, and it is offered whatever the surface
+  // declared: a scope narrows what may be DONE, never what may be asked.
+  const tools = [...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS, MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session, input.surface),
+    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session, input.surface, input.addressee),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.

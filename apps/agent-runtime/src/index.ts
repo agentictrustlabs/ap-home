@@ -1257,7 +1257,7 @@ app.post('/harness/ask', async (c) => {
   const askDeps = harnessDeps(c.env, audit);
   try {
     const { result, resolved } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
-      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef,
+      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee,
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
@@ -2011,6 +2011,16 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     readSubjectRecord: async (subject: string, recordType: string) => {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
       return (out as { data?: unknown } | null)?.data ?? null;
+    },
+    // The same read, with the REASON it failed. "Storage was never enabled for this agent" is a permanent,
+    // actionable state; "the read failed" is a transient one; and neither is "there is nothing here". A
+    // caller that can only see null has to guess which, and guessing produced "the roster could not be
+    // read just now" for an organization whose roster simply does not live in its vault yet.
+    readSubjectRecordStatus: async (subject: string, recordType: string) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType })
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      const r = out as { ok?: boolean; needsEnable?: boolean; data?: unknown; error?: string };
+      return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
     },
     findAgents: async (terms: string) => {
       const out = await askDiscoveryInvoker(env as never)('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);

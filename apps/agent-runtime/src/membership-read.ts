@@ -1,0 +1,108 @@
+// WHO IS IN THIS ORGANIZATION — the question the public directory can never answer.
+//
+// Membership is PRIVATE (ADR-0025): a person↔organization link is a vault credential, not an on-chain
+// edge, and the discovery knowledge base holds only what anyone could reproduce from the chain (ADR-0040).
+// So "who are the members" asked of the directory returns nothing, truthfully and uselessly — the agent
+// looked in the one place the answer cannot be.
+//
+// The roster lives in the ORGANIZATION's own vault (`directory.data`), which is exactly where the Home's
+// Members panel reads it. This is that read, made available conversationally, under the same rule the Home
+// applies: you may see the roster of an organization YOU ARE PART OF, and of no other.
+//
+// The gate is standing, derived (spec 353 S5) — self, steward or member. `none` is refused, and refused in
+// those words: "you are not a member there" is a better answer than an empty list, which reads as "this
+// organization has nobody in it" and is a different, false statement.
+import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
+import type { Address } from 'viem';
+import { deriveStanding, type StandingDeps } from './standing.js';
+
+export const MEMBERSHIP_LIST_TOOL: ToolSpec = {
+  id: 'organization.membership.list',
+  description:
+    'ANSWERS A QUESTION: who belongs to an organization, team, circle or church — its members. Use this '
+    + 'whenever the ask is about members, membership, "who is in", "who belongs to" or a roster. The public '
+    + 'directory does NOT contain members, so it is never the right tool for this. '
+    + 'Args: org (the organization\'s name or address; omit it to mean the agent being asked).',
+  inputSchema: {
+    type: 'object',
+    properties: { org: { type: 'string', description: 'The organization — a name (calvary.org) or an address. Omit for the agent being asked.' } },
+  },
+};
+
+interface Listing { smartAgent?: string; agent?: string; displayName?: string; name?: string; role?: string; status?: string }
+
+export interface MembershipDeps extends StandingDeps {
+  resolveName?: (name: string) => Promise<string | null>;
+  /** The roster read, WITH its reason. Three states a bare `null` cannot tell apart: the organization
+   *  never enabled its own storage (permanent, and someone can act on it), the read failed (transient),
+   *  and the roster is genuinely empty. Reporting the first as the second sent people to retry something
+   *  that will never start working. */
+  readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
+}
+
+/**
+ * The roster of an organization the asker is part of.
+ *
+ * Returns the members as the org itself records them. It does NOT fall back to a public search when the
+ * private read is empty: an organization with an empty roster and one this agent may not read are
+ * different answers, and blurring them is how a private tier stops meaning anything (ADR-0013).
+ */
+export function membershipListInvoker(deps: MembershipDeps, addressee: Address, principal?: Address): ToolInvoker {
+  return async (_toolId, args) => {
+    const raw = String((args as { org?: unknown }).org ?? '').trim();
+    let org = addressee;
+    if (raw) {
+      org = (/^0x[0-9a-fA-F]{40}$/.test(raw)
+        ? raw
+        : ((deps.resolveName ? await deps.resolveName(raw.toLowerCase()) : null) ?? addressee)).toLowerCase() as Address;
+    }
+    if (!principal) return { members: [], count: 0, refused: 'this agent does not know who is asking' };
+
+    const standing = await deriveStanding(deps, { principal, subject: org }).catch(() => null);
+    if (!standing || standing.relation === 'none') {
+      return {
+        members: [], count: 0,
+        refused: `membership is private, and ${standing?.because ?? 'this agent cannot read your links'} — only someone who belongs there can see the roster`,
+      };
+    }
+    if (!deps.readSubjectRecord) return { members: [], count: 0, refused: 'this agent cannot read the roster' };
+
+    let doc: unknown = null;
+    if (deps.readSubjectRecordStatus) {
+      const r = await deps.readSubjectRecordStatus(org, 'directory.data').catch(() => ({ ok: false, data: null } as { ok: boolean; needsEnable?: boolean; data: unknown }));
+      if (r.needsEnable) {
+        return {
+          members: [], count: 0,
+          refused: 'this organization does not keep its roster in its own vault yet — a steward can turn on storage for it at its Home, and the members list will be readable here',
+        };
+      }
+      if (!r.ok) return { members: [], count: 0, refused: 'the roster could not be read just now' };
+      doc = r.data;
+    } else {
+      doc = await deps.readSubjectRecord(org, 'directory.data').catch(() => null);
+      // Unreadable is not empty. Saying "no members" here would invent an answer.
+      if (doc === null) return { members: [], count: 0, refused: 'the roster could not be read just now' };
+    }
+    const listings = ((doc as { listings?: Listing[] } | null)?.listings ?? []);
+    const members = listings
+      .map((l) => ({
+        agent: String(l.smartAgent ?? l.agent ?? '').toLowerCase(),
+        name: l.name ?? l.displayName ?? null,
+        ...(l.role ? { role: l.role } : {}),
+        ...(l.status ? { status: l.status } : {}),
+      }))
+      .filter((m) => /^0x[0-9a-f]{40}$/.test(m.agent));
+    if (!members.length) {
+      // AN EMPTY ROSTER IS NOT AN EMPTY ORGANIZATION, and saying "no members" here would be confidently
+      // wrong: today a member appears in this record only by PUBLISHING their own signed listing, while
+      // everyone who joined by invitation is recorded on the organization's side at its Home and nowhere
+      // in its vault. The Home's Members panel shows the union of the two, so it can list people this read
+      // cannot see. Say that, rather than reporting the half we can reach as the whole.
+      return {
+        org, yourStanding: standing.relation, members, count: 0,
+        note: 'nobody has published a member listing in this organization\'s own records. Members who joined by invitation are held at its Home and are not in its vault yet, so the Members panel there may show people this cannot.',
+      };
+    }
+    return { org, yourStanding: standing.relation, members, count: members.length };
+  };
+}

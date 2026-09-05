@@ -54,6 +54,10 @@ export interface ResolvedParty {
 
 const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
 
+/** Arguments that move value. For these, a resolution that had to settle for a different KIND of agent
+ *  than the capability asked for is a question — a payment cannot be taken back. */
+const VALUE_ARGS = new Set(['payee', 'payer', 'treasury', 'funder']);
+
 /**
  * A bare label against the typed roots the asker could plausibly mean, resolved on chain.
  *
@@ -185,10 +189,25 @@ export async function resolveParty(
   // This narrows and never picks. Two treasuries called nathan is still a question, and a capability whose
   // preferred types match nothing gets asked with everything that DID answer — "nathan has no treasury"
   // is an answer, not a licence to quietly pay some other Nathan.
-  if (where.types?.length && outcome.outcome === 'ambiguous') {
+  if (where.types?.length && (outcome.outcome === 'ambiguous' || outcome.outcome === 'certain')) {
+    const all = outcome.outcome === 'ambiguous' ? outcome.candidates : [outcome.candidate];
     const suffix = (c: EntityCandidate) => (c.name ?? c.label ?? '').toLowerCase().split('.').pop() ?? '';
-    for (const type of where.types) {
-      const tier = outcome.candidates.filter((c) => suffix(c) === type);
+    for (const [rank, type] of where.types.entries()) {
+      const tier = all.filter((c) => suffix(c) === type);
+      // A SUBSTITUTION IS NOT A RESOLUTION. "Send alice 20 USDC" asks for her treasury; when nothing
+      // answers to one, paying her PERSON agent instead is a different destination reached silently — and
+      // a payment to the wrong address is not a thing anyone can undo. So for arguments that move value,
+      // dropping past the first-choice type is a question, with the reason said plainly.
+      //
+      // Only for money: a message falling from `.me` to `.org` is the same conversation with the same
+      // person's organization, and asking about it would be noise.
+      if (tier.length && rank > 0 && VALUE_ARGS.has(where.argName)) {
+        ask(`Nothing called “${value}” is a ${where.types[0]}. Who should be ${where.what}?`, {
+          name: where.argName, label: where.what, type: 'choice', required: true,
+          choices: all.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+          hint: `a ${where.types[0]} may exist under another name — give it in full (e.g. ${value}2.${where.types[0]}) to send there instead`,
+        });
+      }
       if (tier.length === 1) {
         const c = tier[0]!;
         lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c) });

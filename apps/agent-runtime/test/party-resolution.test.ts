@@ -204,11 +204,39 @@ describe('the typed suffix says WHICH nathan — the capability decides', () => 
     expect(pay).not.toEqual(msg);
   });
 
-  it('falls to the NEXT type in order when the first answers to nothing', async () => {
-    // No treasury: an organization pays from its own balance, which is the declared second tier.
-    const l = lookups({ 'nathan.org': NATHAN.org, 'nathan.me': NATHAN.me });
-    const r = await caught(resolveParty('nathan', l, at('treasury.payment.execute', 'payer', ['treasury', 'org'])));
+  it('falls to the NEXT type in order — for anything that does not move value', async () => {
+    // A message to someone with no personal agent reaches their organization. Same conversation, same
+    // people; nothing to confirm.
+    const l = lookups({ 'nathan.org': NATHAN.org, 'nathan.team': NATHAN.team });
+    const r = await caught(resolveParty('nathan', l, at('messaging.direct.send', 'recipient', ['me', 'org'], 'the person to message')));
     expect(r).toEqual({ ok: true, v: NATHAN.org });
+  });
+
+  it('a MONEY argument does not settle for a different kind of agent — it asks', async () => {
+    // The live case: "send alice 20 USDC" when nothing called alice is a treasury. Paying her PERSON
+    // agent instead is a different destination, reached silently, and a payment cannot be taken back.
+    const l = lookups({ 'nathan.org': NATHAN.org, 'nathan.me': NATHAN.me });
+    const r = await caught(resolveParty('nathan', l, at('treasury.payment.execute', 'payee', ['treasury', 'org', 'me'], 'being paid')));
+    expect(r.ok, 'a value substitution is a question').toBe(false);
+    const prompt = (r as { prompt: { prompt: string; fields: Array<{ hint?: string; choices?: unknown[] }> } }).prompt;
+    expect(prompt.prompt).toContain('is a treasury');
+    // It says what it DID find, and how to reach the treasury if it exists under another name.
+    expect(prompt.fields[0]!.choices).toHaveLength(2);
+    expect(prompt.fields[0]!.hint).toMatch(/another name/);
+  });
+
+  it('a money argument resolved AT its first-choice type does not ask', async () => {
+    const l = lookups({ 'nathan.treasury': NATHAN.treasury, 'nathan.me': NATHAN.me });
+    const r = await caught(resolveParty('nathan', l, at('treasury.payment.execute', 'payee', ['treasury', 'org', 'me'], 'being paid')));
+    expect(r).toEqual({ ok: true, v: NATHAN.treasury });
+  });
+
+  it('a lone match of the WRONG kind is still a question when money moves', async () => {
+    // `certain` in the resolver's sense — exactly one agent answers — but it is a person, and the ask was
+    // for a treasury. Silently paying the one thing that answered is the failure this closes.
+    const l = lookups({ 'nathan.me': NATHAN.me });
+    const r = await caught(resolveParty('nathan', l, at('treasury.payment.execute', 'payee', ['treasury', 'me'], 'being paid')));
+    expect(r.ok).toBe(false);
   });
 
   it('NEVER picks through real ambiguity — two of the preferred type is still a question', async () => {
