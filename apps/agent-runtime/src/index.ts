@@ -1261,6 +1261,10 @@ app.post('/resolution/grant', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; requester?: string; targetAgent?: string; wants?: string;
     expiresAt?: string; label?: string; signature?: Hex;
+    /** `prepare` builds and returns the grant unsigned; the issuer signs its digest and posts it back. */
+    prepare?: boolean;
+    /** The grant they signed, echoed back verbatim so the digest is re-derived from what was SIGNED. */
+    grant?: Record<string, unknown>;
   } | null;
   if (!body?.session || !body.requester || !body.targetAgent) {
     return c.json({ ok: false, error: 'session, requester and targetAgent are required' }, 400);
@@ -1293,11 +1297,32 @@ app.post('/resolution/grant', async (c) => {
     return c.json({ ok: false, error: 'you can only give someone a way to reach an agent of your own' }, 403);
   }
 
+  // ── The grant they signed, or the one they are about to ────────────────────────────────────────
+  //
+  // TWO PHASES, because the issuer must sign a thing that already exists: `prepare` builds it and hands
+  // back the digest, the Home signs with the credential that custodies the issuer, and the signed grant
+  // comes back here. Without that this route minted grants on a SESSION alone — the server asserting, on
+  // someone's behalf, that they had disclosed an agent of theirs. A session says who is logged in; a
+  // signature says who decided.
+  const echoed = body.grant as (Record<string, unknown> & { issuer?: string; targetAgent?: string; subject?: string; grantId?: string; expiresAt?: string }) | undefined;
+  if (echoed) {
+    // NEVER TRUST THE ECHO. It is re-checked against this session and this route's own gates: the issuer
+    // must be the person signed in, the target the agent they were found to own, the subject the
+    // requester named. Otherwise a signed grant could be replayed to disclose something else.
+    const caip = (a2: string) => `eip155:${Number(c.env.CHAIN_ID)}:${a2}`;
+    const mismatch =
+      String(echoed.issuer ?? '').toLowerCase() !== caip(owner).toLowerCase() ? 'issuer'
+      : String(echoed.targetAgent ?? '').toLowerCase() !== caip(target).toLowerCase() ? 'target'
+      : String(echoed.subject ?? '').toLowerCase() !== caip(requester).toLowerCase() ? 'subject'
+      : null;
+    if (mismatch) return c.json({ ok: false, error: `the signed grant does not match this request (${mismatch})` }, 400);
+  }
+
   const now = Date.now();
-  const expiresAt = body.expiresAt ?? new Date(now + 30 * 24 * 3600_000).toISOString();
-  const grantId = `apd1_${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('base64url')}`;
+  const expiresAt = String(echoed?.expiresAt ?? body.expiresAt ?? new Date(now + 30 * 24 * 3600_000).toISOString());
+  const grantId = String(echoed?.grantId ?? `apd1_${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('base64url')}`);
   const caip = (a: string) => `eip155:${Number(c.env.CHAIN_ID)}:${a}`;
-  const grant = {
+  const grant = echoed ? { ...echoed } as never : {
     specVersion: 'ap.private-resolution-grant/1' as const,
     grantId,
     issuer: caip(owner), targetAgent: caip(target), subject: caip(requester),
@@ -1317,19 +1342,25 @@ app.post('/resolution/grant', async (c) => {
     proof: body.signature ? { scheme: 'erc1271', signature: body.signature } : null,
   };
 
-  // THE SIGNATURE. A grant nobody signed is a claim by whoever posted it; verified here against the
-  // ISSUER on chain, so the record the requester holds is one the issuer can be shown to have made.
-  if (body.signature) {
-    const digest = keccak256(toBytes(JSON.stringify(grantBody(grant as never))));
-    const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
-    const ok = validator ? await (async () => {
-      try {
-        const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
-        return (await pub.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [owner, digest, body.signature!] })) === true;
-      } catch { return false; }
-    })() : false;
-    if (!ok) return c.json({ ok: false, error: 'the grant signature did not verify against your agent' }, 401);
-  }
+  const digest = keccak256(toBytes(JSON.stringify(grantBody(grant as never))));
+
+  // PHASE ONE: hand back what they are being asked to sign. Nothing is issued or delivered here.
+  if (body.prepare) return c.json({ ok: true, grant, digest });
+
+  // PHASE TWO: THE SIGNATURE, and it is REQUIRED. A grant nobody signed is a claim by whoever posted it —
+  // and this route posted it, on the issuer's behalf, which is the shape of every "the server said you
+  // agreed" problem. Verified against the ISSUER on chain, so what the requester holds is a record the
+  // issuer can be shown to have made and can be held to.
+  if (!body.signature) return c.json({ ok: false, error: 'a resolution grant must be signed by the agent disclosing it' }, 400);
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'signature verification is not configured on this agent' }, 503);
+  const signed = await (async () => {
+    try {
+      const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+      return (await pub.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [owner, digest, body.signature!] })) === true;
+    } catch { return false; }
+  })();
+  if (!signed) return c.json({ ok: false, error: 'the grant signature did not verify against your agent' }, 401);
 
   // WHOSE it is, in words. The target has no name — that is why a grant was needed — so without this the
   // holder is offered "their treasury" and has to trust an address to know who they are paying.
@@ -1345,7 +1376,8 @@ app.post('/resolution/grant', async (c) => {
     grantId, targetAgent: target, owner, targetType: wants,
     ...(ownerName ? { ownerName } : {}),
     ...(body.label ? { label: body.label } : {}),
-    issuedAt: grant.issuedAt, expiresAt, grant,
+    issuedAt: String((grant as { issuedAt?: string }).issuedAt ?? new Date(now).toISOString()), expiresAt,
+    grant: { ...(grant as object), proof: { scheme: 'erc1271', signature: body.signature } },
   };
   const delivered = await callInteractionsInternal(c.env, requester, 'internal.resolution.grant', { grant: held }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
   if ((delivered as { ok?: boolean }).ok === false) {

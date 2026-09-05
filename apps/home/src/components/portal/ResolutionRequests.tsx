@@ -14,9 +14,8 @@ import { BusyButton } from '../shared/BusyButton';
 import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
 import { useManagedAgents } from './ManagedAgents';
-import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
+import { activateInteractionsIfNeeded, resolveVia, signHashFor } from '../../home/onboarding';
 import { ensureCsrfToken, csrfHeaders } from '../../csrf';
-import { connectedCredential } from './ask/credential';
 import type { Address } from '@agenticprimitives/types';
 
 interface PendingRequest {
@@ -96,19 +95,30 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
     }
     setBusy(requester); setErr('');
     try {
-      // Signed by the person deciding — that signature is what makes the grant theirs rather than the
-      // server's. The route verifies it against their agent on chain before delivering anything.
+      // SIGNED BY THE PERSON DECIDING, in two steps, because you cannot sign a thing that does not exist
+      // yet: the agent builds the grant and hands back its digest, this signs it with the credential that
+      // custodies the issuer, and the agent verifies that signature on chain before delivering anything.
+      //
+      // Until this existed the grant was minted on a SESSION alone — the server asserting, on someone's
+      // behalf, that they had disclosed an agent of theirs. A session says who is logged in. A signature
+      // says who decided, and only the second is something the holder can be shown later.
       const via = resolveVia(profile?.credential, session!.via);
-      const cred = await connectedCredential(via, agentAddress as Address, token!);
-      const body = { session: token, requester: req.requester, targetAgent: target, wants: req.wants };
+      const base = { session: token, requester: req.requester, targetAgent: target, wants: req.wants };
       await ensureCsrfToken();
-      const probe = await fetch('/a2a/resolution/grant', {
-        method: 'POST', credentials: 'include',
-        headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify(body),
-      });
-      const out = (await probe.json().catch(() => ({}))) as { ok?: boolean; error?: string; grantId?: string };
-      if (!out.ok) throw new Error(out.error ?? `the grant was refused (${probe.status})`);
-      void cred; // the credential is resolved so a wallet home prompts here, not mid-flow
+      const post = async (payload: unknown) => {
+        const res = await fetch('/a2a/resolution/grant', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify(payload),
+        });
+        const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; grant?: Record<string, unknown>; digest?: `0x${string}`; grantId?: string };
+        if (!j.ok) throw new Error(j.error ?? `the grant was refused (${res.status})`);
+        return j;
+      };
+      const prepared = await post({ ...base, prepare: true });
+      if (!prepared.grant || !prepared.digest) throw new Error('the agent did not return a grant to sign');
+      const signHash = await signHashFor(via, agentAddress as Address, { token: token! });
+      const signature = await signHash(prepared.digest);
+      await post({ ...base, grant: prepared.grant, signature });
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
