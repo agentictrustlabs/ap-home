@@ -306,12 +306,15 @@ const MESSAGING_DELIVER_SKILL = 'messaging.deliver';
 // directory, inbox, the assistant playbook — for want of a scope only the content.* ops use. Those ops already
 // fail closed on their own (`no delivery grant`, 409), and the vault-record-scope caveat denies an out-of-scope
 // content write at demo-mcp. Removing it restores exactly the behaviour the two paragraphs above describe.
-export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data',
-  // spec 338 §7 — requests for a way to reach an unlisted agent, and the grants a person holds. Adding a
-  // record family widens this set, which makes every existing grant STALE by design: `grantIsCurrent`
-  // returns false and the Home re-issues at the next ceremony. That is the migration path, and it is why
-  // the set is declared here rather than inferred from whatever a caller happens to write.
-  'vault:resolution.requests', 'vault:resolution.grants'] as const;
+export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+
+// spec 338 §7 — the resolution records are ISSUED (see the Home's interactions struct) but deliberately
+// NOT REQUIRED here. This set is the STALENESS GATE: adding to it declares every existing grant
+// insufficient, and a person whose grant is stale can do nothing at all until they re-sign. That is the
+// right trade for a record family everyone needs and the wrong one for a new capability few have used —
+// it took the whole estate offline with 409s the moment it shipped. So a grant issued before this feature
+// keeps working for everything it already did, and cannot write a resolution record until it is re-issued,
+// which is exactly what the requester is told.
 
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).

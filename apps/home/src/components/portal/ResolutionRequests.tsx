@@ -7,7 +7,7 @@
 //
 // The alternative to this card is the thing it replaces: publishing a name, which tells EVERYONE. A grant
 // tells one person, for a while, revocably.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { BusyButton } from '../shared/BusyButton';
@@ -31,16 +31,25 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [pickedFor, setPickedFor] = useState<Record<string, string>>({});
+  /** One re-issue per mount — see the note in `load`. */
+  const reissued = useRef(false);
 
   const load = useCallback(async () => {
     if (!token) return;
     // THE GRANT MUST NAME THE RECORD. Requests live in a record family added after most people signed
     // their interactions grant, and a grant that does not name a record cannot write it — so someone
-    // asking for a way to reach you would be refused at your vault, through no fault of theirs. The
-    // surface that depends on a record family is the right place to make sure the grant covers it: the
-    // person is here, and re-issuing is one signature their Home already knows how to collect.
-    if (agentAddress && session) {
-      await activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session.via), { token })
+    // asking for a way to reach you is refused at your vault, through no fault of theirs.
+    //
+    // FORCED, and once per mount: `activateInteractionsIfNeeded` skips when the grant is current, and by
+    // the DO's staleness gate it IS current — the resolution records are issued but deliberately not
+    // required, because requiring them declared every existing grant insufficient and took the estate
+    // offline. So the surface that needs the family asks for the re-issue itself.
+    //
+    // Not on every load: a wallet home signs with a device prompt, and a page that prompts each time it
+    // renders is one nobody will keep open.
+    if (agentAddress && session && !reissued.current) {
+      reissued.current = true;
+      await activateInteractionsIfNeeded(agentAddress as Address, resolveVia(profile?.credential, session.via), { token }, true)
         .catch(() => undefined);
     }
     const r = await fetch('/a2a/resolution/requests', { headers: { authorization: `Bearer ${token}` } });

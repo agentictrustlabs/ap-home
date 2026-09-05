@@ -262,7 +262,7 @@ function buildInboxDeliveryStruct(
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE], ops: ['write'] },
       { server: mcpServerId, resources: [ORG_INVITE_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // ADR-0055 — the org's Content Artifacts, read+write via the DO-held wire (steward-bridged content.* ops).
-      { server: mcpServerId, resources: [CONTENT_RECORDS_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE], ops: ['read', 'write'] },
     ]),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
@@ -306,6 +306,11 @@ export const MEMBER_PROFILE_RESOURCE_SCOPE = 'vault:member.profile' as const;
 export const DIRECTORY_DATA_RESOURCE_SCOPE = 'vault:directory.data' as const;
 /** Conversation/topic split (spec 324 §10 — renamed from board.* in the W6 key migration): the org's
  *  conversation descriptor index + per-topic docs + topic-namespace bodies. */
+/** spec 338 §7 — a person's pending requests for a way to reach an unlisted agent, and the grants they
+ *  hold. Issued in the interactions grant; NOT in the DO's staleness gate, so a grant signed before this
+ *  feature keeps working for everything it already did (and cannot write these until it is re-issued). */
+export const RESOLUTION_REQUESTS_RESOURCE_SCOPE = 'vault:resolution.requests' as const;
+export const RESOLUTION_GRANTS_RESOURCE_SCOPE = 'vault:resolution.grants' as const;
 export const CONVERSATION_INDEX_RESOURCE_SCOPE = 'vault:conversation.index' as const;
 export const CONVERSATION_TOPIC_RESOURCE_SCOPE = 'vault:conversation.topic:*' as const;
 export const TOPIC_BODIES_RESOURCE_SCOPE = 'vault:message.body:topic:*' as const;
