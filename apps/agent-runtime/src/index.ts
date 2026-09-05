@@ -1226,9 +1226,15 @@ app.get('/harness/vocabulary', (c) => c.json({ ok: true, capabilities: askVocabu
 app.get('/resolution/requests', async (c) => {
   const who = await verifyHomeSession(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '', c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
-  const out = await callInteractionsInternal(c.env, who.sa, 'internal.coordination.vaultRead', { recordType: 'resolution.requests' }).catch(() => null);
-  const doc = (out as { data?: { requests?: unknown[] } } | null)?.data;
-  return c.json({ ok: true, requests: Array.isArray(doc?.requests) ? doc.requests : [] });
+  const out = await callInteractionsInternal(c.env, who.sa, 'internal.coordination.vaultRead', { recordType: 'resolution.requests' })
+    .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  const r = out as { ok?: boolean; needsEnable?: boolean; error?: string; data?: { requests?: unknown[] } };
+  // An unreadable record is not an empty one. Returning [] for a denied read is how a storage problem
+  // reads as "nobody has asked you" — the same conflation that made a roster look empty.
+  if (r.ok === false) {
+    return c.json({ ok: false, requests: [], ...(r.needsEnable ? { needsEnable: true } : {}), error: r.error ?? 'the requests could not be read' });
+  }
+  return c.json({ ok: true, requests: Array.isArray(r.data?.requests) ? r.data.requests : [] });
 });
 
 // POST /resolution/grant — the OWNER answers: hand one requester a way to resolve ONE unlisted agent.

@@ -1555,6 +1555,16 @@ export class InteractionsDO {
         // nothing ever re-issued. Seen live on the 2026-09-02 AKCS cutover. Including the leaf's delegate
         // here makes a key rotation self-heal on the principal's next sign-in.
         current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st),
+        // WHAT THE GRANT ACTUALLY COVERS. `granted` and `current` both say yes while a write is refused
+        // with `record_scope_denied`, because a grant can be present, unstale, and still not name the
+        // record someone is trying to write. Reporting the resources makes that answerable instead of
+        // inferable — for an operator, and for the person whose Home has to decide whether to re-issue.
+        recordScopes: (() => {
+          try {
+            const cav = (st.grant?.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+            return cav?.terms ? [...new Set(decodeVaultRecordScopeTerms(cav.terms as Hex).flatMap((g2) => g2.resources))].sort() : [];
+          } catch { return []; }
+        })(),
         deliveryGranted: !!st.deliveryGrant,
         // The migration, visible from outside. A ladder whose rungs can only be read by grepping the
         // source is one nobody checks before promoting — and promotion is exactly the decision that
