@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, CAPABILITY_WORDS, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
+import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { connectedCredential } from './credential';
@@ -177,7 +177,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
         return;
       }
       const wire = await mintMandate(reply, await signAs(reply.delegator));
-      setThread((t) => [...t, { role: 'agent', text: `Authority granted: ${CAPABILITY_WORDS[reply.capability] ?? reply.capability}, for this request.` }]);
+      setThread((t) => [...t, { role: 'agent', text: `Authority granted: ${capabilityWords(reply.capability)}, for this request.` }]);
       setPending(null);
       await turn({ ...state, presented: wire }, 'Working…');
     } catch (e) {
@@ -342,14 +342,14 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
         <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
           {reply.note
             ? reply.note
-            : `This needs ${CAPABILITY_WORDS[reply.capability] ?? reply.capability} as ${short(reply.delegator)}, which a different credential custodies.`}
+            : `This needs ${capabilityWords(reply.capability)} as ${short(reply.delegator)}, which a different credential custodies.`}
         </p>
         <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>Nothing was authorized, and nothing happened.</p>
         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
           {reply.standing?.relation === 'member' && (
             <button
               type="button" className="btn primary" data-testid="ask-request-authority"
-              onClick={() => onRequest(`send a direct message to ${short(reply.delegator)} asking a steward to authorize ${CAPABILITY_WORDS[reply.capability] ?? reply.capability} for me`)}
+              onClick={() => onRequest(`send a direct message to ${short(reply.delegator)} asking a steward to authorize ${capabilityWords(reply.capability)} for me`)}
             >Ask a steward</button>
           )}
           <button type="button" className="btn ghost" onClick={onCancel}>Close</button>
@@ -361,7 +361,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
     <div className="ask-card" data-testid="ask-authority">
       <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>
       <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
-        To do this, {short(reply.delegate)} needs permission to <strong>{CAPABILITY_WORDS[reply.capability] ?? reply.capability}</strong> as{' '}
+        To do this, {short(reply.delegate)} needs permission to <strong>{capabilityWords(reply.capability)}</strong> as{' '}
         <strong>{short(d.delegator)}</strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
       </p>
       {/* WHO IT RESOLVED TO. When several agents answered to the name the person picked one and knows what

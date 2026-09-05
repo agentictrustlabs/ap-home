@@ -110,7 +110,7 @@ export interface AskSurface {
 export const HOME_CEREMONIES = ['data', 'confirmation', 'signature'] as const;
 
 /** One agent's published Ask vocabulary. Disclosure only — every id still needs a mandate. */
-export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[] }
+export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[]; label?: string }
 
 /**
  * The scope this surface declares: the INTERSECTION of what the agent publishes and what this app can
@@ -289,9 +289,17 @@ export function describeRequirement(reply: Extract<AskReply, { kind: 'authority_
 
 /** Human words for the capabilities an Ask can need. Unknown ids fall back to the id itself — an
  *  unfamiliar capability must still be readable, never silently blank. */
-export const CAPABILITY_WORDS: Record<string, string> = {
-  'organization.team.create': 'create teams',
-  'organization.create': 'create organizations',
-  'organization.membership.invite': 'invite members',
-  'treasury.payment.execute': 'make payments',
-};
+/**
+ * Plain words for a capability, from the AGENT's published vocabulary.
+ *
+ * This used to be a hand-kept map here, and it was missing three of the seven — so the card that asks a
+ * person to authorize a message said "needs permission to messaging.direct.send", which is an identifier,
+ * not a sentence. A surface that keeps its own copy of the agent's vocabulary keeps one that goes stale;
+ * the words travel with the capability now, and this only reads them.
+ *
+ * Falls back to the id when the vocabulary has not been read yet — an unfamiliar capability must still
+ * render, and an id is honest where an invented phrase would not be.
+ */
+export function capabilityWords(id: string): string {
+  return vocabularyMemo?.caps.find((c) => c.id === id)?.label ?? id;
+}

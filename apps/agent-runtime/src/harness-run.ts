@@ -1336,9 +1336,12 @@ export function askDescriptors(): SurfaceDescriptor[] {
   });
 }
 
-/** The vocabulary as a surface consumes it: every capability, with the ceremonies it may ask for. */
-export function askVocabulary(): AskCapabilityLike[] {
-  return buildAskVocabulary(askDescriptors());
+/** The vocabulary as a surface consumes it: every capability, with the ceremonies it may ask for and the
+ *  PLAIN WORDS for it. The words travel with the capability because a surface that keeps its own list
+ *  keeps a list that goes stale: the Home's copy was missing three, so a person granting authority to send
+ *  a message read "needs permission to messaging.direct.send", which is the id, not a sentence. */
+export function askVocabulary(): Array<AskCapabilityLike & { label: string }> {
+  return buildAskVocabulary(askDescriptors()).map((c) => ({ ...c, label: CAPABILITY_WORDS[c.id] ?? c.id }));
 }
 
 /**
