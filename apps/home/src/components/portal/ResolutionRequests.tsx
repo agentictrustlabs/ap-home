@@ -15,6 +15,7 @@ import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
 import { useManagedAgents } from './ManagedAgents';
 import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
+import { ensureCsrfToken, csrfHeaders } from '../../csrf';
 import { connectedCredential } from './ask/credential';
 import type { Address } from '@agenticprimitives/types';
 
@@ -84,8 +85,10 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
       const via = resolveVia(profile?.credential, session!.via);
       const cred = await connectedCredential(via, agentAddress as Address, token!);
       const body = { session: token, requester: req.requester, targetAgent: target, wants: req.wants };
+      await ensureCsrfToken();
       const probe = await fetch('/a2a/resolution/grant', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        method: 'POST', credentials: 'include',
+        headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify(body),
       });
       const out = (await probe.json().catch(() => ({}))) as { ok?: boolean; error?: string; grantId?: string };
       if (!out.ok) throw new Error(out.error ?? `the grant was refused (${probe.status})`);
