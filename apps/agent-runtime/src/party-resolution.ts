@@ -47,7 +47,9 @@ export interface PartyLookups {
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean }>>;
   /** The held grants this asker can actually use — signature checked against the issuer, bound to them,
    *  and pointed at the target they name (spec 338 §4). Absent ⇒ held grants are not used. */
-  verifyGrant?: (held: unknown, type: string, asker: string) => Promise<Array<{ targetAgent: string; owner: string; ownerName?: string; label?: string }>>;
+  verifyGrant?: (held: unknown, type: string, asker: string, session?: string) => Promise<Array<{ targetAgent?: string; owner: string; ownerName?: string; label?: string }>>;
+  /** The asker's session, carried so the resolver gate can check they are the grant's subject. */
+  session?: string;
 }
 
 /** What one party's words became. `label` is absent when the person gave an address outright — there was
@@ -218,9 +220,10 @@ export async function ownedAgentsOfType(
     // evidence — the issuer's signature inside it is. Without a verifier configured, a held grant is not
     // trusted at all rather than trusted blindly.
     const grants = lookups.verifyGrant
-      ? await lookups.verifyGrant(held, type, asker).catch(() => [])
+      ? await lookups.verifyGrant(held, type, asker, lookups.session).catch(() => [])
       : [];
     for (const g of grants) {
+      if (!g.targetAgent) continue; // the gate refused; a reference without a projection is not a way in
       if (g.owner.toLowerCase() !== low || seen.has(g.targetAgent.toLowerCase())) continue;
       seen.add(g.targetAgent.toLowerCase());
       out.push({

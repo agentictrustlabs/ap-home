@@ -109,7 +109,7 @@ import { chainStewardshipCheck } from './standing.js';
 import { charteredAgentsReader } from './chartered-agents.js';
 import { relationshipRows } from './relationship-rows.js';
 import { grantBody } from '@agenticprimitives/agent-resolution';
-import { verifiedGrants } from './resolution-invitation.js';
+import { verifiedGrants, grantAllows } from './resolution-invitation.js';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -1250,6 +1250,90 @@ app.get('/resolution/grants', async (c) => {
   return c.json({ ok: true, grants: Array.isArray(r.data?.grants) ? r.data.grants : [] });
 });
 
+// POST /resolution/resolve — THE RESOLVER GATE (spec 338 §4, ADR-0056).
+//
+// The holder does not hold the address. They hold a REFERENCE — a grantId and whose it is — and ask for
+// the projection each time they need it. That is what makes the earlier checks bite: before this, a
+// withdrawn grant meant the resolver would not cooperate while the address sat in the holder's own vault,
+// which is not withholding anything.
+//
+// Every check is here, and each rules out a different party being wrong:
+//   · the CALLER is the grant's subject (recipient-bound — proved by their own session, see the note);
+//   · the AUDIENCE is this resolver (confused-deputy defence: a grant minted for another resolver must
+//     not be redeemable here);
+//   · the ISSUER signed it, and still stands behind it (not expired, not withdrawn).
+//
+// POSSESSION IS PROVED BY THE SESSION, not a fresh signature over a challenge nonce, and that is weaker
+// than spec 338 §4 asks for. The presenter here is an agent acting for the holder inside one request; it
+// holds no credential to sign with, so a nonce ceremony would mean prompting a person on every
+// resolution. Named rather than glossed: a stolen session resolves what its owner could, which is true of
+// every other thing a session does here.
+/**
+ * THE RESOLVER GATE, in one place (spec 338 §4). Called by the route AND in-process by the party
+ * resolver — never over HTTP to ourselves, which a Worker cannot do anyway (CF loopback).
+ */
+async function resolveThroughGate(
+  env: Env,
+  input: { session: string; owner: string; grantId: string },
+): Promise<{ ok: true; targetAgent: string } | { ok: false; error: string; status: number }> {
+  const who = await verifyHomeSession(input.session, env);
+  if (!who.ok) return { ok: false, error: who.error, status: who.status };
+
+  const projected = await callInteractionsInternal(env, input.owner.toLowerCase(), 'internal.resolution.project', { grantId: input.grantId })
+    .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  const p = projected as { ok?: boolean; error?: string; grant?: Record<string, unknown> };
+  if (p.ok === false || !p.grant) {
+    return { ok: false, status: 403, error: p.error === 'revoked' ? 'that grant has been withdrawn' : 'no usable grant' };
+  }
+
+  const g = p.grant as { issuer?: string; targetAgent?: string; proof?: { signature?: string } };
+  const addr = (caip: string | undefined) => (String(caip ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  const refuse = (why: string) => ({ ok: false as const, error: why, status: 403 });
+
+  // Every rule in one tested place — see `grantAllows`.
+  const WORDS: Record<string, string> = {
+    'not-issued-to-you': 'that grant was not issued to you',
+    'not-issued-by-them': 'that grant was not issued by them',
+    'wrong-resolver': 'that grant names a different resolver',
+    expired: 'that grant has expired',
+    'not-yet-valid': 'that grant is not yet valid',
+    unsigned: 'that grant is unsigned',
+  };
+  const refusal = grantAllows(p.grant, { caller: String(who.sa), owner: input.owner, audience: a2aCanonicalDomain(env) });
+  if (refusal) return refuse(WORDS[refusal] ?? refusal);
+
+  const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return { ok: false, status: 503, error: 'signature verification is not configured' };
+  const digest = keccak256(toBytes(JSON.stringify(grantBody(p.grant as never))));
+  const signed = await (async () => {
+    try {
+      const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+      return (await pub.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [addr(g.issuer) as Address, digest, g.proof!.signature as Hex] })) === true;
+    } catch { return false; }
+  })();
+  if (!signed) return refuse('that grant does not verify against the agent that issued it');
+
+  return { ok: true, targetAgent: addr(g.targetAgent) };
+}
+
+// POST /resolution/resolve — THE RESOLVER GATE (spec 338 §4, ADR-0056).
+//
+// The holder does not hold the address. They hold a REFERENCE — a grantId and whose it is — and ask for
+// the projection each time. That is what makes the earlier checks bite: before this, a withdrawn grant
+// meant the resolver would not cooperate while the address sat in the holder's own vault, which is not
+// withholding anything.
+//
+// POSSESSION IS PROVED BY THE SESSION, not a fresh signature over a challenge nonce, and that is weaker
+// than spec 338 §4 asks. The presenter is an agent acting for the holder inside one request; it holds no
+// credential to sign with, so a nonce ceremony would mean prompting a person on every resolution. Named
+// rather than glossed: a stolen session resolves what its owner could, as it does everywhere else here.
+app.post('/resolution/resolve', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; owner?: string; grantId?: string } | null;
+  if (!body?.session || !body.owner || !body.grantId) return c.json({ ok: false, error: 'session, owner and grantId are required' }, 400);
+  const out = await resolveThroughGate(c.env, { session: body.session, owner: body.owner, grantId: body.grantId });
+  return out.ok ? c.json({ ok: true, targetAgent: out.targetAgent, grantId: body.grantId }) : c.json({ ok: false, error: out.error }, out.status as 403);
+});
+
 // POST /resolution/revoke — take back a way to reach something of yours.
 //
 // The half that makes issuing safe: a grant you cannot withdraw is one you should think much harder
@@ -1400,19 +1484,23 @@ app.post('/resolution/grant', async (c) => {
       registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
     }).reverseResolve(owner).catch(() => null);
   })();
+  // WHAT THE HOLDER GETS: a reference, not an address. They know WHOSE agent they may reach and that they
+  // may reach it; where it is comes from the resolver, per use, and stops coming when she withdraws it.
+  // Handing them the address here would make every later check advisory.
   const held = {
     v: 1 as const, kind: 'resolution.grant.held' as const,
-    grantId, targetAgent: target, owner, targetType: wants,
+    grantId, owner, targetType: wants,
     ...(ownerName ? { ownerName } : {}),
     ...(body.label ? { label: body.label } : {}),
     issuedAt: String((grant as { issuedAt?: string }).issuedAt ?? new Date(now).toISOString()), expiresAt,
-    grant: { ...(grant as object), proof: { scheme: 'erc1271', signature: body.signature } },
   };
+  const signedGrant = { ...(grant as object), proof: { scheme: 'erc1271', signature: body.signature } };
   const delivered = await callInteractionsInternal(c.env, requester, 'internal.resolution.grant', { grant: held }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
   if ((delivered as { ok?: boolean }).ok === false) {
     return c.json({ ok: false, error: `the grant could not be delivered: ${(delivered as { error?: string }).error ?? 'unknown'}` }, 502);
   }
-  await callInteractionsInternal(c.env, owner, 'internal.resolution.approve', { requester, wants, grantId }).catch(() => undefined);
+  // The grant itself is kept by the ISSUER — the resolver reads it from there.
+  await callInteractionsInternal(c.env, owner, 'internal.resolution.approve', { requester, wants, grantId, grant: signedGrant }).catch(() => undefined);
 
   // TELL THEM. A grant delivered silently into someone's vault is a thing they have no reason to look
   // for: they asked days ago, and nothing about their Home changed. The answer travels the way the
@@ -2249,29 +2337,18 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // actionable state; "the read failed" is a transient one; and neither is "there is nothing here". A
     // caller that can only see null has to guess which, and guessing produced "the roster could not be
     // read just now" for an organization whose roster simply does not live in its vault yet.
-    // A HELD GRANT IS CHECKED BEFORE IT IS USED. The record sits in the asker's own vault, which the
-    // asker can write, so what counts is the ISSUER's signature inside it — verified on chain here, the
-    // same way a mandate's is. Without this, "I hold a grant from Alice" was a sentence anyone could
-    // write about themselves.
-    verifyGrant: async (held: unknown, type: string, asker: string) => {
-      const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
-      if (!validator) return [];
-      const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+    // A HELD REFERENCE IS RESOLVED THROUGH THE GATE. The record in the asker's vault names whose agent
+    // they may reach and nothing more; the address comes from `/resolution/resolve`, which checks the
+    // subject, the audience, the expiry, the issuer's signature and whether they have withdrawn it.
+    // In-Worker: the asker's own agent asks on their behalf, under the session they are already holding.
+    verifyGrant: async (held: unknown, type: string, asker: string, session?: string) => {
+      if (!session) return [];
       return verifiedGrants(held, type, {
-        asker, chainId: Number(env.CHAIN_ID),
-        // REVOKED IS NOT USABLE. Read from the ISSUER's own record, in-Worker — never from the holder,
-        // who would then be the one reporting whether their own grant had been withdrawn.
-        revokedBy: async (issuer: string) => {
-          const st = await callInteractionsInternal(env, issuer, 'internal.resolution.status', {}).catch(() => null);
-          const ids = (st as { revoked?: string[] } | null)?.revoked;
-          return Array.isArray(ids) ? ids : [];
+        asker,
+        resolve: async ({ owner, grantId }) => {
+          const out = await resolveThroughGate(env, { session, owner, grantId });
+          return out.ok ? out.targetAgent : null;
         },
-        digestOf: (grant) => keccak256(toBytes(JSON.stringify(grantBody(grant as never)))),
-        verifySignature: async ({ signer, digest, signature }) =>
-          (await pub.readContract({
-            address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig',
-            args: [signer as Address, digest as Hex, signature as Hex],
-          }).catch(() => false)) === true,
       });
     },
     // A request for a way to reach an unlisted agent, written into the OWNER's own vault so their Home

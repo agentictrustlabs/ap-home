@@ -1581,7 +1581,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1934,17 +1934,23 @@ export class InteractionsDO {
           //
           // IT IS NOT AUTHORITY. Holding this lets the recipient find where to send money. Moving any
           // still needs their own mandate, judged by the verifier (ADR-0056).
-          const held = body.grant as { grantId?: string; targetAgent?: string; owner?: string } | undefined;
-          if (!held?.grantId || !/^0x[0-9a-f]{40}$/.test(String(held.targetAgent ?? '').toLowerCase())) {
-            return json({ error: 'grant { grantId, targetAgent } required' }, 400);
+          // A REFERENCE, not an address: the holder is told WHOSE agent they may reach and which grant
+          // says so. Where it is comes from the resolver, per use (spec 338 §4).
+          const held = body.grant as { grantId?: string; owner?: string; targetType?: string } | undefined;
+          if (!held?.grantId || !/^0x[0-9a-f]{40}$/.test(String(held.owner ?? '').toLowerCase())) {
+            return json({ error: 'grant { grantId, owner } required' }, 400);
           }
           return this.serialize(async () => {
             const doc = await this.readDoc<{ grants?: unknown[] }>(g, RESOLUTION_GRANTS_RESOURCE, { grants: [] });
             const rows = Array.isArray(doc?.grants) ? doc.grants : [];
-            // Re-issuing for the same target REPLACES: an owner who narrows or re-dates a grant means the
-            // new one, and keeping both would let the recipient present whichever suits them.
-            const target = String(held.targetAgent).toLowerCase();
-            const next = [...rows.filter((r) => String((r as { targetAgent?: string }).targetAgent ?? '').toLowerCase() !== target), held];
+            // Re-issuing for the same (owner, kind) REPLACES: an owner who narrows, re-points or re-dates
+            // a grant means the new one, and keeping both would let the holder present whichever suits.
+            const key = `${String(held.owner).toLowerCase()}:${String(held.targetType ?? '').toLowerCase()}`;
+            const next = [...rows.filter((r) => {
+              const row = r as { owner?: string; targetType?: string; grantId?: string };
+              return `${String(row.owner ?? '').toLowerCase()}:${String(row.targetType ?? '').toLowerCase()}` !== key
+                && row.grantId !== held.grantId;
+            }), held];
             await this.writeDoc(g, RESOLUTION_GRANTS_RESOURCE, { grants: next });
             return json({ ok: true });
           });
@@ -1961,7 +1967,10 @@ export class InteractionsDO {
               const row = r as { kind?: string; requester?: string; wants?: string };
               if (row.kind === 'resolution.invitation.sent') return r; // the other end's row, not this decision
               return `${String(row.requester ?? '').toLowerCase()}:${String(row.wants ?? '').toLowerCase()}` === key
-                ? { ...row, status: 'approved', grantId, decidedAt: new Date().toISOString() } : r;
+                // THE GRANT ITSELF STAYS HERE, with the issuer. The holder gets a reference and asks a
+                // resolver for the address, which is what lets a withdrawal actually WITHHOLD it rather
+                // than merely withhold the resolver's cooperation (spec 338 §4).
+                ? { ...row, status: 'approved', grantId, grant: (body as { grant?: unknown }).grant ?? null, decidedAt: new Date().toISOString() } : r;
             });
             await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
             return json({ ok: true });
@@ -1988,6 +1997,21 @@ export class InteractionsDO {
             await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
             return json({ ok: true, grantId });
           });
+        }
+        if (op === 'internal.resolution.project') {
+          // THE RESOLVER'S READ. Given a grantId this principal ISSUED, hand back the grant so the
+          // resolver can check it and project the target. In-Worker only; the holder never reaches it,
+          // which is the entire point of them holding a reference instead of an address.
+          const grantId = String((body as { grantId?: string }).grantId ?? '');
+          if (!grantId) return json({ error: 'grantId required' }, 400);
+          const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+          const row = (Array.isArray(doc?.requests) ? doc.requests : [])
+            .find((r) => (r as { grantId?: string }).grantId === grantId) as { grant?: unknown; status?: string } | undefined;
+          if (!row?.grant) return json({ ok: false, error: 'no such grant' }, 404);
+          // A withdrawn grant projects NOTHING, reported as a refusal rather than an empty answer so a
+          // caller cannot read "revoked" as "try again later".
+          if (row.status === 'revoked') return json({ ok: false, error: 'revoked' }, 403);
+          return json({ ok: true, grant: row.grant });
         }
         if (op === 'internal.resolution.status') {
           // Which of this principal's issued grants are no longer good. Read by the agent in-Worker when

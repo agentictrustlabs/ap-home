@@ -1,87 +1,81 @@
 /**
- * A HELD GRANT IS CHECKED BEFORE IT IS USED — spec 338 §4.
+ * WHAT A RESOLVER CHECKS BEFORE IT TELLS ANYONE AN ADDRESS — spec 338 §4.
  *
- * The record lives in the HOLDER'S OWN VAULT, which the holder can write. So the record is not the
- * evidence and never was: the issuer's signature inside it is. Until this check existed, "I hold a grant
- * from Alice" was a sentence anyone could write about themselves, and the privacy of an unlisted agent
- * rested entirely on its address not being in a public place — which is true, and is not the same thing
- * as being enforced.
+ * The holder does not hold the address. They hold a REFERENCE, and ask each time. That is what makes
+ * these checks bite: before the gate existed, a withdrawn grant meant the resolver would not cooperate
+ * while the address sat in the holder's own vault, which is not withholding anything.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { verifiedGrants } from '../src/resolution-invitation.js';
+import { grantAllows, verifiedGrants } from '../src/resolution-invitation.js';
 
 const CHAIN = 34348;
 const ALICE = '0x00000000000000000000000000000000000000a1';
 const NATHAN = '0x00000000000000000000000000000000000000b1';
 const MALLORY = '0x00000000000000000000000000000000000000c1';
 const TARGET = '0x00000000000000000000000000000000000000d1';
+const HERE = 'a2a.faithnet.io';
 const caip = (a: string) => `eip155:${CHAIN}:${a}`;
 
-const held = (over: Record<string, unknown> = {}, grantOver: Record<string, unknown> = {}) => ({
-  grants: [{
-    v: 1, kind: 'resolution.grant.held', grantId: 'apd1_x', targetAgent: TARGET, owner: ALICE,
-    targetType: 'treasury', issuedAt: '2026-01-01T00:00:00Z', expiresAt: '2099-01-01T00:00:00Z',
-    grant: { issuer: caip(ALICE), subject: caip(NATHAN), targetAgent: caip(TARGET), proof: { signature: '0xsig' }, ...grantOver },
-    ...over,
-  }],
+const grant = (over: Record<string, unknown> = {}, constraints: Record<string, unknown> = {}) => ({
+  issuer: caip(ALICE), subject: caip(NATHAN), targetAgent: caip(TARGET),
+  proof: { signature: '0xsig' },
+  constraints: { audience: HERE, notBefore: '2020-01-01T00:00:00Z', expiresAt: '2099-01-01T00:00:00Z', ...constraints },
+  ...over,
 });
-const ctx = (verify = true, asker = NATHAN) => ({
-  asker, chainId: CHAIN,
-  digestOf: () => '0xdigest',
-  verifySignature: vi.fn(async () => verify),
+const ctx = { caller: NATHAN, owner: ALICE, audience: HERE };
+
+describe('grantAllows — the rules that decide whether someone learns an address', () => {
+  it('allows one issued to this caller, by this owner, for this resolver, in date, signed', () => {
+    expect(grantAllows(grant(), ctx)).toBeNull();
+  });
+
+  it('REFUSES one issued to somebody else — it is recipient-bound', () => {
+    expect(grantAllows(grant(), { ...ctx, caller: MALLORY })).toBe('not-issued-to-you');
+  });
+
+  it('REFUSES one whose issuer is not the owner it is being read from', () => {
+    expect(grantAllows(grant({ issuer: caip(MALLORY) }), ctx)).toBe('not-issued-by-them');
+  });
+
+  it('REFUSES one minted for a DIFFERENT resolver — the confused-deputy defence', () => {
+    // Alice grants Nathan discovery through resolver A; he must not redeem it at resolver B, which would
+    // let B answer questions Alice never agreed it could answer.
+    expect(grantAllows(grant({}, { audience: 'someone-elses-resolver' }), ctx)).toBe('wrong-resolver');
+  });
+
+  it('REFUSES an expired one, and one not yet valid — the owner set the window', () => {
+    expect(grantAllows(grant({}, { expiresAt: '2020-01-01T00:00:00Z' }), ctx)).toBe('expired');
+    expect(grantAllows(grant({}, { notBefore: '2099-01-01T00:00:00Z' }), ctx)).toBe('not-yet-valid');
+  });
+
+  it('REFUSES an unsigned one — a grant nobody signed is a claim by whoever stored it', () => {
+    expect(grantAllows(grant({ proof: undefined }), ctx)).toBe('unsigned');
+  });
 });
 
-describe('using a resolution grant', () => {
-  it('accepts one the issuer signed, bound to this asker, for this target', async () => {
-    expect(await verifiedGrants(held(), 'treasury', ctx())).toHaveLength(1);
+describe('verifiedGrants — a reference is worth what the gate says it is', () => {
+  const held = { grants: [{ v: 1, kind: 'resolution.grant.held', grantId: 'apd1_x', owner: ALICE, targetType: 'treasury', expiresAt: '2099-01-01T00:00:00Z' }] };
+
+  it('uses the address the gate projects, and never one of its own', async () => {
+    const resolve = vi.fn(async () => TARGET);
+    const out = await verifiedGrants(held, 'treasury', { asker: NATHAN, resolve });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.targetAgent).toBe(TARGET);
+    expect(resolve).toHaveBeenCalledWith({ owner: ALICE, grantId: 'apd1_x' });
   });
 
-  it('REFUSES a self-written record — the holder can write their own vault', async () => {
-    // Mallory writes herself a grant naming Alice's treasury. The shape is perfect; nobody signed it.
-    expect(await verifiedGrants(held(), 'treasury', ctx(false))).toHaveLength(0);
+  it('drops a reference the gate refuses — withdrawn, expired, or not theirs', async () => {
+    expect(await verifiedGrants(held, 'treasury', { asker: NATHAN, resolve: async () => null })).toHaveLength(0);
   });
 
-  it('REFUSES one issued to somebody else — it is recipient-bound', async () => {
-    expect(await verifiedGrants(held(), 'treasury', ctx(true, MALLORY))).toHaveLength(0);
+  it('drops it when the gate cannot be reached — an unanswered question is not a yes', async () => {
+    const resolve = async () => { throw new Error('resolver unreachable'); };
+    expect(await verifiedGrants(held, 'treasury', { asker: NATHAN, resolve })).toHaveLength(0);
   });
 
-  it('REFUSES a grant re-pointed at another agent', async () => {
-    const other = '0x00000000000000000000000000000000000000d2';
-    expect(await verifiedGrants(held({ targetAgent: other }), 'treasury', ctx())).toHaveLength(0);
-  });
-
-  it('REFUSES one whose issuer is not the owner it claims', async () => {
-    expect(await verifiedGrants(held({}, { issuer: caip(MALLORY) }), 'treasury', ctx())).toHaveLength(0);
-  });
-
-  it('REFUSES one with no proof at all', async () => {
-    expect(await verifiedGrants(held({}, { proof: undefined }), 'treasury', ctx())).toHaveLength(0);
-  });
-
-  it('REFUSES an expired one — the owner set the window', async () => {
-    expect(await verifiedGrants(held({ expiresAt: '2020-01-01T00:00:00Z' }), 'treasury', ctx())).toHaveLength(0);
-  });
-
-  it('REFUSES one the issuer has WITHDRAWN', async () => {
-    const c = { ...ctx(), revokedBy: async () => ['apd1_x'] };
-    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(0);
-  });
-
-  it('accepts one when the issuer has withdrawn a DIFFERENT grant', async () => {
-    const c = { ...ctx(), revokedBy: async () => ['apd1_other'] };
-    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(1);
-  });
-
-  it('REFUSES when the status cannot be read — "I could not ask" is not permission', async () => {
-    // The point of revocation is that someone changed their mind. An unreadable status is exactly the
-    // case where honouring the grant anyway is worst.
-    const c = { ...ctx(), revokedBy: async () => { throw new Error('vault unreachable'); } };
-    expect(await verifiedGrants(held(), 'treasury', c)).toHaveLength(0);
-  });
-
-  it('checks the signature against the ISSUER, over the canonical body', async () => {
-    const c = ctx();
-    await verifiedGrants(held(), 'treasury', c);
-    expect(c.verifySignature).toHaveBeenCalledWith({ signer: ALICE, digest: '0xdigest', signature: '0xsig' });
+  it('holds nothing of the wrong type, and asks about nothing', async () => {
+    const resolve = vi.fn(async () => TARGET);
+    expect(await verifiedGrants(held, 'org', { asker: NATHAN, resolve })).toHaveLength(0);
+    expect(resolve).not.toHaveBeenCalled();
   });
 });

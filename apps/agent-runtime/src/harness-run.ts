@@ -433,7 +433,7 @@ export interface HarnessDeps {
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
-  verifyGrant?: (held: unknown, type: string, asker: string) => Promise<Array<{ targetAgent: string; owner: string; ownerName?: string; label?: string }>>;
+  verifyGrant?: (held: unknown, type: string, asker: string, session?: string) => Promise<Array<{ targetAgent?: string; owner: string; ownerName?: string; label?: string }>>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
@@ -1535,7 +1535,7 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, onResolved: (r) => {
+    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}), onResolved: (r) => {
       // The SAME party can be reported twice — once resolved from words or from the asker's own tree, and
       // once again as the plain address it now is. Keep whichever knows its name: overwriting a labelled
       // record with a bare address is how "nathan.treasury" became "0x2c47…" on the card a person reads

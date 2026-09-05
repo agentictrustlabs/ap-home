@@ -59,10 +59,11 @@ export interface SentResolutionRequestV1 {
 export interface HeldResolutionGrantV1 {
   v: 1;
   kind: 'resolution.grant.held';
-  /** The opaque grant id — never name-derived (spec 338 §4). */
+  /** The opaque grant id — never name-derived (spec 338 §4). This is a REFERENCE: the holder presents it
+   *  to the resolver and is given the target, per use. It is deliberately not the address. */
   grantId: string;
-  /** The agent this permits DISCOVERING. Knowing it is not permission to use it. */
-  targetAgent: Address;
+  /** Filled by the RESOLVER when it projects, never stored. Present only in memory, after a gate said so. */
+  targetAgent?: Address;
   /** Whose agent it is, so a surface can say "alice's treasury" without a name for the treasury. */
   owner: Address;
   ownerName?: string;
@@ -134,41 +135,54 @@ export function usableGrants(held: unknown, type: string, now = Date.now()): Hel
  *   · the issuer has not WITHDRAWN it (see `revokedBy`).
  *
  */
+/** Why a grant may not be used. Each names a different party being wrong, so the message can too. */
+export type GrantRefusal =
+  | 'not-issued-to-you' | 'not-issued-by-them' | 'wrong-resolver' | 'expired' | 'not-yet-valid' | 'unsigned';
+
+/**
+ * EVERY CHECK A RESOLVER MAKES BEFORE PROJECTING, as one pure function.
+ *
+ * Pure on purpose: these are the rules that decide whether someone learns an address, and rules that can
+ * only be exercised by standing up a Worker are rules nobody tests. The signature check is the caller's
+ * to make — it needs a chain — and is the one thing not here.
+ */
+export function grantAllows(
+  grant: unknown,
+  ctx: { caller: string; owner: string; audience?: string; now?: number },
+): GrantRefusal | null {
+  const g = (grant ?? {}) as { issuer?: string; subject?: string; constraints?: { audience?: string; expiresAt?: string; notBefore?: string }; proof?: { signature?: string } };
+  const addr = (caip: string | undefined) => (String(caip ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  const now = ctx.now ?? Date.now();
+  // Recipient-bound: one person's grant handed to another is not a grant (spec 338 §4).
+  if (addr(g.subject) !== ctx.caller.toLowerCase()) return 'not-issued-to-you';
+  if (addr(g.issuer) !== ctx.owner.toLowerCase()) return 'not-issued-by-them';
+  // Confused-deputy defence: a grant minted for another resolver must not be redeemable here.
+  if (ctx.audience && g.constraints?.audience && g.constraints.audience !== ctx.audience) return 'wrong-resolver';
+  if (g.constraints?.expiresAt && Date.parse(g.constraints.expiresAt) <= now) return 'expired';
+  if (g.constraints?.notBefore && Date.parse(g.constraints.notBefore) > now) return 'not-yet-valid';
+  if (!g.proof?.signature) return 'unsigned';
+  return null;
+}
+
 export async function verifiedGrants(
   held: unknown,
   type: string,
   ctx: {
     asker: string;
-    chainId: number;
-    /** ERC-1271 / ECDSA signature check, as the mandate path does it. */
-    verifySignature: (input: { signer: string; digest: string; signature: string }) => Promise<boolean>;
-    /** Canonical bytes of the grant as signed. */
-    digestOf: (grant: unknown) => string;
-    /** The grant ids this issuer has withdrawn, read from THEIR record. Absent ⇒ revocation unchecked. */
-    revokedBy?: (issuer: string) => Promise<string[]>;
+    /** Ask the RESOLVER for the target this reference permits. It refuses an expired, withdrawn,
+     *  wrong-subject, wrong-audience or unsigned grant — every check lives there, on the issuer's side,
+     *  which is the only side that can be sure. Returning null is a refusal, not an error to route past. */
+    resolve: (input: { owner: string; grantId: string }) => Promise<string | null>;
     now?: number;
   },
 ): Promise<HeldResolutionGrantV1[]> {
-  const caip = (a: string) => `eip155:${ctx.chainId}:${a.toLowerCase()}`;
   const out: HeldResolutionGrantV1[] = [];
-  for (const held1 of usableGrants(held, type, ctx.now)) {
-    const g = held1.grant as { issuer?: string; subject?: string; targetAgent?: string; proof?: { signature?: string } } | undefined;
-    if (!g?.proof?.signature) continue;
-    if (String(g.subject ?? '').toLowerCase() !== caip(ctx.asker)) continue;
-    if (String(g.targetAgent ?? '').toLowerCase() !== caip(held1.targetAgent)) continue;
-    const issuer = String(g.issuer ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0];
-    if (!issuer || issuer.toLowerCase() !== held1.owner.toLowerCase()) continue;
-    const ok = await ctx.verifySignature({ signer: issuer, digest: ctx.digestOf(g), signature: g.proof.signature }).catch(() => false);
-    if (!ok) continue;
-    // WITHDRAWN IS NOT WEAKER, IT IS OVER. Checked against the issuer's own status, which is the only
-    // side that can say — the holder keeps the record either way. A status that cannot be READ refuses:
-    // the point of revocation is that someone changed their mind, and "I could not ask" is exactly the
-    // case where that matters most.
-    if (ctx.revokedBy) {
-      const revoked = await ctx.revokedBy(issuer).catch(() => null);
-      if (revoked === null || revoked.includes(held1.grantId)) continue;
-    }
-    out.push(held1);
+  for (const ref of usableGrants(held, type, ctx.now)) {
+    // The holder's record says only WHOSE agent and that they were given a way to it. The address comes
+    // from the gate, per use — so a withdrawal actually withholds it rather than merely withholding the
+    // resolver's cooperation while the address sits in their vault.
+    const target = await ctx.resolve({ owner: ref.owner, grantId: ref.grantId }).catch(() => null);
+    if (target) out.push({ ...ref, targetAgent: target as Address });
   }
   return out;
 }
