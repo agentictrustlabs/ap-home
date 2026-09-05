@@ -15,9 +15,13 @@ import { RESOLUTION_REQUESTS_RECORD, RESOLUTION_SENT_RECORD, type ResolutionInvi
  * it makes the reader hunt for the page, and most will not — the request then sits unanswered and looks
  * to the asker like it was ignored. The Home's own origin, so the link works wherever this is deployed.
  */
-export function actionLink(homeOrigin: string | undefined, path: string): string {
-  const base = (homeOrigin ?? '').split(',')[0]?.trim().replace(/\/$/, '');
-  return base ? `${base}${path}` : path;
+export function actionLink(homeOrigins: string | undefined, path: string): string {
+  // PREFER AN ORIGIN A PERSON CAN ACTUALLY OPEN. `ALLOWED_ORIGINS` is a CSRF allowlist, not a list of
+  // places to send someone, and it carries the local dev origins first — so the obvious "take the first
+  // one" put `http://localhost:5175/treasuries` in a message sent to somebody else's machine.
+  const all = (homeOrigins ?? '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+  const base = all.find((o) => o.startsWith('https://') && !/localhost|127\.0\.0\.1/.test(o)) ?? '';
+  return base ? `${base}${path}` : '';
 }
 
 export interface ResolutionRequestDeps {
@@ -79,7 +83,8 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // The note says what to DO, including the case where they have none of that kind — which is the
     // common one for a first payment, and the one where "approve it in your Home" reads as nonsense.
     const where = actionLink(deps.homeOrigin, wants === 'treasury' ? '/treasuries' : '/agents');
-    const note = `I'd like a way to reach your ${wants} — ${purpose}. Decide here: ${where} — if you have a ${wants}, approving lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
+    // A link that cannot be opened is worse than none: it reads as an instruction and goes nowhere.
+    const note = `I'd like a way to reach your ${wants} — ${purpose}. ${where ? `Decide here: ${where} — i` : 'I'}f you have a ${wants}, approving lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
     const sent = session ? await deps.sendDirectMessage?.({ sender: person, recipient: owner, bodyText: note, session }) : undefined;
 
     return {

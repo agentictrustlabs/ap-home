@@ -52,7 +52,7 @@ import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type 
 import type { ResolvedParty } from './party-resolution.js';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
-import { resolutionRequestInvoker } from './resolution-request.js';
+import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES } from '@agenticprimitives/ontology';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
@@ -1462,12 +1462,12 @@ export async function waitingOn(
   const rows = (doc as { requests?: Array<{ kind?: string; requester?: string; wants?: string; status?: string }> } | null)?.requests ?? [];
   const pending = rows.filter((r) => r.kind !== 'resolution.invitation.sent' && !!r.requester && (r.status ?? 'pending') === 'pending');
   if (!pending.length) return null;
-  const where = (homeOrigin ?? '').split(',')[0]?.trim().replace(/\/$/, '');
+  const where = actionLink(homeOrigin, '/treasuries');
   const what = pending.length === 1
     ? `Someone has asked you for a way to reach your ${pending[0]!.wants ?? 'agent'}.`
     : `${pending.length} people have asked you for a way to reach agents of yours.`;
   // WHERE, not just what. A notice that does not say where to go is one more thing to work out.
-  return `${what}${where ? ` You decide at ${where}/treasuries.` : ''}`;
+  return `${what}${where ? ` You decide at ${where}.` : ''}`;
 }
 
 export function askVocabulary(): Array<AskCapabilityLike & { label: string }> {

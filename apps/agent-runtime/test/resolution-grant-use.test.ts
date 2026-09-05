@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { grantAllows, verifiedGrants } from '../src/resolution-invitation.js';
 import { waitingOn } from '../src/harness-run.js';
+import { actionLink } from '../src/resolution-request.js';
 
 const CHAIN = 34348;
 const ALICE = '0x00000000000000000000000000000000000000a1';
@@ -109,5 +110,19 @@ describe('waitingOn — what is pending, said on the surface they actually opene
   it('says nothing rather than failing when the record cannot be read', async () => {
     const broken = { readSubjectRecord: async () => { throw new Error('vault down'); } };
     await expect(waitingOn(broken, person)).resolves.toBeNull();
+  });
+});
+
+describe('actionLink — a link a person can actually open', () => {
+  it('skips the dev origins ALLOWED_ORIGINS lists first', () => {
+    // That list is a CSRF allowlist, not a list of places to send someone. Taking the first entry put
+    // http://localhost:5175/treasuries in a message sent to somebody else's machine.
+    expect(actionLink('http://localhost:5175,https://www.faithnet.me', '/treasuries'))
+      .toBe('https://www.faithnet.me/treasuries');
+  });
+
+  it('returns nothing when there is nowhere real to send them', () => {
+    expect(actionLink('http://localhost:5175,http://127.0.0.1:3000', '/treasuries')).toBe('');
+    expect(actionLink(undefined, '/treasuries')).toBe('');
   });
 });

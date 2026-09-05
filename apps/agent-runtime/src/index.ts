@@ -110,6 +110,7 @@ import { charteredAgentsReader } from './chartered-agents.js';
 import { relationshipRows } from './relationship-rows.js';
 import { grantBody } from '@agenticprimitives/agent-resolution';
 import { verifiedGrants, grantAllows } from './resolution-invitation.js';
+import { actionLink } from './resolution-request.js';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -1505,8 +1506,8 @@ app.post('/resolution/grant', async (c) => {
   // TELL THEM. A grant delivered silently into someone's vault is a thing they have no reason to look
   // for: they asked days ago, and nothing about their Home changed. The answer travels the way the
   // question did — as a message from the person who decided, sent on their own interactions plane.
-  const backTo = (c.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim().replace(/\/$/, '') ?? '';
-  const note = `You can reach my ${wants} now — I've sent you a way to it. Finish what you were doing here: ${backTo}/treasuries — it lets you send there; it gives you no control over it.`;
+  const backTo = actionLink(c.env.ALLOWED_ORIGINS, '/treasuries');
+  const note = `You can reach my ${wants} now — I've sent you a way to it.${backTo ? ` Finish what you were doing here: ${backTo} —` : ''} it lets you send there; it gives you no control over it.`;
   const messaged = await (async () => {
     try {
       const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
