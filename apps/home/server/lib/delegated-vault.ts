@@ -20,6 +20,7 @@ import type {
   VaultObject,
   VaultReadRequest,
   VaultWriteRequest,
+  VaultQueryRequest,
   VaultRef,
 } from '@agenticprimitives/vault';
 
@@ -41,6 +42,9 @@ export interface ServerVaultTransport {
   get(recordType: string): Promise<unknown | null>;
   set(recordType: string, data: unknown): Promise<void>;
   list(): Promise<VaultRef[]>;
+  /** Spec 356 §2.3 — a SELECTOR evaluated at the vault. Optional: a transport whose MCP surface has no
+   *  query verb cannot do this, and says so rather than pretending (see the adapter's `query`). */
+  query?(select: VaultQueryRequest['select'], opts: { fields?: string[]; limit?: number }): Promise<Array<{ resource: string; data: unknown; updatedAt: string }>>;
 }
 
 /**
@@ -77,6 +81,31 @@ export function createDelegatedVault(transport: ServerVaultTransport): Vault {
     async list(owner: string): Promise<VaultRef[]> {
       assertOwner(owner);
       return transport.list();
+    },
+    /**
+     * Spec 356 §2.3 — the selector runs AT the vault, so this needs a transport that can carry one.
+     *
+     * When it cannot, this REFUSES rather than emulating the query with `list()` + N × `read()`. That
+     * emulation is the exact shape the spec forbids: it would pull an owner's whole record set through
+     * this process to answer a question about three of them, and it would work well enough in a test to
+     * survive review. A missing verb is a missing verb (ADR-0013).
+     */
+    async query<T = unknown>(req: VaultQueryRequest): Promise<VaultObject<T>[]> {
+      assertOwner(req.owner);
+      if (!transport.query) {
+        throw new Error('this vault transport cannot run a query — its MCP surface has no query verb (spec 356 §2.3)');
+      }
+      const rows = await transport.query(req.select, {
+        ...(req.fields ? { fields: req.fields } : {}),
+        ...(typeof req.limit === 'number' ? { limit: req.limit } : {}),
+      });
+      return rows.map((r) => ({
+        owner: transport.owner.toLowerCase(),
+        resource: r.resource,
+        classification: 'internal' as const,
+        data: r.data as T,
+        updatedAt: r.updatedAt,
+      }));
     },
   };
 }
