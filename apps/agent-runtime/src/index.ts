@@ -2357,6 +2357,11 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         },
       });
     },
+    // The far end of one of THEIR OWN sent requests: the payment it was waiting for settled, so the note
+    // stops asking to be finished. Their own vault, their own record — nothing of the issuer's changes.
+    settleResolutionRequest: async (person: string, input: { owner: string; wants: string; txHash?: string }) => {
+      await callInteractionsInternal(env, person, 'internal.resolution.settle', input).catch(() => undefined);
+    },
     // A request for a way to reach an unlisted agent, written into the OWNER's own vault so their Home
     // can show it as a decision. It confers nothing — the answer is theirs to give (spec 338 §7).
     appendSubjectRecord: async (subject: string, recordType: string, entry: unknown) => {

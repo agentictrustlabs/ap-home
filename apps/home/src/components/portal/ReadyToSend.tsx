@@ -8,7 +8,7 @@
 // The button prefills the ask; it does not send money. Everything that follows is the ordinary path: the
 // mandate you sign, the approval a payment's risk demands, the receipt. A grant told you where to send,
 // and where is not whether.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { AddressChip } from '../shared/AddressChip';
@@ -29,8 +29,12 @@ export function completionAsk(g: HeldGrant, amount?: string): string {
 export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
   const { session } = useSession();
   const token = session?.token;
-  const [rows, setRows] = useState<Array<{ grant: HeldGrant; amount?: string }> | null>(null);
+  const open = useRef<Set<string>>(new Set());
+  const [rows, setRows] = useState<Array<{ grant: HeldGrant; amount?: string; done?: boolean }> | null>(null);
   const [err, setErr] = useState('');
+  // WHAT WAS STILL OPEN WHEN THEY GOT HERE. A task that settles while they are looking at it is shown as
+  // done once and is gone next time — vanishing silently reads as the card having failed, and leaving it
+  // forever re-offers a payment already made.
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -47,12 +51,26 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
     // so a real grant, sitting in the vault, was invisible because a second record did not line up. The
     // amount is an enrichment; the grant is the fact.
     const sent = (r.requests ?? []).filter((x) => x.kind === 'resolution.invitation.sent');
+    for (const grant of g.grants ?? []) {
+      const mine = sent.find((x) => (x.owner ?? '').toLowerCase() === (grant.owner ?? '').toLowerCase() && x.wants === grant.targetType);
+      if ((mine?.status ?? 'pending') === 'pending') open.current.add((grant.grantId ?? '').toLowerCase());
+    }
     setRows((g.grants ?? []).map((grant) => {
       const mine = sent.find((x) => (x.owner ?? '').toLowerCase() === (grant.owner ?? '').toLowerCase() && x.wants === grant.targetType);
-      return { grant, ...(mine?.amount ? { amount: mine.amount } : {}) };
-    }));
+      const settled = (mine?.status ?? 'pending') !== 'pending';
+      return { grant, ...(mine?.amount ? { amount: mine.amount } : {}), ...(settled ? { done: true } : {}) };
+    // SETTLED AND NOT WATCHED IS FINISHED BUSINESS. The grant itself is untouched and still usable — this
+    // list is what is waiting on you, and once you have sent, nothing is. Ask for it by name any time.
+    }).filter((row) => !row.done || open.current.has((row.grant.grantId ?? '').toLowerCase())));
   }, [token]);
   useEffect(() => { void load(); }, [load]);
+  // The task is usually finished in the Ask flyout beside this list, so the card has to hear about it.
+  // Without this it keeps saying "finish it below" until the page is reloaded.
+  useEffect(() => {
+    const onDone = () => { void load(); };
+    window.addEventListener('ap:ask-done', onDone);
+    return () => window.removeEventListener('ap:ask-done', onDone);
+  }, [load]);
 
   if (!session) return null;
   // Rendered even when empty, quietly. "Nobody has given you a way to reach anything" is a real state and
@@ -72,7 +90,7 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
   return (
     <SectionShell title="Ready to send">
       {err && <p style={errorText}>{err}</p>}
-      {rows.map(({ grant, amount }) => (
+      {rows.map(({ grant, amount, done }) => (
         <div
           key={grant.grantId} style={cardSty}
           data-testid={`ready-to-send-${(grant.grantId ?? '').toLowerCase()}`}
@@ -85,11 +103,13 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
               and it stops being looked up if they withdraw it. */}
           <div style={{ marginTop: 4 }}><AddressChip address={grant.owner ?? ''} /></div>
           <p style={{ ...mutedText, fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
-            {amount
-              ? `You were sending ${amount} USDC. Finish it below — you will still authorize the payment itself.`
-              : 'You can send there now. You will still authorize the payment itself.'}
+            {done
+              ? `Sent${amount ? ` — ${amount} USDC` : ''}. Nothing left to finish; they are still reachable whenever you ask.`
+              : amount
+                ? `You were sending ${amount} USDC. Finish it below — you will still authorize the payment itself.`
+                : 'You can send there now. You will still authorize the payment itself.'}
           </p>
-          <button
+          {done ? null : <button
             type="button" className="btn primary" style={{ marginTop: 10, fontSize: 12 }}
             data-testid={`ready-to-send-go-${(grant.grantId ?? '').toLowerCase()}`}
             onClick={() => {
@@ -99,7 +119,7 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
             }}
           >
             {amount ? `Send ${amount} USDC` : 'Send to it'}
-          </button>
+          </button>}
         </div>
       ))}
     </SectionShell>

@@ -78,8 +78,8 @@ export function DelegationCard({ kind, d }: { kind: 'App access' | 'Membership' 
         <span className="manage-card-label">{kind}</span>
         <span className="manage-card-badge live">{d.authority === ROOT_AUTHORITY ? 'root' : 'sub'}</span>
       </div>
-      <Fact label="Delegator"><AddressChip address={d.delegator} size="sm" withName /></Fact>
-      <Fact label="Delegate"><AddressChip address={d.delegate} size="sm" withName /></Fact>
+      <Fact label="Delegator"><AddressChip address={d.delegator} size="sm" /></Fact>
+      <Fact label="Delegate"><AddressChip address={d.delegate} size="sm" /></Fact>
       <Fact label="Caveats">
         {d.caveats.length === 0 ? 'none' : (
           <ul style={{ margin: 0, paddingLeft: '1rem' }}>
@@ -288,7 +288,7 @@ function MemberCard({ m, onRemove, removing }: { m: ReceivedDelegation; onRemove
           </button>
         )}
       </div>
-      <div style={{ margin: '.45rem 0' }}><AddressChip address={m.orgAgent} size="sm" withName /></div>
+      <div style={{ margin: '.45rem 0' }}><AddressChip address={m.orgAgent} size="sm" /></div>
       {!d ? (
         <p className="manage-card-blurb">No readable delegation for this member.</p>
       ) : !open ? (
@@ -395,7 +395,7 @@ export function OrgMembers({ org, token }: { org: MyOrg; token: string | null })
                   <span className="manage-card-badge live">Steward</span>
                   {selfMember && <span className="manage-card-badge">Member</span>}
                 </div>
-                {agentAddress && <div style={{ margin: '.45rem 0' }}><AddressChip address={agentAddress} size="sm" withName /></div>}
+                {agentAddress && <div style={{ margin: '.45rem 0' }}><AddressChip address={agentAddress} size="sm" /></div>}
                 <p className="manage-card-blurb" style={{ margin: 0 }}>
                   You hold this organization&rsquo;s stewardship delegation — admin read/oversight of its data.
                   {!selfMember && ' (No membership delegation recorded — orgs created from now on add one automatically.)'}
@@ -462,7 +462,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
         <h2><BuildingIcon size={16} /> {org.orgName || '(unnamed org)'}</h2>
         <Fact label="Name"><code>{org.orgName || '—'}</code></Fact>
         <Fact label="Address">
-          <AddressChip address={org.orgAgent} size="sm" withName />{' '}
+          <AddressChip address={org.orgAgent} size="sm" />{' '}
           <ExplorerLink address={org.orgAgent} label="explorer ↗" />
         </Fact>
         <Fact label="Kind">{purposeLabel(org.purpose)}</Fact>

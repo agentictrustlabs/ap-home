@@ -47,7 +47,7 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
-import { resolveParty, ownAgentsOfType, candidateHint, type PartyLookups } from './party-resolution.js';
+import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
@@ -436,6 +436,10 @@ export interface HarnessDeps {
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
   verifyGrant?: (held: unknown, type: string, asker: string, session?: string) => Promise<Array<{ targetAgent?: string; owner: string; ownerName?: string; label?: string }>>;
+  /** Close the note in the ASKER'S OWN vault that was waiting on this — spec 338 §7, the far end of a
+   *  request they sent. Settling is a record of what happened, never a permission: the grant it refers to
+   *  stays exactly as valid as its issuer left it. */
+  settleResolutionRequest?: (person: string, input: { owner: string; wants: string; txHash?: string }) => Promise<void>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
@@ -1186,6 +1190,37 @@ async function resolveStepArgs(
  *  paraphrased — what was created, at what address, in which transaction is stated from the receipt, where
  *  precision is the point. No composer, or a composer that fails, ⇒ the raw result, unchanged: the evidence
  *  is identical either way and only its rendering degrades. */
+/**
+ * THE THING THEY WERE WAITING FOR HAPPENED — spec 338 §7.
+ *
+ * Someone could not be reached, so they asked; a grant came back and their Home remembered what it was
+ * for. The moment the payment that grant enabled settles, that note has nothing left to wait on. Left
+ * open it keeps offering a payment already made, which is the one thing a "finish this" card must never
+ * invite.
+ *
+ * Only a party reached THROUGH its owner's disclosure closes anything: an address typed outright was
+ * nobody's answer to anything. Best-effort, and deliberately so — the money has moved and been receipted;
+ * a note that fails to close costs a card, not a payment, and failing the run over it would be worse.
+ */
+async function settleFinishedRequests(
+  input: { deps?: HarnessDeps; principal?: Address; resolved?: ResolvedParties },
+  r: RunResult,
+): Promise<void> {
+  const settle = input.deps?.settleResolutionRequest;
+  if (!settle || !input.principal) return;
+  const paid = r.receipts.filter((rc) => rc.toolId === 'treasury.payment.execute' && rc.status === 'executed');
+  if (!paid.length) return;
+  const txHash = (r.result as { txHash?: string } | null)?.txHash;
+  const seen = new Set<string>();
+  for (const p of input.resolved?.values() ?? []) {
+    // The args that MOVE VALUE, from the ontology binding (spec 355) — not a hand-kept list of arg names
+    // that would drift the first time a capability names its payee something else.
+    if (!VALUE_ARGS.has(p.arg) || !p.ownedBy || seen.has(p.ownedBy)) continue;
+    seen.add(p.ownedBy);
+    await settle(input.principal, { owner: p.ownedBy, wants: 'treasury', ...(txHash ? { txHash } : {}) }).catch(() => undefined);
+  }
+}
+
 export async function askReplyFor(env: HarnessEnv, input: {
   intent: { goal: string }; result: RunResult; addressee: Address;
   /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
@@ -1328,7 +1363,10 @@ export async function askReplyFor(env: HarnessEnv, input: {
       };
     }
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
-    if (acted) return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
+    if (acted) {
+      await settleFinishedRequests(input, r).catch(() => undefined);
+      return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
+    }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     if (!input.composer) return { kind: 'answer', runRef: r.runRef, text: raw };
     try {

@@ -1581,7 +1581,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2050,6 +2050,35 @@ export class InteractionsDO {
             const next = [...rows.filter((r) => keyOf(r as never) !== key), { ...req, status: 'pending' }];
             await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
             return json({ ok: true });
+          });
+        }
+        if (op === 'internal.resolution.settle') {
+          // THE FAR END OF A SENT REQUEST — spec 338 §7. They asked someone for a way to reach an agent,
+          // it came back, and the payment it enabled has now settled. Closing the note is bookkeeping:
+          // the GRANT it refers to is untouched and stays exactly as valid as its issuer left it, so this
+          // withdraws nothing and permits nothing.
+          //
+          // SENT rows only. A received request is somebody else's decision and closes by being answered —
+          // closing one from here would let a requester mark their own ask as dealt with.
+          const owner = String(body.owner ?? '').toLowerCase();
+          const wants = String(body.wants ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(owner)) return json({ error: 'owner required' }, 400);
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+            const rows = Array.isArray(doc?.requests) ? doc.requests : [];
+            let closed = 0;
+            const next = rows.map((r) => {
+              const row = r as { kind?: string; owner?: string; wants?: string; status?: string };
+              if (row.kind !== 'resolution.invitation.sent') return r;
+              if (String(row.owner ?? '').toLowerCase() !== owner) return r;
+              if (wants && String(row.wants ?? '').toLowerCase() !== wants) return r;
+              if ((row.status ?? 'pending') !== 'pending') return r;
+              closed += 1;
+              return { ...row, status: 'settled', settledAt: new Date().toISOString(), ...(body.txHash ? { txHash: String(body.txHash) } : {}) };
+            });
+            // Nothing was waiting: not an error. A person may pay somebody they were never blocked on.
+            if (closed) await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
+            return json({ ok: true, closed });
           });
         }
         if (op === 'internal.applications.append') {

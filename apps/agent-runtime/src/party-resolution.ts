@@ -60,6 +60,20 @@ export interface ResolvedParty {
   agent: string;
   label?: string;
   hint?: string;
+  /** WHOSE disclosure reached it — the owner, when this agent was found by following someone else's
+   *  chartered edge or a grant they issued. Absent when the person named the agent outright: nobody
+   *  disclosed anything, so there is nobody whose request this settles. Not authority, and not read by
+   *  any gate — it is how a run can close the note that was waiting on exactly this. */
+  ownedBy?: string;
+}
+
+/** The owner a candidate was reached THROUGH, when it was reached through one. Both sources answer
+ *  "what does this agent hold" on someone's behalf, so both name that someone in `provenance.subject`. */
+function ownerOf(c: EntityCandidate): string | undefined {
+  const via = c.provenance?.source;
+  if (via !== 'chartered-under' && via !== 'resolution-grant') return undefined;
+  const subject = String(c.provenance?.subject ?? '').toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(subject) ? subject : undefined;
 }
 
 const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
@@ -67,7 +81,7 @@ const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
 /** Arguments that move value — from the ontology binding (spec 355), where a party says whether getting
  *  it wrong can be undone. For these, settling for a different KIND of agent than the capability asked
  *  for is a question, not a resolution: a payment cannot be taken back. */
-const VALUE_ARGS = ONTOLOGY_VALUE_ARGS;
+export const VALUE_ARGS = ONTOLOGY_VALUE_ARGS;
 
 /**
  * A bare label against the typed roots the asker could plausibly mean, resolved on chain.
@@ -323,7 +337,7 @@ export async function resolveParty(
           .filter((c, i, xs) => xs.findIndex((y) => y.agent === c.agent) === i);
         if (owned.length === 1) {
           const c = owned[0]!;
-          lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent, label: c.label, hint: candidateHint(c) });
+          lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent, label: c.label, hint: candidateHint(c), ...(ownerOf(c) ? { ownedBy: ownerOf(c)! } : {}) });
           return c.agent.toLowerCase() as Address;
         }
         if (owned.length > 1) {
@@ -362,7 +376,7 @@ export async function resolveParty(
       }
       if (tier.length === 1) {
         const c = tier[0]!;
-        lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c) });
+        lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c), ...(ownerOf(c) ? { ownedBy: ownerOf(c)! } : {}) });
         return c.agent.toLowerCase() as Address;
       }
       if (tier.length > 1) {
@@ -380,7 +394,7 @@ export async function resolveParty(
     // surface can show it before a signature, rather than after — a certain resolution is the case where
     // nobody is asked anything, which is exactly when a wrong one goes unnoticed.
     const c = outcome.candidate;
-    lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c) });
+    lookups.onResolved?.({ arg: where.argName, raw: value, agent: c.agent.toLowerCase(), label: c.label, hint: candidateHint(c), ...(ownerOf(c) ? { ownedBy: ownerOf(c)! } : {}) });
     return c.agent.toLowerCase() as Address;
   }
   if (outcome.outcome === 'unknown') {

@@ -21,6 +21,7 @@ import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
+import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
 
@@ -140,6 +141,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
       if (reply.kind === 'done' && session) {
+        // SOMETHING HAPPENED. Surfaces beside this one are showing what was waiting on this person — a
+        // request to finish, a treasury balance — and after a run they are stale. They listen; this says
+        // so once, rather than each of them polling on a timer for a thing that happens twice a week.
+        window.dispatchEvent(new CustomEvent('ap:ask-done'));
         // An invitation's private half: the signed grant goes into the ORG's vault, where the invitee's
         // join looks for it. Without this the ask says "invited" and the invitee finds nothing.
         const invitation = invitationOf(reply.result);
@@ -322,7 +327,20 @@ function ReplyView({ reply }: { reply: AskReply }) {
     return (
       <div>
         <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : `Done — ${r?.name ?? 'it'} is live.`}</div>
-        {r?.agent && <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{short(r.agent)}{r.txHash ? ` · ${short(r.txHash)}` : ''}</div>}
+        {/* THE REFERENCE, whether or not an agent was created. This used to hang off `r.agent`, so a
+            PAYMENT — whose result is a transfer, not an agent — reported "Done" and showed the person who
+            had just moved money no transaction at all. The hash is carried in full for anything that
+            needs to check it; the line stays short for the person reading it. */}
+        {(r?.agent || r?.txHash) && (
+          <div
+            className="muted" style={{ fontSize: 11.5, marginTop: 2 }}
+            {...(r?.txHash ? { 'data-testid': 'ask-tx', 'data-tx': r.txHash } : {})}
+          >
+            {r?.agent && <AgentName address={r.agent} />}
+            {r?.agent && r?.txHash ? ' · ' : ''}
+            {r?.txHash ? short(r.txHash) : ''}
+          </div>
+        )}
       </div>
     );
   }
@@ -369,7 +387,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
         <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
           {reply.note
             ? reply.note
-            : `This needs ${capabilityWords(reply.capability)} as ${short(reply.delegator)}, which a different credential custodies.`}
+            : <>This needs {capabilityWords(reply.capability)} as <AgentName address={reply.delegator} />, which a different credential custodies.</>}
         </p>
         <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>Nothing was authorized, and nothing happened.</p>
         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -388,8 +406,8 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
     <div className="ask-card" data-testid="ask-authority">
       <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>
       <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
-        To do this, {short(reply.delegate)} needs permission to <strong>{capabilityWords(reply.capability)}</strong> as{' '}
-        <strong>{short(d.delegator)}</strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
+        To do this, <AgentName address={reply.delegate} /> needs permission to <strong>{capabilityWords(reply.capability)}</strong> as{' '}
+        <strong><AgentName address={d.delegator} /></strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.
       </p>
       {/* WHO IT RESOLVED TO. When several agents answered to the name the person picked one and knows what
           they picked. When exactly ONE did, nobody was asked anything — which is precisely the case where a
@@ -400,7 +418,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
           {reply.parties.map((p) => (
             <div key={`${p.arg}:${p.agent}`} style={{ fontSize: 12, marginTop: 2 }}>
               <span className="muted">{p.arg}: </span>
-              <strong>{p.label ?? chosen[p.agent.toLowerCase()] ?? short(p.agent as Address)}</strong>
+              <strong>{p.label ?? chosen[p.agent.toLowerCase()] ?? <AgentName address={p.agent} />}</strong>
               {p.hint && <span className="muted" style={{ fontSize: 11 }}> — {p.hint}</span>}
               {!p.label && p.raw && p.raw.toLowerCase() !== p.agent.toLowerCase() && (
                 <span className="muted" style={{ fontSize: 11 }}> (you said “{p.raw}”)</span>
@@ -411,8 +429,8 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
       )}
       <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
         {reply.standing?.relation === 'steward'
-          ? <>You are granting it as a steward of {short(d.delegator)}. You can revoke it on chain at any time.</>
-          : <>You are granting it because your credential custodies {short(d.delegator)}. You can revoke it on chain at any time.</>}
+          ? <>You are granting it as a steward of <AgentName address={d.delegator} />. You can revoke it on chain at any time.</>
+          : <>You are granting it because your credential custodies <AgentName address={d.delegator} />. You can revoke it on chain at any time.</>}
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <BusyButton busy={busy === 'Granting authority…'} busyLabel="Granting…" onClick={onGrant} className="btn primary" data-testid="ask-grant">Grant &amp; continue</BusyButton>

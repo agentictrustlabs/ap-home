@@ -1,7 +1,11 @@
 'use client';
-// Truncated agent address with copy-to-clipboard + brief "Copied" feedback.
-// With `withName`, reverse-resolves the agent's primary name and shows it as the
-// label (the chip still copies the address; the hex remains the aria/title).
+// An agent, shown as the thing a person can read: its registered name when one resolves, the truncated
+// address when none does. Copy still yields the ADDRESS, and the hex stays in the aria label and title —
+// the address is the identity (ADR-0010) and the name is what the chain says points at it.
+//
+// Naming is the DEFAULT. A screen of bare hex asks the reader to recognise agents by six characters, and
+// they cannot: "0x8c5c…7fe3 gave you a way to reach their treasury" names nobody. Pass `withName={false}`
+// only where the hex itself is the subject.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { reverseAgentName } from '../../lib/reverse-name';
@@ -36,11 +40,13 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export function AddressChip({ address, size = 'md', withName = false }: { address: string; size?: 'sm' | 'md'; withName?: boolean }) {
+export function AddressChip({ address, size = 'md', withName = true }: { address: string; size?: 'sm' | 'md'; withName?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
-    if (!withName) return;
+    // Nothing to ask about: a blank or malformed value is not an agent, and asking the naming service
+    // about it spends a request to learn that.
+    if (!withName || !/^0x[0-9a-fA-F]{40}$/.test(address)) return;
     let cancelled = false;
     void reverseAgentName(address as Address).then((n) => { if (!cancelled) setName(n); });
     return () => { cancelled = true; };
