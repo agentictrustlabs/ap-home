@@ -18,6 +18,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { InteractionsDO, type InteractionsDeps } from '../src/interactions-do.js';
+import { REQUIRED_SCOPES as SOURCE_REQUIRED_SCOPES } from '../src/interactions-do.js';
 import { buildVaultRecordScopeCaveat } from '@agenticprimitives/delegation';
 
 const ORG = '0x1111111111111111111111111111111111111111';
@@ -79,12 +80,10 @@ function depsFor(w: World): InteractionsDeps {
 // every entry of REQUIRED_SCOPES. A grant missing one is "stale" and refused with 409 — which is the
 // real mechanism by which a scope widening forces a steward re-enable, and worth building properly
 // rather than stubbing past.
-const REQUIRED_SCOPES = [
-  'vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*',
-  'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*',
-  'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data',
-  'vault:home.manifest', 'vault:control-events.data',
-];
+// IMPORTED, not copied. This list was a hand-kept duplicate, so widening the real one turned eleven
+// tests red with `409` — which is the staleness mechanism working exactly as designed, reported as a
+// test failure. Deriving it here means a scope widening is now a one-line change again.
+const REQUIRED_SCOPES = [...SOURCE_REQUIRED_SCOPES];
 
 const scopeCaveat = buildVaultRecordScopeCaveat([
   { server: 'demo-mcp', resources: REQUIRED_SCOPES, ops: ['read', 'write'] },

@@ -306,7 +306,7 @@ const MESSAGING_DELIVER_SKILL = 'messaging.deliver';
 // directory, inbox, the assistant playbook — for want of a scope only the content.* ops use. Those ops already
 // fail closed on their own (`no delivery grant`, 409), and the vault-record-scope caveat denies an out-of-scope
 // content write at demo-mcp. Removing it restores exactly the behaviour the two paragraphs above describe.
-const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data',
+export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data',
   // spec 338 §7 — requests for a way to reach an unlisted agent, and the grants a person holds. Adding a
   // record family widens this set, which makes every existing grant STALE by design: `grantIsCurrent`
   // returns false and the Home re-issues at the next ceremony. That is the migration path, and it is why
