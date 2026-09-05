@@ -107,6 +107,8 @@ import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck } from './standing.js';
 import { charteredAgentsReader } from './chartered-agents.js';
+import { relationshipRows } from './relationship-rows.js';
+import { grantBody } from '@agenticprimitives/agent-resolution';
 import { RELATIONSHIP_TYPE } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -1218,6 +1220,113 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 // (spec 353 §4) — publishing it grants exactly nothing, which is why it can be read without a session.
 app.get('/harness/vocabulary', (c) => c.json({ ok: true, capabilities: askVocabulary() }));
 
+// GET /resolution/requests — what people have asked THIS person for a way to reach (spec 338 §7).
+// Their own record, read with their own session. A request confers nothing; this is the list of
+// decisions waiting on them.
+app.get('/resolution/requests', async (c) => {
+  const who = await verifyHomeSession(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '', c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const out = await callInteractionsInternal(c.env, who.sa, 'internal.coordination.vaultRead', { recordType: 'resolution.requests' }).catch(() => null);
+  const doc = (out as { data?: { requests?: unknown[] } } | null)?.data;
+  return c.json({ ok: true, requests: Array.isArray(doc?.requests) ? doc.requests : [] });
+});
+
+// POST /resolution/grant — the OWNER answers: hand one requester a way to resolve ONE unlisted agent.
+//
+// Two things are checked and neither is optional. The issuer must OWN the target — a person may only
+// disclose where their own agent is, and "I know its address" is not ownership. And the grant must be
+// SIGNED by them, verified on chain, because an unsigned grant is an assertion by whoever posted it.
+//
+// What it produces permits DISCOVERY and nothing else (ADR-0056). After this the requester knows an
+// address; moving anything from it still needs their own mandate, judged by the verifier.
+app.post('/resolution/grant', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; requester?: string; targetAgent?: string; wants?: string;
+    expiresAt?: string; label?: string; signature?: Hex;
+  } | null;
+  if (!body?.session || !body.requester || !body.targetAgent) {
+    return c.json({ ok: false, error: 'session, requester and targetAgent are required' }, 400);
+  }
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+
+  const owner = String(who.sa).toLowerCase() as Address;
+  const target = body.targetAgent.toLowerCase() as Address;
+  const requester = body.requester.toLowerCase() as Address;
+  const wants = String(body.wants ?? 'treasury').toLowerCase();
+
+  // OWNERSHIP, on chain and not on their word: the issuer's credential must custody the target. A tree
+  // row saying it is theirs is their own note about themselves (the same rule standing applies).
+  const custodies = await (async () => {
+    try {
+      const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+      const abi = [{ type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'bool' }] }] as const;
+      // The person's SA custodies its children in this estate; ask the target whether the owner is a
+      // custodian of it, which is the same question the Home asks before offering to sign as an agent.
+      return (await pub.readContract({ address: target, abi, functionName: 'isCustodian', args: [owner] })) === true;
+    } catch { return false; }
+  })();
+  const charteredHere = await (async () => {
+    const out = await callInteractionsInternal(c.env, owner, 'internal.coordination.vaultRead', { recordType: 'relationships.data' }).catch(() => null);
+    const doc = (out as { data?: unknown } | null)?.data;
+    return relationshipRows(doc).some((r) => r.agent === target && r.parent?.toLowerCase() === owner);
+  })();
+  if (!custodies && !charteredHere) {
+    return c.json({ ok: false, error: 'you can only give someone a way to reach an agent of your own' }, 403);
+  }
+
+  const now = Date.now();
+  const expiresAt = body.expiresAt ?? new Date(now + 30 * 24 * 3600_000).toISOString();
+  const grantId = `apd1_${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('base64url')}`;
+  const caip = (a: string) => `eip155:${Number(c.env.CHAIN_ID)}:${a}`;
+  const grant = {
+    specVersion: 'ap.private-resolution-grant/1' as const,
+    grantId,
+    issuer: caip(owner), targetAgent: caip(target), subject: caip(requester),
+    mode: 'subject-bound' as const,
+    actions: ['agent.resolve'] as const,
+    projection: { profile: 'pairwise', includeProfile: false, includeCapabilities: false, includeTransportKeys: false },
+    constraints: {
+      audience: a2aCanonicalDomain(c.env),
+      purpose: 'payment',
+      notBefore: new Date(now - 60_000).toISOString(),
+      expiresAt,
+      requireProofOfPossession: true,
+    },
+    statusRef: `vault://${owner}/resolution.grants/${grantId}`,
+    issuedAt: new Date(now).toISOString(),
+    authorityRef: `custody://${owner}`,
+    proof: body.signature ? { scheme: 'erc1271', signature: body.signature } : null,
+  };
+
+  // THE SIGNATURE. A grant nobody signed is a claim by whoever posted it; verified here against the
+  // ISSUER on chain, so the record the requester holds is one the issuer can be shown to have made.
+  if (body.signature) {
+    const digest = keccak256(toBytes(JSON.stringify(grantBody(grant as never))));
+    const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+    const ok = validator ? await (async () => {
+      try {
+        const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
+        return (await pub.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [owner, digest, body.signature!] })) === true;
+      } catch { return false; }
+    })() : false;
+    if (!ok) return c.json({ ok: false, error: 'the grant signature did not verify against your agent' }, 401);
+  }
+
+  const held = {
+    v: 1 as const, kind: 'resolution.grant.held' as const,
+    grantId, targetAgent: target, owner, targetType: wants,
+    ...(body.label ? { label: body.label } : {}),
+    issuedAt: grant.issuedAt, expiresAt, grant,
+  };
+  const delivered = await callInteractionsInternal(c.env, requester, 'internal.resolution.grant', { grant: held }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  if ((delivered as { ok?: boolean }).ok === false) {
+    return c.json({ ok: false, error: `the grant could not be delivered: ${(delivered as { error?: string }).error ?? 'unknown'}` }, 502);
+  }
+  await callInteractionsInternal(c.env, owner, 'internal.resolution.approve', { requester, wants, grantId }).catch(() => undefined);
+  return c.json({ ok: true, grantId, targetAgent: target, expiresAt });
+});
+
 app.post('/harness/ask', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
@@ -2033,6 +2142,15 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // actionable state; "the read failed" is a transient one; and neither is "there is nothing here". A
     // caller that can only see null has to guess which, and guessing produced "the roster could not be
     // read just now" for an organization whose roster simply does not live in its vault yet.
+    // A request for a way to reach an unlisted agent, written into the OWNER's own vault so their Home
+    // can show it as a decision. It confers nothing — the answer is theirs to give (spec 338 §7).
+    appendSubjectRecord: async (subject: string, recordType: string, entry: unknown) => {
+      if (recordType !== 'resolution.requests') return { ok: false, error: `no append path for ${recordType}` };
+      const out = await callInteractionsInternal(env, subject, 'internal.resolution.request', { request: entry })
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      const r = out as { ok?: boolean; error?: string };
+      return r.ok === false ? { ok: false, ...(r.error ? { error: r.error } : {}) } : { ok: true };
+    },
     readSubjectRecordStatus: async (subject: string, recordType: string) => {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType })
         .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));

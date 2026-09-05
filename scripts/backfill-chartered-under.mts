@@ -91,7 +91,14 @@ for (const handle of HANDLES) {
   if (!signin.homeSession || !signin.agent) { console.error(`✗ ${handle}: no session`); failed++; continue; }
   const token = signin.homeSession;
   const tree = await j(await fetch(`${HOME}/connect/related-orgs`, { headers: { authorization: `Bearer ${token}` } })) as { orgs?: Array<{ orgAgent: string; orgName: string; kind?: string; parent?: string }> };
-  const children = (tree.orgs ?? []).filter((o) => KINDS.has(String(o.kind ?? '')) && !!o.parent);
+  // NAMELESS AGENTS ARE LEFT OFF THE CHAIN, deliberately (spec 338 / ADR-0056). An unnamed agent is one
+  // its owner chose not to publish; recording "alice holds a treasury at 0x…" would put back exactly the
+  // fact the missing name withholds, and the owner never asked for that. Discovering an unlisted agent is
+  // a GRANT its owner issues to one recipient, not a side effect of a backfill.
+  const all = (tree.orgs ?? []).filter((o) => KINDS.has(String(o.kind ?? '')) && !!o.parent);
+  const unnamed = all.filter((o) => !String(o.orgName ?? '').includes('.'));
+  const children = all.filter((o) => String(o.orgName ?? '').includes('.'));
+  for (const o of unnamed) console.log(`  · ${o.orgAgent.slice(0, 10)}… skipped — unnamed, so unlisted by choice`);
   console.log(`\n── ${handle} (${signin.agent}) — ${children.length} child agent(s) to record ──`);
 
   for (const child of children) {

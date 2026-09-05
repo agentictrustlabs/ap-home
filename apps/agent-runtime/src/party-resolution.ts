@@ -27,6 +27,7 @@ import { resolveEntity, type EntityCandidate, type EntityProvider } from '@agent
 import type { Address } from 'viem';
 import { VALUE_ARGS as ONTOLOGY_VALUE_ARGS } from '@agenticprimitives/ontology';
 import { relationshipRows } from './relationship-rows.js';
+import { RESOLUTION_GRANTS_RECORD, usableGrants } from './resolution-invitation.js';
 import { relationshipsProvider, rosterProvider } from './private-context.js';
 
 /** The roots a bare label might live under, most-likely first. A person is the common case for "alice". */
@@ -179,6 +180,24 @@ export async function ownedAgentsOfType(
       agent: c.agent, label: c.name ?? c.agent, ...(c.name ? { name: c.name } : {}),
       provenance: { tier: 'public' as const, source: 'chartered-under', subject: low, match: 'owned-by' },
     });
+  }
+
+  // A GRANT SOMEONE GAVE THEM. An unlisted agent is in no public place by its owner's choice, so the only
+  // way to reach it is that the owner told this person — a resolution grant they hold in their own vault
+  // (spec 338 / ADR-0056). It answers "where do I send it", never "may I spend it": the payment that
+  // follows still needs the asker's own mandate, judged by the verifier like any other.
+  if (lookups.readSubjectRecord && asker) {
+    const held = await lookups.readSubjectRecord(asker, RESOLUTION_GRANTS_RECORD).catch(() => null);
+    for (const g of usableGrants(held, type)) {
+      if (g.owner.toLowerCase() !== low || seen.has(g.targetAgent.toLowerCase())) continue;
+      seen.add(g.targetAgent.toLowerCase());
+      out.push({
+        agent: g.targetAgent.toLowerCase(),
+        // It has NO NAME — that is why a grant was needed. Say whose it is instead.
+        label: g.label ?? `${g.ownerName ?? 'their'} ${type}`,
+        provenance: { tier: 'private' as const, source: 'resolution-grant', subject: asker, match: 'granted' },
+      });
+    }
   }
 
   // Then the asker's own tier, which knows agents whose edge has not been recorded yet — every agent

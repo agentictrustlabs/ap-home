@@ -332,6 +332,10 @@ const MEMBER_PROFILE_RESOURCE = (org: string): string => `member.profile:${org.t
 // caches are provenance-tagged projections of it. Self-gated writes (the principal owns their membership
 // record); the org retains its own copy in the org's DO.
 const MEMBERSHIP_RESOURCE = (org: string): string => `org.membership:${org.toLowerCase()}`;
+/** spec 338 §7 — requests for a way to reach an unlisted agent, in the OWNER's own vault. */
+const RESOLUTION_REQUESTS_RESOURCE = 'resolution.requests';
+/** spec 338 §7 — the grants a person HOLDS: permission to discover, never to use. */
+const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 
 // spec 323 W2 — owner-own capability DOCUMENTS (last-writer-wins whole-doc records), reachable ONLY
 // self (session SA === principal) over the interactions grant. This is the delegation-authorized,
@@ -1559,7 +1563,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1903,6 +1907,68 @@ export class InteractionsDO {
         // AND consult answers) + their display name. Deliberately NOT gated on the auto-reply
         // assistant being enabled: consultability is its own opt-in (the delegation); the playbook
         // is guidance either way. Read-only; returns markdown + name, never bodies or mail.
+        if (op === 'internal.resolution.grant') {
+          // spec 338 §7 — the OWNER answered: this principal is handed a way to RESOLVE one unlisted
+          // agent. Same shape and same justification as mail (`internal.deliver`): the recipient's own
+          // DO writes into the recipient's own vault under the recipient's own grant. What differs is who
+          // may cause it — the route that reaches this has already verified the issuer OWNS the target
+          // and signed the grant, because a resolution grant nobody issued is just an address.
+          //
+          // IT IS NOT AUTHORITY. Holding this lets the recipient find where to send money. Moving any
+          // still needs their own mandate, judged by the verifier (ADR-0056).
+          const held = body.grant as { grantId?: string; targetAgent?: string; owner?: string } | undefined;
+          if (!held?.grantId || !/^0x[0-9a-f]{40}$/.test(String(held.targetAgent ?? '').toLowerCase())) {
+            return json({ error: 'grant { grantId, targetAgent } required' }, 400);
+          }
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ grants?: unknown[] }>(g, RESOLUTION_GRANTS_RESOURCE, { grants: [] });
+            const rows = Array.isArray(doc?.grants) ? doc.grants : [];
+            // Re-issuing for the same target REPLACES: an owner who narrows or re-dates a grant means the
+            // new one, and keeping both would let the recipient present whichever suits them.
+            const target = String(held.targetAgent).toLowerCase();
+            const next = [...rows.filter((r) => String((r as { targetAgent?: string }).targetAgent ?? '').toLowerCase() !== target), held];
+            await this.writeDoc(g, RESOLUTION_GRANTS_RESOURCE, { grants: next });
+            return json({ ok: true });
+          });
+        }
+        if (op === 'internal.resolution.approve') {
+          // The owner's own record of what they decided. Kept because a grant that cannot be found later
+          // cannot be revoked later, and revocation is the half of issuing that makes it safe to issue.
+          const { requester, wants, grantId } = body as { requester?: string; wants?: string; grantId?: string };
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+            const rows = Array.isArray(doc?.requests) ? doc.requests : [];
+            const key = `${String(requester ?? '').toLowerCase()}:${String(wants ?? '').toLowerCase()}`;
+            const next = rows.map((r) => {
+              const row = r as { requester?: string; wants?: string };
+              return `${String(row.requester ?? '').toLowerCase()}:${String(row.wants ?? '').toLowerCase()}` === key
+                ? { ...row, status: 'approved', grantId, decidedAt: new Date().toISOString() } : r;
+            });
+            await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
+            return json({ ok: true });
+          });
+        }
+        if (op === 'internal.resolution.request') {
+          // spec 338 §7 — someone ASKS this principal for a way to reach an unlisted agent of theirs.
+          // It lands in their OWN vault under their OWN grant, exactly like an application: the request
+          // is a question they will answer in their Home, and it confers nothing on arrival.
+          const req = body.request as { requester?: string; owner?: string; wants?: string; purpose?: string; requestedAt?: string } | undefined;
+          const requester = String(req?.requester ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(requester)) return json({ error: 'request { requester } required' }, 400);
+          return this.serialize(async () => {
+            const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
+            const rows = Array.isArray(doc?.requests) ? doc.requests : [];
+            // ONE pending request per (requester, wants): asking twice is the same ask, and letting it
+            // accumulate turns "anyone may ask" into a way to fill someone's Home with cards.
+            const key = `${requester}:${String(req?.wants ?? '').toLowerCase()}`;
+            const next = [...rows.filter((r) => {
+              const row = r as { requester?: string; wants?: string };
+              return `${String(row.requester ?? '').toLowerCase()}:${String(row.wants ?? '').toLowerCase()}` !== key;
+            }), { ...req, status: 'pending' }];
+            await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
+            return json({ ok: true });
+          });
+        }
         if (op === 'internal.applications.append') {
           // spec 341 §5.5a — the ORG admitting an application into its OWN vault, under its OWN grant.
           // Reached only from this Worker (the `org.apply` skill), after the org's A2A gate verified

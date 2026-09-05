@@ -51,6 +51,8 @@ import { resolveParty, ownAgentsOfType, candidateHint, type PartyLookups } from 
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
+import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
+import { resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS } from '@agenticprimitives/ontology';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
@@ -181,6 +183,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     risk: 'high',
   },
   INVITE_TOOL,
+  RESOLUTION_REQUEST_TOOL,
   {
     id: 'messaging.direct.send',
     description:
@@ -423,6 +426,8 @@ export interface HarnessDeps {
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   /** Read one record from a subject's own vault — the asker's private tier (spec 353 §3). */
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
+  appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
@@ -712,6 +717,16 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);
     }
+    if (toolId === RESOLUTION_REQUEST_TOOL.id) {
+      return resolutionRequestInvoker(
+        {
+          ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
+          ...(deps.appendSubjectRecord ? { appendSubjectRecord: deps.appendSubjectRecord } : {}),
+          ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
+        },
+        person, session,
+      )(toolId, args, ctx);
+    }
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
@@ -863,6 +878,7 @@ const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.payment.execute': 'make payments',
   'treasury.fund': 'fund a treasury with demo USDC',
   'messaging.direct.send': 'send direct messages',
+  'resolution.invitation.request': 'ask someone how to reach an agent of theirs',
 };
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
@@ -1279,6 +1295,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
+  'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */

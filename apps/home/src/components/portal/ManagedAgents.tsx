@@ -604,17 +604,24 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
                   person={person} via={via} token={token} refreshKey={version} onFunded={reload}
                   nameSlot={<NameAgentForm agent={t.agent} kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} />} />
               ))
-            ) : (
-              <div className="manage-card">
-                <div className="manage-card-head">
-                  <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
-                  <span className="manage-card-label">Personal treasury</span>
-                  <span className="manage-card-badge">Not yet</span>
-                </div>
-                <p className="manage-card-blurb">Your own money agent — holds funds and pays on your behalf.</p>
-                <CreateAgentForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta="Create personal treasury" />
+            ) : null}
+            {/* ALWAYS offered, not only when there are none. Holding one treasury is not a reason to be
+                unable to make another: a second is how you separate what is yours from what you are
+                holding for something, and an UNNAMED one is how you keep a payment address off the
+                public record entirely (spec 338). The card used to appear only in the empty state, so a
+                person with one treasury had no way to make a second from the page that lists them. */}
+            <div className="manage-card">
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><LandmarkIcon size={17} /></span>
+                <span className="manage-card-label">{personal.length ? 'Another personal treasury' : 'Personal treasury'}</span>
+                <span className="manage-card-badge">{personal.length ? 'Optional' : 'Not yet'}</span>
               </div>
-            )}
+              <p className="manage-card-blurb">
+                Your own money agent — holds funds and pays on your behalf.
+                {' '}An unnamed one is not in the public directory: someone can only pay it if you give them a way to find it.
+              </p>
+              <CreateAgentForm kind="person-treasury" parent={person} person={person} token={token} via={via} onDone={reload} cta={personal.length ? 'Create another treasury' : 'Create personal treasury'} />
+            </div>
           </div>
 
           <h3 className="subhead" style={{ marginTop: '1.5rem' }}>Organization treasuries</h3>
