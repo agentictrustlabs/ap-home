@@ -51,6 +51,7 @@ import { resolveParty, ownAgentsOfType, candidateHint, type PartyLookups } from 
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
+import { partyRole, suffixesFor, COUNTERPARTY_ARGS } from '@agenticprimitives/ontology';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
@@ -907,7 +908,7 @@ const PARTY_ARGS = ['payer', 'payee', 'treasury', 'invitee', 'parent', 'org', 'w
  * The counterpart args are deliberately absent: `payer`, `funder`, `parent`, `org` and `treasury` are very
  * often the asker, and asking there would be noise.
  */
-export const NEVER_THE_ASKER = new Set(['recipient', 'payee', 'invitee']);
+export const NEVER_THE_ASKER: ReadonlySet<string> = COUNTERPARTY_ARGS;
 
 /** What to call each of them when asking a person which one they meant. */
 const PARTY_WORD: Record<string, string> = {
@@ -917,44 +918,22 @@ const PARTY_WORD: Record<string, string> = {
 };
 
 /**
- * WHAT KIND OF AGENT EACH PARTY IS — the typed suffix, used the way a person uses it.
+ * WHAT KIND OF AGENT EACH PARTY IS — now read from the ONTOLOGY (spec 355).
  *
- * "Send money to nathan" means nathan.treasury and "send nathan a message" means nathan.me. Both are the
- * same word, and the difference is not in the sentence — it is in the CAPABILITY. A suffix names the
- * derived agent type (ADR-0061), so a capability can say which types it acts on, and a bare name stops
- * being four-ways ambiguous the moment you know what is being asked.
+ * "Send money to nathan" means nathan.treasury and "send nathan a message" means nathan.me. Same word,
+ * two agents, and the difference is in the CAPABILITY. That was a table here; it is a projection of
+ * `@agenticprimitives/ontology` `PARTY_ROLES` now, where each party says which ontology CLASSES it may be
+ * (`ap:Treasury`, `ap:PersonAgent`) and which RELATIONSHIP to follow when the agent named is not one of
+ * them (`ap:charters` — from alice to the treasury chartered under her).
  *
- * ORDERED, and read as tiers rather than as a ranking: take the first type that anything answers to. A
- * message goes to a person; failing that, to an organization. This is not a score — it is a declared,
- * deterministic property of the capability that can be stated in one sentence, which is exactly what a
- * similarity score can never be (ADR-0013, spec 353 §3).
- *
- * Narrowing NEVER picks in the face of real ambiguity: two candidates of the same preferred type is still
- * a question. And it never invents one — if nothing answers to the preferred types, the person is asked
- * with everything that DID answer, so "nathan has no treasury" arrives as an answer rather than as a
- * silent substitution of some other Nathan.
+ * The table did not merely duplicate the ontology, it disagreed with it: it looked for a treasury whose
+ * NAME matched its owner's, which the ontology never claimed and the estate does not do, so paying
+ * "alice" dead-ended because alice2.treasury does not look like "alice". `check:ontology-bindings` now
+ * fails the build if a binding names a term the T-box does not declare.
  */
-const PARTY_TYPES: Record<string, readonly string[]> = {
-  // Money moves between things that hold it. An organization pays from its own balance, so `.org` is a
-  // real payer, not a fallback for a missing treasury.
-  'treasury.payment.execute:payer': ['treasury', 'org'],
-  // Paying a PERSON directly is ordinary, but "send money to nathan" means his treasury when he has one.
-  'treasury.payment.execute:payee': ['treasury', 'org', 'me'],
-  'treasury.fund:treasury': ['treasury'],
-  // An inbox belongs to a person first. Someone who means the organization says so.
-  'messaging.direct.send:recipient': ['me', 'org', 'team', 'circle', 'church', 'svc'],
-  // You are invited BY an organization and you are invited AS a person.
-  'organization.membership.invite:org': ['org', 'team', 'workspace', 'circle', 'church'],
-  'organization.membership.invite:invitee': ['me'],
-  // A team is chartered under a workspace or an organization; a treasury hangs under whoever holds it.
-  'organization.team.create:parent': ['workspace', 'org'],
-  'organization.create:parent': ['workspace', 'org', 'me'],
-  'treasury.create:parent': ['me', 'org', 'team'],
-};
-
-/** The agent types a capability's party argument means, in the order a person would mean them. */
 export function partyTypesFor(capabilityId: string, arg: string): readonly string[] | undefined {
-  return PARTY_TYPES[`${capabilityId}:${arg}`];
+  const suffixes = suffixesFor(partyRole(capabilityId, arg));
+  return suffixes.length ? suffixes : undefined;
 }
 
 /**

@@ -25,6 +25,7 @@
 import { InputRequired, type InputFieldV1 } from '@agenticprimitives/orchestration';
 import { resolveEntity, type EntityCandidate, type EntityProvider } from '@agenticprimitives/context';
 import type { Address } from 'viem';
+import { VALUE_ARGS as ONTOLOGY_VALUE_ARGS } from '@agenticprimitives/ontology';
 import { relationshipRows } from './relationship-rows.js';
 import { relationshipsProvider, rosterProvider } from './private-context.js';
 
@@ -54,9 +55,10 @@ export interface ResolvedParty {
 
 const isAddress = (v: string): boolean => /^0[xX][0-9a-fA-F]{40}$/.test(v);
 
-/** Arguments that move value. For these, a resolution that had to settle for a different KIND of agent
- *  than the capability asked for is a question — a payment cannot be taken back. */
-const VALUE_ARGS = new Set(['payee', 'payer', 'treasury', 'funder']);
+/** Arguments that move value — from the ontology binding (spec 355), where a party says whether getting
+ *  it wrong can be undone. For these, settling for a different KIND of agent than the capability asked
+ *  for is a question, not a resolution: a payment cannot be taken back. */
+const VALUE_ARGS = ONTOLOGY_VALUE_ARGS;
 
 /**
  * A bare label against the typed roots the asker could plausibly mean, resolved on chain.
