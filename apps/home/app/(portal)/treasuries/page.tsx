@@ -7,6 +7,7 @@ import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { TreasuriesRollup } from '../../../src/components/portal/ManagedAgents';
 import { ResolutionRequests } from '../../../src/components/portal/ResolutionRequests';
+import { ReadyToSend } from '../../../src/components/portal/ReadyToSend';
 
 export default function TreasuriesPage() {
   const { session, agentAddress } = useSession();
@@ -19,6 +20,9 @@ export default function TreasuriesPage() {
       {/* Decisions before inventory: someone waiting on a way to pay you belongs above the list of what
           you hold, and an unnamed treasury is unreachable until you answer them (spec 338 §7). */}
       <ResolutionRequests />
+      {/* The other end of the same exchange: someone answered, and this is where you finish what you
+          started. Above the inventory for the same reason — it is a thing waiting on you. */}
+      <ReadyToSend />
       <TreasuriesRollup token={session?.token ?? null} person={agentAddress ?? null} via={session?.via ?? ''} />
     </SectionShell>
   );

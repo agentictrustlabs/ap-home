@@ -20,6 +20,9 @@ import type { Address } from 'viem';
 /** The record family a person's held grants and pending requests live in, in their own vault. */
 export const RESOLUTION_REQUESTS_RECORD = 'resolution.requests';
 export const RESOLUTION_GRANTS_RECORD = 'resolution.grants';
+/** The requester's own record of asks they are waiting on. Rides the same scope as the requests they
+ *  receive: one record family for "resolution requests", whichever end of one you are. */
+export const RESOLUTION_SENT_RECORD = 'resolution.requests';
 
 /** What Nathan sends Alice. Deliberately small: it names what he wants to reach and why, and nothing else. */
 export interface ResolutionInvitationRequestV1 {
@@ -33,6 +36,22 @@ export interface ResolutionInvitationRequestV1 {
   wants: string;
   /** Why, in the requester's own words. A person approving deserves the reason unedited. */
   purpose: string;
+  /** What the requester was trying to send when routing failed, in whole USDC. Recorded so the payment
+   *  can be finished in one press when the answer comes back — and so the person deciding can see the
+   *  size of what they are enabling. Absent when the ask named no figure. */
+  amount?: string;
+  requestedAt: string;
+}
+
+/** The requester's OWN record of an ask they are waiting on. Their Home joins it to a delivered grant
+ *  to offer "you can finish this now" — the half that turns a granted address into a completed payment. */
+export interface SentResolutionRequestV1 {
+  v: 1;
+  kind: 'resolution.invitation.sent';
+  owner: Address;
+  ownerName?: string;
+  wants: string;
+  amount?: string;
   requestedAt: string;
 }
 
@@ -76,6 +95,7 @@ export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
       owner: { type: 'string', description: 'The person to ask — an agent name (alice.me) or address' },
       wants: { type: 'string', description: "What kind of theirs you need to reach: 'treasury'" },
       purpose: { type: 'string', description: 'Why you are asking, in your own words' },
+      usdc: { type: 'string', description: 'The amount you were trying to send, in whole USDC, when the ask named one. Pass it so the payment can be finished in one step later.' },
     },
     required: ['owner'],
   },

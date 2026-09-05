@@ -248,7 +248,7 @@ export function candidateHint(c: EntityCandidate): string {
 export async function resolveParty(
   raw: unknown,
   lookups: PartyLookups,
-  where: { stepRef: string; toolId: string; argName: string; what: string; subject?: string; types?: readonly string[] },
+  where: { stepRef: string; toolId: string; argName: string; what: string; subject?: string; types?: readonly string[]; pendingAmount?: string },
 ): Promise<Address> {
   const value = String(raw ?? '').trim();
   if (isAddress(value)) {
@@ -319,8 +319,14 @@ export async function resolveParty(
           // THE WAY OUT OF THE DEAD END. Their ${where.types[0]} may exist and simply be unlisted — that
           // is a choice its owner made, and the answer is to ask them, not to guess harder. Offered as a
           // follow-up the person can send, because they should not have to know the phrasing.
+          //
+          // It carries the AMOUNT when the ask named one, so the request records what this was for and
+          // the payment can be finished in one press when the answer comes back. Without it the person
+          // has to remember, days later, what they were trying to send and to whom.
           label: `Ask ${value} for a way to reach their ${where.types[0]}`,
-          message: `ask ${value} for a way to pay their ${where.types[0]}`,
+          message: where.pendingAmount
+            ? `ask ${value} for a way to pay their ${where.types[0]} so I can send ${where.pendingAmount} usdc`
+            : `ask ${value} for a way to pay their ${where.types[0]}`,
         });
       }
       if (tier.length === 1) {

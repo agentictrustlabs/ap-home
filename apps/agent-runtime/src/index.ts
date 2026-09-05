@@ -1352,7 +1352,24 @@ app.post('/resolution/grant', async (c) => {
     return c.json({ ok: false, error: `the grant could not be delivered: ${(delivered as { error?: string }).error ?? 'unknown'}` }, 502);
   }
   await callInteractionsInternal(c.env, owner, 'internal.resolution.approve', { requester, wants, grantId }).catch(() => undefined);
-  return c.json({ ok: true, grantId, targetAgent: target, expiresAt });
+
+  // TELL THEM. A grant delivered silently into someone's vault is a thing they have no reason to look
+  // for: they asked days ago, and nothing about their Home changed. The answer travels the way the
+  // question did — as a message from the person who decided, sent on their own interactions plane.
+  const note = `You can reach my ${wants} now — I've sent you a way to it. It lets you send there; it gives you no control over it.`;
+  const messaged = await (async () => {
+    try {
+      const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
+      const res = await stub.fetch(new Request(`https://do/interactions/${owner}/messaging.send`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session: body.session, recipient: requester, bodyText: note }),
+      }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean };
+      return res.ok && out.ok !== false;
+    } catch { return false; }
+  })();
+
+  return c.json({ ok: true, grantId, targetAgent: target, expiresAt, messaged });
 });
 
 app.post('/harness/ask', async (c) => {

@@ -2,7 +2,7 @@
 // The authenticated portal chrome: topbar (brand + workspace switcher + identity) + sidebar
 // (desktop) / bottom-nav (mobile) + the routed section as <main>. The active WORKSPACE is
 // derived from the URL (spec 315) and scopes the left nav: person / org / connected app.
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, useEffect} from 'react';
 import { usePathname } from 'next/navigation';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
@@ -21,6 +21,20 @@ import { nameLabel } from '../../lib/domain';
 
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
   const [askOpen, setAskOpen] = useState(false);
+  /** An ask a PAGE wants to start — "finish the payment you were waiting on". The shell owns whether the
+   *  flyout is open, so a card deep in a page asks for it by event rather than by prop-drilling through
+   *  every layer between them. Prefilled and not sent: the person still reads it and presses send. */
+  const [askSeed, setAskSeed] = useState<string | null>(null);
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
+      if (!message) return;
+      setAskSeed(message);
+      setAskOpen(true);
+    };
+    window.addEventListener('ap:ask', onAsk);
+    return () => window.removeEventListener('ap:ask', onAsk);
+  }, []);
   const pathname = usePathname();
   const active = parseWorkspacePath(pathname ?? '/');
   const { session, agentAddress, agentName } = useSession();
@@ -93,6 +107,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
       <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />
       {askOpen && canAsk && (
         <AskFlyout
+          seed={askSeed}
+          onSeedUsed={() => setAskSeed(null)}
           addressee={askAddressee!} addresseeLabel={askLabel}
           // The app knows where you are standing and what you are to this agent; the Ask should not have
           // to infer it from a sentence.

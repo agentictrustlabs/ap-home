@@ -31,16 +31,26 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, realm, onClose }: {
+export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onSeedUsed}: {
   addressee: Address; addresseeLabel: string;
   /** Where the person is standing, as this app understands it — the agent narrows what it OFFERS to it,
    *  and derives standing itself (spec 353 §4). */
   realm?: { kind?: 'person' | 'org' | 'service' };
   onClose: () => void;
+  /** An ask a page wants to start on this surface. Prefills the composer; never sends. */
+  seed?: string | null;
+  onSeedUsed?: () => void;
 }) {
   const { session, profile, agentAddress } = useSession();
   const [thread, setThread] = useState<Entry[]>([]);
   const [q, setQ] = useState('');
+  // A page asked to start this ask (e.g. "finish the payment you were waiting on"). It lands in the
+  // composer, where the person reads it and presses send — the same rule every suggested ask follows.
+  useEffect(() => {
+    if (!seed) return;
+    setQ(seed);
+    onSeedUsed?.();
+  }, [seed]);
   // WHAT THE PERSON PICKED, in this surface's own words. After choosing "nathan.me" from four Nathans the
   // answer travels as an address, so the next card would show a bare 0x… — asking someone to re-verify a
   // choice they just made, against a string that tells them nothing. This is the surface remembering its

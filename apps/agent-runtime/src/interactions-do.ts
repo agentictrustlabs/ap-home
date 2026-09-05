@@ -1958,7 +1958,8 @@ export class InteractionsDO {
             const rows = Array.isArray(doc?.requests) ? doc.requests : [];
             const key = `${String(requester ?? '').toLowerCase()}:${String(wants ?? '').toLowerCase()}`;
             const next = rows.map((r) => {
-              const row = r as { requester?: string; wants?: string };
+              const row = r as { kind?: string; requester?: string; wants?: string };
+              if (row.kind === 'resolution.invitation.sent') return r; // the other end's row, not this decision
               return `${String(row.requester ?? '').toLowerCase()}:${String(row.wants ?? '').toLowerCase()}` === key
                 ? { ...row, status: 'approved', grantId, decidedAt: new Date().toISOString() } : r;
             });
@@ -1970,19 +1971,25 @@ export class InteractionsDO {
           // spec 338 §7 — someone ASKS this principal for a way to reach an unlisted agent of theirs.
           // It lands in their OWN vault under their OWN grant, exactly like an application: the request
           // is a question they will answer in their Home, and it confers nothing on arrival.
-          const req = body.request as { requester?: string; owner?: string; wants?: string; purpose?: string; requestedAt?: string } | undefined;
-          const requester = String(req?.requester ?? '').toLowerCase();
-          if (!/^0x[0-9a-f]{40}$/.test(requester)) return json({ error: 'request { requester } required' }, 400);
+          // TWO KINDS IN ONE FAMILY, because they are two ends of one thing: a request RECEIVED (someone
+          // asking this principal) and a request SENT (this principal waiting on someone). They dedupe on
+          // different parties — the counterparty is the requester in one and the owner in the other — and
+          // keying both on `requester` would collide every sent row against every other.
+          const req = body.request as { kind?: string; requester?: string; owner?: string; wants?: string; purpose?: string; requestedAt?: string } | undefined;
+          const sent = req?.kind === 'resolution.invitation.sent';
+          const counterparty = String((sent ? req?.owner : req?.requester) ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(counterparty)) return json({ error: 'request { requester | owner } required' }, 400);
           return this.serialize(async () => {
             const doc = await this.readDoc<{ requests?: unknown[] }>(g, RESOLUTION_REQUESTS_RESOURCE, { requests: [] });
             const rows = Array.isArray(doc?.requests) ? doc.requests : [];
-            // ONE pending request per (requester, wants): asking twice is the same ask, and letting it
-            // accumulate turns "anyone may ask" into a way to fill someone's Home with cards.
-            const key = `${requester}:${String(req?.wants ?? '').toLowerCase()}`;
-            const next = [...rows.filter((r) => {
-              const row = r as { requester?: string; wants?: string };
-              return `${String(row.requester ?? '').toLowerCase()}:${String(row.wants ?? '').toLowerCase()}` !== key;
-            }), { ...req, status: 'pending' }];
+            // ONE pending request per (counterparty, wants, direction): asking twice is the same ask, and
+            // letting it accumulate turns "anyone may ask" into a way to fill someone's Home with cards.
+            const keyOf = (r: { kind?: string; requester?: string; owner?: string; wants?: string }): string => {
+              const isSent = r.kind === 'resolution.invitation.sent';
+              return `${isSent ? 'sent' : 'recv'}:${String((isSent ? r.owner : r.requester) ?? '').toLowerCase()}:${String(r.wants ?? '').toLowerCase()}`;
+            };
+            const key = keyOf(req ?? {});
+            const next = [...rows.filter((r) => keyOf(r as never) !== key), { ...req, status: 'pending' }];
             await this.writeDoc(g, RESOLUTION_REQUESTS_RESOURCE, { requests: next });
             return json({ ok: true });
           });

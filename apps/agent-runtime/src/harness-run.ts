@@ -1069,6 +1069,9 @@ async function resolveStepArgs(
         // when a message is sent. Undeclared ⇒ no narrowing: a capability that has not said what it acts
         // on gets every candidate and, if there are several, a question.
         ...(() => { const t = partyTypesFor(where.capabilityId ?? where.toolId, key); return t ? { types: t } : {}; })(),
+        // What the ask was FOR, so a request raised from this dead end can carry it and be finished in
+        // one press later.
+        ...(String(out.usdc ?? '').trim() ? { pendingAmount: String(out.usdc).trim() } : {}),
       });
       continue;
     }

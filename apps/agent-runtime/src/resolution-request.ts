@@ -8,7 +8,7 @@
 // own Home, and until they make it Nathan knows exactly what he knew before.
 import type { ToolInvoker } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
-import { RESOLUTION_REQUESTS_RECORD, type ResolutionInvitationRequestV1 } from './resolution-invitation.js';
+import { RESOLUTION_REQUESTS_RECORD, RESOLUTION_SENT_RECORD, type ResolutionInvitationRequestV1, type SentResolutionRequestV1 } from './resolution-invitation.js';
 
 export interface ResolutionRequestDeps {
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) =>
@@ -30,9 +30,11 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     const wants = String((args as { wants?: unknown }).wants ?? 'treasury').trim().toLowerCase();
     const purpose = String((args as { purpose?: unknown }).purpose ?? '').trim() || 'to send you money';
 
+    const amount = String((args as { usdc?: unknown }).usdc ?? '').trim();
+    const at = new Date().toISOString();
     const request: ResolutionInvitationRequestV1 = {
       v: 1, kind: 'resolution.invitation.request',
-      requester: person, owner, wants, purpose, requestedAt: new Date().toISOString(),
+      requester: person, owner, wants, purpose, ...(amount ? { amount } : {}), requestedAt: at,
     };
 
     // The DECISION record first: a message they might miss is not a request they can act on, and the Home
@@ -46,6 +48,13 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
         : stored.error ?? 'unknown';
       throw new Error(`the request could not be recorded for them: ${why}`);
     }
+
+    // THE REQUESTER'S OWN COPY. Without it, a grant arriving days later is an address with no story:
+    // their Home cannot say "this is the thing you were trying to pay, and here is the amount". Written
+    // best-effort — the request itself has already landed, and losing the note costs a button, not the ask.
+    await deps.appendSubjectRecord?.(person, RESOLUTION_SENT_RECORD, {
+      v: 1, kind: 'resolution.invitation.sent', owner, wants, ...(amount ? { amount } : {}), requestedAt: at,
+    } satisfies SentResolutionRequestV1).catch(() => undefined);
 
     // Then the human-readable half, so it appears where they read things.
     // The note says what to DO, including the case where they have none of that kind — which is the
