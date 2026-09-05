@@ -39,13 +39,15 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
     const g = (await gRes.json().catch(() => ({}))) as { ok?: boolean; grants?: HeldGrant[]; error?: string };
     const r = (await rRes.json().catch(() => ({}))) as { requests?: SentRequest[] };
     if (g.ok === false) { setErr(g.error ?? 'could not read what you have been given'); setRows([]); return; }
-    // Only what YOU asked for: a grant someone sent unprompted is still theirs to explain, and pairing it
-    // with an amount you never named would be inventing an intention.
+    // EVERY grant you hold, with the amount attached when one of your own asks explains it. The first
+    // version showed only grants it could match to a request and rendered nothing when the match failed —
+    // so a real grant, sitting in the vault, was invisible because a second record did not line up. The
+    // amount is an enrichment; the grant is the fact.
     const sent = (r.requests ?? []).filter((x) => x.kind === 'resolution.invitation.sent');
     setRows((g.grants ?? []).map((grant) => {
-      const mine = sent.find((s) => (s.owner ?? '').toLowerCase() === (grant.owner ?? '').toLowerCase() && s.wants === grant.targetType);
-      return mine ? { grant, ...(mine.amount ? { amount: mine.amount } : {}) } : null;
-    }).filter((x): x is { grant: HeldGrant; amount?: string } => x !== null));
+      const mine = sent.find((x) => (x.owner ?? '').toLowerCase() === (grant.owner ?? '').toLowerCase() && x.wants === grant.targetType);
+      return { grant, ...(mine?.amount ? { amount: mine.amount } : {}) };
+    }));
   }, [token]);
   useEffect(() => { void load(); }, [load]);
 
