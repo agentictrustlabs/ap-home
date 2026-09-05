@@ -284,7 +284,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
             onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
           />
         )}
-        {busy && !pending && <div className="muted" style={{ fontSize: 12 }}><span className="spinner" /> {busy}</div>}
+        {busy && !pending && <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}><span className="spinner" /> {busy}</div>}
         {err && <div className="ask-err" role="alert">{err}</div>}
         <div ref={endRef} />
       </div>
