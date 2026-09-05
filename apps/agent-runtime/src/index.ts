@@ -1331,9 +1331,19 @@ app.post('/resolution/grant', async (c) => {
     if (!ok) return c.json({ ok: false, error: 'the grant signature did not verify against your agent' }, 401);
   }
 
+  // WHOSE it is, in words. The target has no name — that is why a grant was needed — so without this the
+  // holder is offered "their treasury" and has to trust an address to know who they are paying.
+  const ownerName = await (async () => {
+    if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+    return new AgentNamingClient({
+      rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID),
+      registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+    }).reverseResolve(owner).catch(() => null);
+  })();
   const held = {
     v: 1 as const, kind: 'resolution.grant.held' as const,
     grantId, targetAgent: target, owner, targetType: wants,
+    ...(ownerName ? { ownerName } : {}),
     ...(body.label ? { label: body.label } : {}),
     issuedAt: grant.issuedAt, expiresAt, grant,
   };

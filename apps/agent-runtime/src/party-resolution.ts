@@ -194,7 +194,9 @@ export async function ownedAgentsOfType(
       out.push({
         agent: g.targetAgent.toLowerCase(),
         // It has NO NAME — that is why a grant was needed. Say whose it is instead.
-        label: g.label ?? `${g.ownerName ?? 'their'} ${type}`,
+        // "alice.me's treasury" — the owner's name, because the target has none and an address alone
+        // does not tell the holder who they are about to pay.
+        label: g.label ?? (g.ownerName ? `${g.ownerName}'s ${type}` : `their ${type}`),
         provenance: { tier: 'private' as const, source: 'resolution-grant', subject: asker, match: 'granted' },
       });
     }
