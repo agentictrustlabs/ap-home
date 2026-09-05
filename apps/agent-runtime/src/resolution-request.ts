@@ -48,7 +48,9 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     }
 
     // Then the human-readable half, so it appears where they read things.
-    const note = `I'd like a way to reach your ${wants} — ${purpose}. Approve it in your Home (Requests) and I'll be able to send there. It gives me no control over it.`;
+    // The note says what to DO, including the case where they have none of that kind — which is the
+    // common one for a first payment, and the one where "approve it in your Home" reads as nonsense.
+    const note = `I'd like a way to reach your ${wants} — ${purpose}. Open your Home (Requests): if you have a ${wants}, approving there lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
     const sent = session ? await deps.sendDirectMessage?.({ sender: person, recipient: owner, bodyText: note, session }) : undefined;
 
     return {

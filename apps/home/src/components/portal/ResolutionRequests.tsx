@@ -133,7 +133,20 @@ export function ResolutionRequests({ title = 'Requests to reach your agents' }: 
                 {options.map((o) => <option key={o.agent} value={o.agent}>{o.name || `unnamed ${req.wants} · ${o.agent.slice(0, 10)}…`}</option>)}
               </select>
             )}
-            {!options.length && <p style={{ ...mutedText, fontSize: 11.5 }}>You have no {req.wants} to share.</p>}
+            {/* NOTHING TO SHARE IS A STEP, NOT A WALL. Someone is trying to pay them and they have no
+                treasury — the request is answerable, it just needs one to exist first. Saying only "you
+                have no treasury" leaves both people stuck on a thing either could fix in a minute. */}
+            {!options.length && (
+              <div style={{ marginTop: 6 }}>
+                <p style={{ ...mutedText, fontSize: 11.5, lineHeight: 1.5 }}>
+                  You have no {req.wants} yet — that is why they could not reach one. Create one and come back to this
+                  card; nothing is sent until you do.
+                </p>
+                <a className="btn ghost" style={{ fontSize: 12, display: 'inline-block', marginTop: 6 }} href="/treasuries" data-testid={`resolution-create-${req.requester.toLowerCase()}`}>
+                  Create a {req.wants}
+                </a>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <BusyButton
                 busy={busy === req.requester} busyLabel="Granting…"
