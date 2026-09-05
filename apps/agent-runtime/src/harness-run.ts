@@ -40,8 +40,7 @@ import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep 
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
-  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1,
-} from '@agenticprimitives/delegation';
+  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector,} from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
@@ -837,10 +836,15 @@ const ASK_PLANNER_SYSTEM =
 /** What a presented mandate is FOR, in the words the planner knows the capability by. Read from the wire's
  *  own caveats — the mandate says what it covers, and nothing here has to be told. */
 export function mandateCapabilityWords(presented: { caveats?: Array<{ enforcer?: string; terms?: string }> } | null): string | null {
-  const terms = (presented?.caveats ?? []).map((c) => String(c.terms ?? '')).join(' ');
+  // The id is not IN the caveat: `capabilityHandler` reduces it to a 4-byte METHOD SELECTOR
+  // (`methodSelector(id)`), so searching the terms for the id's own bytes matched nothing, ever — the
+  // guidance this feeds was silently never added and the drift it was written to stop carried on.
+  // Compare selectors, which is what is actually there.
+  const terms = (presented?.caveats ?? []).map((c) => String(c.terms ?? '').toLowerCase()).join(' ');
+  if (!terms) return null;
   for (const id of Object.keys(CAPABILITY_WORDS)) {
-    // The capability id is encoded in the caveat terms; finding it there is enough to name it.
-    if (terms.includes(Buffer.from(id).toString('hex'))) return CAPABILITY_WORDS[id]!;
+    const selector = methodSelector(id).slice(2).toLowerCase();
+    if (selector && terms.includes(selector)) return CAPABILITY_WORDS[id]!;
   }
   return null;
 }

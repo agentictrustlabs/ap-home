@@ -205,6 +205,10 @@ export async function resolveParty(
         ask(`Nothing called “${value}” is a ${where.types[0]}. Who should be ${where.what}?`, {
           name: where.argName, label: where.what, type: 'choice', required: true,
           choices: all.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+          // The right answer is very often NOT in this list — that is the whole reason we are asking —
+          // so the person must be able to type it. Telling them to "give it in full" beside a list they
+          // cannot add to is a dead end with instructions on it.
+          allowOther: true,
           hint: `a ${where.types[0]} may exist under another name — give it in full (e.g. ${value}2.${where.types[0]}) to send there instead`,
         });
       }
@@ -217,7 +221,8 @@ export async function resolveParty(
         ask(`Which “${value}” do you mean?`, {
           name: where.argName, label: where.what, type: 'choice', required: true,
           choices: tier.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
-          hint: `${tier.length} of them are what ${where.what} has to be — pick the one you mean`,
+          allowOther: true,
+          hint: `${tier.length} of them are what ${where.what} has to be — pick one, or give a full name`,
         });
       }
     }
@@ -261,7 +266,9 @@ export async function resolveParty(
   ask(`Which “${value}” do you mean?`, {
     name: where.argName, label: where.what, type: 'choice', required: true,
     choices: candidates.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
-    hint: `${wanted}${candidates.length} agents you know answer to “${value}” — pick the one you mean`,
+    // Someone they know may not be among these, and knowing the full name is a real answer.
+    allowOther: true,
+    hint: `${wanted}${candidates.length} agents you know answer to “${value}” — pick one, or give a full name`,
   });
   throw new Error('unreachable');
 }

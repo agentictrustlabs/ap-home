@@ -436,6 +436,19 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
                   </button>
                 );
               })}
+              {/* THE ANSWER IS OFTEN NOT IN THE LIST — that is why we are asking. A prompt that says "give
+                  it in full" beside a list nobody can add to is a dead end with instructions on it: asked
+                  to pay "alice" when her treasury is named alice2.treasury, the only offered choice was
+                  her person agent, and typing the right one was impossible. */}
+              {f.allowOther && (
+                <input
+                  className="input" data-testid={`ask-other-${f.name}`} style={{ marginTop: 6 }}
+                  placeholder="or type a name (alice2.treasury) or address"
+                  value={f.choices.some((c) => c.value === answers[f.name]) ? '' : answers[f.name] ?? ''}
+                  onChange={(e) => setAnswers({ ...answers, [f.name]: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && ready && !busy) onAnswer(); }}
+                />
+              )}
             </div>
           ) : (
             <input

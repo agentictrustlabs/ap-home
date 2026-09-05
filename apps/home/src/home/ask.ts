@@ -44,6 +44,8 @@ export interface AskField {
   required?: boolean;
   /** For `choice`. `hint` is what tells two candidates apart — kind, address, where they are known from. */
   choices?: Array<{ value: string; label: string; hint?: string }>;
+  /** The listed candidates are not the only answers — the surface must also accept a typed one. */
+  allowOther?: boolean;
   pattern?: string;
   hint?: string;
 }
