@@ -9,18 +9,20 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { NonRetryableError } from 'cloudflare:workflows';
 import { TerminalDenial, type DurableStepPort } from '@agenticprimitives/orchestration';
 import { driveApprovalFlow, type AttemptOutcome, type AttemptFn } from './harness-workflow-core.js';
-import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 
-/** INPUTS, never conclusions — the checkpoint law applied to workflow params: enough to re-enter the
- *  run from nothing, re-planned and re-verified per attempt. */
+/**
+ * REFS ONLY — spec 362 §6.1. The first cut persisted the session token, the person's words, the signed
+ * wires and the plan args into ENGINE instance storage: retained for days, outside our keys, outside
+ * the vault. A session token at rest in an engine log is a bearer; a signed wire is a credential; the
+ * goal text is the person's words. The checkpoint law taken literally: the engine holds the HANDLE, and
+ * every attempt re-loads the content from `harness:run:<runRef>` on `A2aTaskDO` — already the record,
+ * already TTL'd, already ours. `check:workflow-params-are-refs` fails the build if this type ever grows
+ * a content-class field.
+ */
 export interface HarnessWorkflowParams {
   runRef: string;
+  /** WHERE the checkpoint lives (the DO is keyed by the addressee). An address is a ref (§6 table). */
   addressee: string;
-  person: string;
-  session: string;
-  intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
-  presented: DelegationWireV1 | DelegationWireV1[] | null;
-  plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
   approvalTimeoutMs?: number;
 }
 

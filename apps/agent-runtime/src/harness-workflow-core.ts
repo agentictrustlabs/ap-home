@@ -6,8 +6,19 @@ import { TerminalDenial, type DurableStepPort, type ApprovalEventV1 } from '@age
 
 export interface AttemptOutcome {
   outcome: string;
-  error?: string;
+  /** A short machine CODE, never a sentence — engine step results are retained outside our custody for
+   *  days, and an error string with an address and an amount in it is content at rest (§6.1). The full
+   *  words live on the run's own record, where they always did. */
+  errorCode?: string;
   awaiting?: { kind: string; stepRef: string } | null;
+}
+
+/** Squeeze an error sentence to its leading code token: `intent-mismatch: mandate is bound to 0x…` →
+ *  `intent-mismatch`. Anything that does not look like a code becomes `failed`. */
+export function toErrorCode(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const head = error.split(/[:\s]/, 1)[0] ?? '';
+  return /^[a-z][a-z0-9_-]{1,40}$/i.test(head) ? head.toLowerCase() : 'failed';
 }
 
 /** Runs ONE whole attempt: load the run's CURRENT inputs, re-verify everything, reconcile, act. The
@@ -42,7 +53,7 @@ export async function driveApprovalFlow(
       try {
         return await attempt(approvals);
       } catch (e) {
-        if (e instanceof TerminalDenial) return { outcome: 'denied', error: e.message };
+        if (e instanceof TerminalDenial) return { outcome: 'denied', errorCode: toErrorCode(e.message) ?? 'denied' };
         throw e;
       }
     });
@@ -55,7 +66,7 @@ export async function driveApprovalFlow(
     evt = await step.waitForEvent<ApprovalEventV1>('custodian-decision', { type: 'custodian-decision', timeoutMs: opts.approvalTimeoutMs });
   } catch {
     // Expiry is an OUTCOME, not a failure: nothing was acted, and the task should say exactly that.
-    return { outcome: 'expired', error: 'the approval window closed with no decision — nothing was acted' };
+    return { outcome: 'expired', errorCode: 'approval-window-closed' };
   }
   return guarded('attempt-2', [{ approvalRef: String(evt?.approvalRef ?? '') }]);
 }

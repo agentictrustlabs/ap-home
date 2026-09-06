@@ -34,11 +34,11 @@ describe('the four gates (spec 362 §4)', () => {
     let mandateRevoked = false;
     const out = await driveApprovalFlow(port, async (approvals) => {
       if (approvals.length === 0) { mandateRevoked = true; return suspended; } // revoked during the wait
-      return { outcome: 'denied', error: 'mandate revoked' };                  // attempt-2 re-verifies NOW
+      return { outcome: 'denied', errorCode: 'mandate-revoked' };              // attempt-2 re-verifies NOW
     }, { approvalTimeoutMs: 1000 });
     expect(mandateRevoked).toBe(true);
     expect(out.outcome).toBe('denied');
-    expect(out.error).toMatch(/revoked/);
+    expect(out.errorCode).toMatch(/revoked/);
   });
 
   it('GATE 2 — a retry never reuses an earlier verdict: the WHOLE attempt re-runs', async () => {
@@ -61,7 +61,7 @@ describe('the four gates (spec 362 §4)', () => {
       // that committed before the crash is found, not repeated.
       const alreadySettled = true;
       if (!alreadySettled) acted++;
-      return { outcome: 'completed', error: undefined };
+      return { outcome: 'completed' };
     }, { approvalTimeoutMs: 1000 });
     expect(out.outcome).toBe('completed');
     expect(acted).toBe(0);
@@ -98,7 +98,7 @@ describe('the four gates (spec 362 §4)', () => {
     let calls = 0;
     const attempt = async (): Promise<AttemptOutcome> => { calls++; throw new TerminalDenial('revoked'); };
     const out = await driveApprovalFlow(engine.port, attempt, { approvalTimeoutMs: 10 });
-    expect(out).toEqual({ outcome: 'denied', error: 'revoked' });
+    expect(out).toEqual({ outcome: 'denied', errorCode: 'revoked' });
     expect(engine.ran).toEqual(['attempt-1']);
     // Re-drive: the denial replays as history; nothing re-verifies because nothing re-ATTEMPTS.
     await driveApprovalFlow(engine.port, attempt, { approvalTimeoutMs: 10 });

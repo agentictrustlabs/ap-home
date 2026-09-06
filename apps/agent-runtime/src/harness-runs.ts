@@ -29,6 +29,10 @@ export interface HarnessRunCheckpointV1 {
   /** The sentence. An ask is ONE thing — a different sentence is a different ask and a different intent
    *  digest, so it may not inherit this run's mandate. */
   message: string;
+  /** The FULL intent when the run was entered with one (a durable/supplied-plan run). The mandate binds
+   *  the digest of THIS object — rebuilding `{ goal }` from the message alone changes the digest and
+   *  every mandate mismatches, which is how the first refs-only attempt denied its own valid mandate. */
+  intent?: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
   /** The realm the ask was addressed to. */
   addressee: Address;
   /** WHO asked. Only they may resume: a run carries their session's authority and their answers. */
@@ -46,6 +50,9 @@ export interface HarnessRunCheckpointV1 {
   presented: DelegationWireV1[];
   /** Everything answered so far, by stepRef. */
   supplied: SuppliedInputV1[];
+  /** Spec 361 I4 — the caller-supplied plan, when the run was entered deterministically. Utterance-class
+   *  content, which is exactly why it lives HERE (DO-local, TTL'd) and never in engine params (§6). */
+  plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
   /** What the run is waiting for, for a surface that lists pending work. */
   awaiting?: { kind: 'data' | 'signature' | 'confirmation'; prompt: string; stepRef: string };
   /** Set when the run is a WORK ITEM nobody has picked up: `asker` is the principal rather than a person,

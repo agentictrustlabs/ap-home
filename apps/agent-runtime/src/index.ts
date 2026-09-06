@@ -108,6 +108,7 @@ import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
+import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
@@ -1286,14 +1287,14 @@ app.post('/harness/durable', async (c) => {
   // The checkpoint FIRST, then the instance: if the create's response is lost the run record already
   // names its executor, and retrying the create with the same id is idempotent at the engine.
   await saveRun(c.env as never, {
-    runRef, message: body.intent.goal, addressee, asker: String(who.sa).toLowerCase() as Address,
+    runRef, message: body.intent.goal, intent: body.intent, addressee, asker: String(who.sa).toLowerCase() as Address,
     presented: body.presented == null ? [] : Array.isArray(body.presented) ? body.presented : [body.presented],
     supplied: [], executor: 'workflow', createdAt: now, updatedAt: now,
-  });
-  const params: HarnessWorkflowParams = {
-    runRef, addressee, person: String(who.sa).toLowerCase(), session: body.session,
-    intent: body.intent, presented: body.presented ?? null,
     ...(body.plan ? { plan: body.plan } : {}),
+  });
+  // REFS ONLY cross the engine boundary (spec 362 §6.1) — the checkpoint above is the content's home.
+  const params: HarnessWorkflowParams = {
+    runRef, addressee,
     ...(body.approvalTimeoutMs ? { approvalTimeoutMs: body.approvalTimeoutMs } : {}),
   };
   await c.env.HARNESS_WORKFLOW.create({ id: runRef, params });
@@ -1376,8 +1377,16 @@ app.post('/harness/approve', async (c) => {
     } as never],
     updatedAt: Date.now(),
   });
-  const instance = await c.env.HARNESS_WORKFLOW.get(body.runRef);
-  await instance.sendEvent({ type: 'custodian-decision', payload: { type: 'custodian-decision', approvalRef: body.approval.digest, approver: body.approval.approver } });
+  try {
+    const instance = await c.env.HARNESS_WORKFLOW.get(body.runRef);
+    await instance.sendEvent({ type: 'custodian-decision', payload: { type: 'custodian-decision', approvalRef: body.approval.digest, approver: body.approval.approver } });
+  } catch (e) {
+    // A decision delivered to a run that already finished is late, not broken: say what the run's state
+    // is instead of a bare 500 (the first live symptom of the intent-digest bug read exactly like this).
+    let state: unknown = null;
+    try { state = await (await c.env.HARNESS_WORKFLOW.get(body.runRef)).status(); } catch { /* unknown */ }
+    return c.json({ ok: false, error: 'the run is not waiting for a decision', detail: e instanceof Error ? e.message : String(e), instance: state }, 409);
+  }
   return c.json({ ok: true, runRef: body.runRef });
 });
 
@@ -2691,6 +2700,16 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
       const r = out as { ok?: boolean; needsEnable?: boolean; data?: unknown; error?: string };
       return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
+    },
+    // REVERSE name lookup for an address — the public directory's fact (ADR-0040), used to name roster
+    // rows that only carry addresses. Best-effort; null is a fine answer.
+    nameOf: async (address: string) => {
+      // The discovery /agent answer is RAW TRIPLES ({agent, triples:[{p,o}]}) — the name is whichever
+      // triple's predicate ends `#name`. Two earlier reads guessed `.agent.name` then top-level `.name`
+      // and both returned null for every row; the shape was never either.
+      const out = (await askDiscoveryInvoker({ fetchDiscovery: discoveryFetchFor(env) })('get_agent', { key: address.toLowerCase() }, {} as never).catch(() => null)) as { triples?: Array<{ p: string; o: string }> } | null;
+      const name = out?.triples?.find((t) => /[#/]name$/.test(t.p))?.o ?? null;
+      return name && !/^0x/.test(name) ? name : null;
     },
     findAgents: async (terms: string) => {
       const out = await askDiscoveryInvoker({ fetchDiscovery: discoveryFetchFor(env) })('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
@@ -6741,14 +6760,16 @@ bindHarnessAttempt(async (envIn, p, _approvalRefs) => {
   const env = envIn as Env;
   const audit = buildAuditSink(env);
   const deps = harnessDeps(env, audit);
-  // The checkpoint is the DRAFT + the keyring + the discharged evidence — inputs, never conclusions.
+  // EVERYTHING FROM THE CHECKPOINT (spec 362 §6.1): the engine handed us refs; the content — the
+  // person's words, the keyring, the plan, the answers — lives on the run's own record, ours and TTL'd.
   const stored = await loadRun(env as never, p.addressee as Address, p.runRef).catch(() => null);
+  if (!stored) return { outcome: 'failed', errorCode: 'run-record-missing' };
   const { result } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
-    intent: p.intent,
-    presented: (stored?.presented?.length ? stored.presented : p.presented) as never,
-    person: p.person as Address, session: p.session, runRef: p.runRef, addressee: p.addressee as Address,
-    ...(p.plan ? { plan: p.plan } : {}),
-    ...(stored?.supplied?.length ? { supplied: stored.supplied } : {}),
+    intent: stored.intent ?? { goal: stored.message },
+    presented: (stored.presented ?? []) as never,
+    person: stored.asker as Address, runRef: p.runRef, addressee: p.addressee as Address,
+    ...(stored.plan ? { plan: stored.plan } : {}),
+    ...(stored.supplied?.length ? { supplied: stored.supplied } : {}),
     // A durable run advances a GOVERNED ACTION through its approval. The discovery/question tools are
     // conversation-shaped and have no place inside an approval wait — refusing them here keeps the
     // durable path from quietly becoming a second Ask with a weaker surface.
@@ -6756,7 +6777,7 @@ bindHarnessAttempt(async (envIn, p, _approvalRefs) => {
   });
   return {
     outcome: result.outcome,
-    ...(result.error ? { error: result.error } : {}),
+    ...(result.error ? { errorCode: toErrorCode(result.error) } : {}),
     ...(result.prompt ? { awaiting: { kind: result.prompt.kind, stepRef: result.prompt.stepRef } } : {}),
   };
 });

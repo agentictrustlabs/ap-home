@@ -476,6 +476,8 @@ export interface HarnessDeps {
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
   /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
+  /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
+  nameOf?: (address: string) => Promise<string | null>;
   now?: () => number;
 }
 
@@ -801,6 +803,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
+          ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
           // The org's own INVITATION records, found through its inventory (spec 356 §2.5). A member who
           // joined by invite never published a listing, and reading listings alone hides them.
           ...(deps.survey ? { survey: deps.survey } : {}),
