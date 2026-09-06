@@ -48,6 +48,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
+import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
@@ -927,6 +928,9 @@ export interface AskEvidence {
   /** What a keyword search actually looked for. A name match that found nothing and a directory that holds
    *  none of a kind are different facts, and this is the one that says which happened. */
   searched?: string;
+  /** WHOSE data the tool read (vault-question's `looked`/`recordsOf`) — what attribution is checked
+   *  against: an answer may not present these as anybody else's (spec 358 W3). */
+  subjects?: string[];
   /** Why nothing came back, when the tool said. An answer built on a refusal must not read like an answer
    *  built on an empty result. */
   reason?: string;
@@ -937,7 +941,7 @@ export interface AskEvidence {
 export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
   const out: AskEvidence[] = [];
   for (const o of steps) {
-    const r = o.result as { query?: unknown; interpretation?: unknown; count?: unknown; reason?: unknown; searchedNamesFor?: unknown; note?: unknown } | null;
+    const r = o.result as { query?: unknown; interpretation?: unknown; count?: unknown; reason?: unknown; searchedNamesFor?: unknown; note?: unknown; looked?: unknown; recordsOf?: unknown } | null;
     if (!r || typeof r !== 'object') continue;
     const has = (v: unknown): boolean => typeof v === 'string' && v.length > 0;
     if (!has(r.query) && !has(r.interpretation) && !has(r.reason) && !has(r.searchedNamesFor)) continue;
@@ -949,6 +953,12 @@ export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
       ...(has(r.searchedNamesFor) ? { searched: r.searchedNamesFor as string } : {}),
       // A tool's own explanation of an empty result beats anything reconstructed from the shape of it.
       ...(has(r.reason) ? { reason: r.reason as string } : has(r.note) ? { reason: r.note as string } : {}),
+      ...((): { subjects?: string[] } => {
+        const looked = Array.isArray(r.looked) ? (r.looked as Array<{ subject?: unknown }>).map((l) => String(l.subject ?? '')).filter(Boolean) : [];
+        const of = Array.isArray(r.recordsOf) ? (r.recordsOf as unknown[]).map(String).filter(Boolean) : [];
+        const subjects = [...new Set([...looked, ...of])];
+        return subjects.length ? { subjects } : {};
+      })(),
     });
   }
   return out;
@@ -1447,7 +1457,22 @@ export async function askReplyFor(env: HarnessEnv, input: {
     const withEvidence = (text: string): AskReply => ({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}) });
     if (!input.composer) return withEvidence(raw);
     try {
-      return withEvidence(await input.composer.compose({ intent: input.intent, observations: r.steps }));
+      // GROUNDED COMPOSITION — spec 358 W3. Every real gate ran before the invoker; this is the one
+      // stage that was ungoverned, and it is where the week's false sentences were written. The prose is
+      // checked against the evidence it will be shown WITH: one recompose carrying the governor's own
+      // corrections, then the floor — the evidence stated plainly, because after two ungrounded
+      // compositions the person gets the observations, not a third guess.
+      let text = await input.composer.compose({ intent: input.intent, observations: r.steps });
+      let violations = checkGroundedComposition(text, evidence);
+      if (violations.length) {
+        text = await input.composer.compose({
+          intent: input.intent, observations: r.steps,
+          corrections: violations.map((v) => v.correction),
+        });
+        violations = checkGroundedComposition(text, evidence);
+        if (violations.length) text = groundedFallback(evidence);
+      }
+      return withEvidence(text);
     } catch {
       return withEvidence(raw);
     }

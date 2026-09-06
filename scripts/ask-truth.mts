@@ -165,6 +165,24 @@ const cases: TruthCaseV1[] = [
       noPlaceholderLeaks(),
     ],
   },
+  {
+    id: 'empty-says-how-it-looked',
+    incident: '2026-09-05 (W3): an empty lookup restated as a fact about the world. "There are no agents called X" claims knowledge of the world; the agent has only "nothing matched a search for X".',
+    question: 'are there any agents called zzznonexistent-truthcase',
+    probes: {},
+    run: ask('alice', 'are there any agents called zzznonexistent-truthcase'),
+    checks: [
+      answered(),
+      emptinessCarriesReason(),
+      // The claim layer: an emptiness sentence must carry the HOW — searched terms or lookup vocabulary —
+      // never a bare assertion of nonexistence (spec 358 W3, checkGroundedComposition's rule).
+      claimsRequire(
+        /\b(?:does not|doesn'?t)\s+(?:list|contain|have|show)\s+any\b|\bthere (?:are|is) no\b|\bno agents?\b/i,
+        /zzznonexistent-truthcase|search|match|name|look|quer/i,
+        'an emptiness claim must say how it looked (spec 358 W3) — “X does not exist” is not knowable; “nothing matched a search for X” is',
+      ),
+    ],
+  },
 ];
 
 const report = await runTruthSet(cases);
