@@ -265,3 +265,55 @@ export async function seedImpactProfileFields(addr: Address, fields: Partial<Imp
   }
   console.warn('[profile-seed] vault key never bound — connection data not seeded (edit it on /profile)');
 }
+
+// ── The agent's playbook — spec 354 K3 (the assignment record + the ceremony's read/write) ────────
+import { validateAgentHarnessDefinition, definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+
+export interface ArchetypeAssignmentRecord {
+  type: 'ap.archetype-assignment.v1';
+  archetypeId: string;
+  archetypeVersion: string;
+  definitionDigest: string;
+  definition: AgentHarnessDefinitionV1;
+}
+
+/** The agent's current playbook, or null. `record.get` is self-gated; the interactions grant's
+ *  additive `vault:archetype.assignment` scope carries it (a stale grant returns nothing, which the
+ *  caller surfaces as "enable to set a playbook"). */
+export async function readPlaybookAssignment(agent: Address): Promise<ArchetypeAssignmentRecord | null> {
+  await ensureCsrfToken();
+  const session = homeBearer();
+  if (!session) throw new Error('no home session');
+  const res = await fetch(`/a2a/interactions/${agent.toLowerCase()}/record.get`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session, recordType: 'archetype.assignment' }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { record?: ArchetypeAssignmentRecord | null; error?: string };
+  if (body.error === 'record_scope_denied') throw new InteractionsNotEnabledError();
+  if (!res.ok) throw new Error(body.error ?? `playbook read failed (${res.status})`);
+  return body.record ?? null;
+}
+
+/** Write the playbook assignment. The Home is the WRITER, never the approver in one act — the caller
+ *  gates this behind the confirmation the ceremony renders ("this grants no authority"). The record
+ *  embeds the definition and re-derives its digest, so run admission verifies the same value we wrote. */
+export async function writePlaybookAssignment(agent: Address, definition: AgentHarnessDefinitionV1): Promise<void> {
+  const check = validateAgentHarnessDefinition(definition);
+  if (!check.ok) throw new Error(`the playbook is not a valid definition: ${check.errors[0]}`);
+  await ensureCsrfToken();
+  const session = homeBearer();
+  if (!session) throw new Error('no home session');
+  const record: ArchetypeAssignmentRecord = {
+    type: 'ap.archetype-assignment.v1', archetypeId: definition.archetypeId,
+    archetypeVersion: definition.archetypeVersion, definitionDigest: definitionDigest(definition), definition,
+  };
+  const res = await fetch(`/a2a/interactions/${agent.toLowerCase()}/record.put`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session, recordType: 'archetype.assignment', record }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (body.error === 'record_scope_denied') throw new InteractionsNotEnabledError();
+  if (!res.ok || body.ok !== true) throw new Error(body.error ?? `playbook write failed (${res.status})`);
+}

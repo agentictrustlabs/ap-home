@@ -7,6 +7,7 @@ import { useManagedAgents } from './ManagedAgents';
 import { SectionShell } from './SectionShell';
 import { DelegationCard, VaultReader } from './OrgDetail';
 import { BusyButton } from '../shared/BusyButton';
+import { BehaviourPlaybook } from './BehaviourPlaybook';
 import { agentClassOf } from '../../lib/agent-class';
 import type { DelegationWire } from '../../lib/delegation';
 
@@ -146,6 +147,7 @@ export function ServicePlaybookSection({ agent }: { agent: string }) {
   const what = svc.kind === 'workspace' ? 'workspace agent' : svc.kind === 'team' ? 'team' : 'service';
   return (
     <SectionShell title="Playbook">
+      <BehaviourPlaybook agent={svc.agent} kind={svc.kind} name={svc.name || undefined} />
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
         The instructions this {what} agent answers under — markdown, the agent’s SKILL.md. It shapes
         every reply the agent writes in its own discussion topics

@@ -1,0 +1,215 @@
+'use client';
+// Behaviour → Archetype — the K3 assignment ceremony (spec 354 §4.2).
+//
+// A steward picks an archetype (filtered to the agent's class), the Home previews the DIFF — the tools
+// the definition would expose, and the mandate types the agent would START ASKING for — and says, in one
+// sentence, the invariant the whole design rests on: THIS GRANTS NO AUTHORITY. Assigning an archetype
+// changes what the agent knows how to DO; the mandate still decides what it MAY do (spec 354 §1). The
+// approval writes `ArchetypeAssignmentV1` to the agent's own vault (`archetype.assignment`, self-gated
+// record.put), where the harness's run admission re-derives the digest and loads it — a tampered or
+// absent playbook leaves the bare harness standing (`apps/demo-a2a/src/playbook.ts`).
+//
+// This is the STEWARDSHIP surface for the same record the a2a harness reads. It never signs and never
+// grants; the only on-chain thing near it is the vault write itself, gated by the interactions grant's
+// additive `vault:archetype.assignment` scope.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { Address } from '@agenticprimitives/types';
+import type { AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+import { catalogForKind, type CatalogArchetype } from '../../lib/archetype-catalog';
+import { readPlaybookAssignment, writePlaybookAssignment, type ArchetypeAssignmentRecord } from '../../profile-store';
+import { BusyButton } from '../shared/BusyButton';
+
+const rarLabel = (t: string) => t.replace(/^urn:ap:rar:/, '');
+
+/** The human words for a mandate requirement type — falls back to the bare urn tail. Kept tiny and
+ *  local: the authoritative label lives with the capability in the compiler; here we only need to make
+ *  the diff legible to the steward. */
+const MANDATE_WORDS: Record<string, string> = {
+  'treasury.payment.execute': 'make payments',
+  'treasury.fund': 'fund the treasury',
+  'organization.membership.manage': 'manage membership',
+  'organization.team.create': 'charter teams',
+  'messaging.direct.send': 'send direct messages',
+};
+const mandateWords = (t: string) => MANDATE_WORDS[rarLabel(t)] ?? rarLabel(t);
+
+function ToolLine({ id, description, risk }: { id: string; description: string; risk?: string }) {
+  const informational = !risk || risk === 'informational';
+  return (
+    <li style={{ margin: '.35rem 0', lineHeight: 1.4 }}>
+      <code style={{ fontSize: '.82rem' }}>{id}</code>
+      {!informational && (
+        <span style={{ marginLeft: '.4rem', fontSize: '.7rem', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '0 .35rem' }}>
+          {risk} · needs a mandate
+        </span>
+      )}
+      <div style={{ fontSize: '.78rem', color: 'var(--color-text-muted)' }}>{description}</div>
+    </li>
+  );
+}
+
+/** The diff panel: what this definition would make the agent able to do, and what it would start
+ *  asking authority for. Reads only real fields of the definition. */
+function DiffPreview({ def }: { def: AgentHarnessDefinitionV1 }) {
+  const mandates = def.requiredMandateTypes ?? [];
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '.85rem 1rem', background: 'var(--color-surface, #fff)' }}>
+      <p style={{ margin: '0 0 .5rem', fontSize: '.82rem', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>{def.instructions}</p>
+      <h4 style={{ margin: '.6rem 0 .2rem', fontSize: '.82rem' }}>Tools it would use</h4>
+      <ul style={{ margin: 0, paddingLeft: '1.1rem', listStyle: 'disc' }}>
+        {def.tools.map((t) => (
+          <ToolLine key={t.id} id={t.id} description={t.description} risk={t.risk} />
+        ))}
+      </ul>
+      <h4 style={{ margin: '.7rem 0 .2rem', fontSize: '.82rem' }}>Authority it would start asking for</h4>
+      {mandates.length === 0 ? (
+        <p style={{ margin: 0, fontSize: '.8rem', color: 'var(--color-text-muted)' }}>None — this archetype only reads and converses.</p>
+      ) : (
+        <ul style={{ margin: 0, paddingLeft: '1.1rem', listStyle: 'disc', fontSize: '.82rem' }}>
+          {mandates.map((m) => (
+            <li key={m} style={{ margin: '.2rem 0' }}>{mandateWords(m)} <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>({rarLabel(m)})</span></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The ceremony. `agent` is the managed agent's SA; `kind` its AgentKind (used to filter the catalog to
+ * the agent's class); `name` for copy. Reads the current assignment, offers the class's archetypes,
+ * previews the diff, and on approval writes the assignment record — one write, no signature, no grant.
+ */
+export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind: string; name?: string }) {
+  const options = useMemo(() => catalogForKind(kind), [kind]);
+  const [current, setCurrent] = useState<ArchetypeAssignmentRecord | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState<CatalogArchetype | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    void readPlaybookAssignment(agent)
+      .then((rec) => { if (!cancelled) setCurrent(rec); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [agent]);
+
+  const assign = useCallback(async () => {
+    if (!selected) return;
+    setBusy(true); setSaved(false); setError(null);
+    try {
+      await writePlaybookAssignment(agent, selected.definition);
+      setCurrent({
+        type: 'ap.archetype-assignment.v1',
+        archetypeId: selected.definition.archetypeId,
+        archetypeVersion: selected.definition.archetypeVersion,
+        definitionDigest: '', // re-read below carries the authoritative digest
+        definition: selected.definition,
+      });
+      setSaved(true);
+      setSelected(null);
+      const rec = await readPlaybookAssignment(agent).catch(() => null);
+      if (rec) setCurrent(rec);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }, [agent, selected]);
+
+  const clear = useCallback(async () => {
+    setBusy(true); setSaved(false); setError(null);
+    try {
+      // "Clear" is a re-assignment to the bare state: write no archetype by removing the record's
+      // teeth — here we simply re-present the picker. A true delete is a vault op we don't expose yet;
+      // reassigning to another archetype is the supported change. Keep this honest:
+      setSelected(null);
+    } finally { setBusy(false); }
+  }, []);
+
+  if (options.length === 0) {
+    return (
+      <div style={{ marginBottom: '1.2rem' }}>
+        <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Archetype</h3>
+        <p className="manage-card-blurb" style={{ margin: 0 }}>No archetypes apply to this kind of agent yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '1.4rem' }}>
+      <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Archetype</h3>
+      <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
+        An archetype is a compiled behaviour — the skills, tools and reasoning {name || 'this agent'} runs
+        under. Assigning one <strong>changes what the agent knows how to do; it grants no authority.</strong>{' '}
+        Every action it takes still waits on a mandate you sign for that request.
+      </p>
+      {error && <p role="alert" className="manage-card-blurb" style={{ color: 'var(--color-danger, #b3261e)' }}>{error}</p>}
+
+      {!loaded ? (
+        <p className="manage-card-blurb">Loading…</p>
+      ) : (
+        <>
+          <div style={{ marginBottom: '.8rem', fontSize: '.85rem' }}>
+            {current ? (
+              <span>
+                Currently: <strong>{current.archetypeId.replace(/^skill:archetypes\//, '')}</strong>{' '}
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>v{current.archetypeVersion}</span>
+                {saved && <span role="status" style={{ marginLeft: '.5rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
+              </span>
+            ) : (
+              <span style={{ color: 'var(--color-text-muted)' }}>No archetype assigned — the agent runs the bare harness.</span>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gap: '.55rem' }}>
+            {options.map((opt) => {
+              const isCurrent = current?.archetypeId === opt.definition.archetypeId;
+              const isSel = selected?.key === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => { setSelected(isSel ? null : opt); setSaved(false); }}
+                  style={{
+                    textAlign: 'left', cursor: 'pointer', padding: '.6rem .8rem', borderRadius: 10,
+                    border: `1px solid ${isSel ? 'var(--color-sage-700, #3f6212)' : 'var(--color-border)'}`,
+                    background: isSel ? 'var(--color-sage-50, #f2f7ec)' : 'var(--color-surface, #fff)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+                    <strong style={{ fontSize: '.88rem' }}>{opt.label}</strong>
+                    {isCurrent && <span style={{ fontSize: '.68rem', color: 'var(--color-sage-700)' }}>assigned</span>}
+                  </div>
+                  <div style={{ fontSize: '.8rem', color: 'var(--color-text-muted)' }}>{opt.summary}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {selected && (
+            <div style={{ marginTop: '.9rem', display: 'grid', gap: '.7rem' }}>
+              <DiffPreview def={selected.definition} />
+              <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center' }}>
+                <BusyButton
+                  busy={busy}
+                  busyLabel="Assigning…"
+                  onClick={() => void assign()}
+                  className="btn"
+                  style={{ width: 'auto' }}
+                >
+                  {current?.archetypeId === selected.definition.archetypeId ? 'Re-assign' : `Assign ${selected.label}`}
+                </BusyButton>
+                <button type="button" className="btn btn-ghost" style={{ width: 'auto' }} onClick={() => void clear()} disabled={busy}>Cancel</button>
+                <span style={{ marginLeft: 'auto', fontSize: '.72rem', color: 'var(--color-text-muted)' }}>Writes to the agent’s vault · no signature, no grant</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
