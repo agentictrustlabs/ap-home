@@ -1727,7 +1727,12 @@ app.post('/harness/ask', async (c) => {
     const otherRuns = await listRuns(c.env as never, addressee)
       .then((rs) => rs.filter((r) => r.runRef !== runRef && claimableBy(r, String(who.sa).toLowerCase() as Address)))
       .catch(() => []);
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: otherRuns.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })) } : {}) });
+    // A FEW, NEWEST FIRST — never the whole pile. This is a note beside the answer, and a note that is
+    // longer than the answer is not a note. The count travels so a surface can say how many there are
+    // without listing them; `/harness/runs` is where someone goes to see them all.
+    const UNFINISHED_SHOWN = 3;
+    const shown = otherRuns.slice(0, UNFINISHED_SHOWN);
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

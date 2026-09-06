@@ -62,6 +62,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
   // spec 350 W3 — other unfinished runs on this agent that this person could pick up. The run is durable
   // on the agent; this is how they find it again after closing the tab.
   const [unfinished, setUnfinished] = useState<UnfinishedRun[]>([]);
+  const [unfinishedTotal, setUnfinishedTotal] = useState(0);
+  // COLLAPSED BY DEFAULT. This is a note beside the conversation, never a competitor to it.
+  const [showUnfinished, setShowUnfinished] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   // WHAT THE AGENT ACTUALLY DID, kept for the whole conversation rather than the last answer. A generated
   // query is the one piece of evidence a reader cannot reconstruct from the reply, and "the directory does
@@ -122,7 +125,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     setBusy(label);
     const startedAt = Date.now();
     try {
-      const { reply, resumable, waiting, unfinishedRuns } = await ask(session, state);
+      const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, state);
       // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
       // the run somebody wants to look at afterwards.
       setDiag((d) => [...d, {
@@ -156,6 +159,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
       // never as a card that has to be dismissed before they can carry on with what they came to do.
       if (waiting) setWaiting(waiting);
       setUnfinished(unfinishedRuns ?? []);
+      setUnfinishedTotal(total ?? unfinishedRuns?.length ?? 0);
       // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
@@ -308,8 +312,19 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
             turn did. One line each, and only ones this person may resume. */}
         {unfinished.length > 0 && (
           <div className="ask-msg agent" data-testid="ask-unfinished" style={{ fontSize: 12, opacity: 0.9 }}>
-            {unfinished.length === 1 ? 'You have an unfinished ask here:' : `You have ${unfinished.length} unfinished asks here:`}
-            {unfinished.map((r) => (
+            {/* ONE LINE, COLLAPSED. Listing every unfinished ask inline put 167 of them between a person
+                and the answer they had just asked for. The COUNT is the notification; the list is
+                something they choose to open. */}
+            <button
+              type="button"
+              data-testid="ask-unfinished-toggle"
+              onClick={() => setShowUnfinished((v) => !v)}
+              style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              {unfinishedTotal === 1 ? 'You have 1 unfinished ask here' : `You have ${unfinishedTotal} unfinished asks here`}
+              {showUnfinished ? ' — hide' : ' — show'}
+            </button>
+            {showUnfinished && unfinished.map((r) => (
               <div key={r.runRef} style={{ marginTop: 4 }}>
                 <button
                   type="button"
@@ -321,6 +336,11 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
                 {r.awaiting && <span style={{ opacity: 0.75 }}> — waiting on {r.awaiting.kind === 'signature' ? 'your signature' : r.awaiting.kind === 'confirmation' ? 'your confirmation' : 'an answer'}</span>}
               </div>
             ))}
+            {showUnfinished && unfinishedTotal > unfinished.length && (
+              <div style={{ marginTop: 4, opacity: 0.7 }}>
+                …and {unfinishedTotal - unfinished.length} more. Unfinished asks expire after a day.
+              </div>
+            )}
           </div>
         )}
         {pending?.reply.kind === 'authority_required' && (

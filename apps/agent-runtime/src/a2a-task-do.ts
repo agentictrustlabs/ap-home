@@ -92,6 +92,10 @@ import {
 import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
+/** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
+ *  suspended run holds expires in minutes, so a stale checkpoint offers a resume that would have to ask
+ *  for fresh authority anyway. See the `list` op for why they are swept there rather than on a timer. */
+const RUN_TTL_MS = 24 * 60 * 60 * 1000;
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
@@ -858,10 +862,28 @@ export class A2aTaskDO {
       // their own; a steward additionally sees the unclaimed work items).
       if (op === 'list') {
         const rows = await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:run:' });
-        // Mandates are bearer-shaped wires; enumeration is a LISTING, not a resume, so the keyring never
-        // rides along. Loading the run by its ref is what hands those back, to the one who may resume it.
-        const runs = [...rows.values()].map(({ presented: _presented, ...rest }) => rest);
-        return Response.json({ ok: true, runs });
+        // AN UNFINISHED RUN EXPIRES. A checkpoint was only ever dropped on a terminal outcome, so every
+        // ask a person walked away from stayed forever — one estate reached 167 of them and the list
+        // buried the conversation it was supposed to sit beside.
+        //
+        // A day is well past the point of resumability: the mandate a suspended run holds has long since
+        // expired (they are minted for the request, minutes not days), so resuming would ask for a fresh
+        // one anyway — at which point asking again is the same act with less ceremony. Deleting them here
+        // rather than on a timer means the cleanup happens wherever the cost is already being paid.
+        const now = Date.now();
+        const live: Record<string, unknown>[] = [];
+        const expired: string[] = [];
+        for (const [key, run] of rows) {
+          const updatedAt = Number((run as { updatedAt?: number }).updatedAt ?? 0);
+          if (updatedAt && now - updatedAt > RUN_TTL_MS) { expired.push(key); continue; }
+          // Mandates are bearer-shaped wires; enumeration is a LISTING, not a resume, so the keyring
+          // never rides along. Loading the run by its ref is what hands those back.
+          const { presented: _presented, ...rest } = run;
+          live.push(rest);
+        }
+        if (expired.length) await this.state.storage.delete(expired);
+        live.sort((a, b) => Number((b as { updatedAt?: number }).updatedAt ?? 0) - Number((a as { updatedAt?: number }).updatedAt ?? 0));
+        return Response.json({ ok: true, runs: live, expired: expired.length });
       }
       return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });
     }
