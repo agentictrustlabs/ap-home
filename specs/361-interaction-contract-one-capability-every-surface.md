@@ -130,6 +130,19 @@ authorize a changed request). What is missing is the SHARED surface:
 | **I6** | Context projection: `AskScopeV1` gains `selection` (entity refs + filters + open draft), permission-filtered; presentation ops (`navigate`/`openEntity`/`prefillDraft`/`focusField`) | "invite *her*" resolves the selected member; ops are enumerable in the reply, not free-form |
 | **I7…** | Repeat I4 per feature family (profile, delegation, card publication, service config), each with its parity test — the spec 359 domain cadence | per-family |
 
+**I4 ledger:** invite ✅ (one-prompt, `alsoApprove` bundle) · fund ✅ (mandate = the one signature; the
+legacy browser-mint DELETED with its last caller, and the converged path gains the FundingReceipt effect
+the direct mint never left) · payment — no screen button exists; the Ask is already the one
+implementation · **charters — OPEN, with a named tension:** the legacy button is ONE signature (spec
+253's batched genesis) while the harness path costs TWO (the parent's mandate + the child's genesis),
+and the approveHash bundle cannot merge them because the mandate's delegator is the PARENT and the
+genesis batch executes as the CHILD — approving the mandate digest there registers it for the wrong SA's
+ERC-1271. Converting at two prompts violates the value-steps rule; resolving it needs either a
+parent-side authorize batched around the same ceremony (still two device prompts unless the credential
+is promptless) or a design that lets the genesis signature itself discharge the parent's requirement.
+Decided when it is decided — not converted quietly at a worse prompt count. Email invites likewise stay
+on the direct pre-sign: a counterfactual address cannot run a plan.
+
 ## 6. What we deliberately do NOT adopt (from the review's catalogue)
 
 - **CopilotKit / Tambo / assistant-ui runtimes as owners of conversation state.** The loop, the run

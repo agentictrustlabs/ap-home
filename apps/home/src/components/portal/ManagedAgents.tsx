@@ -7,10 +7,11 @@
 // the same /connect/related-orgs vault (MAM-D7) via listManagedAgents.
 import { useEffect, useState } from 'react';
 import { ExplorerLink } from '../shared/ExplorerLink';
+import { fundThroughHarness } from '../../home/fund-harness';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { AGENT_NAME_PARENT } from '../../lib/domain';
-import { typedTldForKind, createManagedAgent, nameManagedAgent, fundTreasury, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { PrimaryPayee } from './PrimaryPayee';
 import { emitControlEvent } from '../../home/control-plane';
@@ -131,7 +132,13 @@ export function FundForm({
     const n = Number(amt);
     if (!(n > 0)) { setErr('Enter an amount greater than 0.'); return; }
     setBusy(true); setErr(''); setStep('');
-    const res = await fundTreasury({ treasury: treasury as `0x${string}`, usdc: n, person: person as `0x${string}`, via }, token, setStep);
+    // Through the HARNESS (spec 361 I4): this button and "fund my treasury with N usdc" are one
+    // implementation now. Same one signature (the mandate replaces the direct userOp sign), and the
+    // converged path fires the spec-360 FundingReceipt the direct mint never left.
+    setStep('Granting the funding authority…');
+    const sign = await personSignHash(person as `0x${string}`, via, token);
+    if (typeof sign !== 'function') { setBusy(false); setErr(sign.error); return; }
+    const res = await fundThroughHarness({ treasury: treasury as `0x${string}`, usdc: n, session: { token }, signHash: sign });
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
     setOpen(false);

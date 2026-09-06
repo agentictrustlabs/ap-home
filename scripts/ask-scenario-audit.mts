@@ -20,6 +20,10 @@ interface Scenario {
   persona: string;
   addressee: 'self' | string;
   message: string;
+  /** The BUTTON's entry (spec 361 I4): a supplied plan through the same boundary. A parity.* scenario
+   *  proves the deterministic path reaches the same governed gate the sentence does — one per converted
+   *  family, added AS the family converts, so the scorecard drives the queue. */
+  plan?: { steps: Array<{ toolId: string; args: Record<string, unknown> }> };
   /** What unification predicts. */
   expect: { kind: string; capability?: string; textLike?: RegExp; alsoApprove?: boolean };
 }
@@ -39,6 +43,13 @@ const SCENARIOS: Scenario[] = [
   { id: 'kb.question', persona: 'nathan', addressee: 'self', message: 'how many organizations are registered in the public directory', expect: { kind: 'answer', textLike: /\d/ } },
   { id: 'standing', persona: 'nathan', addressee: 'self', message: 'am I a member of any organizations', expect: { kind: 'answer' } },
   { id: 'unsupported.honest', persona: 'nathan', addressee: 'self', message: 'book me a flight to denver', expect: { kind: 'answer', textLike: /can't|cannot/i } },
+  // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
+  { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
+    plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },
+    expect: { kind: 'authority_required', capability: 'organization.membership.invite', alsoApprove: true } },
+  { id: 'parity.fund.plan', persona: 'nathan', addressee: '0x2c471607fec409516ab6de6b7517bcf95f1f2edc', message: 'fund my treasury with 5 usdc',
+    plan: { steps: [{ toolId: 'treasury.fund', args: { treasury: '0x2c471607fec409516ab6de6b7517bcf95f1f2edc', amount: '5000000' } }] },
+    expect: { kind: 'authority_required', capability: 'treasury.fund' } },
 ];
 
 const sessions = new Map<string, { token: string; agent: string; cookie: string; csrf: string }>();
@@ -60,7 +71,7 @@ for (const sc of SCENARIOS) {
   const started = Date.now();
   const r = await j(await fetch(`${HOME}/a2a/harness/ask`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin: HOME, cookie: s.cookie, 'x-csrf-token': s.csrf },
-    body: JSON.stringify({ session: s.token, addressee, message: sc.message }),
+    body: JSON.stringify({ session: s.token, addressee, message: sc.message, ...(sc.plan ? { plan: sc.plan } : {}) }),
   })) as { reply?: { kind?: string; capability?: string; text?: string; alsoApprove?: unknown[] } ; error?: string };
   const rep = r.reply ?? { kind: `ERROR:${r.error ?? 'no reply'}` };
   const problems: string[] = [];

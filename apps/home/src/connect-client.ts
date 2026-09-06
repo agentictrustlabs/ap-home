@@ -1949,7 +1949,7 @@ const MINT_ABI = [
  * a demo persona's treasury opened MetaMask under a blurb promising no wallet prompt, and the popup was for
  * an account that does not custody anything here. One helper, so the next ceremony cannot forget it.
  */
-async function personSignHash(person: Address, via: string, sessionToken: string): Promise<SignHash | { error: string }> {
+export async function personSignHash(person: Address, via: string, sessionToken: string): Promise<SignHash | { error: string }> {
   const viaLc = (via ?? '').toLowerCase();
   if (viaLc === 'google' || viaLc === 'youversion' || viaLc === 'email' || viaLc === 'phone') {
     return googleSignHash(person, sessionToken); // C_sub signs for the home SA (the whole KMS family)
@@ -1971,25 +1971,8 @@ export async function signsWithoutPrompt(via: string, sessionToken: string): Pro
   return false;
 }
 
-export async function fundTreasury(
-  input: { treasury: Address; usdc: number; person: Address; via: string },
-  sessionToken: string,
-  onStep?: (s: string) => void,
-): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
-  if (!(input.usdc > 0)) return { ok: false, error: 'Enter an amount greater than 0.' };
-  const amount = BigInt(Math.round(input.usdc * 1_000_000)); // USDC has 6 decimals
-
-  const signer = await personSignHash(input.person, input.via, sessionToken);
-  if (typeof signer !== 'function') return { ok: false, error: signer.error };
-  const signHash: SignHash = signer;
-
-  onStep?.(`Funding ${input.usdc} USDC…`);
-  const mintData = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [input.treasury, amount] });
-  const callData = buildExecuteCallData({ to: CONTRACTS.mockUsdc, value: 0n, data: mintData });
-  const res = await executeCall(input.person, signHash, callData, { attempts: 6 });
-  if (!res.ok) return { ok: false, error: `funding failed: ${res.error}` };
-  return { ok: true, txHash: res.txHash };
-}
+// `fundTreasury` (the browser-built mint userOp) retired 2026-09-06 — the Fund button goes through
+// the harness (`home/fund-harness.ts`), one implementation with the Ask (spec 361 I4). deletes > deprecations.
 
 /** spec 256 — org-create for a GOOGLE member: the org is custodied by their per-(iss,sub) KMS
  *  custodian C_sub and deployed + named + grant-approved SERVER-SIDE in one C_sub-signed userOp —
