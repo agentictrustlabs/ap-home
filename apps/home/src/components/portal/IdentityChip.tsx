@@ -16,14 +16,21 @@ import { AddressChip } from '../shared/AddressChip';
 import { ChevronDownIcon } from '../shared/Icons';
 import { Popover } from '../shared/ui';
 
-export function IdentityChip() {
+/**
+ * `placement`: where the menu opens FROM. `'topbar'` drops down (the mobile header); `'sidebar-foot'`
+ * opens UPWARD from the foot of the left nav, which is where this lives on desktop — the Ask flyout is
+ * a fixed right-hand panel at a higher stacking level, and it was painting straight over a menu anchored
+ * in the topbar. Moving the person to the foot of the nav puts it out from under the Ask entirely,
+ * rather than fighting it with z-index.
+ */
+export function IdentityChip({ placement = 'topbar' }: { placement?: 'topbar' | 'sidebar-foot' } = {}) {
   const { agentName, agentAddress, signOut } = useSession();
 
   return (
-    <div className="identity-chip-wrap">
+    <div className={`identity-chip-wrap${placement === 'sidebar-foot' ? ' identity-chip-foot' : ''}`}>
       <Popover
         role="menu"
-        panelClassName="identity-popover"
+        panelClassName={`identity-popover${placement === 'sidebar-foot' ? ' identity-popover-up' : ''}`}
         trigger={(p) => (
           <button type="button" className="identity-chip" {...p}>
             <span className="identity-chip-name">{agentName ?? 'Your portal'}</span>

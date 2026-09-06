@@ -10,6 +10,7 @@
 //
 // Every item is a next/link, NOT a bare <a>: an anchor in the App Router is a full document load, so
 // clicking any nav item tore down the app and re-ran session bootstrap and every page fetch from cold.
+import { IdentityChip } from './IdentityChip';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { NavGroup, NavItem, PaneId, SettingsGroup } from './nav';
@@ -71,6 +72,7 @@ export function PortalSidebar({
   return (
     <div className="portal-sidebar-wrap">
       <nav className="portal-sidebar" aria-label="Portal navigation">
+        <div className="portal-sidebar-scroll">
         {groups.map((g, i) => (
           <div
             className={`nav-group${g.startsRegion ? ' region-start' : ''}${g.isExit ? ' region-exit' : ''}`}
@@ -86,6 +88,15 @@ export function PortalSidebar({
             ))}
           </div>
         ))}
+        </div>
+        {/* THE PERSON, at the foot of the nav. It was in the topbar, where the Ask flyout — a fixed
+            right-hand panel at a higher stacking level — painted over the menu that holds Sign out. Here
+            it is out from under the Ask entirely, and the menu opens upward from its own corner. Outside
+            the scrolling area on purpose: an absolutely-positioned panel inside `overflow-y:auto` is a
+            clipped panel. */}
+        <div className="portal-sidebar-foot">
+          <IdentityChip placement="sidebar-foot" />
+        </div>
       </nav>
       {openGroups && (
         <nav
