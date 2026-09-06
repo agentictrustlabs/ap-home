@@ -723,7 +723,7 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address, playbook?: { capabilityIds: Set<string> } | null): ToolInvoker {
   const presentedAll: MandatePresentation[] = presentedInput == null ? [] : Array.isArray(presentedInput) ? presentedInput : [presentedInput];
   // Non-payment invokers redeem the single mandate the turn presented (unchanged). The PAYMENT invoker
   // redeems the one whose caveat names the step's payee — the same selection the verifier used, so what
@@ -734,7 +734,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // mandate); explicit so a future caller cannot make it reachable quietly.
     if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
-      const offered = scopedActionTools(surface).map((t) => t.capability?.id ?? t.id);
+      const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
     }
     if (toolId === MEMBERSHIP_LIST_TOOL.id) {
@@ -1834,7 +1834,7 @@ fanned out.`;
   ];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee),
+    invoke: harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.
