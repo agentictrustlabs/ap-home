@@ -16,6 +16,31 @@ const event = (over: Record<string, unknown> = {}) => ({
 }) as never;
 
 describe('the payment receipt reaches BOTH parties', () => {
+  it('messages BOTH sides — the payee is told they were paid, the person is told they paid', async () => {
+    const msgs: Array<{ recipient: string; bodyText: string }> = [];
+    const ASKER = '0x1111111111111111111111111111111111111111';
+    const sink = declaredEffectSink({
+      writeSubjectRecord: async () => ({ ok: true }),
+      sendDirectMessage: async (m) => { msgs.push({ recipient: m.recipient, bodyText: m.bodyText }); return { ok: true }; },
+    }, { session: 'tok', usdc: USDC, person: ASKER });
+    await sink.discharge(event());
+    expect(msgs.map((m) => m.recipient).sort()).toEqual([ASKER, PAYEE].sort());
+    expect(msgs.find((m) => m.recipient === PAYEE)!.bodyText).toMatch(/sent you 3 USDC/);
+    expect(msgs.find((m) => m.recipient === ASKER)!.bodyText).toMatch(/^You sent 3 USDC to/);
+    // Both carry the transaction; neither is composed.
+    for (const m of msgs) expect(m.bodyText).toContain('0xTX');
+  });
+
+  it('never messages the payer agent as itself — a note from you to you is not a notification', async () => {
+    const msgs: string[] = [];
+    const sink = declaredEffectSink({
+      writeSubjectRecord: async () => ({ ok: true }),
+      sendDirectMessage: async (m) => { msgs.push(m.recipient); return { ok: true }; },
+    }, { session: 'tok', usdc: USDC, person: PAYER });
+    await sink.discharge(event());
+    expect(msgs).toEqual([PAYEE]);
+  });
+
   it('writes payment.receipt:<tx> to payer AND payee, and messages the payee', async () => {
     const writes: Array<[string, string, PaymentReceiptRecordV1]> = [];
     const msgs: Array<{ recipient: string; bodyText: string }> = [];

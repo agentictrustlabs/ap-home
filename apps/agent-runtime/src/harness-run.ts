@@ -1067,12 +1067,15 @@ const PARTY_ARGS: readonly string[] = [
  */
 export const NEVER_THE_ASKER: ReadonlySet<string> = COUNTERPARTY_ARGS;
 
-/** What to call each of them when asking a person which one they meant. */
-const PARTY_WORD: Record<string, string> = {
-  payer: 'paying from', payee: 'being paid', treasury: 'the treasury', invitee: 'being invited',
-  parent: 'the parent', org: 'the organization', workspace: 'the workspace', funder: 'funding it',
-  recipient: 'the person to message',
-};
+/**
+ * What to call each party when asking a person which one they meant — READ FROM THE ONTOLOGY.
+ *
+ * This was a hand-kept map duplicating `PartyRoleV1.word`, and a duplicate of a modelled fact is a
+ * duplicate that drifts: the same argument could be called one thing in the question a person is asked
+ * and another in the record that answers it. `workspace` has no declared role and falls back to its own
+ * name, which is honest — an undeclared party has no agreed word for it.
+ */
+const partyWord = (arg: string): string => PARTY_ROLES.find((r) => r.arg === arg)?.word ?? arg;
 
 /**
  * WHAT KIND OF AGENT EACH PARTY IS — now read from the ONTOLOGY (spec 355).
@@ -1135,7 +1138,7 @@ async function resolveStepArgs(
         const mine = await ownAgentsOfType(where.subject, type, lookups);
         if (mine.length === 1) {
           const c = mine[0]!;
-          lookups.onResolved?.({ arg, raw: PARTY_WORD[arg] ?? arg, agent: c.agent, label: c.label, hint: candidateHint(c) });
+          lookups.onResolved?.({ arg, raw: partyWord(arg), agent: c.agent, label: c.label, hint: candidateHint(c) });
           out[arg] = c.agent;
           found = true;
           break;
@@ -1145,9 +1148,9 @@ async function resolveStepArgs(
           // makes that ordinary. Which one is yours to say, not ours to rank.
           throw new InputRequired({
             kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-            prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${PARTY_WORD[arg] ?? arg}?`,
+            prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${partyWord(arg)}?`,
             fields: [{
-              name: arg, label: PARTY_WORD[arg] ?? arg, type: 'choice', required: true,
+              name: arg, label: partyWord(arg), type: 'choice', required: true,
               choices: mine.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
               // One of theirs may not be in their tree yet; a full name is always a valid answer.
               allowOther: true,
@@ -1163,9 +1166,9 @@ async function resolveStepArgs(
       if (!found) {
         throw new InputRequired({
           kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-          prompt: `You have no ${types[0]} to be ${PARTY_WORD[arg] ?? arg}. Which agent should be?`,
+          prompt: `You have no ${types[0]} to be ${partyWord(arg)}. Which agent should be?`,
           fields: [{
-            name: arg, label: PARTY_WORD[arg] ?? arg, type: 'text', required: true,
+            name: arg, label: partyWord(arg), type: 'text', required: true,
             hint: `give a name (yours2.${types[0]}) or an address — a ${types[0]} is what holds what would be spent`,
           }],
         });
@@ -1193,12 +1196,12 @@ async function resolveStepArgs(
       if (NEVER_THE_ASKER.has(key) && where.subject && raw.toLowerCase() === where.subject.toLowerCase()) {
         throw new InputRequired({
           kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-          prompt: `That would be you. Who is ${PARTY_WORD[key] ?? key}?`,
-          fields: [{ name: key, label: PARTY_WORD[key] ?? key, type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
+          prompt: `That would be you. Who is ${partyWord(key)}?`,
+          fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
         });
       }
       out[key] = await resolveParty(raw, lookups, {
-        stepRef: where.stepRef, toolId: where.toolId, argName: key, what: PARTY_WORD[key] ?? key,
+        stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
         // answer is an honest "unknown" — never a widening to a public search.
         ...(where.subject ? { subject: where.subject } : {}),
@@ -1965,7 +1968,7 @@ fanned out.`;
           ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
         },
-        { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}) },
+        { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}), ...(input.person ? { person: input.person } : {}) },
       ),
     },
     // WHOSE PLAYBOOK DECLARES WHAT FOLLOWS — spec 360, resolved PER STEP.

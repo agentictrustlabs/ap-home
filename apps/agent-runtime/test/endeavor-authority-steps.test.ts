@@ -98,3 +98,33 @@ describe('the planner can NAME an authority-bearing step (without it, the bindin
     }
   });
 });
+
+// The coordination side's capability list is deliberately NARROWER than the harness's mandate-bearing
+// set. That is a decision; this is the guard that keeps it a decision rather than a drift.
+import { NOT_PLAN_STEPS } from '../src/endeavor-authority-steps.js';
+import { HARNESS_ACTION_TOOLS } from '../src/harness-run.js';
+
+describe('AUTHORITY_BEARING_CAPABILITIES stays honest about the harness', () => {
+  const mandateBearing = new Set(
+    HARNESS_ACTION_TOOLS.filter((t) => t.capability && t.risk && t.risk !== 'informational')
+      .map((t) => t.capability!.id),
+  );
+
+  it('every id is a REAL mandate-bearing capability — no dead strings from a rename', () => {
+    for (const id of AUTHORITY_BEARING_CAPABILITIES) {
+      expect(mandateBearing.has(id), `${id} is listed as a plan step but no harness tool exercises it`).toBe(true);
+    }
+  });
+
+  it('every mandate-bearing capability is either a plan step or a NAMED omission', () => {
+    const accounted = new Set([...AUTHORITY_BEARING_CAPABILITIES, ...NOT_PLAN_STEPS]);
+    for (const id of mandateBearing) {
+      expect(accounted.has(id), `${id} needs a mandate but is neither a plan step nor a named omission — decide which`).toBe(true);
+    }
+  });
+
+  it('the two lists do not overlap — a capability is one or the other', () => {
+    const both = AUTHORITY_BEARING_CAPABILITIES.filter((id) => NOT_PLAN_STEPS.includes(id));
+    expect(both).toEqual([]);
+  });
+});

@@ -6,6 +6,7 @@
 // (this device), a wallet (SIWE/EOA custodian), or Google (a per-subject KMS-derived custodian
 // the server signs with — see spec 235). The operations are via-parameterized so the journey
 // branches on the chosen credential.
+import { assignDefaultArchetype } from './default-archetype';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { keccak256, toBytes } from 'viem';
 import { fastPollMs } from '../lib/fast-poll';
@@ -337,6 +338,18 @@ export async function secureHome(
     const out = await secureHomeWithGoogle(auth.token, homeLabel(name));
     if (!out.ok) return { ok: false, error: out.error };
     await activatePersonPlanes(out.agent, via, auth);
+    // THE AGENT IS BORN WITH ITS PLAYBOOK (spec 354 §3). A person's own agent is the surface the Ask runs
+    // on; without an assignment every capability it offers comes from hardcoded tool declarations and the
+    // contracts a domain author wrote never reach it. Best-effort and last: an unassigned agent runs the
+    // bare harness, which works — failing an enrolment because a BEHAVIOUR could not be attached would be
+    // the tail wagging the dog, and behaviour grants nothing.
+    try {
+      const token = homeBearerToken(auth);
+      if (token) {
+        const a = await assignDefaultArchetype(out.agent, 'person', token);
+        if (!a.ok) console.warn('[home-create] default archetype not assigned (the bare harness stands):', a.reason);
+      }
+    } catch (e) { console.warn('[home-create] default archetype deferred:', e); }
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (via === 'wallet') {

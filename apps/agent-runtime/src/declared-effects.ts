@@ -59,12 +59,21 @@ function displayAmount(amount: string, asset: string, usdc?: string): string {
  * here came back from the chain call, and a notification that paraphrased it would be a claim about
  * someone's money.
  */
-export function receiptSentence(r: PaymentReceiptRecordV1, opts: { payerName?: string | null; payeeName?: string | null; usdc?: string }): string {
+export function receiptSentence(
+  r: PaymentReceiptRecordV1,
+  opts: { payerName?: string | null; payeeName?: string | null; usdc?: string; side?: 'payee' | 'payer' },
+): string {
   const who = opts.payerName ? opts.payerName : `${r.payer.slice(0, 6)}…${r.payer.slice(-4)}`;
   const to = opts.payeeName ? opts.payeeName : `${r.payee.slice(0, 6)}…${r.payee.slice(-4)}`;
+  const amount = displayAmount(r.amount, r.asset, opts.usdc);
+  // BOTH SIDES ARE TOLD, each in their own voice. The payee learns they were paid; the payer gets the
+  // confirmation they would otherwise have to go looking for. Same record, same numbers, two sentences —
+  // and neither is composed: every figure came back from the chain call.
+  const lead = opts.side === 'payer'
+    ? `You sent ${amount} to ${to}.`
+    : `${who} sent you ${amount}. It went to ${to}.`;
   return [
-    `${who} sent you ${displayAmount(r.amount, r.asset, opts.usdc)}.`,
-    `It went to ${to}.`,
+    lead,
     `Transaction ${r.txHash}.`,
     `This is a receipt of a transfer that settled — it says the money moved, not what it was for.`,
   ].join(' ');
@@ -78,7 +87,13 @@ interface PaymentResult { txHash?: string; asset?: string; payee?: string; amoun
  * PaymentReceipt is, where a vault lives and how a message is delivered; `packages/orchestration` stays
  * domain-free and only knows THAT an effect was declared and WHEN to discharge it.
  */
-export function declaredEffectSink(deps: EffectDeps, ctx: { session?: string; usdc?: string }): EffectSink {
+export function declaredEffectSink(
+  deps: EffectDeps,
+  /** `person` is the human who asked. The PAYER side of a transfer is an org or a treasury — an agent
+   *  with an inbox nobody opens — so its confirmation is delivered to the person who authorised it,
+   *  which is who actually wants to know. The payer's own copy of the RECORD still lands in its vault. */
+  ctx: { session?: string; usdc?: string; person?: string },
+): EffectSink {
   return {
     discharge: async (e) => {
       const effect = e.effect as DeclaredEffectV1;
@@ -123,17 +138,27 @@ export function declaredEffectSink(deps: EffectDeps, ctx: { session?: string; us
 
       // THE THREAD is a projection of the record, not a second source of truth. It is where a person
       // actually looks, which is the whole reason the incident was invisible.
-      if (effect.surface.includes('thread') && deps.sendDirectMessage && ctx.session && parties.has(payee)) {
+      if (effect.surface.includes('thread') && deps.sendDirectMessage && ctx.session) {
         const [payerName, payeeName] = await Promise.all([
           deps.nameFor?.(payer).catch(() => null) ?? Promise.resolve(null),
           deps.nameFor?.(payee).catch(() => null) ?? Promise.resolve(null),
         ]);
-        const sent = await deps.sendDirectMessage({
-          sender: payer as Address, recipient: payee as Address,
-          bodyText: receiptSentence(record, { payerName, payeeName, ...(ctx.usdc ? { usdc: ctx.usdc } : {}) }),
-          session: ctx.session,
-        }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
-        if (!sent.ok) failures.push(`notify ${payee}: ${sent.error}`);
+        const words = (side: 'payee' | 'payer') =>
+          receiptSentence(record, { payerName, payeeName, side, ...(ctx.usdc ? { usdc: ctx.usdc } : {}) });
+        const notify = async (to: string, side: 'payee' | 'payer') => {
+          // Never message an agent as itself: a note from you to you is not a notification, it is a
+          // resolution that went nowhere.
+          if (!/^0x[0-9a-f]{40}$/.test(to) || to === payer) return;
+          const sent = await deps.sendDirectMessage!({
+            sender: payer as Address, recipient: to as Address, bodyText: words(side), session: ctx.session!,
+          }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+          if (!sent.ok) failures.push(`notify ${to}: ${sent.error}`);
+        };
+        if (parties.has(payee)) await notify(payee, 'payee');
+        // The payer SIDE, told to the person who authorised it. Deliberately not the payer agent's own
+        // inbox: a treasury's inbox is not a place anyone looks, and the point of a confirmation is that
+        // somebody reads it.
+        if (parties.has(payer) && ctx.person) await notify(String(ctx.person).toLowerCase(), 'payer');
       }
 
       // Throwing here reaches the loop's isolation and becomes an `EffectFailed` event: the payment

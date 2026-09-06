@@ -21,15 +21,35 @@
 import type { HarnessRunCheckpointV1 } from './harness-runs.js';
 import type { Address } from 'viem';
 
-/** The capability ids this substrate can exercise under a mandate. Kept as a list rather than derived
- *  from the tool set so the coordination side names what it means, and an unrelated tool appearing in
- *  the harness never silently changes what a plan step is taken to be. */
+/**
+ * The capability ids a PLAN STEP may be taken to exercise. Kept as a list rather than derived from the
+ * tool set so the coordination side names what it means, and an unrelated tool appearing in the harness
+ * never silently changes what a plan step is taken to be.
+ *
+ * IT IS DELIBERATELY NARROWER than the set of capabilities that require a mandate. `treasury.fund`,
+ * `messaging.direct.send` and `resolution.invitation.request` all need one in the harness and are all
+ * absent here — because an endeavor step is a unit of WORK someone is accountable for finishing, and
+ * those three are things an agent does in passing while doing the work rather than milestones a plan is
+ * built out of. Sending a message is not a deliverable.
+ *
+ * The omissions being intentional is exactly why they need a guard: a renamed capability, or one dropped
+ * from the harness, would leave a dead string here and nobody would notice. `check:authority-capabilities`
+ * asserts every id is still a real mandate-bearing capability, and that each absence is named above.
+ */
 export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
   'organization.team.create',
   'organization.create',
   'organization.membership.invite',
   'treasury.create',
   'treasury.payment.execute',
+];
+
+/** The mandate-bearing capabilities this list deliberately does NOT treat as plan steps. Named, so the
+ *  guard can tell a considered omission from one that happened by accident. */
+export const NOT_PLAN_STEPS: readonly string[] = [
+  'treasury.fund',
+  'messaging.direct.send',
+  'resolution.invitation.request',
 ];
 
 /** A plan step as the work loop sees it. */
