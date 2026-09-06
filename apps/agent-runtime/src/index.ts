@@ -102,6 +102,7 @@ import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from './kb-question.js';
+import { VAULT_QUESTION_TOOL, vaultQuestionInvoker } from './vault-question.js';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
@@ -1576,6 +1577,9 @@ app.post('/harness/ask', async (c) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker(c.env as never)(toolId, args, ctx);
+        // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
+        // an argument, so a question cannot name somebody else's vault.
+        if (toolId === VAULT_QUESTION_TOOL.id) return vaultQuestionInvoker(c.env as never, askDeps, who.sa as string)(toolId, args, ctx);
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
         return askDiscoveryInvoker({
           ...(c.env as unknown as Record<string, unknown>),
@@ -2366,6 +2370,17 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     },
     // The far end of one of THEIR OWN sent requests: the payment it was waiting for settled, so the note
     // stops asking to be finished. Their own vault, their own record — nothing of the issuer's changes.
+    // Spec 356 §2.5 phase one — the inventory, no plaintext. Their own DO, their own grant, in-Worker.
+    survey: async (subject: string) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultSurvey', {}).catch(() => null);
+      const rows = (out as { records?: Array<{ recordType?: string; updatedAt?: string }> } | null)?.records ?? [];
+      return rows.filter((r) => !!r.recordType).map((r) => ({ recordType: String(r.recordType), ...(r.updatedAt ? { updatedAt: String(r.updatedAt) } : {}) }));
+    },
+    // Phase two — decode exactly the chosen keys, one batched call.
+    readRecords: async (subject: string, recordTypes: string[]) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultQuery', { recordTypes }).catch(() => null);
+      return (out as { records?: Record<string, unknown> } | null)?.records ?? {};
+    },
     settleResolutionRequest: async (person: string, input: { owner: string; wants: string; txHash?: string }) => {
       await callInteractionsInternal(env, person, 'internal.resolution.settle', input).catch(() => undefined);
     },

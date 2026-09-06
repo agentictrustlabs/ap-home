@@ -48,6 +48,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from './kb-question.js';
+import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from './vault-question.js';
 import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from './party-resolution.js';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from './party-resolution.js';
@@ -441,6 +442,10 @@ export interface HarnessDeps {
    *  request they sent. Settling is a record of what happened, never a permission: the grant it refers to
    *  stays exactly as valid as its issuer left it. */
   settleResolutionRequest?: (person: string, input: { owner: string; wants: string; txHash?: string }) => Promise<void>;
+  /** Spec 356 §2.5 — the INVENTORY of a subject's vault: keys and timestamps, no plaintext. */
+  survey?: (subject: string) => Promise<Array<{ recordType: string; updatedAt?: string }>>;
+  /** Spec 356 §2.5 — decode exactly these keys, one batched call. */
+  readRecords?: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
@@ -1665,6 +1670,9 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   const tools = [
     ...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable(env as never) ? [KB_QUESTION_TOOL] : []),
+    // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
+    // itself — absent either, it is not listed rather than listed and broken.
+    ...(vaultQuestionAvailable(env as never, deps) ? [VAULT_QUESTION_TOOL] : []),
     MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL,
   ];
   const result = await runIntent(input.intent, {

@@ -1581,7 +1581,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1779,6 +1779,47 @@ export class InteractionsDO {
             const needsEnable = /record_scope_denied|scope/i.test(msg);
             console.log(`[334§6 vaultRead] ${recordType} FAILED needsEnable=${needsEnable} — ${msg.slice(0, 160)}`);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
+          }
+        }
+        if (op === 'internal.coordination.vaultSurvey') {
+          // THE INVENTORY, WITHOUT OPENING ANYTHING — spec 356 §2.5. `list` returns record keys and their
+          // timestamps; no ciphertext is touched and no plaintext produced. This is what lets a question be
+          // narrowed to CANDIDATES before a single record is decrypted.
+          //
+          // It is still a read of this principal's vault under this principal's grant: unencrypted never
+          // means unauthorized. And the keys carry information — `org.invite:agent:0x…` names who was
+          // invited — so this is a disclosure of low-sensitivity data, not of none.
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          try {
+            const records = await this.vaultFor(g).list('');
+            const rows = records.map((r) => ({ recordType: r.resource, updatedAt: r.updatedAt }));
+            return json({ ok: true, records: rows, count: rows.length });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return json({ ok: false, ...(/record_scope_denied|scope/i.test(msg) ? { needsEnable: true } : {}), error: msg });
+          }
+        }
+        if (op === 'internal.coordination.vaultQuery') {
+          // DECODE EXACTLY THE SELECTED RECORDS — spec 356 §2.5, phase two. ONE batched round trip
+          // (`get_vault_records`, the seam the topic-body read already uses), because a per-record loop is
+          // what exhausts a principal's verified-call budget.
+          //
+          // The caller names record types; the GRANT names whose vault. A record the grant's scope does not
+          // cover simply does not come back — choosing a record authorizes nothing (ADR-0041).
+          const requested = Array.isArray(body.recordTypes) ? (body.recordTypes as unknown[]).map((r) => String(r)).filter(Boolean) : [];
+          if (!requested.length) return json({ error: 'recordTypes[] required' }, 400);
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          // Bounded: a question is answered from a handful of records, and an unbounded batch is how one
+          // ask becomes a whole-vault read under another name.
+          const recordTypes = [...new Set(requested)].slice(0, 25);
+          try {
+            const resp = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes });
+            const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Record<string, unknown>; error?: string };
+            if (!resp.ok || out.ok === false) return json({ ok: false, error: out.error ?? `vault batch read failed (${resp.status})` });
+            const records = out.records ?? {};
+            return json({ ok: true, records, read: Object.keys(records), requested: recordTypes });
+          } catch (e) {
+            return json({ ok: false, error: e instanceof Error ? e.message : String(e) });
           }
         }
         // ── spec 327 — the org-assistant pipeline's two internal ops (in-Worker marker only). ──
