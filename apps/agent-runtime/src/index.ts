@@ -119,6 +119,7 @@ import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, waitingOn } from './harness-run.js';
+import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -1223,7 +1224,20 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 //
 // Disclosure, not authority. Every id here still needs a mandate, and no gate consults this list
 // (spec 353 §4) — publishing it grants exactly nothing, which is why it can be read without a session.
-app.get('/harness/vocabulary', (c) => c.json({ ok: true, capabilities: askVocabulary() }));
+app.get('/harness/vocabulary', async (c) => {
+  // Playbook-aware disclosure (spec 354 §4.4 / K5): name the agent (`?agent=0x…`) and the vocabulary is
+  // narrowed to what its assigned archetype knows how to do — the same set it will OFFER at plan time.
+  // No agent named ⇒ the bare-harness vocabulary (unchanged), so an unnarrowed reader still works. The
+  // playbook read is best-effort: a tampered/absent assignment falls back to the full vocabulary (the
+  // bare harness stands), never an error.
+  const agent = (c.req.query('agent') ?? '').toLowerCase();
+  let playbook: { capabilityIds: Set<string> } | null = null;
+  if (/^0x[0-9a-f]{40}$/.test(agent)) {
+    const deps = harnessDeps(c.env, buildAuditSink(c.env));
+    playbook = await loadPlaybook(deps.readSubjectRecord, agent).catch(() => null);
+  }
+  return c.json({ ok: true, capabilities: askVocabulary(playbook) });
+});
 
 // GET /resolution/requests — what people have asked THIS person for a way to reach (spec 338 §7).
 // Their own record, read with their own session. A request confers nothing; this is the list of

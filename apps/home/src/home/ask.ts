@@ -143,25 +143,33 @@ export interface AskVocabularyEntry { id: string; description?: string; riskTier
  * has not said what it can do is not narrowed by its silence), so a fetch failure costs honesty, never
  * function.
  */
-let vocabularyMemo: { at: number; caps: AskVocabularyEntry[] } | null = null;
+const vocabularyMemo = new Map<string, { at: number; caps: AskVocabularyEntry[] }>();
 const VOCABULARY_TTL_MS = 5 * 60_000;
 
-export async function homeScope(realm?: { kind?: 'person' | 'org' | 'service' }): Promise<AskSurface> {
+export async function homeScope(
+  realm?: { kind?: 'person' | 'org' | 'service' },
+  /** The agent being asked. When given, the published vocabulary is narrowed to its assigned archetype
+   *  (spec 354 §4.4 / K5) — the classification vocabulary is `app ∩ this agent's definition capabilities`.
+   *  Memoised per agent, because two agents on the same Home publish different vocabularies. */
+  agent?: string,
+): Promise<AskSurface> {
   const ceremonies = [...HOME_CEREMONIES];
   const surface: AskSurface = { ceremonies, ...(realm ? { realm } : {}) };
   try {
     // Cache-first, and the cache holds the canonical answer rather than a cheaper substitute for it
     // (ADR-0013). A capability list changes when the agent is redeployed, so minutes is the right
     // granularity — and a stale list can only ever narrow, never widen, what the agent will do.
-    const fresh = vocabularyMemo && Date.now() - vocabularyMemo.at < VOCABULARY_TTL_MS ? vocabularyMemo.caps : null;
+    const memoKey = (agent ?? '').toLowerCase();
+    const cached = vocabularyMemo.get(memoKey);
+    const fresh = cached && Date.now() - cached.at < VOCABULARY_TTL_MS ? cached.caps : null;
     if (fresh) {
       const renders = new Set<string>(ceremonies);
       return { ...surface, capabilities: fresh.filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x))).map((c) => c.id) };
     }
-    const r = await fetch('/a2a/harness/vocabulary');
+    const r = await fetch(`/a2a/harness/vocabulary${memoKey ? `?agent=${memoKey}` : ''}`);
     if (!r.ok) return surface;
     const body = (await r.json()) as { capabilities?: AskVocabularyEntry[] };
-    if (body.capabilities) vocabularyMemo = { at: Date.now(), caps: body.capabilities };
+    if (body.capabilities) vocabularyMemo.set(memoKey, { at: Date.now(), caps: body.capabilities });
     const renders = new Set<string>(ceremonies);
     const usable = (body.capabilities ?? []).filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x)));
     // An empty intersection is a real answer and must not read as "no scope declared": send the empty
@@ -322,5 +330,11 @@ export function describeRequirement(reply: Extract<AskReply, { kind: 'authority_
  * render, and an id is honest where an invented phrase would not be.
  */
 export function capabilityWords(id: string): string {
-  return vocabularyMemo?.caps.find((c) => c.id === id)?.label ?? id;
+  // A capability's plain words are the same whichever agent published it, so any cached vocabulary
+  // answers. Search across the per-agent memo.
+  for (const { caps } of vocabularyMemo.values()) {
+    const hit = caps.find((c) => c.id === id);
+    if (hit) return hit.label ?? id;
+  }
+  return id;
 }

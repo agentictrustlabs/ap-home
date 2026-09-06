@@ -68,3 +68,46 @@ describe('playbookProvenanceFromReceipts (K4)', () => {
     expect(playbookProvenanceFromReceipts([{ runRef: 'r' }, { runRef: 'r' }], '0xAGENT')).toBeUndefined();
   });
 });
+
+// spec 354 §4.4 (K5) — the reassigned-treasury scenario. The SAME treasury agent, one archetype then
+// another: with Treasury it offers AND publishes payment; reassigned to a read-only Bookkeeper it does
+// neither — while the authority gate (requirement type + risk floor for a payment) is identical in both,
+// because a playbook narrows behavior and never touches the verifier (spec 354 §1).
+import { askDescriptors } from '../src/harness-run.js';
+
+const BOOKKEEPER_DEF: AgentHarnessDefinitionV1 = {
+  type: 'ap.agent-harness-definition.v1', archetypeId: 'skill:archetypes/bookkeeper', archetypeVersion: '1.0.0',
+  applicableAgentTypes: ['treasury', 'person', 'service'], instructions: 'You are a Bookkeeper. You move nothing.',
+  tools: [{ id: 'vault.records.query', description: 'read' }],
+  requiredMandateTypes: [], approvalPolicyRefs: [], retrievalQueries: ['Treasury'], evidenceRequirements: [], sourceCommitments: { x: 'id:x' },
+};
+const pbOf = async (def: AgentHarnessDefinitionV1) => (await loadPlaybook(reader(record(def)), '0xAGENT'))!;
+
+describe('reassigned-treasury (K5)', () => {
+  it('Treasury OFFERS payment; Bookkeeper does not — same agent, same tools, different playbook', async () => {
+    const treasury = await pbOf(TREASURY_DEF);
+    const bookkeeper = await pbOf(BOOKKEEPER_DEF);
+    const offers = (pb: { capabilityIds: Set<string> }) => scopedActionTools(undefined, pb).map((t) => t.capability?.id ?? t.id);
+    expect(offers(treasury)).toContain('treasury.payment.execute');
+    expect(offers(bookkeeper)).not.toContain('treasury.payment.execute');
+  });
+
+  it('Treasury PUBLISHES payment in its vocabulary; Bookkeeper does not', async () => {
+    const treasury = await pbOf(TREASURY_DEF);
+    const bookkeeper = await pbOf(BOOKKEEPER_DEF);
+    const published = (pb: { capabilityIds: Set<string> }) => askDescriptors(pb).map((d) => d.id);
+    expect(published(treasury)).toContain('treasury.payment.execute');
+    expect(published(bookkeeper)).not.toContain('treasury.payment.execute');
+  });
+
+  it('the payment gate is IDENTICAL regardless of playbook — the descriptor that IS published carries the same authority', async () => {
+    // Whichever agent publishes payment, its authorization shape (risk floor) is fixed by the tool, not
+    // by the archetype: a playbook cannot raise or lower it. Compare the bare-harness descriptor to the
+    // Treasury-narrowed one for the same capability.
+    const bare = askDescriptors().find((d) => d.id === 'treasury.payment.execute')!;
+    const treasury = await pbOf(TREASURY_DEF);
+    const scoped = askDescriptors(treasury).find((d) => d.id === 'treasury.payment.execute')!;
+    expect(scoped.authorization.riskTier).toBe(bare.authorization.riskTier);
+    expect(scoped.authorization.mode).toBe(bare.authorization.mode);
+  });
+});

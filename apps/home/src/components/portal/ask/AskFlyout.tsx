@@ -194,7 +194,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     setThread((t) => [...t, { role: 'you', text: message }]);
     // The scope is computed per ask, not per session: it is the agent's published vocabulary ∩ what this
     // flyout can finish, and the agent being asked may not offer what the last one did.
-    const surface = await homeScope(realm);
+    const surface = await homeScope(realm, addressee);
     await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface }, 'Thinking…');
   };
 

@@ -1599,8 +1599,16 @@ export function surfaceCanRender(capabilityId: string, ceremonies?: string[]): b
  * Vocabulary is DISCLOSURE. A capability appearing here permits nothing — the mandate decides authority,
  * and this list is not consulted by any gate (spec 353 §4).
  */
-export function askDescriptors(): SurfaceDescriptor[] {
-  return HARNESS_ACTION_TOOLS.filter((t) => t.id !== UNSUPPORTED_TOOL.id).map((t) => {
+export function askDescriptors(playbook?: { capabilityIds: Set<string> } | null): SurfaceDescriptor[] {
+  // THE PUBLISHED VOCABULARY IS NARROWED BY THE PLAYBOOK (spec 354 §4.4 / K5). The classification
+  // vocabulary a surface reads to build its scope is `app.capabilities ∩ this agent's definition
+  // capabilities` — so a treasury reassigned to a read-only Bookkeeper stops PUBLISHING payment, exactly
+  // as it stops OFFERING it at plan time. Disclosure honesty from behavior; the mandate gate is untouched
+  // (this list is consulted by no gate — spec 353 §4). Absent playbook ⇒ the bare harness publishes all.
+  const tools = playbook
+    ? HARNESS_ACTION_TOOLS.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id))
+    : HARNESS_ACTION_TOOLS;
+  return tools.filter((t) => t.id !== UNSUPPORTED_TOOL.id).map((t) => {
     const id = t.capability?.id ?? t.id;
     return {
       id,
@@ -1654,8 +1662,8 @@ export async function waitingOn(
   return `${what}${where ? ` You decide at ${where}.` : ''}`;
 }
 
-export function askVocabulary(): Array<AskCapabilityLike & { label: string }> {
-  return buildAskVocabulary(askDescriptors()).map((c) => ({ ...c, label: CAPABILITY_WORDS[c.id] ?? c.id }));
+export function askVocabulary(playbook?: { capabilityIds: Set<string> } | null): Array<AskCapabilityLike & { label: string }> {
+  return buildAskVocabulary(askDescriptors(playbook)).map((c) => ({ ...c, label: CAPABILITY_WORDS[c.id] ?? c.id }));
 }
 
 /**
