@@ -32,7 +32,7 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
-import {
+import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer,
 } from '@agenticprimitives/orchestration';
@@ -57,7 +57,8 @@ import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
-import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES } from '@agenticprimitives/ontology';
+import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, fanOutBindingFor } from '@agenticprimitives/ontology';
+import { decodePaymentTerms } from '@agenticprimitives/delegation';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from '@agenticprimitives/context';
@@ -721,7 +722,12 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address): ToolInvoker {
+  const presentedAll: MandatePresentation[] = presentedInput == null ? [] : Array.isArray(presentedInput) ? presentedInput : [presentedInput];
+  // Non-payment invokers redeem the single mandate the turn presented (unchanged). The PAYMENT invoker
+  // redeems the one whose caveat names the step's payee — the same selection the verifier used, so what
+  // is redeemed is exactly what was judged.
+  const presented: MandatePresentation | null = presentedAll[0] ?? null;
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
@@ -764,17 +770,24 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
+    // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
+    // step's payee — identical selection to the loop's — and refuse when none fits rather than redeeming
+    // a mandate for a different item.
+    const paymentPresented = presentedAll.length > 1
+      ? selectByPayee({ capability: { id: 'treasury.payment.execute' }, args }, presentedAll, harnessEnforcers(env).payment)
+      : presented;
+    if (!paymentPresented) throw new Error('no presented mandate names this payee — each fanned-out payment needs its own');
     const dm = env.DELEGATION_MANAGER as Address;
     const enforcers = harnessEnforcers(env);
     if (!enforcers.payment) throw new Error('harness: PAYMENT_ENFORCER is not configured');
     const asset = String(args.asset).toLowerCase() as Address;
     const payer = args.payer ? await partyAddress(args.payer, deps, 'the payer') : '';
-    if (payer && payer !== (presented!.wire as Delegation).delegator.toLowerCase()) {
-      throw new Error(`the payment is made by the mandate's delegator (${(presented!.wire as Delegation).delegator}); the plan named ${payer}`);
+    if (payer && payer !== (paymentPresented.wire as Delegation).delegator.toLowerCase()) {
+      throw new Error(`the payment is made by the mandate's delegator (${(paymentPresented.wire as Delegation).delegator}); the plan named ${payer}`);
     }
     const payee = await partyAddress(args.payee, deps, 'the payee');
     const amount = fundingAmount(args);
-    const wire = presented!.wire as Delegation;
+    const wire = paymentPresented.wire as Delegation;
     const digest = intentDigest(ctx.intent);
 
     // Redeem-time caveat args. PaymentEnforcer: (mandateId, nonce, resourceHash) — the nonce is single-use
@@ -787,7 +800,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
     // DigestBindingEnforcer: the intent digest this run is acting under — the commitment.
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const nonce = keccak256(toBytes(`${digest}:${stepRef}`));
-    const paymentArgs = encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [digest, nonce, keccak256(toBytes(`${presented!.ref}:${stepRef}`))]);
+    const paymentArgs = encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [digest, nonce, keccak256(toBytes(`${paymentPresented.ref}:${stepRef}`))]);
     const caveats = wire.caveats.map((c) => {
       const e = c.enforcer.toLowerCase();
       if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: paymentArgs };
@@ -808,9 +821,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
 
 export interface HarnessRunInput {
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
-  /** The mandate the caller presents. `null` is legitimate on an ASK: the run then reports the authority it
-   *  would need (`authority-required`) instead of failing — and grants nothing. */
-  presented: DelegationWireV1 | null;
+  /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
+   *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
+   *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
+   *  the one whose payment caveat names ITS payee — selection is deterministic, verification unchanged. */
+  presented: DelegationWireV1 | DelegationWireV1[] | null;
   approvals?: SuppliedApprovalV1[];
   /** Spec 350 §3.4 — answers to the prompts an earlier run of this ask raised (a resume). */
   supplied?: SuppliedInputV1[];
@@ -1635,6 +1650,28 @@ export function scopedActionTools(surface?: AskScopeV1): ToolSpec[] {
 }
 
 
+/**
+ * WHICH KEY FITS THIS STEP — spec 358 W4. A payment step is judged under the presented mandate whose
+ * PaymentEnforcer caveat names the step's payee; every other capability takes the first (the single-
+ * mandate ask, unchanged). Returning null is honest: the loop then reports authority-required for THAT
+ * item's own args, which is what the surface mints the next mandate from. Reading a caveat's terms is
+ * not verifying them — the verifier judges the selected mandate alone, afterwards, as always.
+ */
+function selectByPayee(rs: { capability: { id: string }; args: Record<string, unknown> }, all: MandatePresentation[], paymentEnforcer?: string): MandatePresentation | null {
+  if (rs.capability.id !== 'treasury.payment.execute' || !paymentEnforcer) return all[0] ?? null;
+  const payee = String(rs.args.payee ?? '').toLowerCase();
+  if (!payee) return all[0] ?? null;
+  for (const p of all) {
+    const wire = p.wire as { caveats?: Array<{ enforcer?: string; terms?: unknown }> };
+    const caveat = (wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === paymentEnforcer.toLowerCase());
+    if (!caveat) continue;
+    try {
+      if (decodePaymentTerms(caveat.terms as never).payee.toLowerCase() === payee) return p;
+    } catch { /* an undecodable caveat fits nothing */ }
+  }
+  return null;
+}
+
 /** Run one ask under a mandate. Everything the loop decided is on the receipts; nothing here re-decides. */
 /** What the run's party words became, keyed so the same party resolved twice is recorded once. Display
  *  only — nothing reads it to decide anything. */
@@ -1646,8 +1683,14 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const dm = env.DELEGATION_MANAGER as Address;
   const enforcers = harnessEnforcers(env);
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
-  const wire = input.presented ? wireToDelegation(input.presented) : null;
-  const presented: MandatePresentation | null = wire ? { ref: hashDelegation(wire, chainId, dm), wire } : null;
+  // The KEYRING (spec 358 W4): one mandate stays exactly what it was; several are normalised into a
+  // list, and each step is judged under the one whose payment caveat names ITS payee — selected
+  // deterministically below, verified alone, exactly as if the person had asked N times.
+  const presentedList: MandatePresentation[] = (input.presented == null ? [] : Array.isArray(input.presented) ? input.presented : [input.presented])
+    .map((w) => { const wire = wireToDelegation(w); return { ref: hashDelegation(wire, chainId, dm), wire }; });
+  const presented: MandatePresentation | MandatePresentation[] | null =
+    presentedList.length === 0 ? null : presentedList.length === 1 ? presentedList[0]! : presentedList;
+  const firstPresented = presentedList[0] ?? null;
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
 
   const verifier = delegationMandateVerifier({
@@ -1680,13 +1723,57 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // and the person was told "I can't help with that" one step after being told it needed their signature.
   // Saying what the mandate covers is guidance, never authority: the verifier still judges the step, and a
   // plan that ignores this is refused by the same gates as any other.
-  const holding = input.presented ? mandateCapabilityWords(input.presented) : null;
+  const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
+  const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
     ? `${ASK_PLANNER_SYSTEM}
 
 The person has ALREADY granted authority to ${holding} for this exact ask. That is the capability to use; do not choose another, and do not choose ask.unsupported.`
     : ASK_PLANNER_SYSTEM;
-  const { planner, kind } = selectPlanner(env as never, { systemPrompt });
+  /**
+   * COMPILED FAN-OUT — spec 358 W4 by way of spec 355's rule: compile, don't interpret. "Pay every
+   * member 1 usdc" has exactly one correct plan — enumerate the members, then the payment once with
+   * forEach — and a plan with one correct shape should not depend on a model choosing to emit two tool
+   * calls (live, it emitted one and the composer PROMISED the payments instead). The canonical shape
+   * compiles; the model plans everything the compiler does not claim.
+   */
+  const compiledFanOut = (goal: string): Plan | null => {
+    const g = goal.toLowerCase();
+    if (!/\b(pay|send)\b/.test(g) || !/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/.test(g)) return null;
+    const amount = g.match(/(\d+(?:\.\d+)?)\s*usdc/)?.[1];
+    return {
+      steps: [
+        { toolId: MEMBERSHIP_LIST_TOOL.id, args: {}, ref: 'roster', id: 's0' },
+        // No amount ⇒ the argument is OMITTED and the capability asks — never a placeholder (§3.5).
+        { toolId: 'treasury.payment.execute', args: { payee: { $item: 'agent' }, ...(amount ? { usdc: amount } : {}) }, id: 's1', forEach: { ref: 'roster.members' } },
+      ],
+      rationale: 'compiled: per-member payment (spec 358 W4)',
+    };
+  };
+
+  // Fan-out guidance (spec 358 W4) — appended to whichever prompt applies. The form is taught, the
+  // SAFETY is not delegated to the model: the loop refuses a forEach over anything the producing tool
+  // does not declare enumerable, the ontology binding caps the count, and every item re-enters the
+  // verifier — a mandate per payment, exactly as if the person had asked N times.
+  const fanOutPrompt = `${systemPrompt}
+
+FOR EVERY / FOR EACH asks ("pay every member of X 2 usdc") are the ONE case where you emit TWO tool
+calls, BOTH IN THIS SAME RESPONSE, in order:
+  1. organization.membership.list with arguments {"$ref": "roster"} — it enumerates the members.
+  2. the per-item capability ONCE — for a payment: treasury.payment.execute with
+     {"$forEach": "roster.members", "payee": {"$item": "agent"}, "usdc": "<the amount asked>"}.
+The runtime expands call 2 into one act per member, each separately authorized. Do NOT list members
+yourself, do NOT emit one call per member, and never fan out over anything except what a tool
+enumerates. "Choose the tool" above means one CAPABILITY — this two-call form is still one capability,
+fanned out.`;
+  const selected = selectPlanner(env as never, { systemPrompt: fanOutPrompt });
+  // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
+  // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
+  // planner rule would be.
+  const planner: Planner = {
+    plan: async (pin) => compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
+  };
+  const kind = selected.kind;
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -1710,7 +1797,7 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   ];
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presented, input.mcpInvoke, input.person, input.session, input.surface, input.addressee),
+    invoke: harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.
@@ -1733,6 +1820,16 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     }),
     ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink },
     presented,
+    // The keyring's selector: a payment step is judged under the mandate whose PaymentEnforcer caveat
+    // names its payee. Selection reads a caveat; it verifies nothing — the verifier still judges the one
+    // selected mandate alone (ADR-0013: one mechanism, deterministically chosen).
+    selectPresentation: (rs, all) => selectByPayee(rs, all, enforcers.payment),
+    // Which relations a plan may FAN OUT over — the ontology's plan-shapes binding, injected so the loop
+    // stays domain-free. Absence fails closed in the loop.
+    fanOut: (relation) => {
+      const b = fanOutBindingFor(relation);
+      return b ? { maxItems: b.maxItems } : null;
+    },
     // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
     ...(presented ? {} : { onMissingMandate: 'report' as const }),
     ...(input.supplied ? { supplied: input.supplied } : {}),

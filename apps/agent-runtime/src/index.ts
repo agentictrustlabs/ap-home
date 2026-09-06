@@ -1678,7 +1678,8 @@ app.post('/harness/run', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; supplied?: HarnessRunInput['supplied']; runRef?: string;
   } | null;
-  if (!body?.session || !body.intent?.goal || !body.presented?.delegator) return c.json({ ok: false, error: 'session, intent.goal, presented (a delegation wire) required' }, 400);
+  const presentedOk = Array.isArray(body?.presented) ? body.presented.every((p) => p?.delegator) && body.presented.length > 0 : !!body?.presented?.delegator;
+  if (!body?.session || !body.intent?.goal || !presentedOk) return c.json({ ok: false, error: 'session, intent.goal, presented (a delegation wire, or a list of them) required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
@@ -1687,7 +1688,7 @@ app.post('/harness/run', async (c) => {
   const deps = harnessDeps(c.env, audit);
   try {
     const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
-      intent: body.intent, presented: body.presented, person: who.sa as Address,
+      intent: body.intent, presented: body.presented ?? null, person: who.sa as Address,
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
       mcpInvoke: async () => { throw new Error('informational tools are not wired on /harness/run yet — use the orchestrate skill'); },
     });
