@@ -13,7 +13,7 @@
 //
 // NO ASSIGNMENT ⇒ NO NARROWING (spec 354 §4.3): the bare harness stands, its buttons still work, and the
 // Ask offers everything the surface allows. A playbook refines; its absence is not a restriction.
-import { validateAgentHarnessDefinition, definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+import { validateAgentHarnessDefinition, definitionDigest, type AgentHarnessDefinitionV1, type DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 
 export interface PlaybookScope {
   archetypeId: string;
@@ -26,6 +26,12 @@ export interface PlaybookScope {
   /** spec 360 — what the playbook promises FOLLOWS each capability, keyed by capability id. Carried
    *  through to the loop as data; it grants nothing and no verifier reads it. */
   declaredEffects?: Record<string, unknown[]>;
+  /** THE COMPILED TOOL DECLARATIONS, keyed by capability id — what the SKILL.md contract said about each
+   *  capability. Only the BEHAVIOURAL half of these is ever used (see `mergeContractTool`): the words a
+   *  planner chooses by, what to ask for, what a result enumerates. The authority half — which arg the
+   *  mandate binds to, whether one is required, the risk floor — stays with the code that runs the act,
+   *  because a playbook that could restate those could weaken them. */
+  tools?: Record<string, DefinitionToolV1>;
 }
 
 /** The assignment record as written to the agent's vault. The definition is EMBEDDED and its digest
@@ -77,5 +83,6 @@ export async function loadPlaybook(
     capabilityIds: new Set(rec.definition.tools.map((t) => t.capability?.id ?? t.id)),
     instructions: rec.definition.instructions,
     ...(rec.definition.declaredEffects ? { declaredEffects: rec.definition.declaredEffects as unknown as Record<string, unknown[]> } : {}),
+    tools: Object.fromEntries(rec.definition.tools.map((t) => [t.capability?.id ?? t.id, t])),
   };
 }

@@ -111,3 +111,63 @@ describe('reassigned-treasury (K5)', () => {
     expect(scoped.authorization.mode).toBe(bare.authorization.mode);
   });
 });
+
+// ── THE BOUNDARY: a contract may DESCRIBE the act, never WEAKEN the gate ─────────────────────────────
+// A SKILL.md is written by a domain author and published to a corpus. The harness has a running invoker
+// with an authority shape the verifier compares against, so the contract supplies behaviour and the code
+// keeps authority. These tests are the enforcement; the comment on `mergeContractTool` is the reason.
+import { mergeContractTool } from '../src/harness-run.js';
+import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
+
+const PAY_BUILTIN = {
+  id: 'treasury.payment.execute',
+  description: 'built-in words',
+  capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer' },
+  risk: 'high' as const,
+  inputSchema: { type: 'object', properties: { payer: {}, payee: {}, amount: {} }, required: ['payer', 'payee', 'amount'] },
+};
+
+describe('mergeContractTool — behaviour merges, authority does not', () => {
+  it('takes the DESCRIPTION from the contract — the sentence a planner chooses by', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, { id: 'x', description: 'the domain author’s words' } as DefinitionToolV1);
+    expect(out.description).toBe('the domain author’s words');
+  });
+
+  it('REFUSES to lower risk — a contract cannot make a payment informational', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, { id: 'x', description: 'd', risk: 'informational' } as DefinitionToolV1);
+    expect(out.risk).toBe('high');
+  });
+
+  it('allows risk to be RAISED — a domain may hold itself to a stricter floor', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, { id: 'x', description: 'd', risk: 'critical' } as DefinitionToolV1);
+    expect(out.risk).toBe('critical');
+  });
+
+  it('NEVER rebinds authorityArg — the gate would check the wrong party and still pass', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, {
+      id: 'x', description: 'd',
+      capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'payee', authorityArg: 'payee' },
+    } as DefinitionToolV1);
+    expect(out.capability).toEqual(PAY_BUILTIN.capability);
+  });
+
+  it('UNIONS required args — a contract may ask for more, never for less', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, {
+      id: 'x', description: 'd',
+      inputSchema: { type: 'object', properties: {}, required: ['memo'] },
+    } as DefinitionToolV1);
+    const req = (out.inputSchema as { required: string[] }).required;
+    expect(req.sort()).toEqual(['amount', 'memo', 'payee', 'payer']);
+  });
+
+  it('a contract that drops a required arg does not drop it', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, {
+      id: 'x', description: 'd', inputSchema: { type: 'object', properties: {}, required: [] },
+    } as DefinitionToolV1);
+    expect((out.inputSchema as { required: string[] }).required.sort()).toEqual(['amount', 'payee', 'payer']);
+  });
+
+  it('no contract ⇒ the built-in stands unchanged', () => {
+    expect(mergeContractTool(PAY_BUILTIN as never, undefined)).toBe(PAY_BUILTIN as never);
+  });
+});

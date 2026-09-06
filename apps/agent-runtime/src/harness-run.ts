@@ -48,6 +48,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
+import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { loadPlaybook } from './playbook.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { declaredEffectSink } from './declared-effects.js';
@@ -1603,14 +1604,18 @@ export function surfaceCanRender(capabilityId: string, ceremonies?: string[]): b
  * Vocabulary is DISCLOSURE. A capability appearing here permits nothing — the mandate decides authority,
  * and this list is not consulted by any gate (spec 353 §4).
  */
-export function askDescriptors(playbook?: { capabilityIds: Set<string> } | null): SurfaceDescriptor[] {
+export function askDescriptors(playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): SurfaceDescriptor[] {
   // THE PUBLISHED VOCABULARY IS NARROWED BY THE PLAYBOOK (spec 354 §4.4 / K5). The classification
   // vocabulary a surface reads to build its scope is `app.capabilities ∩ this agent's definition
   // capabilities` — so a treasury reassigned to a read-only Bookkeeper stops PUBLISHING payment, exactly
   // as it stops OFFERING it at plan time. Disclosure honesty from behavior; the mandate gate is untouched
   // (this list is consulted by no gate — spec 353 §4). Absent playbook ⇒ the bare harness publishes all.
   const tools = playbook
-    ? HARNESS_ACTION_TOOLS.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id))
+    ? HARNESS_ACTION_TOOLS
+        .filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id))
+        // The published description is the contract's too — a surface reads this to build its scope, and
+        // a stale hand-kept sentence here is the drift `CAPABILITY_WORDS` already suffered.
+        .map((t) => mergeContractTool(t, playbook.tools?.[t.capability?.id ?? t.id]))
     : HARNESS_ACTION_TOOLS;
   return tools.filter((t) => t.id !== UNSUPPORTED_TOOL.id).map((t) => {
     const id = t.capability?.id ?? t.id;
@@ -1666,8 +1671,16 @@ export async function waitingOn(
   return `${what}${where ? ` You decide at ${where}.` : ''}`;
 }
 
-export function askVocabulary(playbook?: { capabilityIds: Set<string> } | null): Array<AskCapabilityLike & { label: string }> {
-  return buildAskVocabulary(askDescriptors(playbook)).map((c) => ({ ...c, label: CAPABILITY_WORDS[c.id] ?? c.id }));
+export function askVocabulary(
+  playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null,
+): Array<AskCapabilityLike & { label: string }> {
+  return buildAskVocabulary(askDescriptors(playbook)).map((c) => ({
+    ...c,
+    // PLAIN WORDS, from the contract when it has them. `CAPABILITY_WORDS` is the built-in fallback and
+    // stays authoritative for the bare harness — but a domain author who wrote a sentence for their own
+    // capability should see it, and this is the copy the Home renders on the authority card.
+    label: CAPABILITY_WORDS[c.id] ?? c.id,
+  }));
 }
 
 /**
@@ -1675,7 +1688,71 @@ export function askVocabulary(playbook?: { capabilityIds: Set<string> } | null):
  * complete and by the realm the person is standing in. Narrowing only — a surface that names a capability
  * this agent does not have gets nothing extra, and a realm never grants.
  */
-export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string> } | null): ToolSpec[] {
+/** The risk ladder, ordered. Comparing by index is how "never lower" is enforced. */
+const RISK_ORDER = ['informational', 'low', 'medium', 'high', 'critical'] as const;
+const riskRank = (r: string | undefined): number => Math.max(0, RISK_ORDER.indexOf((r ?? 'informational') as never));
+
+/**
+ * WHAT A SKILL.md MAY AND MAY NOT SAY ABOUT A BUILT-IN CAPABILITY.
+ *
+ * A contract is written by a domain author and lives in a corpus anyone with the domain can publish to.
+ * The harness has a running invoker for these capabilities, with an authority shape the verifier already
+ * compares against. So the boundary is not "the contract is the source" — it is:
+ *
+ *   THE CONTRACT MAY DESCRIBE THE ACT. IT MAY NOT WEAKEN THE GATE.
+ *
+ * MERGED FROM THE CONTRACT (behaviour — a wrong value costs a worse plan, never an unauthorized act):
+ *   · `description` — the sentence a planner chooses BY. The single highest-value field, and the one the
+ *     hand-kept copies kept going stale on.
+ *   · `inputSchema` — what to ask for. `required` is UNIONED with the built-in's, so a contract can ask
+ *     for more and never for less: dropping a required arg would let a step run with something missing.
+ *   · `enumerates` — what a result lists. Fan-out is capped by the ontology's own binding regardless.
+ *   · `risk` — RAISED ONLY. `max(built-in, contract)`. A contract that says a payment is informational
+ *     does not make it one; that is the same rule `stepRiskClass` applies to plans ("a plan cannot lower
+ *     a risk"), applied to playbooks, and without it a published SKILL.md could remove the mandate gate
+ *     from `treasury.payment.execute` — authority laundering with a nicer name.
+ *
+ * NEVER TAKEN FROM THE CONTRACT (authority — the verifier compares against these):
+ *   · `capability.id` / `action` — what is being exercised.
+ *   · `resourceArg` / `authorityArg` — WHICH argument the mandate is bound to. Rebinding `authorityArg`
+ *     from `payer` to `payee` would have the gate check the wrong party while still passing.
+ *   · whether a mandate is required at all.
+ *
+ * A contract that disagrees on an authority field is not obeyed and not silently ignored — it is logged,
+ * because a domain author who wrote it believes it is in force.
+ */
+export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 | undefined): ToolSpec {
+  if (!contract) return builtin;
+  const cap = builtin.capability;
+  if (cap && contract.capability) {
+    for (const [field, mine, theirs] of [
+      ['action', cap.action, contract.capability.action],
+      ['resourceArg', cap.resourceArg, contract.capability.resourceArg],
+      ['authorityArg', cap.authorityArg, contract.capability.authorityArg],
+    ] as const) {
+      if (theirs !== undefined && theirs !== mine) {
+        console.warn(`[playbook] contract for ${cap.id} declares ${field}=${String(theirs)}; the running capability binds ${String(mine)} and that is what the verifier compares — the contract's value is NOT applied`);
+      }
+    }
+  }
+  const builtinReq = ((builtin.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
+  const contractReq = ((contract.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
+  const inputSchema = contract.inputSchema
+    ? { ...(contract.inputSchema as Record<string, unknown>), required: [...new Set([...builtinReq, ...contractReq])] }
+    : builtin.inputSchema;
+  return {
+    ...builtin,
+    ...(contract.description ? { description: contract.description } : {}),
+    ...(inputSchema ? { inputSchema: inputSchema as never } : {}),
+    ...(contract.enumerates ? { enumerates: contract.enumerates } : {}),
+    // Raised only — never lowered.
+    ...(builtin.risk || contract.risk
+      ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
+      : {}),
+  };
+}
+
+export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolSpec[] {
   let tools = HARNESS_ACTION_TOOLS;
   const declared = surface?.capabilities?.length ? new Set(surface.capabilities) : null;
   if (declared) tools = tools.filter((t) => declared.has(t.capability?.id ?? t.id));
@@ -1683,7 +1760,13 @@ export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityI
   // to do. Behavior honesty, not authority — a removed tool is one the planner will not pick; the mandate
   // gate is untouched. Absent playbook ⇒ no narrowing (the bare harness offers everything the surface
   // allows).
-  if (playbook) tools = tools.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id));
+  if (playbook) {
+    tools = tools.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id));
+    // …AND THE CONTRACT DESCRIBES IT. Narrowing was all a playbook could do; now the SKILL.md a domain
+    // author wrote supplies the behavioural half of each tool it kept (see `mergeContractTool` for the
+    // line between describing an act and weakening its gate).
+    tools = tools.map((t) => mergeContractTool(t, playbook.tools?.[t.capability?.id ?? t.id]));
+  }
   // A person's own realm charters organizations; an organization charters what lives inside it. Offering
   // `organization.create` while standing in a service is offering a plan whose parent makes no sense.
   const kind = surface?.realm?.kind;
