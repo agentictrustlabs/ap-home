@@ -40,15 +40,18 @@ export function IdentityChip({ placement = 'topbar' }: { placement?: 'topbar' | 
       >
         <div className="identity-popover-name">{agentName ?? '—'}</div>
         {agentAddress && <AddressChip address={agentAddress} size="sm" />}
+        {/* SIGN OUT SITS UNDER THE NAME, first. It used to be last, after every menu link — and in the
+            sidebar-foot placement the menu opens UPWARD, so a long list pushed the one item people came
+            for off the top. The way out of a session should never require scrolling to find. */}
+        <button type="button" className="identity-popover-item danger" role="menuitem" data-testid="identity-signout" onClick={signOut}>
+          Sign out
+        </button>
         <div className="identity-popover-divider" />
         <a className="identity-popover-item" href="/" role="menuitem">View your portal</a>
         {buildUserMenu(whitelabel).map((item) => (
           <a key={item.id} className="identity-popover-item" href={item.href} role="menuitem">{item.label}</a>
         ))}
         <a className="identity-popover-item" href="/names" role="menuitem">Registered names</a>
-        <button type="button" className="identity-popover-item danger" role="menuitem" onClick={signOut}>
-          Sign out
-        </button>
       </Popover>
     </div>
   );
