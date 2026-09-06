@@ -107,6 +107,8 @@ import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
+import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
+export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
@@ -504,6 +506,8 @@ export interface Env {
    *  principal's DO, which is a decision a deployment makes, not one a commit makes for it. */
   GATEWAY_SHADOW?: string;
   DELIVERY_SERVICE_SA?: string;
+  /** spec 362 — the durable-executor binding (Cloudflare Workflows). Absent ⇒ durable runs 503. */
+  HARNESS_WORKFLOW?: { create(opts: { id: string; params: unknown }): Promise<unknown>; get(id: string): Promise<{ sendEvent(e: { type: string; payload: unknown }): Promise<void>; status(): Promise<unknown> }> };
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -1263,6 +1267,71 @@ app.post('/harness/runs', async (c) => {
   return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
 });
 
+// POST /harness/durable { session, addressee, intent, presented, plan?, approvalTimeoutMs? } — spec 362.
+// Start a run the ENGINE advances: attempt → durable approval wait → attempt. The instance id IS the
+// runRef (A2aTaskDO stays the record; the workflow is its execution handle), and the checkpoint pins
+// executor:'workflow' so the conversational path cannot co-drive it.
+app.post('/harness/durable', async (c) => {
+  if (!c.env.HARNESS_WORKFLOW) return c.json({ ok: false, error: 'durable execution is not configured on this deployment' }, 503);
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; addressee?: Address; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented'];
+    plan?: HarnessRunInput['plan']; approvalTimeoutMs?: number;
+  } | null;
+  if (!body?.session || !body.addressee || !body.intent?.goal) return c.json({ ok: false, error: 'session, addressee, intent.goal required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const runRef = `drun-${crypto.randomUUID()}`;
+  const now = Date.now();
+  // The checkpoint FIRST, then the instance: if the create's response is lost the run record already
+  // names its executor, and retrying the create with the same id is idempotent at the engine.
+  await saveRun(c.env as never, {
+    runRef, message: body.intent.goal, addressee, asker: String(who.sa).toLowerCase() as Address,
+    presented: body.presented == null ? [] : Array.isArray(body.presented) ? body.presented : [body.presented],
+    supplied: [], executor: 'workflow', createdAt: now, updatedAt: now,
+  });
+  const params: HarnessWorkflowParams = {
+    runRef, addressee, person: String(who.sa).toLowerCase(), session: body.session,
+    intent: body.intent, presented: body.presented ?? null,
+    ...(body.plan ? { plan: body.plan } : {}),
+    ...(body.approvalTimeoutMs ? { approvalTimeoutMs: body.approvalTimeoutMs } : {}),
+  };
+  await c.env.HARNESS_WORKFLOW.create({ id: runRef, params });
+  return c.json({ ok: true, runRef, executor: 'workflow' });
+});
+
+// POST /harness/approve { session, addressee, runRef, approval:{ approver, digest, signature } } — the
+// custodian's decision. The EVIDENCE goes on the checkpoint (a supplied signature the approval port
+// verifies on the next attempt); the EVENT carries only its reference — "relevant evidence may now be
+// available", never permission.
+app.post('/harness/approve', async (c) => {
+  if (!c.env.HARNESS_WORKFLOW) return c.json({ ok: false, error: 'durable execution is not configured on this deployment' }, 503);
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; addressee?: Address; runRef?: string;
+    approval?: { approver?: string; digest?: string; signature?: string; stepRef?: string };
+  } | null;
+  if (!body?.session || !body.addressee || !body.runRef || !body.approval?.digest || !body.approval.signature || !body.approval.approver) {
+    return c.json({ ok: false, error: 'session, addressee, runRef and approval{approver,digest,signature} required' }, 400);
+  }
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+  if (!stored) return c.json({ ok: false, error: 'no such run' }, 404);
+  if (stored.executor !== 'workflow') return c.json({ ok: false, error: 'this run is not advancing durably' }, 409);
+  await saveRun(c.env as never, {
+    ...stored,
+    supplied: [...stored.supplied, {
+      stepRef: body.approval.stepRef ?? 's0',
+      signature: { digest: body.approval.digest, signer: body.approval.approver, signature: body.approval.signature },
+    } as never],
+    updatedAt: Date.now(),
+  });
+  const instance = await c.env.HARNESS_WORKFLOW.get(body.runRef);
+  await instance.sendEvent({ type: 'custodian-decision', payload: { type: 'custodian-decision', approvalRef: body.approval.digest, approver: body.approval.approver } });
+  return c.json({ ok: true, runRef: body.runRef });
+});
+
 app.get('/harness/vocabulary', async (c) => {
   // Playbook-aware disclosure (spec 354 §4.4 / K5): name the agent (`?agent=0x…`) and the vocabulary is
   // narrowed to what its assigned archetype knows how to do — the same set it will OFFER at plan time.
@@ -1607,6 +1676,11 @@ app.post('/harness/ask', async (c) => {
     if (stored && !claimableBy(stored, String(who.sa).toLowerCase() as Address)) {
       return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
     }
+    // ONE EXECUTOR PER RUN (spec 362 §2). A workflow-owned run is advanced by its engine; re-driving it
+    // from the conversation would be two executors on one operation — approve it instead.
+    if (stored?.executor === 'workflow') {
+      return c.json({ ok: false, error: 'this run is advancing durably — a custodian decision moves it, not a re-ask (POST /harness/approve)' }, 409);
+    }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
   }
   let satisfied: { stepId: string; ok: boolean; error?: string } | undefined;
@@ -1742,6 +1816,7 @@ app.post('/harness/ask', async (c) => {
 app.post('/harness/run', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; intent?: HarnessRunInput['intent']; presented?: HarnessRunInput['presented']; approvals?: HarnessRunInput['approvals']; supplied?: HarnessRunInput['supplied']; runRef?: string;
+    plan?: HarnessRunInput['plan'];
   } | null;
   const presentedOk = Array.isArray(body?.presented) ? body.presented.every((p) => p?.delegator) && body.presented.length > 0 : !!body?.presented?.delegator;
   if (!body?.session || !body.intent?.goal || !presentedOk) return c.json({ ok: false, error: 'session, intent.goal, presented (a delegation wire, or a list of them) required' }, 400);
@@ -1753,6 +1828,7 @@ app.post('/harness/run', async (c) => {
   const deps = harnessDeps(c.env, audit);
   try {
     const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
+      ...(body.plan ? { plan: body.plan } : {}),
       intent: body.intent, presented: body.presented ?? null, person: who.sa as Address,
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
       mcpInvoke: async () => { throw new Error('informational tools are not wired on /harness/run yet — use the orchestrate skill'); },
@@ -6607,3 +6683,31 @@ app.all('/custody/vault-key/:name', async (c) => {
 });
 
 export default app;
+
+// ── spec 362 — the Worker-side ATTEMPT the workflow drives. One whole attempt = load the run's CURRENT
+//    inputs from its checkpoint (approvals a custodian delivered while the engine slept arrive as
+//    `supplied` signatures there) → re-verify everything → reconcile → act. No verdict survives an
+//    attempt; the engine checkpoints only outcomes. ──────────────────────────────────────────────────
+bindHarnessAttempt(async (envIn, p, _approvalRefs) => {
+  const env = envIn as Env;
+  const audit = buildAuditSink(env);
+  const deps = harnessDeps(env, audit);
+  // The checkpoint is the DRAFT + the keyring + the discharged evidence — inputs, never conclusions.
+  const stored = await loadRun(env as never, p.addressee as Address, p.runRef).catch(() => null);
+  const { result } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
+    intent: p.intent,
+    presented: (stored?.presented?.length ? stored.presented : p.presented) as never,
+    person: p.person as Address, session: p.session, runRef: p.runRef, addressee: p.addressee as Address,
+    ...(p.plan ? { plan: p.plan } : {}),
+    ...(stored?.supplied?.length ? { supplied: stored.supplied } : {}),
+    // A durable run advances a GOVERNED ACTION through its approval. The discovery/question tools are
+    // conversation-shaped and have no place inside an approval wait — refusing them here keeps the
+    // durable path from quietly becoming a second Ask with a weaker surface.
+    mcpInvoke: async (toolId) => { throw new Error(`${toolId} is not available on a durable run — ask conversationally instead`); },
+  });
+  return {
+    outcome: result.outcome,
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.prompt ? { awaiting: { kind: result.prompt.kind, stepRef: result.prompt.stepRef } } : {}),
+  };
+});

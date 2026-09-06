@@ -53,6 +53,11 @@ export interface HarnessRunCheckpointV1 {
   openToStewards?: boolean;
   /** The plan step this run exists to satisfy. When it completes, the step's evidence is its RECEIPT. */
   origin?: { endeavorId: string; stepId: string; principal: Address };
+  /** spec 362 — WHICH ENGINE advances this run. `client` (the flyout re-drives it — the default) or
+   *  `workflow` (a Cloudflare Workflows instance owns it). ONE executor per run, never a fallback pair:
+   *  the other entry path refuses to advance a run it does not own, because two engines discovering the
+   *  same operation is how a payment happens twice. */
+  executor?: 'client' | 'workflow';
   createdAt: number;
   updatedAt: number;
 }

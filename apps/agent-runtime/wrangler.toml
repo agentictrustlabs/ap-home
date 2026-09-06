@@ -638,3 +638,10 @@ pattern = "womens-discipleship-circle.faithnet.io"
 custom_domain = true
 
 # <<< agent hosts (faithnet)
+
+# spec 362 — the durable executor (Cloudflare Workflows). The instance id IS the harness runRef;
+# A2aTaskDO stays the canonical record, this engine is its execution handle. faithnet only.
+[[env.faithnet.workflows]]
+name = "harness-approval-faithnet"
+binding = "HARNESS_WORKFLOW"
+class_name = "HarnessApprovalWorkflow"

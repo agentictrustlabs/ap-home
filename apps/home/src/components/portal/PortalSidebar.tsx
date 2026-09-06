@@ -10,7 +10,7 @@
 //
 // Every item is a next/link, NOT a bare <a>: an anchor in the App Router is a full document load, so
 // clicking any nav item tore down the app and re-ran session bootstrap and every page fetch from cold.
-import { IdentityChip } from './IdentityChip';
+import { SidebarFootMenu } from './SidebarFootMenu';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { NavGroup, NavItem, PaneId, SettingsGroup } from './nav';
@@ -95,7 +95,7 @@ export function PortalSidebar({
             the scrolling area on purpose: an absolutely-positioned panel inside `overflow-y:auto` is a
             clipped panel. */}
         <div className="portal-sidebar-foot">
-          <IdentityChip placement="sidebar-foot" />
+          <SidebarFootMenu />
         </div>
       </nav>
       {openGroups && (

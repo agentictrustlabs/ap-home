@@ -871,6 +871,16 @@ export interface HarnessRunInput {
   approvals?: SuppliedApprovalV1[];
   /** Spec 350 §3.4 — answers to the prompts an earlier run of this ask raised (a resume). */
   supplied?: SuppliedInputV1[];
+  /**
+   * Spec 361 I4 — a CALLER-SUPPLIED plan: the deterministic entry a SCREEN uses. A form already knows
+   * its intent and parameters; routing a button click through an LLM to rediscover them is the named
+   * anti-pattern ("do not convert clicks into sentences"). A supplied plan replaces only the PROPOSER —
+   * every step still crosses the same tool allowlist, the same normaliser, the same verifier, the same
+   * risk ladder and the same approval port as a model-planned step. Planner proposes, mandate
+   * authorizes; a caller is just a different proposer, and a caller-named tool the surface does not
+   * offer fails the loop's own unknown-tool gate.
+   */
+  plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
   /** The connected user (the session's SA). What they create, they custody. */
   person?: Address;
   /** Their Home session — the interactions plane authenticates a direct message with it. */
@@ -1935,10 +1945,15 @@ fanned out.`;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
-  const planner: Planner = {
-    plan: async (pin) => compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
-  };
-  const kind = selected.kind;
+  const planner: Planner = input.plan
+    // The screen's plan verbatim — interpretation is what Ask ADDS in front of the same boundary, not a
+    // toll every caller pays. One-shot: a failed supplied step is the caller's to correct, not a model's
+    // to re-plan around (re-planning a click would act on something nobody clicked).
+    ? { plan: async () => ({ steps: input.plan!.steps }) }
+    : {
+        plan: async (pin) => compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
+      };
+  const kind = input.plan ? 'supplied' : selected.kind;
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
