@@ -167,6 +167,16 @@ describe('mergeContractTool — behaviour merges, authority does not', () => {
     expect((out.inputSchema as { required: string[] }).required.sort()).toEqual(['amount', 'payee', 'payer']);
   });
 
+  it('merges the INTERACTION binding — the most behavioural field yet (spec 361)', () => {
+    const out = mergeContractTool(PAY_BUILTIN as never, {
+      id: 'x', description: 'd',
+      interaction: { review: 'PaymentReview', navigationTarget: 'treasuries' },
+    } as DefinitionToolV1);
+    expect(out.interaction).toEqual({ review: 'PaymentReview', navigationTarget: 'treasuries' });
+    // And the authority half is still untouched by the same merge.
+    expect(out.capability).toEqual(PAY_BUILTIN.capability);
+  });
+
   it('no contract ⇒ the built-in stands unchanged', () => {
     expect(mergeContractTool(PAY_BUILTIN as never, undefined)).toBe(PAY_BUILTIN as never);
   });

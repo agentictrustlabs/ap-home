@@ -1039,7 +1039,10 @@ export type AskReply =
       /** Why standing could not be read, when it could not. Never a refusal — the ask proceeds. */
       standingUnavailable?: string }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
-  | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> }
+  | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
+      /** Spec 361 — where the outcome LIVES: the acted capability's contract-declared binding, so a surface
+       *  can offer 'open it' without a hand-kept capability→route table. Display only. */
+      interaction?: { result?: string; navigationTarget?: string } }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> };
 
 /** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
@@ -1382,6 +1385,8 @@ export async function askReplyFor(env: HarnessEnv, input: {
   verifyStewardship?: StandingDeps['verifyStewardship'];
   /** What the run's party words resolved to, for the surface to show back before a signature. */
   resolved?: ResolvedParties;
+  /** Spec 361 — contract interaction bindings by capability id, from the run's own merged tools. */
+  interactionFor?: Record<string, { editor?: string; review?: string; result?: string; navigationTarget?: string }>;
   /** The asker's Home session — carried so a finished payment can ask the resolver gate whose disclosure
    *  it used, which is what says whose note it just closed. */
   session?: string;
@@ -1514,7 +1519,11 @@ export async function askReplyFor(env: HarnessEnv, input: {
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
     if (acted) {
       await settleFinishedRequests(input, r).catch(() => undefined);
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts });
+      // The binding of the LAST authority-bearing step that executed — that is the act the person asked
+      // for; informational reads before it are how it was planned, not what was done.
+      const actedCap = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational')?.capability?.id;
+      const ix = actedCap ? input.interactionFor?.[actedCap] : undefined;
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
@@ -1760,6 +1769,10 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
     ...(contract.description ? { description: contract.description } : {}),
     ...(inputSchema ? { inputSchema: inputSchema as never } : {}),
     ...(contract.enumerates ? { enumerates: contract.enumerates } : {}),
+    // Spec 361 — the interaction binding is the MOST behavioural field yet: a wrong name costs a worse
+    // screen, never an unauthorized act. Merged like description; a surface with no registration for the
+    // name falls back to generic rendering.
+    ...(contract.interaction ? { interaction: contract.interaction } : {}),
     // Raised only — never lowered.
     ...(builtin.risk || contract.risk
       ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
@@ -1821,7 +1834,7 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties }> {
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> }> {
   const resolved: ResolvedParties = new Map();
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
@@ -2026,5 +2039,9 @@ fanned out.`;
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,
   });
-  return { result, plannerKind: kind, resolved };
+  // Spec 361 I2 — the interaction bindings of the tools this run OFFERED (contract-merged), keyed by
+  // capability id, so the reply can say where its outcome lives. Display data; decides nothing.
+  const interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> = {};
+  for (const t of tools) if (t.interaction) interactionFor[t.capability?.id ?? t.id] = t.interaction;
+  return { result, plannerKind: kind, resolved, interactionFor };
 }

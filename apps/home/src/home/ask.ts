@@ -85,7 +85,10 @@ export type AskReply =
        *  person sees which one, before they sign rather than after. */
       parties?: Array<{ arg: string; raw: string; agent: string; label?: string; hint?: string }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
-  | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[] }
+  | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[];
+      /** Spec 361 — where the outcome lives, from the acted capability's CONTRACT (never a hand-kept
+       *  capability→route table here). Resolved through the app's interaction registry. */
+      interaction?: { result?: string; navigationTarget?: string } }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
 
 /** Answers carried into the next turn of the SAME ask. */

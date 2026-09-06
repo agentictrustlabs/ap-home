@@ -19,6 +19,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun } from '../../../home/ask';
+import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { AgentName } from '../../shared/AgentName';
@@ -293,7 +294,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
         )}
         {thread.map((e, i) => (
           <div key={i} className={e.role === 'you' ? 'ask-msg you' : 'ask-msg agent'}>
-            {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} />}
+            {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} realm={realm} addressee={addressee} />}
           </div>
         ))}
         {/* Somebody is waiting on a decision only they can make. A line, with the place to make it — not
@@ -469,7 +470,7 @@ function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: 
 }
 
 /** What the agent said, in the shape it said it. */
-function ReplyView({ reply }: { reply: AskReply }) {
+function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null }) {
   if (reply.kind === 'answer') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
@@ -490,6 +491,20 @@ function ReplyView({ reply }: { reply: AskReply }) {
             {r?.txHash ? short(r.txHash) : ''}
           </div>
         )}
+        {/* Spec 361 I2 — WHERE THE OUTCOME LIVES, said by the capability's own contract. This used to be
+            unknowable here: the flyout had no table of capability→screen and rightly refused to keep one.
+            Now the SKILL.md declares a navigation KEY, the reply carries it for the acted step, and the
+            app's registry resolves what it means in THIS deployment. */}
+        {reply.interaction?.navigationTarget && (() => {
+          const nav = resolveNavigationTarget(reply.interaction!.navigationTarget!, { kind: realm?.kind, addressee });
+          return nav ? (
+            <div style={{ marginTop: 4 }}>
+              <a href={nav.href} data-testid="ask-open-target" style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--color-sage-700, #3f6212)' }}>
+                {nav.label} →
+              </a>
+            </div>
+          ) : null;
+        })()}
       </div>
     );
   }
