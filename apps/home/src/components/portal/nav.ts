@@ -106,13 +106,18 @@ export function buildNav(
     ],
   };
 
-  // An org MEMBER (spec 318) gets participation only. Adding areas must never widen what membership grants.
+  // An org MEMBER (spec 318) gets participation only. Adding areas must never widen what membership
+  // grants — and WHO ELSE BELONGS is something membership already grants: the Ask answers "who are the
+  // members of this team" for a member (`organization.membership.list` derives standing and allows it),
+  // so hiding the page while the conversation answers the question is two surfaces disagreeing about one
+  // model. Deciding who belongs stays steward-only, in Settings → Membership.
   if (active.kind === 'org' && orgRelationship === 'member') {
     return [
       top,
       { items: [
         { id: 'org-discussions', label: 'Discussions', href: orgHref(active.org, 'discussions'), Icon: HashIcon, status: 'live' },
-        { id: 'work', label: 'Work', href: orgHref(active.org, 'work'), Icon: CheckCircleIcon, status: 'live' },
+        ...(hasMembers ? [{ id: 'members', label: 'Members', href: href('members'), Icon: UserIcon, status: 'live' as const }] : []),
+        { id: 'work', label: 'Work', href: orgHref(active.org, 'work'), Icon: CheckCircleIcon, status: 'live' as const },
       ] },
       backHome,
     ];

@@ -1793,7 +1793,14 @@ export class InteractionsDO {
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             // A scope-denied write is a STALE GRANT, not a failure of the payment that produced it.
-            const needsEnable = /record_scope_denied|scope/i.test(msg);
+            // WHAT "NEEDS ENABLING" LOOKS LIKE FROM HERE. A scope denial is one shape; the other is an
+            // agent whose interactions plane was never provisioned at all — its vault has no grant, so
+            // the MCP hop fails to AUTHENTICATE rather than to authorize ("auth failed"). Both are the
+            // same permanent, actionable state: a steward turns storage on once. Reporting the second as
+            // transient sent people to "try again later" for something that will never come right on its
+            // own — which is what a team chartered through the Ask looked like, because that flow does
+            // not provision the planes the Home's org-create does.
+            const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
         }
@@ -1808,7 +1815,14 @@ export class InteractionsDO {
             return json({ ok: true, recordType, data });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            const needsEnable = /record_scope_denied|scope/i.test(msg);
+            // WHAT "NEEDS ENABLING" LOOKS LIKE FROM HERE. A scope denial is one shape; the other is an
+            // agent whose interactions plane was never provisioned at all — its vault has no grant, so
+            // the MCP hop fails to AUTHENTICATE rather than to authorize ("auth failed"). Both are the
+            // same permanent, actionable state: a steward turns storage on once. Reporting the second as
+            // transient sent people to "try again later" for something that will never come right on its
+            // own — which is what a team chartered through the Ask looked like, because that flow does
+            // not provision the planes the Home's org-create does.
+            const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             console.log(`[334§6 vaultRead] ${recordType} FAILED needsEnable=${needsEnable} — ${msg.slice(0, 160)}`);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
