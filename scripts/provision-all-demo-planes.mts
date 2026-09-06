@@ -17,6 +17,8 @@
  * created before either.
  */
 import { toWire, issueInteractionsDelegation, issueInboxDeliveryDelegation, issueSessionDelegation } from '../apps/demo-sso-next/src/lib/delegation';
+import { buildVaultKeyAuthorization } from '../apps/demo-sso-next/src/lib/delegation';
+import { keccak256, toBytes } from 'viem';
 import { MCP_SERVER_ID } from '../apps/demo-sso-next/src/lib/inbox-delivery';
 import type { Address, Hex } from 'viem';
 
@@ -24,6 +26,10 @@ const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const INTERACTIONS_SERVICE_SA = (process.env.INTERACTIONS_SERVICE_SA ?? '0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a') as Address;
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const DRY = process.argv.includes('--dry-run');
+/** Re-sign interactions grants even when /status says current — for a SCOPE WIDENING the staleness gate
+ *  deliberately does not force (blanket-staling the estate is the named hazard; this flag is the
+ *  explicit, targeted alternative). */
+const RESIGN = process.argv.includes('--resign');
 const HANDLES = args.length ? args : ['alice', 'bob', 'carol', 'dave', 'elena', 'nathan', 'david'];
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 160) }; } };
@@ -54,9 +60,11 @@ for (const handle of HANDLES) {
   const orgs = (related.orgs ?? []) as Array<{ orgAgent: string; orgName: string; kind?: string; relationship?: string }>;
   const targets: Array<{ sa: string; label: string }> = [
     { sa: person, label: `${handle} (person)` },
-    ...orgs
-      .filter((o) => o.relationship !== 'member')
-      .map((o) => ({ sa: o.orgAgent.toLowerCase(), label: `${o.orgName} [${o.kind ?? 'org'}]` })),
+    // EVERY related agent, whatever the relationship LABEL says. The label is a display projection; the
+    // authority to enable a plane is the persona's key passing the agent's ERC-1271, which fail-closes
+    // on its own. Filtering on the word skipped a team the persona CUSTODIED but was listed as a mere
+    // member of — and it stayed broken while everything the filter liked got fixed.
+    ...orgs.map((o) => ({ sa: o.orgAgent.toLowerCase(), label: `${o.orgName || o.orgAgent.slice(0, 10)} [${o.kind ?? 'org'}]` })),
   ];
 
   const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
@@ -69,9 +77,35 @@ for (const handle of HANDLES) {
 
   for (const t of targets) {
     const st = await j(await fetch(`${HOME}/a2a/interactions/${t.sa}/status`, { method: 'POST', headers: H, body: JSON.stringify({ session: token }) })) as { granted?: boolean; current?: boolean; deliveryGranted?: boolean };
-    const needIx = st.granted !== true || st.current !== true;
+    const needIx = RESIGN || st.granted !== true || st.current !== true;
     const needDl = st.deliveryGranted !== true;
-    if (!needIx && !needDl) { console.log(`  ✓ ${t.label} — both planes on`); continue; }
+    // THE THIRD LEG — the VAULT KEY (spec 278). Grants authorize the read; the KEK is what decrypts it.
+    // rich-big-thompson-team had both planes ON and every read still failing, because nothing had ever
+    // bound its key: an agent created outside the Home's org-create ceremony gets grants from this sweep
+    // and no KEK from anywhere. Both proofs are ERC-1271 against the owner, so the persona key makes them.
+    const kb = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/is-bound?owner=${t.sa}`)) as { bound?: boolean; allowedResources?: string[] };
+    const needKey = kb.bound !== true || !(kb.allowedResources ?? []).includes('vault:*');
+    if (!needIx && !needDl && !needKey) { console.log(`  ✓ ${t.label} — planes + vault key on`); continue; }
+    if (!DRY && needKey) {
+      try {
+        const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info`)) as { serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
+        const issuedAt = Math.floor(Date.now() / 1000);
+        const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', t.sa, String(issuedAt)].join('\n')));
+        const prov = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/provision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: t.sa, issuedAt, proof: await sign(challenge) }) })) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
+        if (!prov.ok || !prov.kmsKeyRef) throw new Error(prov.error_description ?? prov.detail ?? 'provision failed');
+        const params = { vaultId: 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address, allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'] as ('read' | 'write')[] };
+        const { delegation, digest, expiresAt } = buildVaultKeyAuthorization(t.sa as Address, params);
+        delegation.signature = await sign(digest);
+        const bound = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/bind`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: t.sa, vaultId: params.vaultId, kmsKeyRef: params.kmsKeyRef, allowedResources: params.allowedResources, classificationCeiling: params.classificationCeiling, ops: params.ops, expiresAt, authorization: toWire(delegation) }) })) as { ok?: boolean; reason?: string; error?: string };
+        if (bound.ok !== true) throw new Error(bound.reason ?? bound.error ?? 'bind failed');
+        console.log(`  ✚ ${t.label} — vault key bound (${prov.kmsKeyRef.slice(0, 24)}…)`);
+        fixedCount++;
+      } catch (e) {
+        console.log(`  ✗ ${t.label} vault key: ${e instanceof Error ? e.message : String(e)}`);
+        failCount++;
+      }
+    }
+    if (!needIx && !needDl) continue;
     if (DRY) { console.log(`  · ${t.label} — WOULD fix: ${[needIx && 'interactions', needDl && 'delivery'].filter(Boolean).join(' + ')}`); continue; }
     try {
       if (needIx) {

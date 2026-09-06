@@ -1300,6 +1300,55 @@ app.post('/harness/durable', async (c) => {
   return c.json({ ok: true, runRef, executor: 'workflow' });
 });
 
+// POST /harness/authorize — spec 361 I4, the ONE-PROMPT ceremony. Phase A ({session, delegator,
+// digests[]}) builds a sponsored userOp FROM the delegator SA whose callData is executeBatch of
+// approveHash for every digest — the spec-253 mechanism, applied to an existing SA. Phase B
+// ({delegator, userOp, signature}) submits it. One custodian signature over one userOpHash authorizes
+// every wire in the bundle; each then carries the 0x03 sentinel and verifies through the SA's
+// ERC-1271 approved-hash branch — on chain, where the enforcement always was.
+//
+// The AUTHORITY here is the SA's own validateUserOp: it accepts only its custodian's signature, so
+// this route can build for anyone and submit only what the rightful key signed. The session gates the
+// paymaster's sponsorship, nothing more.
+app.post('/harness/authorize', async (c) => {
+  if (!c.env.PAYMASTER || !c.env.APPROVED_HASH_REGISTRY) return c.json({ ok: false, error: 'approvals not configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as {
+    session?: string; delegator?: Address; digests?: Hex[];
+    userOp?: Record<string, string>; signature?: Hex;
+  } | null;
+  if (!body?.session || !body.delegator) return c.json({ ok: false, error: 'session and delegator required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const delegator = body.delegator.toLowerCase() as Address;
+
+  let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+  if (c.env.PAYMASTER_VERIFYING_SIGNER) {
+    const kmsAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
+    verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+  }
+
+  // Phase B — submit what the custodian signed.
+  if (body.userOp && body.signature) {
+    const op = { ...body.userOp, nonce: BigInt(body.userOp.nonce!), preVerificationGas: BigInt(body.userOp.preVerificationGas!), signature: body.signature } as never;
+    const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
+    const { receipt } = await accountClient(c.env).submitCallUserOp(op, relayerAccount);
+    const inner = detectInnerOpFailure(receipt as never, { sender: delegator });
+    if (!inner.ok) return c.json({ ok: false, error: `the approval batch reverted: ${inner.revertReason ?? 'no revert reason'} (tx ${receipt.transactionHash})` }, 502);
+    return c.json({ ok: true, txHash: receipt.transactionHash });
+  }
+
+  // Phase A — build.
+  const digests = (body.digests ?? []).filter((d) => /^0x[0-9a-fA-F]{64}$/.test(String(d)));
+  if (!digests.length || digests.length > 8) return c.json({ ok: false, error: '1–8 digests required' }, 400);
+  const calls = digests.map((d) => orgApproveHashCall(c.env, d as Hex));
+  const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({
+    sender: delegator, callData: buildExecuteBatchCallData(calls), paymaster: c.env.PAYMASTER as Address,
+    callGasLimit: 300_000n,
+    ...(verifyingPaymaster ? { verifyingPaymaster } : {}),
+  });
+  return c.json({ ok: true, userOpHash, userOp: { ...userOp, nonce: userOp.nonce.toString(), preVerificationGas: userOp.preVerificationGas.toString() } });
+});
+
 // POST /harness/approve { session, addressee, runRef, approval:{ approver, digest, signature } } — the
 // custodian's decision. The EVIDENCE goes on the checkpoint (a supplied signature the approval port
 // verifies on the next attempt); the EVENT carries only its reference — "relevant evidence may now be

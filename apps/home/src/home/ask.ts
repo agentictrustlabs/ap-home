@@ -81,6 +81,9 @@ export type AskReply =
        *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */
       standing?: { relation: 'self' | 'steward' | 'member' | 'none'; because: string; canGrant: boolean };
       note?: string;
+      /** Spec 361 I4 — other digests the act needs from the SAME delegator; approveHash'd with the
+       *  mandate's in one userOp (one signature). */
+      alsoApprove?: { purpose: string; digest: `0x${string}` }[];
       /** What the words became. "send nathan a message" is authorized against an ADDRESS; this is where a
        *  person sees which one, before they sign rather than after. */
       parties?: Array<{ arg: string; raw: string; agent: string; label?: string; hint?: string }> }
@@ -278,6 +281,50 @@ export async function canGrantAs(delegator: Address, credential: AskCredential):
  * ones this build targets; a deployment with no `DigestBindingEnforcer` cannot bind a mandate to one ask,
  * and we refuse rather than mint a broader authority than the person was shown (ADR-0013: no fallback).
  */
+/**
+ * THE ONE-PROMPT CEREMONY — spec 361 I4. When an act needs the same delegator's signature on MORE than
+ * the mandate (an invitation also needs the org→invitee grant), signing each digest is a prompt per
+ * digest. Instead: build the mandate UNSIGNED with the 0x03 approved-hash sentinel, then approveHash
+ * its digest AND every `alsoApprove` digest in ONE org userOp — one custodian signature over one
+ * userOpHash authorizes everything the act needs. Each wire verifies on chain through the SA's
+ * ERC-1271 approved-hash branch (the spec-253 mechanism); nothing here weakens a gate, it batches the
+ * consent the gates already require.
+ */
+export async function mintApprovedMandate(
+  reply: Extract<AskReply, { kind: 'authority_required' }>,
+  signHash: SignHash,
+  session: { token: string },
+): Promise<DelegationWire> {
+  const enforcers = {
+    delegationManager: CONTRACTS.delegationManager, timestamp: CONTRACTS.timestampEnforcer,
+    allowedTargets: CONTRACTS.allowedTargetsEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer,
+    value: CONTRACTS.valueEnforcer, payment: CONTRACTS.paymentEnforcer, digestBinding: CONTRACTS.digestBindingEnforcer,
+  };
+  const handler = reply.requirement.type === PAYMENT_TYPE ? paymentHandler : capabilityHandler;
+  const caveats: Caveat[] = [
+    ...handler.toCaveats(reply.requirement, enforcers as never),
+    buildDigestBindingCaveat(enforcers.digestBinding, 'intent', reply.requirement.intentDigest as Hex),
+  ];
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const mandate: Delegation = { delegator: reply.delegator, delegate: reply.delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+  const mandateDigest = hashDelegation(mandate, CHAIN_ID, CONTRACTS.delegationManager);
+  const digests = [mandateDigest, ...(reply.alsoApprove ?? []).map((a) => a.digest as Hex)];
+
+  const j = async (r: Response) => (await r.json().catch(() => ({}))) as Record<string, unknown>;
+  await ensureCsrfToken();
+  const H = { 'content-type': 'application/json', ...csrfHeaders() };
+  const a = (await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, digests }) }))) as { ok?: boolean; userOpHash?: `0x${string}`; userOp?: Record<string, string>; error?: string };
+  if (a.ok !== true || !a.userOpHash) throw new Error(String(a.error ?? 'the approval batch could not be built'));
+  // THE prompt. One signature, every authority this act needs.
+  const signature = await signHash(a.userOpHash as Hex);
+  const b = await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, userOp: a.userOp, signature }) }));
+  if (b.ok !== true) throw new Error(String(b.error ?? 'the approval batch was not accepted on chain'));
+  mandate.signature = '0x03';
+  return toWire(mandate);
+}
+
 export async function mintMandate(
   reply: Extract<AskReply, { kind: 'authority_required' }>,
   signHash: SignHash,

@@ -583,11 +583,32 @@ function buildInviteGrant(env: HarnessEnv, org: Address, invitee: Address, salt:
 }
 
 /**
+ * THE INVITATION GRANT'S IDENTITY, derivable BEFORE any mandate exists — spec 361 I4's one-prompt
+ * design. Everything the digest depends on is fixed by the REQUIREMENT the surface will mint from
+ * (intentDigest, validAfter) plus the step's own args, so the authority_required reply can name the
+ * grant digest alongside the mandate's — and ONE custodian signature over one org userOp
+ * (executeBatch approveHash×2, the spec-253 mechanism) authorizes both. The invoker derives the same
+ * values from the PRESENTED wire; a surface that minted faithfully lands on the identical digest.
+ */
+export function inviteGrantForRequirement(
+  env: HarnessEnv,
+  requirement: { intentDigest: string; validAfter: number },
+  org: Address,
+  invitee: Address,
+  stepRef: string,
+): { digest: Hex; validUntil: number; salt: bigint } {
+  const validUntil = requirement.validAfter + 365 * 24 * 3600;
+  const salt = BigInt(keccak256(toBytes(`${requirement.intentDigest}:${stepRef}:invite:${invitee.toLowerCase()}`)));
+  const grant = buildInviteGrant(env, org, invitee.toLowerCase() as Address, salt, validUntil);
+  return { digest: hashDelegation(grant, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address), validUntil, salt };
+}
+
+/**
  * `organization.membership.invite`. Derives the grant, asks the steward to sign it, and returns it for the
  * surface to store in the org's vault. It does NOT make anyone a member: the invitee redeems it on join,
  * which is the whole reason the org-side capability is the INVITATION and not the membership.
  */
-export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
+export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined, deps?: Pick<HarnessDeps, 'readContract'>): ToolInvoker {
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const wire = presented.wire as Delegation;
@@ -612,6 +633,21 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:invite:${invitee}`)));
     const grant = buildInviteGrant(env, org, invitee, salt, validUntil);
     const grantDigest = hashDelegation(grant, chainId, dm);
+
+    // ONE-PROMPT PATH (spec 361 I4): the surface may have already approveHash'd this exact digest in
+    // the SAME org userOp that approved the mandate's — one custodian signature for both. The org's
+    // ERC-1271 answers for the 0x03 sentinel, and asking the person to sign a digest their signature
+    // already covers is the double-prompt this design removes. The chain is asked, never a cache.
+    if (deps?.readContract) {
+      const approved = await deps.readContract({
+        address: org,
+        abi: [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }],
+        functionName: 'isValidSignature', args: [grantDigest, '0x03'],
+      }).catch(() => null);
+      if (approved === '0x1626ba7e') {
+        return { grantDigest, wire: { ...grant, salt: grant.salt.toString(), signature: '0x03' }, org, invitee, approvedHash: true };
+      }
+    }
 
     const signed = signatureFor(ctx.supplied, stepRef, grantDigest);
     if (!signed) {
@@ -781,7 +817,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       )(toolId, args, ctx);
     }
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
-    if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person)(toolId, args, ctx);
+    if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
       return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
@@ -1047,7 +1083,12 @@ export type AskReply =
        *  ADDRESS, and this is the only place they can see which one before they sign. Display only. */
       parties?: ResolvedParty[];
       /** Why standing could not be read, when it could not. Never a refusal — the ask proceeds. */
-      standingUnavailable?: string }
+      standingUnavailable?: string;
+      /** Spec 361 I4 one-prompt — OTHER digests this act will need signed BY THE SAME DELEGATOR, so the
+       *  surface can approveHash them in the same org userOp as the mandate's: one signature, every
+       *  authority the act needs. Derived from the requirement (deterministic); display + ceremony
+       *  input, verified on chain like everything else. */
+      alsoApprove?: Array<{ purpose: string; digest: Hex }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
       /** Spec 361 — where the outcome LIVES: the acted capability's contract-declared binding, so a surface
@@ -1428,6 +1469,19 @@ export async function askReplyFor(env: HarnessEnv, input: {
       if (refusal) return { kind: 'refused', runRef: r.runRef, outcome: 'denied', error: refusal, receipts: r.receipts };
     }
     const requirement = mandateRequirementForStep({ required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
+    // ONE-PROMPT (spec 361 I4): an invitation needs a SECOND signature from the same delegator (the
+    // org→invitee grant). Naming its digest here lets the surface approveHash both in one org userOp —
+    // one custodian signature for the mandate AND the grant, and the invoker's run finds the grant
+    // already approved on chain instead of prompting again.
+    const alsoApprove: Array<{ purpose: string; digest: Hex }> = [];
+    if (r.required.capability.id === ORG_INVITE_CAPABILITY) {
+      const org = String(args.org ?? '').toLowerCase();
+      const invitee = String(args.invitee ?? '').toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(org) && /^0x[0-9a-f]{40}$/.test(invitee)) {
+        const g = inviteGrantForRequirement(env, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter ?? Math.floor(Date.now() / 1000) - 60 }, org as Address, invitee as Address, r.required.stepRef);
+        alsoApprove.push({ purpose: `the invitation grant ${org.slice(0, 10)}… → ${invitee.slice(0, 10)}…`, digest: g.digest });
+      }
+    }
     // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the
     // parent a team is chartered under), else the agent being asked. Never the person by default — a
     // team's authority is its workspace's — and never the token a payment moves.
@@ -1462,6 +1516,7 @@ export async function askReplyFor(env: HarnessEnv, input: {
     const note = standing ? standingNote(standing, CAPABILITY_WORDS[r.required.capability.id] ?? 'authority') : '';
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
+      ...(alsoApprove.length ? { alsoApprove } : {}),
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
       capability: r.required.capability.id, stepRef: r.required.stepRef,
       summary: `${r.required.capability.id} on ${delegator}`,

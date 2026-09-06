@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun } from '../../../home/ask';
+import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun } from '../../../home/ask';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
@@ -222,7 +222,12 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
         setThread((t) => [...t, { role: 'agent', text: `You can’t grant this: ${short(reply.delegator)} is custodied by a different credential than the one you are signed in with. Whoever custodies it has to grant this authority.` }]);
         return;
       }
-      const wire = await mintMandate(reply, await signAs(reply.delegator));
+      // ONE PROMPT (spec 361 I4): an act needing more signatures from the same delegator (an invitation
+      // also needs the org→invitee grant) approveHashes them all in one org userOp — one signature covers
+      // the mandate AND the rest, and the run finds the grant already approved instead of prompting again.
+      const wire = reply.alsoApprove?.length
+        ? await mintApprovedMandate(reply, await signAs(reply.delegator), session!)
+        : await mintMandate(reply, await signAs(reply.delegator));
       setThread((t) => [...t, { role: 'agent', text: `Authority granted: ${capabilityWords(reply.capability)}, for this request.` }]);
       setPending(null);
       await turn({ ...state, presented: wire }, 'Working…');

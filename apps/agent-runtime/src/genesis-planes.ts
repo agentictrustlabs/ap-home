@@ -44,6 +44,7 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
   ], ops: ['read', 'write'] },
   { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
   { resources: ['vault:message.body:dm:*'], ops: ['read'] },
+  { resources: ['vault:org.invite:*'], ops: ['read'] },
   { resources: [
     'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed', 'vault:uupg:coalition',
     'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy', 'vault:uupg:identity',

@@ -445,6 +445,13 @@ function buildInteractionsStruct(
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
+      // THE ORG'S OWN INVITATIONS, read-only — what makes membership-read's invited-member path LIVE.
+      // A member who joined by invitation and never published a listing is a real member with no
+      // directory row; the org's `org.invite:agent:<sa>` records name them, and without this scope the
+      // survey that would find them rode a grant that could not see them — the roster answered "no
+      // published listing" for people the Members screen plainly showed. Writes stay on the delivery
+      // plane (disjoint-writes, as with mail).
+      { server: mcpServerId, resources: ['vault:org.invite:*'], ops: ['read'] },
       // spec 334 §6 — the org's own app records, READ-only: the coordination agent AND the discussion
       // @ask turn ground their work in the org's recorded figures. Two shapes, both read-only/additive:
       // the uupg app's enumerated public-claim types, and any relying app's ontology namespace ROOT
