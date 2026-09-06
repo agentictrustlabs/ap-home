@@ -106,6 +106,7 @@ import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
+import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
@@ -2317,11 +2318,28 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       const child = await accountClient(env).getAddressForAgentAccount(spec);
       const name = `${label}.${root.tld}`;
       const grant = buildOrgGrant(env, child, parent, undefined, stewardship);
+      // THE PLANES RIDE THE SAME SIGNATURE. A team that exists without its vault is the broken state
+      // every "Enable (steward)" / "auth failed" report traces back to; the person signing "create a
+      // team" is consenting to a team WITH storage, not to a second ceremony. Requires the interactions
+      // service + session key to be configured — on a deployment without them the genesis still works
+      // and the team is enable-able later, exactly as before.
+      let planes: GenesisPlaneWires | null = null;
+      if (env.INTERACTIONS_SERVICE_SA && interactionsSessionKeyConfigured(env)) {
+        const sk = await interactionsSessionAccount(env);
+        planes = buildGenesisPlanes(
+          env, child,
+          env.INTERACTIONS_SERVICE_SA as Address,
+          (env.DELIVERY_SERVICE_SA ?? env.INTERACTIONS_SERVICE_SA) as Address,
+          sk.address as Address,
+          stewardship,
+        );
+      }
       const calls: Array<{ to: Address; value: bigint; data: Hex }> = [
         ...(await declareTypeCallsFor(env, child, root.tld)),
         buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
         buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
         orgApproveHashCall(env, grant.digest),
+        ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d)) : []),
       ];
       let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
       if (env.PAYMASTER_VERIFYING_SIGNER) {
@@ -2330,7 +2348,7 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       }
       const { userOp, userOpHash, sender } = await accountClient(env).buildDeployUserOpForAgentAccount({ spec, callData: buildExecuteBatchCallData(calls), paymaster: env.PAYMASTER as Address, verifyingPaymaster });
       if (sender.toLowerCase() !== child.toLowerCase()) throw new Error('built userOp sender ≠ predicted team SA');
-      return { child, name, userOp: toJson(userOp as never), userOpHash, stewardship: grant.wire as DelegationWireV1 };
+      return { child, name, userOp: toJson(userOp as never), userOpHash, stewardship: grant.wire as DelegationWireV1, ...(planes ? { planes } : {}) };
     },
     async userOpHash(userOp) {
       return (await pub().readContract({ address: env.ENTRY_POINT as Address, abi: entryPointAbi, functionName: 'getUserOpHash', args: [fromJson(userOp)] })) as Hex;
@@ -2338,6 +2356,25 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
     async isDeployed(child) {
       const code = await pub().getBytecode({ address: child }).catch(() => undefined);
       return !!code && code !== '0x';
+    },
+    async provisionPlanes(child, planesIn) {
+      const planes = planesIn as GenesisPlaneWires;
+      const wire = (d: { wire: { salt: bigint } }) => ({ ...(d.wire as object), salt: d.wire.salt.toString() });
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(child.toLowerCase()));
+      const post = async (op: string, body: unknown): Promise<{ ok: boolean; error?: string }> => {
+        const res = await stub.fetch(new Request(`https://do/interactions/${child.toLowerCase()}/${op}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        }));
+        const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        return res.ok && out.ok !== false ? { ok: true } : { ok: false, error: out.error ?? `${op} ${res.status}` };
+      };
+      // The DO verifies each wire itself — ERC-1271 against the child, whose genesis just approved the
+      // digests — so this store carries no authority of its own, exactly like the browser ceremony's POST.
+      const g = await post('grant', { delegation: wire(planes.interactions), sessionLeaf: wire(planes.sessionLeaf) });
+      if (!g.ok) return { ok: false, error: `interactions plane: ${g.error}` };
+      const d = await post('grant.delivery.put', { delegation: wire(planes.delivery) });
+      if (!d.ok) return { ok: false, error: `delivery plane: ${d.error}` };
+      return { ok: true };
     },
     async submit(userOp) {
       const relayerAccount = await getRelayerAccount(env, 'direct-deploy', audit);
