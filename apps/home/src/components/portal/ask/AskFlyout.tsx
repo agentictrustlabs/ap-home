@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField } from '../../../home/ask';
+import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { AgentName } from '../../shared/AgentName';
@@ -60,6 +60,12 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
   /** "Someone has asked you for a way to reach your treasury." Reported, never acted on. */
   const [waiting, setWaiting] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // WHAT THE AGENT ACTUALLY DID, kept for the whole conversation rather than the last answer. A generated
+  // query is the one piece of evidence a reader cannot reconstruct from the reply, and "the directory does
+  // not list any organizations" — said of a directory holding 37 — was indistinguishable from a true answer
+  // until the query was visible (spec 357 §4).
+  const [diag, setDiag] = useState<DiagEntry[]>([]);
+  const [showDiag, setShowDiag] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState<{ reply: AskReply; state: AskTurnState } | null>(null);
   // Can this session AUTHORIZE anything here, or only ask? An agent can sit in your home's tree while its
@@ -111,8 +117,17 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     if (!session) return;
     setErr(null);
     setBusy(label);
+    const startedAt = Date.now();
     try {
       const { reply, resumable, waiting } = await ask(session, state);
+      // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
+      // the run somebody wants to look at afterwards.
+      setDiag((d) => [...d, {
+        at: new Date().toISOString(), ms: Date.now() - startedAt, kind: reply.kind,
+        ...(state.message ? { question: state.message } : {}),
+        evidence: (reply as { evidence?: AskEvidence[] }).evidence ?? [],
+        ...(reply.kind === 'refused' ? { error: reply.error } : {}),
+      }]);
       // Once the agent holds this run, later turns carry the runRef and the new answers only — the
       // mandate stops living here between turns.
       const carried: AskTurnState = resumable
@@ -163,7 +178,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
         }
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setDiag((d) => [...d, { at: new Date().toISOString(), ms: Date.now() - startedAt, kind: 'error', ...(state.message ? { question: state.message } : {}), evidence: [], error: message }]);
+      setErr(message);
     } finally {
       setBusy(null);
     }
@@ -246,6 +263,15 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
               : 'Follows the workspace you are in — switch it in the topbar.'}
           </div>
         </div>
+        <button
+          type="button" className="btn ghost" data-testid="ask-diagnostics-toggle"
+          aria-label="Show what the agent did" aria-pressed={showDiag}
+          title="What the agent did — the tools it used and the queries it ran"
+          style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
+          onClick={() => setShowDiag((v) => !v)}
+        >
+          {showDiag ? 'Hide' : 'How'}{diag.length ? ` (${diag.length})` : ''}
+        </button>
         <button type="button" className="btn ghost" data-testid="ask-close" aria-label="Close Ask" onClick={onClose}><XIcon size={16} /></button>
       </div>
 
@@ -294,6 +320,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
         <div ref={endRef} />
       </div>
 
+      {showDiag && <DiagnosticsPane entries={diag} onClose={() => setShowDiag(false)} />}
+
       <div className="ask-flyout-f">
         <input
           className="input" data-testid="ask-input" value={q} placeholder={`Ask ${addresseeLabel}…`}
@@ -319,58 +347,86 @@ function plainReason(error: string): string {
   return error;
 }
 
+/** One turn, as the diagnostics pane shows it: what was asked, how long it took, what came back, and what
+ *  the agent read to get there. Client-side only — the receipts are the authority record (spec 350); this
+ *  is the run explaining itself to the person who ran it. */
+interface DiagEntry {
+  at: string;
+  ms: number;
+  kind: string;
+  question?: string;
+  evidence: AskEvidence[];
+  error?: string;
+}
+
 /**
- * An answer, and — on request — how it was reached.
+ * WHAT THE AGENT DID — the pane behind "How".
  *
- * A generated query is the one piece of evidence a reader cannot reconstruct from the answer, and the
- * difference it makes is not cosmetic: "The directory does not list any organizations" and "I searched
- * names for the word 'organizations' and matched none" read identically and only one of them is true.
- * Folded away by default, because the answer is what was asked for; one click from the person who wants
- * to check it (spec 357 §4).
+ * The Ask answers in prose, and prose is where a wrong answer hides. "The directory does not list any
+ * organizations" reads the same whether the directory is empty or the agent searched NAMES for the word
+ * "organizations" and matched none. One is a fact and the other was a bug, and until the query was visible
+ * there was no way to tell them apart — not for the person, and not for me.
+ *
+ * So: per turn, the question, what came back, how long it took, which tool ran, how that tool read the
+ * question, and the query it actually sent. Copyable, because a query worth showing is one somebody will
+ * want to paste somewhere.
  */
-function AnswerView({ reply }: { reply: Extract<AskReply, { kind: 'answer' }> }) {
-  const [open, setOpen] = useState(false);
-  const evidence = reply.evidence ?? [];
+function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: () => void }) {
   return (
-    <div>
-      <span>{reply.text}</span>
-      {evidence.length > 0 && (
-        <div style={{ marginTop: 6 }}>
-          <button
-            type="button" className="btn ghost" data-testid="ask-evidence-toggle"
-            style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => setOpen((v) => !v)}
-          >
-            {open ? 'Hide how I know' : 'How do I know?'}
-          </button>
-          {open && (
-            <div data-testid="ask-evidence" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
-              {evidence.map((e, i) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <div className="muted">
-                    <strong>{e.toolId}</strong>
-                    {typeof e.count === 'number' ? ` · ${e.count} result${e.count === 1 ? '' : 's'}` : ''}
-                  </div>
-                  {e.interpretation && <div className="muted">read as: {e.interpretation}</div>}
-                  {e.searched && <div className="muted">searched names for “{e.searched}”</div>}
-                  {e.reason && <div className="muted">{e.reason}</div>}
-                  {e.query && (
-                    <pre style={{ margin: '4px 0 0', padding: 8, overflowX: 'auto', fontSize: 10.5, background: 'var(--c-surface-2, rgba(127,127,127,.12))', borderRadius: 6 }}>
-                      {e.query}
-                    </pre>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+    <div data-testid="ask-diagnostics" style={{ borderTop: '1px solid var(--c-border, rgba(127,127,127,.25))', padding: '8px 12px', maxHeight: '45vh', overflowY: 'auto', fontSize: 11.5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <strong style={{ fontSize: 11.5 }}>What this agent did</strong>
+        <button type="button" className="btn ghost" style={{ fontSize: 11, padding: '1px 6px' }} onClick={onClose}>Close</button>
+      </div>
+      {entries.length === 0 && (
+        <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>
+          Nothing yet. Ask something, and every step it takes — the tools it used and the queries it wrote —
+          appears here.
+        </p>
       )}
+      {entries.map((e, i) => (
+        <div key={i} data-testid={`ask-diag-${i}`} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: i < entries.length - 1 ? '1px dashed var(--c-border, rgba(127,127,127,.2))' : 'none' }}>
+          <div className="muted" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <span><strong>{e.kind}</strong></span>
+            <span>{(e.ms / 1000).toFixed(1)}s</span>
+            <span>{new Date(e.at).toLocaleTimeString()}</span>
+          </div>
+          {e.question && <div style={{ margin: '2px 0' }}>&ldquo;{e.question}&rdquo;</div>}
+          {e.error && <div style={{ color: 'var(--c-danger, #dc2626)' }}>{e.error}</div>}
+          {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
+          {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
+          {e.evidence.map((ev, k) => (
+            <div key={k} style={{ marginTop: 4 }}>
+              <div className="muted">
+                <strong>{ev.toolId}</strong>
+                {typeof ev.count === 'number' ? ` · ${ev.count} result${ev.count === 1 ? '' : 's'}` : ''}
+              </div>
+              {ev.interpretation && <div className="muted">read as: {ev.interpretation}</div>}
+              {ev.searched && <div className="muted">searched names for &ldquo;{ev.searched}&rdquo;</div>}
+              {ev.reason && <div className="muted">{ev.reason}</div>}
+              {ev.query && (
+                <div style={{ position: 'relative' }}>
+                  <pre style={{ margin: '4px 0 0', padding: 8, overflowX: 'auto', fontSize: 10.5, background: 'var(--c-surface-2, rgba(127,127,127,.12))', borderRadius: 6, whiteSpace: 'pre' }}>
+                    {ev.query}
+                  </pre>
+                  <button
+                    type="button" className="btn ghost" data-testid={`ask-diag-copy-${i}-${k}`}
+                    style={{ position: 'absolute', top: 6, right: 6, fontSize: 10, padding: '1px 6px' }}
+                    onClick={() => { void navigator.clipboard?.writeText(ev.query ?? ''); }}
+                  >Copy</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
 
 /** What the agent said, in the shape it said it. */
 function ReplyView({ reply }: { reply: AskReply }) {
-  if (reply.kind === 'answer') return <AnswerView reply={reply} />;
+  if (reply.kind === 'answer') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
     return (
