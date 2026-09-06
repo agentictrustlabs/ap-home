@@ -49,6 +49,7 @@ import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import { loadPlaybook } from './playbook.js';
+import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
@@ -1021,8 +1022,8 @@ export type AskReply =
       /** Why standing could not be read, when it could not. Never a refusal — the ask proceeds. */
       standingUnavailable?: string }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
-  | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts'] }
-  | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts'] };
+  | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> }
+  | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> };
 
 /** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
  *  the requirement is built so the two cannot disagree. */
@@ -1366,6 +1367,10 @@ export async function askReplyFor(env: HarnessEnv, input: {
   session?: string;
 }): Promise<AskReply> {
   const r = input.result;
+  // spec 354 §4.5 — the playbook provenance manifest for this run's outbound artifact (undefined when
+  // the agent ran the bare harness). Attached to every terminal reply that carries a result.
+  const prov = playbookProvenanceFromReceipts(r.receipts, input.addressee);
+  const withProv = <T extends AskReply>(reply: T): T => (prov ? ({ ...reply, skillProvenance: prov } as T) : reply);
   if (r.outcome === 'authority-required' && r.required) {
     // Already normalised by the loop (`normalizeArgs`); re-run defensively for a caller that did not.
     const args = await resolveStepArgs(r.required.args, env, { ...(input.resolveName ? { resolveName: input.resolveName } : {}) });
@@ -1477,23 +1482,23 @@ export async function askReplyFor(env: HarnessEnv, input: {
     if (unsupported) {
       const u = unsupported.result as { what?: string; available?: string[] };
       const can = (u.available ?? []).map((id) => CAPABILITY_WORDS[id] ?? id);
-      return {
+      return withProv({
         kind: 'answer', runRef: r.runRef,
         // Quoted rather than folded into the sentence: the person's words come back in their own person
         // ("book me a flight"), and "I can't book me a flight" reads like a machine that did not listen.
         text: u.what?.trim()
           ? `I can't help with “${u.what.trim()}” here.${can.length ? ` What I can do as this agent: ${can.join(', ')}.` : ''}`
           : `I can't do that here.${can.length ? ` What I can do as this agent: ${can.join(', ')}.` : ''}`,
-      };
+      });
     }
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
     if (acted) {
       await settleFinishedRequests(input, r).catch(() => undefined);
-      return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
-    const withEvidence = (text: string): AskReply => ({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}) });
+    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}) });
     if (!input.composer) return withEvidence(raw);
     try {
       // GROUNDED COMPOSITION — spec 358 W3. Every real gate ran before the invoker; this is the one
@@ -1516,7 +1521,7 @@ export async function askReplyFor(env: HarnessEnv, input: {
       return withEvidence(raw);
     }
   }
-  return { kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts };
+  return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts });
 }
 
 /**
@@ -1873,6 +1878,9 @@ fanned out.`;
     // reached its second payee, whose mandate had not been minted yet. Reporting names the step and its
     // args; the surface mints exactly that and resumes.
     onMissingMandate: 'report' as const,
+    // Spec 354 §4.5 — the playbook that admitted this run (canonical id + version + definition digest),
+    // stamped onto every receipt by the loop. Absent ⇒ the bare harness; receipts carry no skillRef.
+    ...(playbook ? { skillRef: { skillId: playbook.archetypeId, version: playbook.archetypeVersion, commitment: playbook.digest } } : {}),
     ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,

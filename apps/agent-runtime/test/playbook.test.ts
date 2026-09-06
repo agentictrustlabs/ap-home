@@ -45,3 +45,26 @@ describe('the offer narrows to the playbook — behavior, not authority', () => 
     expect(scopedActionTools(undefined, null).length).toBeGreaterThan(offeredB.length);
   });
 });
+
+// spec 354 §4.5 (K4) — receipts name the playbook, and the outbound artifact carries a verifiable
+// skill-provenance/v1 manifest built from them — without any corpus fetch (the digest IS the commitment).
+import { playbookProvenanceFromReceipts, SKILL_PROVENANCE_EXT_URI } from '../src/skill-provenance.js';
+
+describe('playbookProvenanceFromReceipts (K4)', () => {
+  const commitment = definitionDigest(TREASURY_DEF);
+  const receiptsWithSkill = [
+    { runRef: 'run1', skillRef: { skillId: 'skill:archetypes/treasury', version: '1.0.0', commitment } },
+    { runRef: 'run1', skillRef: { skillId: 'skill:archetypes/treasury', version: '1.0.0', commitment } }, // same run, one execution
+  ];
+
+  it('builds the manifest naming the playbook id + version + digest', () => {
+    const m = playbookProvenanceFromReceipts(receiptsWithSkill, '0xAGENT') as Record<string, { executions: Array<{ skill: { id: string; version: string; skillMdDigest: string } }> }>;
+    const ext = m[SKILL_PROVENANCE_EXT_URI];
+    expect(ext.executions).toHaveLength(1); // distinct (id,version,commitment) collapse
+    expect(ext.executions[0].skill).toEqual({ id: 'skill:archetypes/treasury', version: '1.0.0', skillMdDigest: commitment });
+  });
+
+  it('undefined when no receipt names a playbook (the bare harness leaves no provenance)', () => {
+    expect(playbookProvenanceFromReceipts([{ runRef: 'r' }, { runRef: 'r' }], '0xAGENT')).toBeUndefined();
+  });
+});

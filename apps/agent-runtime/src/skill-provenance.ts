@@ -87,3 +87,49 @@ export async function skillProvenanceMetadata(
     },
   };
 }
+
+// ── spec 354 §4.5 — the PLAYBOOK provenance manifest, built from a run's receipts ────────────────────
+//
+// The archetype that shaped a run is named on every StepReceipt as `skillRef` (canonical id + version +
+// definition digest). Unlike the corpus-resolved variant above, this needs NO fetch: the digest IS the
+// content commitment, so the manifest is meaningful even when SKILLS_CORPUS_URL is unset — a receiver
+// re-derives the definition digest and checks THAT against the corpus (by digest), proving which
+// procedure the agent followed. Grants nothing; a playbook is never authority (spec 354 §1).
+
+interface ReceiptWithSkillRef { runRef?: string; skillRef?: { skillId: string; version: string; commitment: string } }
+
+/**
+ * Build the `skill-provenance/v1` manifest for an outbound artifact from a run's receipts, or undefined
+ * when no receipt names a playbook (the agent ran the bare harness). One run is shaped by one playbook,
+ * so distinct skillRefs collapse to one execution per (id, version, commitment).
+ */
+export function playbookProvenanceFromReceipts(
+  receipts: ReadonlyArray<ReceiptWithSkillRef>,
+  agentSA: Address,
+): Record<string, unknown> | undefined {
+  const seen = new Map<string, { skillId: string; version: string; commitment: string; runRef?: string }>();
+  for (const r of receipts) {
+    if (!r.skillRef) continue;
+    const key = `${r.skillRef.skillId}@${r.skillRef.version}:${r.skillRef.commitment}`;
+    if (!seen.has(key)) seen.set(key, { ...r.skillRef, ...(r.runRef ? { runRef: r.runRef } : {}) });
+  }
+  if (seen.size === 0) return undefined;
+  const executions = [...seen.values()].map((s) => {
+    const executionId = `${s.runRef ?? 'run'}:${s.skillId}`;
+    return {
+      executionId,
+      // The corpus reference shape, filled from the receipt: id + version + the digest as the content
+      // commitment. `included` is unproven here (no fetch) — a verifier resolves the inclusion proof.
+      skill: { id: s.skillId, version: s.version, skillMdDigest: s.commitment },
+      agentId: agentSA,
+      activationReason: 'archetype playbook admitted the run',
+    };
+  });
+  return {
+    [SKILL_PROVENANCE_EXT_URI]: {
+      extension: SKILL_PROVENANCE_EXT_URI,
+      executions,
+      contributions: executions.map((e) => ({ executionId: e.executionId, target: { type: 'artifact' }, contribution: 'shaped' })),
+    },
+  };
+}
