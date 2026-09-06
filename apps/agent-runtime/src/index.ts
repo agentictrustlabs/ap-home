@@ -102,12 +102,12 @@ import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from './kb-question.js';
-import { VAULT_QUESTION_TOOL, vaultQuestionInvoker } from './vault-question.js';
+import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from './vault-question.js';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
-import { chainStewardshipCheck } from './standing.js';
+import { chainStewardshipCheck, deriveStanding } from './standing.js';
 import { charteredAgentsReader } from './chartered-agents.js';
 import { relationshipRows } from './relationship-rows.js';
 import { grantBody } from '@agenticprimitives/agent-resolution';
@@ -1579,7 +1579,9 @@ app.post('/harness/ask', async (c) => {
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker(c.env as never)(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
-        if (toolId === VAULT_QUESTION_TOOL.id) return vaultQuestionInvoker(c.env as never, askDeps, who.sa as string)(toolId, args, ctx);
+        if (toolId === VAULT_QUESTION_TOOL.id) {
+          return vaultQuestionInvoker(c.env as never, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
+        }
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
         return askDiscoveryInvoker({
           ...(c.env as unknown as Record<string, unknown>),
@@ -2370,6 +2372,58 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     },
     // The far end of one of THEIR OWN sent requests: the payment it was waiting for settled, so the note
     // stops asking to be finished. Their own vault, their own record — nothing of the issuer's changes.
+    /**
+     * WHOSE VAULTS THIS ASKER MAY READ — spec 356 §2.2 (W3).
+     *
+     * Their own, plus every agent they STEWARD. Derived from their own private links and confirmed by
+     * `deriveStanding`, which checks the stewardship wire on chain where it can — never from a subject the
+     * ask named, and never from a client-supplied list (ADR-0041).
+     *
+     * MEMBERSHIP IS NOT ON THIS LIST, and neither is custody. Being a member of an organization authorizes
+     * nothing (tbox `aporg:OrganizationMembership`), and holding an organization's key is control of the
+     * agent rather than entitlement to what it knows (`ap:CustodyMember`). Only a delegation the
+     * organization SIGNED, naming this person, reads.
+     *
+     * This runs in-Worker, where the internal ops have no external gate — which is exactly why the check
+     * has to be HERE. Reaching a principal's DO is possible; being entitled to is what this establishes.
+     */
+    readableVaults: async (asker: string) => {
+      // NAMED, not an address. The self entry used to label its records `0xb0d1…3d11 :: capabilities.data`,
+      // and a composer asked "what records does nathan hold" duly presented ALICE'S OWN records as
+      // Nathan's — no data crossed a boundary, and the answer still named the wrong person. A label the
+      // model can read is what makes that a contradiction instead of a plausible summary.
+      const ownName = await new AgentNamingClient({
+        rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID),
+        registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+      }).reverseResolve(asker as Address).catch(() => null);
+      const self: ReadableVault = { subject: asker.toLowerCase(), name: `${ownName ?? 'you'} (your own records)`, why: 'self' };
+      const linkRead = await callInteractionsInternal(env, asker, 'internal.coordination.vaultRead', { recordType: 'relationships.data' }).catch(() => null);
+      const doc = (linkRead as { data?: unknown } | null)?.data ?? null;
+      const rows = doc ? relationshipRows(doc) : [];
+      const readLinks = async (subject: string, recordType: string): Promise<unknown> => {
+        const r = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
+        return (r as { data?: unknown } | null)?.data ?? null;
+      };
+      const out: ReadableVault[] = [self];
+      for (const row of rows) {
+        if (row.relationship !== 'steward' || !row.stewardshipDelegation) continue;
+        const standing = await deriveStanding(
+          { readSubjectRecord: readLinks, verifyStewardship: chainStewardshipCheck({
+            readContract: ((a: never) => pub.readContract(a) as Promise<unknown>) as never,
+            chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
+            allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER,
+            vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+            isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+            ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+          }) },
+          { principal: asker as Address, subject: row.agent as Address },
+        ).catch(() => null);
+        // Only `steward` reads. `member`, `none`, and an unreadable standing all mean the same thing here:
+        // not on the list. An unreadable standing must not become the stronger answer.
+        if (standing?.relation === 'steward') out.push({ subject: row.agent, name: row.name, why: 'stewardship' });
+      }
+      return out;
+    },
     // Spec 356 §2.5 phase one — the inventory, no plaintext. Their own DO, their own grant, in-Worker.
     survey: async (subject: string) => {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultSurvey', {}).catch(() => null);

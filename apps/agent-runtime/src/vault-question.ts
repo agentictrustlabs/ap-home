@@ -17,9 +17,19 @@
 // person's whole record set into a service that has no business holding it, turns one authorization into
 // hundreds, and scales exactly backwards.
 //
-// WHOSE VAULT. W2 is the ASKER'S OWN, and only theirs. Reading a vault they hold a delegation for is W3,
-// and it is a different authority question — not a bigger loop around the same one. The subject here is
-// the connected person, taken from the session and never from an argument.
+// WHOSE VAULT — spec 356 §2.2 (W3). Their own, plus every agent they STEWARD. Not every agent they can
+// see, and emphatically not every agent they custody:
+//
+//   custody     — can this credential make that agent act. NEVER a source here (tbox core.ttl,
+//                 `ap:CustodyMember`): whoever holds an organization's key is not thereby entitled to
+//                 read what the organization knows, and the two sets routinely differ.
+//   membership  — what am I part of. Informational; being a member authorizes nothing.
+//   stewardship — a delegation the organization SIGNED, naming this person. That is the one that reads.
+//
+// The set is derived from the asker's own links and confirmed by `deriveStanding` (which checks the wire
+// on chain where it can) — never from a subject the caller names as an argument and never from a
+// client-supplied list (ADR-0041). A subject not in the set is REFUSED by name, and the refusal says what
+// IS readable: "you may not read X" and "X has none of those" are different answers.
 //
 // AUTHORITY. Unchanged and not ours: every read rides the principal's own interactions grant, per-record
 // scope enforced where it always was (spec 277, ADR-0041). Choosing a record authorizes nothing.
@@ -30,21 +40,36 @@ import { bindingForRecordType, askableRecordKinds, recordTypesForClass } from '@
 export const VAULT_QUESTION_TOOL: ToolSpec = {
   id: 'vault.records.query',
   description:
-    'ANSWERS A QUESTION ABOUT THE ASKER\'S OWN PRIVATE RECORDS — what they are working on, what they have '
-    + 'been sent, what they hold. Use this for "what am I working on", "what endeavors do I have", "what '
-    + 'artifacts are in my vault", "what requests am I waiting on". '
-    + 'It reads the ASKER\'S OWN vault only — never another agent\'s, never an organization\'s roster, and '
-    + 'never the public directory (use find_agents / kb.question for anything public). '
+    'ANSWERS A QUESTION ABOUT PRIVATE RECORDS the asker may read — their own, and those of any '
+    + 'organization they STEWARD. Use this for "what am I working on", "what endeavors do I have", "what '
+    + 'artifacts does the org hold", "what requests am I waiting on". '
+    + 'It never reads the public directory (use find_agents / kb.question for anything public), and never '
+    + 'a vault the asker has no stewardship delegation for. '
     + 'It READS ONLY: it never sends, pays, creates or changes anything. '
-    + 'Args: question (in plain words).',
+    + 'IF THE ASK NAMES WHOSE RECORDS TO LOOK IN, PASS `subject`. Without it this looks in the asker\'s own '
+    + 'records and those of orgs they steward — which will answer a question about somebody else with the '
+    + 'WRONG PERSON\'S data. If they may not read that subject you get a refusal, which is the right answer. '
+    + 'Args: question (in plain words); subject (optional — whose records to look in, a name or address).',
   inputSchema: {
     type: 'object',
-    properties: { question: { type: 'string', description: 'The question about your own records, in plain words.' } },
+    properties: {
+      question: { type: 'string', description: 'The question about the records, in plain words.' },
+      subject: { type: 'string', description: 'Optional — the organization whose records to look in (name or address). Omit for everything the asker may read.' },
+    },
     required: ['question'],
   },
 };
 
+/** One vault this asker may read, and WHY — the reason an answer has to be able to cite. */
+export interface ReadableVault {
+  subject: string;
+  name?: string;
+  why: 'self' | 'stewardship';
+}
+
 export interface VaultQuestionDeps {
+  /** Every vault this asker may read. Derived (see the header); never a caller's list. */
+  readableVaults?: (asker: string) => Promise<ReadableVault[]>;
   /** The inventory: record keys + timestamps, no plaintext (§2.5 phase one). */
   survey?: (subject: string) => Promise<Array<{ recordType: string; updatedAt?: string }>>;
   /** The decode: exactly these keys, one batched call (§2.5 phase two). */
@@ -62,6 +87,10 @@ export interface VaultQuestionEnv {
 export function vaultQuestionAvailable(env: VaultQuestionEnv, deps: VaultQuestionDeps): boolean {
   return env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY && !!deps.survey && !!deps.readRecords;
 }
+
+/** How many vaults one question may survey. A question is answered from a few; surveying everything a
+ *  steward can reach turns one ask into a fan-out across an estate. */
+const MAX_SUBJECTS = 5;
 
 /** The survey, as a person would read it: what is in there, by kind. Unbound keys are reported as
  *  `unclassified` rather than dropped — a record nothing binds is still a record they have, and hiding it
@@ -100,7 +129,7 @@ const SELECT_TOOL = {
  */
 async function chooseRecords(
   client: AnthropicLike, model: string, question: string,
-  survey: Array<{ recordType: string; updatedAt?: string }>,
+  survey: Array<{ recordType: string; updatedAt?: string; owner: string; ownerLabel: string }>,
 ): Promise<{ interpretation: string; recordTypes: string[] }> {
   const byKind = surveyByKind(survey);
   const system = [
@@ -111,8 +140,8 @@ async function chooseRecords(
     'WHAT IS IN THIS VAULT:',
     ...byKind.map((g) => `  ${g.count.toString().padStart(4)} × ${g.kind}${g.class ? ` (${g.class})` : ''} — e.g. ${g.examples.join(', ')}`),
     '',
-    'EVERY RECORD KEY:',
-    ...survey.slice(0, 400).map((r) => `  ${r.recordType}${r.updatedAt ? `  (updated ${r.updatedAt})` : ''}`),
+    'EVERY RECORD KEY, as owner :: key — choose keys in exactly that form:',
+    ...survey.slice(0, 400).map((r) => `  ${r.ownerLabel} :: ${r.recordType}${r.updatedAt ? `  (updated ${r.updatedAt})` : ''}`),
     '',
     'RULES:',
     '  - Choose the FEWEST keys that can answer the question. Opening a record is a real read of private data.',
@@ -128,7 +157,7 @@ async function chooseRecords(
   });
   const block = res.content.find((b) => b.type === 'tool_use' && b.name === 'choose_records');
   const input = (block?.input ?? {}) as { interpretation?: unknown; recordTypes?: unknown };
-  const known = new Set(survey.map((r) => r.recordType));
+  const known = new Set(survey.map((r) => `${r.ownerLabel} :: ${r.recordType}`));
   return {
     interpretation: String(input.interpretation ?? ''),
     // ONLY KEYS THAT EXIST. A model naming a plausible key it did not see is the vault-side twin of
@@ -144,41 +173,123 @@ async function chooseRecords(
  * read. What this returns is evidence: the kinds present, which records were opened, and how the question
  * was read — so the diagnostics pane can show a person which of their records an answer came from.
  */
-export function vaultQuestionInvoker(env: VaultQuestionEnv, deps: VaultQuestionDeps, subject?: string): ToolInvoker {
+export function vaultQuestionInvoker(
+  env: VaultQuestionEnv,
+  deps: VaultQuestionDeps,
+  subject?: string,
+  resolveName?: (name: string) => Promise<string | null>,
+): ToolInvoker {
   return async (_toolId, args) => {
     const question = String((args as { question?: unknown }).question ?? '').trim();
+    const named = String((args as { subject?: unknown }).subject ?? '').trim();
     if (!question) return { refused: 'ask a question' };
-    if (!subject) return { refused: 'this agent does not know whose records to read' };
+    if (!subject) return { refused: 'this agent does not know who is asking' };
     if (!deps.survey || !deps.readRecords) throw new Error('vault.records.query is not configured on this agent');
 
-    const survey = await deps.survey(subject);
-    if (!survey.length) {
-      // Empty is an answer, and a specific one: nothing is stored, which is different from "I could not read it".
-      return { answered: true, count: 0, kinds: [], interpretation: 'their vault holds no records', results: {} };
-    }
-    const kinds = surveyByKind(survey);
+    // WHOSE VAULTS — derived, never taken from the ask. Absent the dep, this is their own and nothing else:
+    // a missing derivation must narrow, never widen.
+    const readable = deps.readableVaults
+      ? await deps.readableVaults(subject)
+      : [{ subject, why: 'self' as const }];
+    if (!readable.length) return { refused: 'you have no records this agent may read' };
 
-    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
-    const chosen = await chooseRecords(client, env.ORCHESTRATION_MODEL ?? 'claude-sonnet-4-6', question, survey);
-    if (!chosen.recordTypes.length) {
+    // A NAMED SUBJECT IS CHECKED, NOT TRUSTED. Refused BY NAME with what is readable — because "you may
+    // not read that" and "that has none of those" are different answers, and only one of them is about
+    // the question they asked.
+    let scope = readable;
+    if (named) {
+      // MATCHED AGAINST WHAT THEY MAY READ, in every form they might say it: the address, the registered
+      // name, or what the thing is CALLED in their own links ("Missio Nexus"). The readable set is the
+      // authority on both questions — what they may read, and what it is called to them — so a display
+      // name must not fall through to a refusal just because it is not a registered name. It did: "what
+      // artifacts does missio nexus hold" was refused for a vault its steward may plainly read.
+      const norm = (v: string): string => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const wanted = /^0x[0-9a-fA-F]{40}$/.test(named)
+        ? named.toLowerCase()
+        : ((resolveName ? await resolveName(named.toLowerCase()).catch(() => null) : null) ?? '').toLowerCase();
+      const hit = readable.find((v) => v.subject === wanted)
+        ?? readable.find((v) => v.name && norm(v.name) === norm(named))
+        // A prefix match last, and only when it is UNAMBIGUOUS: "missio" for one Missio Nexus is a name;
+        // for two it is a question, and answering it by picking one reads the wrong vault.
+        ?? (readable.filter((v) => v.name && norm(v.name).startsWith(norm(named))).length === 1
+              ? readable.find((v) => v.name && norm(v.name).startsWith(norm(named)))
+              : undefined);
+      if (!hit) {
+        return {
+          answered: false,
+          reason: `you have no stewardship of “${named}”, so this agent cannot read its records`,
+          readable: readable.map((v) => ({ name: v.name ?? v.subject, why: v.why })),
+        };
+      }
+      scope = [hit];
+    }
+    scope = scope.slice(0, MAX_SUBJECTS);
+
+    // PHASE ONE — the inventory of each vault in scope. Metadata only; nothing decrypted.
+    const label = (v: ReadableVault): string => v.name ?? v.subject;
+    const surveys = await Promise.all(scope.map(async (v) => ({
+      vault: v,
+      rows: await deps.survey!(v.subject).catch(() => [] as Array<{ recordType: string; updatedAt?: string }>),
+    })));
+    const flat = surveys.flatMap(({ vault, rows }) =>
+      rows.map((r) => ({ ...r, owner: vault.subject, ownerLabel: label(vault) })));
+    if (!flat.length) {
       return {
-        answered: false, interpretation: chosen.interpretation,
-        reason: 'none of their records hold what this question needs',
-        // The shape of the vault, so the answer can say what IS there instead of only what is not.
-        kinds: kinds.map((k) => ({ kind: k.kind, count: k.count })),
+        answered: true, count: 0, results: {},
+        interpretation: scope.length === 1 ? `${label(scope[0]!)} holds no records` : 'none of those vaults hold records',
+        looked: scope.map((v) => ({ subject: label(v), why: v.why })),
       };
     }
 
-    const records = await deps.readRecords(subject, chosen.recordTypes);
+    // PHASE TWO — the model picks candidates from the INVENTORY. Nothing has been decrypted.
+    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
+    const chosen = await chooseRecords(client, env.ORCHESTRATION_MODEL ?? 'claude-sonnet-4-6', question, flat);
+    const kinds = surveyByKind(flat);
+    if (!chosen.recordTypes.length) {
+      return {
+        answered: false, interpretation: chosen.interpretation,
+        reason: 'none of those records hold what this question needs',
+        kinds: kinds.map((k) => ({ kind: k.kind, count: k.count })),
+        looked: scope.map((v) => ({ subject: label(v), why: v.why })),
+      };
+    }
+
+    // PHASE THREE — decode, per owner, one batched call each. Grouped because the GRANT is per subject:
+    // a batch cannot straddle two vaults, and pretending otherwise would be a cross-principal read.
+    const byOwner = new Map<string, string[]>();
+    for (const key of chosen.recordTypes) {
+      const sep = key.indexOf(' :: ');
+      if (sep < 0) continue;
+      const row = flat.find((f) => f.ownerLabel === key.slice(0, sep) && f.recordType === key.slice(sep + 4));
+      if (!row) continue;
+      byOwner.set(row.owner, [...(byOwner.get(row.owner) ?? []), row.recordType]);
+    }
+    const results: Record<string, unknown> = {};
+    const opened: string[] = [];
+    for (const [owner, recordTypes] of byOwner) {
+      const vault = scope.find((v) => v.subject === owner);
+      const records = await deps.readRecords!(owner, recordTypes).catch(() => ({}));
+      for (const [rt, data] of Object.entries(records)) {
+        // Qualified in the RESULT too: a record means something different depending on whose it is, and an
+        // answer that merges two vaults into one bag cannot say which.
+        results[`${vault ? label(vault) : owner} :: ${rt}`] = data;
+        opened.push(`${vault ? label(vault) : owner} :: ${rt}`);
+      }
+    }
+
     return {
       answered: true,
+      // WHOSE RECORDS THESE ARE, first and in words. Everything below is about these agents and nobody
+      // else; an answer that names a different person is contradicting its own evidence.
+      recordsOf: scope.map((v) => label(v)),
       interpretation: chosen.interpretation,
-      // Named for the diagnostics pane: WHICH of their records this answer came from (spec 357 §4 applies
-      // here too — an answer whose sources nobody can inspect is a claim).
-      query: `records opened: ${chosen.recordTypes.join(', ')}`,
-      count: Object.keys(records).length,
+      // WHOSE RECORDS, AND WHY THEY WERE READABLE. The citation an answer has to be able to make: "as a
+      // steward of Missio Nexus" is the difference between an answer and an assertion (spec 356 §2.2).
+      looked: scope.map((v) => ({ subject: label(v), why: v.why })),
+      query: `records opened: ${opened.join(', ')}`,
+      count: opened.length,
       kinds: kinds.map((k) => ({ kind: k.kind, count: k.count })),
-      results: records,
+      results,
     };
   };
 }

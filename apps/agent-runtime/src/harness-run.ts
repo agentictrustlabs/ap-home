@@ -442,6 +442,9 @@ export interface HarnessDeps {
    *  request they sent. Settling is a record of what happened, never a permission: the grant it refers to
    *  stays exactly as valid as its issuer left it. */
   settleResolutionRequest?: (person: string, input: { owner: string; wants: string; txHash?: string }) => Promise<void>;
+  /** Spec 356 §2.2 — whose vaults this asker may read: their own, plus what they STEWARD. Derived, never
+   *  a caller's list; membership and custody are not sources (see `readableVaults` in index.ts). */
+  readableVaults?: (asker: string) => Promise<Array<{ subject: string; name?: string; why: 'self' | 'stewardship' }>>;
   /** Spec 356 §2.5 — the INVENTORY of a subject's vault: keys and timestamps, no plaintext. */
   survey?: (subject: string) => Promise<Array<{ recordType: string; updatedAt?: string }>>;
   /** Spec 356 §2.5 — decode exactly these keys, one batched call. */
