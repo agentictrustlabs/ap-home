@@ -2413,6 +2413,17 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
       return (out as { data?: unknown } | null)?.data ?? null;
     },
+    // spec 360 E5 — deposit a declared-effect artifact in a principal's OWN vault, written by that
+    // principal's own grant inside their own DO. Allowlisted by record type there: this cannot be
+    // pointed at an arbitrary record, which is the whole reason it is safe to call for a counterparty.
+    writeSubjectRecord: async (subject: string, recordType: string, record: unknown) => {
+      try {
+        const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record });
+        return { ok: (out as { ok?: boolean }).ok === true, ...(((out as { error?: string }).error) ? { error: (out as { error?: string }).error! } : {}) };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
     // The same read, with the REASON it failed. "Storage was never enabled for this agent" is a permanent,
     // actionable state; "the read failed" is a transient one; and neither is "there is nothing here". A
     // caller that can only see null has to guess which, and guessing produced "the roster could not be

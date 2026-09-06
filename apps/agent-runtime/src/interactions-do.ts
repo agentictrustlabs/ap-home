@@ -354,6 +354,10 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // path without landing here, so every capability save was refused by this allowlist and fell back to the
 // Home's KV cache — the save LOOKED fine and nothing reached the owner's vault. A best-effort mirror
 // hides a missing allowlist entry perfectly; only reading the vault back shows it.
+/** spec 360 — the ONLY record families an internal declared-effect write may deposit in a vault it does
+ *  not own. A prefix list, not a wildcard: this op's whole safety is that it cannot be pointed anywhere. */
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:'] as const;
+
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
 const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timeline is a recent-window projection.
@@ -1581,7 +1585,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1766,6 +1770,34 @@ export class InteractionsDO {
         // here — the platform never names it. A grant that predates those scopes denies per-record at
         // demo-mcp (`record_scope_denied`); we surface that as needsEnable so the caller can prompt the
         // steward to re-enable storage at their Home (the same additive-scope re-enable as coordination.*).
+        // ── spec 360 E5 — WRITE ONE DECLARED-EFFECT ARTIFACT into this principal's own vault.
+        //
+        // The receipt of a payment is held by BOTH parties, and the payee's copy cannot be written by the
+        // payer: she has no authority over his vault and must not. So it is admitted the way mail is
+        // (`messaging.deliver`, `org.apply`): the caller carries no write authority at all, and the
+        // PRINCIPAL'S OWN grant performs the write inside the principal's own DO.
+        //
+        // ALLOWLISTED BY RECORD TYPE, hard. The bound is spec 360 §1's disclosure rule made structural:
+        // an internal caller may deposit a receipt of an act this principal was party to, and nothing
+        // else. Without this the op would be "any in-Worker code may write any record to anyone", which
+        // is a far larger thing than the feature it exists for.
+        if (op === 'internal.coordination.vaultWrite') {
+          const recordType = String(body.recordType ?? '').trim();
+          if (!EFFECT_WRITABLE_RECORDS.some((p) => recordType.startsWith(p))) {
+            return json({ ok: false, error: `internal.coordination.vaultWrite may not write "${recordType}" — declared-effect artifacts only` }, 403);
+          }
+          if (body.record === undefined) return json({ ok: false, error: 'record required' }, 400);
+          try {
+            await this.writeDoc(g, recordType, body.record);
+            return json({ ok: true, recordType });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            // A scope-denied write is a STALE GRANT, not a failure of the payment that produced it.
+            const needsEnable = /record_scope_denied|scope/i.test(msg);
+            return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
+          }
+        }
+
         if (op === 'internal.coordination.vaultRead') {
           const recordType = String(body.recordType ?? '').trim();
           if (!recordType) return json({ error: 'recordType required' }, 400);
@@ -3180,16 +3212,25 @@ export class InteractionsDO {
       //    what it may do. The a2a harness re-derives the digest from the embedded definition at run
       //    admission (`src/playbook.ts`); a tampered or absent record leaves the bare harness. ──
       if (op === 'channels.archetypeAssignment.get' || op === 'channels.archetypeAssignment.put') {
-        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        // SELF **OR** STEWARD. An org/workspace/treasury agent's playbook is authored by its custodian
+        // through a stewardship wire — but a PERSON is the custodian of their own agent, and there is no
+        // wire from someone to themselves. Gating on stewardship alone locked every person out of their
+        // own Behaviour panel: the read came back 403 and the ceremony could neither show nor clear an
+        // assignment. Both are custody; only the shape of the proof differs.
+        const isSelf = sessionSa.toLowerCase() === principal;
+        const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
         if (!steward) return json({ error: 'only the agent’s custodian may assign an archetype' }, 403);
         if (op === 'channels.archetypeAssignment.get') {
           const doc = await this.readDoc<unknown>(grant, 'archetype.assignment', null);
           return json({ ok: true, record: doc });
         }
-        if (body.record === undefined) return json({ error: 'record required' }, 400);
-        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.archetypeAssignmentPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-assignment', id: principal } });
+        if (body.record === undefined) return json({ error: 'record required (null clears the assignment)' }, 400);
+        // `null` REMOVES the playbook — the agent goes back to the bare harness, which is a real choice a
+        // steward makes and not a broken state. `loadPlaybook` reads a non-object as absent, so this is
+        // the same outcome as never having assigned one.
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: body.record === null ? 'interactions.channels.archetypeAssignmentClear' : 'interactions.channels.archetypeAssignmentPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-assignment', id: principal } });
         await this.writeDoc(grant, 'archetype.assignment', body.record);
-        return json({ ok: true });
+        return json({ ok: true, cleared: body.record === null });
       }
 
       // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──

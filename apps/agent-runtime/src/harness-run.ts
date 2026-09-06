@@ -50,6 +50,7 @@ import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import { loadPlaybook } from './playbook.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
+import { declaredEffectSink } from './declared-effects.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
@@ -439,6 +440,9 @@ export interface HarnessDeps {
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
   /** Read one record from a subject's own vault — the asker's private tier (spec 353 §3). */
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** spec 360 E5 — deposit ONE declared-effect artifact in a principal's own vault. Allowlisted by record
+   *  type at the DO; the caller carries no write authority (the principal's own grant performs it). */
+  writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
@@ -1868,7 +1872,22 @@ fanned out.`;
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],
     }),
-    ports: { mandateVerifier: verifier, policyEvaluator: policy, approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink },
+    ports: {
+      mandateVerifier: verifier, policyEvaluator: policy,
+      approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink,
+      // spec 360 — what the playbook promised FOLLOWS a successful step. Isolated by the loop: an effect
+      // that cannot be delivered never fails the act that produced it.
+      effectSink: declaredEffectSink(
+        {
+          ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
+          ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
+        },
+        { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}) },
+      ),
+    },
+    // The playbook's declared consequences, keyed by capability id — DATA to the loop, which hands one to
+    // the sink when the step it belongs to succeeds.
+    ...(playbook?.declaredEffects ? { declaredEffects: playbook.declaredEffects } : {}),
     presented,
     // The keyring's selector: a payment step is judged under the mandate whose PaymentEnforcer caveat
     // names its payee. Selection reads a caveat; it verifies nothing — the verifier still judges the one

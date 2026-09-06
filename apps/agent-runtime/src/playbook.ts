@@ -23,6 +23,9 @@ export interface PlaybookScope {
   capabilityIds: Set<string>;
   /** The behavioral prose, for the planner's system prompt. */
   instructions: string;
+  /** spec 360 — what the playbook promises FOLLOWS each capability, keyed by capability id. Carried
+   *  through to the loop as data; it grants nothing and no verifier reads it. */
+  declaredEffects?: Record<string, unknown[]>;
 }
 
 /** The assignment record as written to the agent's vault. The definition is EMBEDDED and its digest
@@ -73,5 +76,6 @@ export async function loadPlaybook(
     digest: derived,
     capabilityIds: new Set(rec.definition.tools.map((t) => t.capability?.id ?? t.id)),
     instructions: rec.definition.instructions,
+    ...(rec.definition.declaredEffects ? { declaredEffects: rec.definition.declaredEffects as unknown as Record<string, unknown[]> } : {}),
   };
 }
