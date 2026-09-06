@@ -43,6 +43,18 @@ async function readAssignment(token: string, agent: Address): Promise<ArchetypeA
   return b.record ?? null;
 }
 
+interface PublishedBinding { archetypeId: string; archetypeVersion: string; definitionDigest: string }
+
+/** The playbook binding this agent's PUBLIC card promises (spec 354 K6), or null. Public — no session:
+ *  the released card is world-readable (ADR-0040). A Home compares its digest to the current assignment
+ *  to say "Bound to release". */
+async function readPublishedBinding(agent: Address): Promise<{ binding: PublishedBinding | null; releaseId: string | null }> {
+  const r = await fetch(`/a2a/agent-cards/playbook-binding?agent=${agent.toLowerCase()}`);
+  if (!r.ok) return { binding: null, releaseId: null };
+  const b = (await r.json().catch(() => ({}))) as { binding?: PublishedBinding | null; releaseId?: string | null };
+  return { binding: b.binding ?? null, releaseId: b.releaseId ?? null };
+}
+
 async function writeAssignment(token: string, agent: Address, definition: AgentHarnessDefinitionV1): Promise<void> {
   const check = validateAgentHarnessDefinition(definition);
   if (!check.ok) throw new Error(`the archetype is not a valid definition: ${check.errors[0]}`);
@@ -130,6 +142,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [published, setPublished] = useState<{ binding: PublishedBinding | null; releaseId: string | null } | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -141,6 +154,14 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
       .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, [agent, token]);
+
+  // spec 354 K6 — is the current playbook BOUND to a public card release? Public read, best-effort: a
+  // nameless or unpublished agent simply shows nothing (private posture is the honest default).
+  useEffect(() => {
+    let cancelled = false;
+    void readPublishedBinding(agent).then((p) => { if (!cancelled) setPublished(p); }).catch(() => { if (!cancelled) setPublished(null); });
+    return () => { cancelled = true; };
+  }, [agent, current?.definitionDigest]);
 
   const assign = useCallback(async () => {
     if (!selected || !token) return;
@@ -200,6 +221,27 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
               <span style={{ color: 'var(--color-text-muted)' }}>No archetype assigned — the agent runs the bare harness.</span>
             )}
           </div>
+
+          {/* spec 354 K6 — Bound to release. Whether the CURRENT playbook is the one this agent's public
+              card promises. Verifiability is structural: the released card carries the definition digest,
+              so anyone can check this playbook version against the corpus. Silent when nothing is
+              published (private posture) or there is no assignment. */}
+          {current && published?.binding && (
+            published.binding.definitionDigest === current.definitionDigest ? (
+              <p style={{ margin: '0 0 .8rem', fontSize: '.8rem', color: 'var(--color-sage-700)' }}>
+                ✓ Bound to a published card release — the world can verify this exact playbook version against the corpus by its digest.
+              </p>
+            ) : (
+              <p style={{ margin: '0 0 .8rem', fontSize: '.8rem', color: 'var(--color-text-muted)' }}>
+                Your card publishes a <strong>different</strong> playbook version ({published.binding.archetypeVersion}). Release a new card to bind the current one.
+              </p>
+            )
+          )}
+          {current && published && !published.binding && (
+            <p style={{ margin: '0 0 .8rem', fontSize: '.78rem', color: 'var(--color-text-muted)' }}>
+              This playbook is private — no card release binds it. Publishing is the steward’s call; bind it in the Card Studio to make the version verifiable.
+            </p>
+          )}
 
           <div style={{ display: 'grid', gap: '.55rem' }}>
             {options.map((opt) => {

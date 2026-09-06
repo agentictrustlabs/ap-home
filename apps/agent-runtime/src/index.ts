@@ -63,7 +63,7 @@ import {
 import { originAllowed, hostnameAllowed } from './origins';
 import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
 import { ardHostManifest, ARD_WELL_KNOWN_PATH } from './ard';
-import { cardContentDigest, jcsDigest as cardJcsDigest } from '@agenticprimitives/agent-profile/a2a';
+import { cardContentDigest, jcsDigest as cardJcsDigest, readPlaybookBinding } from '@agenticprimitives/agent-profile/a2a';
 import { AgentIdentityClient } from '@agenticprimitives/agent-profile';
 import { AgentCardStudio, type StudioDeps, type StudioSources, type RegistryEntryOnChain } from './agent-card-studio.js';
 import type { AgentNameBindingV1, PublicSkillClaimV1 } from '@agenticprimitives/registry-kit/projection';
@@ -1032,6 +1032,22 @@ export function releasedCardKey(agent: string): string {
 }
 app.get('/.well-known/agent-card.json', serveAgentCard);
 app.get('/.well-known/agent.json', serveAgentCard); // legacy alias
+
+// GET /agent-cards/playbook-binding?agent=0x… — spec 354 K6, PUBLIC. The playbook binding a released
+// card publicly promises for this agent, or null when its card carries none / no card is published. Reads
+// the same world-readable RELEASED_CARDS cache the well-known route serves — disclosure, never authority,
+// so no session (the card is public by construction, ADR-0040). A Home shows "Bound to release" by
+// comparing `definitionDigest` here to the agent's current assignment digest.
+app.get('/agent-cards/playbook-binding', async (c) => {
+  const agent = (c.req.query('agent') ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (address) required' }, 400);
+  if (!c.env.RELEASED_CARDS) return c.json({ ok: true, binding: null, releaseId: null });
+  const raw = await c.env.RELEASED_CARDS.get(releasedCardKey(agent));
+  if (!raw) return c.json({ ok: true, binding: null, releaseId: null });
+  const entry = JSON.parse(raw) as { digest: string; releaseId: string; bytes: string };
+  const card = JSON.parse(entry.bytes) as { capabilities?: { extensions?: Array<{ uri: string; params?: Record<string, unknown> }> } };
+  return c.json({ ok: true, binding: readPlaybookBinding(card as never), releaseId: entry.releaseId });
+});
 
 // spec 347 §8.5 — per-host ARD manifest (Agentic Resource Discovery v0.91): ONE entry for the bound agent whose `url`
 // is this host's own well-known card (released bytes when published, live otherwise — same rule as serveAgentCard).

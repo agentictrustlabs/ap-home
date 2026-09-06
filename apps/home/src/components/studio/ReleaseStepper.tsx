@@ -3,11 +3,11 @@
 // verify. Each node shows where the release IS, who moved it, and — when the viewer can't perform the
 // current step — the muted "Waiting on someone with … access." line instead of a button. Separation of
 // duties is VISIBLE here, not just enforced server-side.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { buildStudioApprovalCard, approvalCoversSubject, VERSION_LABELS, type StudioApprovalSubjectV1 } from '@agenticprimitives/home';
 import type { A2AAgentCardReleaseV1, CardDraftState } from '@agenticprimitives/agent-profile/a2a';
-import { signedCardContentDigest } from '@agenticprimitives/agent-profile/a2a';
+import { signedCardContentDigest, withPlaybookBinding, type PlaybookBindingV1 } from '@agenticprimitives/agent-profile/a2a';
 import { BusyButton } from '../shared/BusyButton';
 import { AddressChip } from '../shared/AddressChip';
 import {
@@ -17,6 +17,7 @@ import {
   deprecateRelease,
   newCardSigningKey,
   newMutation,
+  patchDraft,
   publishRelease,
   requestReleaseApproval,
   revokeRelease,
@@ -35,6 +36,7 @@ import { cardUriForName, editForksNewDraft, gateForOp, publicationVerdict, studi
 import { ReleaseDiffPanel } from './Inspector';
 import { Banner, Chip, Digest, ErrorLine, LiveRegion, inputStyle } from './ui';
 import { notifyCardChanged } from './useStudio';
+import { useSession } from '../../context/session';
 
 /**
  * A LOCAL render envelope for `buildStudioApprovalCard` — the package owns the title/summary/digest
@@ -115,9 +117,35 @@ export function ReleaseStepper({
   const [step, setStep] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmRelease, setConfirmRelease] = useState(false);
+  // spec 354 K6 — the agent's current playbook binding (if any), and the steward's opt-in to make this
+  // release promise it. Behavior is private posture by default; binding is the steward's explicit choice.
+  const { session } = useSession();
+  const [playbookBinding, setPlaybookBinding] = useState<PlaybookBindingV1 | null>(null);
+  const [bindPlaybook, setBindPlaybook] = useState(false);
   const [signOpen, setSignOpen] = useState(!!autoExpand);
   const [cardUri, setCardUri] = useState(() => cardUriForName(agentName, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN }) ?? '');
   const [revokeReason, setRevokeReason] = useState('');
+
+  useEffect(() => {
+    const token = session?.token;
+    if (!token) return;
+    let cancelled = false;
+    void fetch('/connect/channels', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: sa.toLowerCase() }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { record?: { archetypeId?: string; archetypeVersion?: string; definitionDigest?: string } | null } | null) => {
+        if (cancelled) return;
+        const rec = b?.record;
+        setPlaybookBinding(rec?.archetypeId && rec.archetypeVersion && rec.definitionDigest
+          ? { archetypeId: rec.archetypeId, archetypeVersion: rec.archetypeVersion, definitionDigest: rec.definitionDigest }
+          : null);
+      })
+      .catch(() => { if (!cancelled) setPlaybookBinding(null); });
+    return () => { cancelled = true; };
+  }, [session?.token, sa]);
   const [publishNote, setPublishNote] = useState<PublicationVerdict | null>(null);
   /** Publishing needs a public host, which comes from the agent's NAME. Checked before the button, so a
    *  nameless agent reads as "needs a name", not as a failed publish. */
@@ -345,6 +373,19 @@ export function ReleaseStepper({
             Review, then freeze: what this {VERSION_LABELS.cardRelease.toLowerCase()} changes
           </h3>
           <ReleaseDiffPanel previous={release} draft={detail.draft} />
+          {/* spec 354 K6 — opt-in playbook binding. Off by default: behaviour is private posture unless
+              the steward chooses to publish it. Checking this patches the draft's capabilities.extensions
+              with the current playbook's digest BEFORE the release is cut, so the released card promises
+              exactly this version and the world can verify it against the corpus. Grants nothing. */}
+          {playbookBinding && (
+            <label style={{ display: 'flex', gap: '.45rem', alignItems: 'flex-start', margin: '.6rem 0', fontSize: '.82rem' }}>
+              <input type="checkbox" checked={bindPlaybook} onChange={(e) => setBindPlaybook(e.target.checked)} style={{ marginTop: '.15rem' }} />
+              <span>
+                Bind this agent’s playbook (<strong>{playbookBinding.archetypeId.replace(/^skill:archetypes\//, '')}</strong> v{playbookBinding.archetypeVersion}) to this release —
+                its digest is published on the card so anyone can verify the behaviour version. It grants no authority.
+              </span>
+            </label>
+          )}
           <div style={{ display: 'flex', gap: '.4rem', marginTop: '.6rem' }}>
             <BusyButton
               busy={busy === 'create-release'}
@@ -352,6 +393,16 @@ export function ReleaseStepper({
               className="btn-primary"
               onClick={() =>
                 void run('create-release', 'Creating release…', async () => {
+                  // Patch the binding into the draft first (one revision), so the release snapshots a card
+                  // that already promises the playbook. A stale revision is a 409 we never paper over.
+                  if (bindPlaybook && playbookBinding && detail.draft) {
+                    const bound = withPlaybookBinding(detail.draft.card, playbookBinding);
+                    await patchDraft(
+                      delegation, cardResourceId,
+                      [{ op: 'add', path: '/capabilities/extensions', value: bound.capabilities.extensions ?? [] }],
+                      { ...newMutation(), expectedRevision: detail.draft.revision }, detail.draft.etag,
+                    );
+                  }
                   await createRelease(delegation, cardResourceId, newMutation());
                   setConfirmRelease(false);
                 })
