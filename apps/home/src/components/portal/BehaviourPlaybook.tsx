@@ -18,6 +18,8 @@ import type { AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-cla
 import { useSession } from '../../context/session';
 import { validateAgentHarnessDefinition, definitionDigest } from '@agenticprimitives/capability-claims';
 import { catalogForKind, type CatalogArchetype } from '../../lib/archetype-catalog';
+import { registryArchetypesFor, type RegistryArchetype } from '../../lib/skills-registry';
+import { KIND_TO_TYPE_SLUG } from '../../lib/archetype-catalog';
 import { BusyButton } from '../shared/BusyButton';
 
 /** The record shape written to the agent's vault (`archetype.assignment`). */
@@ -135,10 +137,24 @@ function DiffPreview({ def }: { def: AgentHarnessDefinitionV1 }) {
 export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind: string; name?: string }) {
   const { session } = useSession();
   const token = session?.token ?? null;
-  const options = useMemo(() => catalogForKind(kind), [kind]);
+  // TWO SOURCES, ONE SHAPE. The app-config catalog is spec 354 §3's defaults; the registry is where a
+  // domain author's SKILL.md contracts actually live, so an archetype edited there shows up here. Both
+  // hand back an AgentHarnessDefinitionV1, which is the point of compiling one.
+  const builtIn = useMemo(() => catalogForKind(kind), [kind]);
+  const [registry, setRegistry] = useState<RegistryArchetype[]>([]);
+  const options = useMemo(() => {
+    // A registry archetype WINS over a built-in of the same archetypeId: the corpus is the editable
+    // source, and shadowing it with a compiled-in copy is how an edit stops mattering.
+    const fromRegistry = registry.map((r) => ({ key: r.key, label: r.label, summary: r.summary, definition: r.definition, registry: r }));
+    const shadowed = new Set(fromRegistry.map((o) => o.definition.archetypeId));
+    return [
+      ...fromRegistry,
+      ...builtIn.filter((b) => !shadowed.has(b.definition.archetypeId)).map((b) => ({ ...b, registry: undefined as RegistryArchetype | undefined })),
+    ];
+  }, [builtIn, registry]);
   const [current, setCurrent] = useState<ArchetypeAssignmentRecord | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [selected, setSelected] = useState<CatalogArchetype | null>(null);
+  const [selected, setSelected] = useState<(CatalogArchetype & { registry?: RegistryArchetype }) | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +170,14 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
       .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, [agent, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void registryArchetypesFor(KIND_TO_TYPE_SLUG[(kind ?? '').toLowerCase()])
+      .then((r) => { if (!cancelled) setRegistry(r); })
+      .catch(() => { if (!cancelled) setRegistry([]); });
+    return () => { cancelled = true; };
+  }, [kind]);
 
   // spec 354 K6 — is the current playbook BOUND to a public card release? Public read, best-effort: a
   // nameless or unpublished agent simply shows nothing (private posture is the honest default).
@@ -263,6 +287,22 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                     {isCurrent && <span style={{ fontSize: '.68rem', color: 'var(--color-sage-700)' }}>assigned</span>}
                   </div>
                   <div style={{ fontSize: '.8rem', color: 'var(--color-text-muted)' }}>{opt.summary}</div>
+                  {/* WHERE THIS BEHAVIOUR COMES FROM. A steward picking a playbook should be able to see
+                      which SKILL.md contract defines it — that file is the editable source, and an
+                      archetype with no contract behind a capability is running a built-in fallback. */}
+                  {opt.registry && (
+                    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.25rem' }}>
+                      from <code>{opt.registry.context}</code>
+                      {opt.registry.skills.length > 0
+                        ? <> · driven by {opt.registry.skills.map((sk) => <code key={sk} style={{ marginLeft: '.25rem' }}>{sk}</code>)}</>
+                        : <> · no SKILL.md linked yet</>}
+                      {opt.registry.warnings.length > 0 && (
+                        <div style={{ color: 'var(--color-warning, #92700e)' }}>
+                          {opt.registry.warnings.length} capabilit{opt.registry.warnings.length === 1 ? 'y has' : 'ies have'} no contract — running the built-in shape
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </button>
               );
             })}

@@ -159,3 +159,15 @@ export function toAgentName(nameOrLabel: string): string {
 /** The deployment's agent directory (spec 346 §7 registry URN) the Studio lists agents in — e.g.
  *  `urn:ap:registry:faithnet-agents`. Absent ⇒ the directory listing row says the directory is not set up. */
 export const AGENT_REGISTRY_URN = process.env.NEXT_PUBLIC_AGENT_REGISTRY_URN || '';
+
+/** The skills registry (skills-a2a) that serves domain archetypes and their compiled definitions.
+ *  The Home READS from it — the corpus is where a domain author's SKILL.md contracts live, and reading
+ *  them is what makes an edit there change what an agent does here (agent-rules:
+ *  one-capability-model-generates-both). Never written to from the Home. */
+export const SKILLS_REGISTRY_ORIGIN =
+  process.env.NEXT_PUBLIC_SKILLS_REGISTRY || 'https://skills-a2a-production.richardpedersen3.workers.dev';
+
+/** Which skills CONTEXTS this Home offers archetypes from, in order. `agentic-trust` is the upper (a
+ *  treasury is not a domain concept); the white-label domain follows. */
+export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith')
+  .split(',').map((s) => s.trim()).filter(Boolean);
