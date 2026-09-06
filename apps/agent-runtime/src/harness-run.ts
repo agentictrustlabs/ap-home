@@ -1885,9 +1885,25 @@ fanned out.`;
         { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}) },
       ),
     },
-    // The playbook's declared consequences, keyed by capability id — DATA to the loop, which hands one to
-    // the sink when the step it belongs to succeeds.
-    ...(playbook?.declaredEffects ? { declaredEffects: playbook.declaredEffects } : {}),
+    // WHOSE PLAYBOOK DECLARES WHAT FOLLOWS — spec 360, resolved PER STEP.
+    //
+    // An effect follows THE ACT, so it is declared by the agent whose authority the act spends: a
+    // payment's receipt belongs to the treasury whose funds moved. Reading it from the ADDRESSEE would
+    // tie every consequence to whichever agent the person happened to be talking to — and in the Home's
+    // Ask that is their own person agent, which is never the treasury a Treasury archetype applies to.
+    // That is why "money moved and nobody was told" survived the first cut of this feature.
+    //
+    // So: the step's declared `authorityArg` names the agent spending authority; its playbook is loaded
+    // and asked. The addressee's own playbook is the fallback for steps that spend nobody else's.
+    declaredEffects: async (capabilityId, step) => {
+      const authorityArg = step.tool.capability?.authorityArg;
+      const actor = authorityArg ? String(step.args?.[authorityArg] ?? '') : '';
+      if (/^0x[0-9a-fA-F]{40}$/.test(actor) && actor.toLowerCase() !== String(input.addressee ?? '').toLowerCase()) {
+        const theirs = await loadPlaybook(deps.readSubjectRecord, actor).catch(() => null);
+        if (theirs?.declaredEffects?.[capabilityId]?.length) return theirs.declaredEffects[capabilityId]!;
+      }
+      return playbook?.declaredEffects?.[capabilityId] ?? [];
+    },
     presented,
     // The keyring's selector: a payment step is judged under the mandate whose PaymentEnforcer caveat
     // names its payee. Selection reads a caveat; it verifies nothing — the verifier still judges the one
