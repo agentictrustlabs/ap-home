@@ -2657,9 +2657,10 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         const r = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
         return (r as { data?: unknown } | null)?.data ?? null;
       };
-      const out: ReadableVault[] = [self];
-      for (const row of rows) {
-        if (row.relationship !== 'steward' || !row.stewardshipDelegation) continue;
+      // Each row's standing is an independent chain+vault derivation; awaiting them one at a time made
+      // this the slowest part of every vault question (sum of rows, not max). Parallel, same verdicts.
+      const stewarded = await Promise.all(rows.map(async (row): Promise<ReadableVault | null> => {
+        if (row.relationship !== 'steward' || !row.stewardshipDelegation) return null;
         const standing = await deriveStanding(
           { readSubjectRecord: readLinks, verifyStewardship: chainStewardshipCheck({
             readContract: ((a: never) => pub.readContract(a) as Promise<unknown>) as never,
@@ -2673,9 +2674,9 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         ).catch(() => null);
         // Only `steward` reads. `member`, `none`, and an unreadable standing all mean the same thing here:
         // not on the list. An unreadable standing must not become the stronger answer.
-        if (standing?.relation === 'steward') out.push({ subject: row.agent, name: row.name, why: 'stewardship' });
-      }
-      return out;
+        return standing?.relation === 'steward' ? { subject: row.agent, name: row.name, why: 'stewardship' } : null;
+      }));
+      return [self, ...stewarded.filter((v): v is ReadableVault => v !== null)];
     },
     // Spec 356 §2.5 phase one — the inventory, no plaintext. Their own DO, their own grant, in-Worker.
     survey: async (subject: string) => {

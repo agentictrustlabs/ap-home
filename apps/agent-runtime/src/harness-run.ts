@@ -1970,6 +1970,26 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
    * calls (live, it emitted one and the composer PROMISED the payments instead). The canonical shape
    * compiles; the model plans everything the compiler does not claim.
    */
+  // THE COMPILED READ-PLANS (the latency program's planner half). Three model calls in sequence is the
+  // whole ~28s of a conversational read; the first — the planner deciding "who are the members" means
+  // the membership tool — is a decision a REGEX makes identically every time. Same doctrine as
+  // compiledFanOut below: the match is deterministic and decided BEFORE any planner runs, and anything
+  // it does not confidently match falls through to the model unchanged. These are READS: no capability,
+  // no mandate, so a wrong match costs a wrong tool's honest refusal, never an unauthorized act.
+  const compiledRead = (goal: string): Plan | null => {
+    const g = goal.toLowerCase();
+    if (/\bmembers?\b.*\b(of|on|in)\b|\bwho (are|is|belongs)\b.*\bmembers?\b|\bwho belongs\b/.test(g)) {
+      return { steps: [{ toolId: MEMBERSHIP_LIST_TOOL.id, args: {} }] };
+    }
+    if (/\b(what|which|how many)\b.*\b(kinds?|types?|records?)\b.*\b(hold|have|vault|keep)|\brecords? (do|does) .* hold\b/.test(g)) {
+      return { steps: [{ toolId: VAULT_QUESTION_TOOL.id, args: { question: goal } }] };
+    }
+    if (/\b(my|our)\b.*\breceipts?\b|\breceipts?\b.*\b(do i|have i|my)\b/.test(g)) {
+      return { steps: [{ toolId: VAULT_QUESTION_TOOL.id, args: { question: goal } }] };
+    }
+    return null;
+  };
+
   const compiledFanOut = (goal: string): Plan | null => {
     const g = goal.toLowerCase();
     if (!/\b(pay|send)\b/.test(g) || !/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/.test(g)) return null;
@@ -2013,7 +2033,7 @@ fanned out.`;
     // to re-plan around (re-planning a click would act on something nobody clicked).
     ? { plan: async () => ({ steps: input.plan!.steps }) }
     : {
-        plan: async (pin) => compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
+        plan: async (pin) => compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
       };
   const kind = input.plan ? 'supplied' : selected.kind;
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
