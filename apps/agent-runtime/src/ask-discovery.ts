@@ -56,10 +56,13 @@ export const ASK_DISCOVERY_TOOLS: ToolSpec[] = [
   {
     id: 'find_agents',
     description:
-      'ANSWERS A QUESTION about who exists — never a step towards doing something. '
-      + 'Search the PUBLIC agent directory for agents (people, organizations, teams, services) by name or ' +
-      'by what they do. `terms` are search words only — never the user\'s full question, and never who is ' +
-      'asking. Returns public, on-chain-derived facts: name, address, kind, declared capabilities.',
+      'KEYWORD SEARCH BY NAME — finds agents whose NAME or declared capabilities contain your search words. '
+      + 'Use it when the ask names something ("the outreach team in greeley", "find alice"). '
+      + 'It is NOT a census and NOT a category listing: searching for "organizations" matches agents CALLED '
+      + 'that, and returns nothing in a directory full of them. For "what organizations are there", "how '
+      + 'many teams", "which agents have X" — anything that counts, lists or filters a KIND — use '
+      + 'kb.question instead. `terms` are search words only — never the user\'s full question, and never who '
+      + 'is asking. Returns public, on-chain-derived facts: name, address, kind, declared capabilities.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,7 +103,17 @@ export function askDiscoveryInvoker(env: DiscoveryEnv & { resolveName?: (name: s
       const limit = Math.min(Number((args as { limit?: unknown }).limit ?? MAX_ROWS) || MAX_ROWS, MAX_ROWS);
       const body = await discovery(env, `/search?q=${encodeURIComponent(terms)}&limit=${limit}`);
       const agents = (body.agents ?? body.results ?? []) as unknown[];
-      return { agents, count: agents.length };
+      // SAY WHAT WAS DONE, not just what came back. `{agents: [], count: 0}` reads as "there are none",
+      // and a composer duly wrote "The directory does not list any organizations" for a directory holding
+      // 37 of them — because the search was a NAME match for the word "organizations", which nothing is
+      // called. An empty result is an answer (ADR-0013); it is an answer to the question that was asked,
+      // and this says which question that was.
+      return {
+        agents, count: agents.length, searchedNamesFor: terms,
+        ...(agents.length ? {} : {
+          note: `No agent's name or declared capabilities matched "${terms}". This was a keyword match, not a listing — it does NOT mean the directory holds none of that kind. To count or list a KIND of agent, use kb.question.`,
+        }),
+      };
     }
     if (toolId === 'get_agent') {
       const key = String((args as { key?: unknown }).key ?? '').trim();

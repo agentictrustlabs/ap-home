@@ -903,10 +903,52 @@ const CAPABILITY_WORDS: Record<string, string> = {
 export const REQUIREMENT_TYPE_FOR = (capabilityId: string): string =>
   capabilityId === 'treasury.payment.execute' ? PAYMENT_RAR_TYPE : CAPABILITY_RAR_TYPE;
 
+/** One step's readable trace: which tool ran, how it read the question, and the query it actually sent.
+ *  This is not the receipt (that is authority evidence and lives on `receipts`) — it is the answer showing
+ *  its work, which is the difference between "there are none" and "I looked here and found none". */
+export interface AskEvidence {
+  toolId: string;
+  interpretation?: string;
+  query?: string;
+  count?: number;
+  /** What a keyword search actually looked for. A name match that found nothing and a directory that holds
+   *  none of a kind are different facts, and this is the one that says which happened. */
+  searched?: string;
+  /** Why nothing came back, when the tool said. An answer built on a refusal must not read like an answer
+   *  built on an empty result. */
+  reason?: string;
+}
+
+/** Pull the trace out of what the steps observed. Only fields a tool deliberately returned for display —
+ *  never the whole result, which would put arbitrary read data on a surface that did not ask for it. */
+export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
+  const out: AskEvidence[] = [];
+  for (const o of steps) {
+    const r = o.result as { query?: unknown; interpretation?: unknown; count?: unknown; reason?: unknown; searchedNamesFor?: unknown; note?: unknown } | null;
+    if (!r || typeof r !== 'object') continue;
+    const has = (v: unknown): boolean => typeof v === 'string' && v.length > 0;
+    if (!has(r.query) && !has(r.interpretation) && !has(r.reason) && !has(r.searchedNamesFor)) continue;
+    out.push({
+      toolId: o.step.toolId,
+      ...(has(r.interpretation) ? { interpretation: r.interpretation as string } : {}),
+      ...(has(r.query) ? { query: r.query as string } : {}),
+      ...(typeof r.count === 'number' ? { count: r.count } : {}),
+      ...(has(r.searchedNamesFor) ? { searched: r.searchedNamesFor as string } : {}),
+      // A tool's own explanation of an empty result beats anything reconstructed from the shape of it.
+      ...(has(r.reason) ? { reason: r.reason as string } : has(r.note) ? { reason: r.note as string } : {}),
+    });
+  }
+  return out;
+}
+
 /** What the Ask surface gets back: an answer, the authority it would need, a question for the person, or
  *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
 export type AskReply =
-  | { kind: 'answer'; text: string; runRef: string }
+  | { kind: 'answer'; text: string; runRef: string;
+      /** WHAT IT READ TO SAY THAT. A generated query is the one kind of evidence a person cannot
+       *  reconstruct from the answer, and an answer whose query nobody can inspect is a claim (spec 357
+       *  §4). Present when a step produced one; display only, and it decides nothing. */
+      evidence?: AskEvidence[] }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
       /** What the ASKER is to the delegator, derived (spec 353 S5). Absent when nothing could read it —
        *  which is not "no standing", so a surface must not render absence as a refusal. */
@@ -1388,11 +1430,13 @@ export async function askReplyFor(env: HarnessEnv, input: {
       return { kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts };
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
-    if (!input.composer) return { kind: 'answer', runRef: r.runRef, text: raw };
+    const evidence = askEvidence(r.steps);
+    const withEvidence = (text: string): AskReply => ({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}) });
+    if (!input.composer) return withEvidence(raw);
     try {
-      return { kind: 'answer', runRef: r.runRef, text: await input.composer.compose({ intent: input.intent, observations: r.steps }) };
+      return withEvidence(await input.composer.compose({ intent: input.intent, observations: r.steps }));
     } catch {
-      return { kind: 'answer', runRef: r.runRef, text: raw };
+      return withEvidence(raw);
     }
   }
   return { kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts };

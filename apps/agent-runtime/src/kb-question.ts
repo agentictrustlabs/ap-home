@@ -30,10 +30,12 @@ import type { DiscoveryEnv } from './discovery-facets.js';
 export const KB_QUESTION_TOOL: ToolSpec = {
   id: 'kb.question',
   description:
-    'ANSWERS A PRECISE QUESTION about the PUBLIC agent directory by querying it directly — use this when the '
-    + 'ask needs a combination, a filter, a count or a relationship that find_agents (keyword search) and '
-    + 'get_agent (one key) cannot express: "which teams have X", "how many orgs are there", "which agents '
-    + 'does Y operate". For a plain name lookup or a keyword search, prefer get_agent / find_agents. '
+    'QUERIES THE PUBLIC DIRECTORY DIRECTLY to answer a question about it. USE THIS FOR ANY QUESTION ABOUT A '
+    + 'KIND OR A GROUP — "what organizations are out there", "how many teams are there", "list the people", '
+    + '"which agents have X", "who operates Y" — and for anything that counts, lists, filters or relates. '
+    + 'find_agents cannot answer those: it matches search words against NAMES, so asking it for '
+    + '"organizations" returns nothing even when the directory holds dozens. Use find_agents only when the '
+    + 'ask NAMES a specific thing to look up. '
     + 'It reads PUBLIC data only — never membership rosters, vault records or private relationships. '
     + 'Args: question (the question, in plain words).',
   inputSchema: {

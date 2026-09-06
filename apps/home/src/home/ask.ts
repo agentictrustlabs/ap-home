@@ -58,8 +58,24 @@ export type AskPrompt =
   | { kind: 'signature'; stepRef: string; toolId: string; prompt: string; digest: Hex; signer: string; payload?: unknown }
   | { kind: 'confirmation'; stepRef: string; toolId: string; prompt: string; summary: unknown };
 
+/** One step showing its work: which tool ran, how it read the question, and what it sent. */
+export interface AskEvidence {
+  toolId: string;
+  interpretation?: string;
+  query?: string;
+  count?: number;
+  /** What a keyword search looked for — the difference between "none exist" and "no name matched". */
+  searched?: string;
+  reason?: string;
+}
+
 export type AskReply =
-  | { kind: 'answer'; text: string; runRef: string }
+  | { kind: 'answer'; text: string; runRef: string;
+      /** HOW IT KNOWS. When a step wrote a query to answer, the query comes back with the answer —
+       *  otherwise "the directory does not list any organizations" and "I searched names for the word
+       *  'organizations' and matched none" are the same sentence to a reader, and only one of them is
+       *  true (spec 357 §4). Display only; it decides nothing. */
+      evidence?: AskEvidence[] }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
       /** What the ASKER is to the delegator, derived by the agent from evidence the chain confirms
        *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */

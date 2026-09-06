@@ -319,9 +319,58 @@ function plainReason(error: string): string {
   return error;
 }
 
+/**
+ * An answer, and — on request — how it was reached.
+ *
+ * A generated query is the one piece of evidence a reader cannot reconstruct from the answer, and the
+ * difference it makes is not cosmetic: "The directory does not list any organizations" and "I searched
+ * names for the word 'organizations' and matched none" read identically and only one of them is true.
+ * Folded away by default, because the answer is what was asked for; one click from the person who wants
+ * to check it (spec 357 §4).
+ */
+function AnswerView({ reply }: { reply: Extract<AskReply, { kind: 'answer' }> }) {
+  const [open, setOpen] = useState(false);
+  const evidence = reply.evidence ?? [];
+  return (
+    <div>
+      <span>{reply.text}</span>
+      {evidence.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <button
+            type="button" className="btn ghost" data-testid="ask-evidence-toggle"
+            style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => setOpen((v) => !v)}
+          >
+            {open ? 'Hide how I know' : 'How do I know?'}
+          </button>
+          {open && (
+            <div data-testid="ask-evidence" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
+              {evidence.map((e, i) => (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div className="muted">
+                    <strong>{e.toolId}</strong>
+                    {typeof e.count === 'number' ? ` · ${e.count} result${e.count === 1 ? '' : 's'}` : ''}
+                  </div>
+                  {e.interpretation && <div className="muted">read as: {e.interpretation}</div>}
+                  {e.searched && <div className="muted">searched names for “{e.searched}”</div>}
+                  {e.reason && <div className="muted">{e.reason}</div>}
+                  {e.query && (
+                    <pre style={{ margin: '4px 0 0', padding: 8, overflowX: 'auto', fontSize: 10.5, background: 'var(--c-surface-2, rgba(127,127,127,.12))', borderRadius: 6 }}>
+                      {e.query}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** What the agent said, in the shape it said it. */
 function ReplyView({ reply }: { reply: AskReply }) {
-  if (reply.kind === 'answer') return <span>{reply.text}</span>;
+  if (reply.kind === 'answer') return <AnswerView reply={reply} />;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
     return (
