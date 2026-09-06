@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence } from '../../../home/ask';
+import { ask, mintMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun } from '../../../home/ask';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { AgentName } from '../../shared/AgentName';
@@ -59,6 +59,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
   const [chosen, setChosen] = useState<Record<string, string>>({});
   /** "Someone has asked you for a way to reach your treasury." Reported, never acted on. */
   const [waiting, setWaiting] = useState<string | null>(null);
+  // spec 350 W3 — other unfinished runs on this agent that this person could pick up. The run is durable
+  // on the agent; this is how they find it again after closing the tab.
+  const [unfinished, setUnfinished] = useState<UnfinishedRun[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   // WHAT THE AGENT ACTUALLY DID, kept for the whole conversation rather than the last answer. A generated
   // query is the one piece of evidence a reader cannot reconstruct from the reply, and "the directory does
@@ -119,7 +122,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     setBusy(label);
     const startedAt = Date.now();
     try {
-      const { reply, resumable, waiting } = await ask(session, state);
+      const { reply, resumable, waiting, unfinishedRuns } = await ask(session, state);
       // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
       // the run somebody wants to look at afterwards.
       setDiag((d) => [...d, {
@@ -152,6 +155,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
       // SOMEBODY IS WAITING ON THEM. Said once per turn, after the answer — never instead of it, and
       // never as a card that has to be dismissed before they can carry on with what they came to do.
       if (waiting) setWaiting(waiting);
+      setUnfinished(unfinishedRuns ?? []);
       // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
@@ -296,6 +300,26 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
               /^https?:\/\//.test(part)
                 ? <a key={i} href={part} style={{ textDecoration: 'underline' }}>{part.replace(/^https?:\/\//, '')}</a>
                 : <span key={i}>{part}</span>
+            ))}
+          </div>
+        )}
+        {/* spec 350 W3 — an ask you left unfinished. It lives on the agent, not in this tab, so it is
+            still there after a reload; picking it up re-runs it through every gate exactly as the first
+            turn did. One line each, and only ones this person may resume. */}
+        {unfinished.length > 0 && (
+          <div className="ask-msg agent" data-testid="ask-unfinished" style={{ fontSize: 12, opacity: 0.9 }}>
+            {unfinished.length === 1 ? 'You have an unfinished ask here:' : `You have ${unfinished.length} unfinished asks here:`}
+            {unfinished.map((r) => (
+              <div key={r.runRef} style={{ marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => void turn({ message: r.message, addressee, runRef: r.runRef, presented: null, supplied: [], resumable: true }, 'Picking it up…')}
+                  style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--color-sage-700, #3f6212)', textDecoration: 'underline', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  “{r.message}”
+                </button>
+                {r.awaiting && <span style={{ opacity: 0.75 }}> — waiting on {r.awaiting.kind === 'signature' ? 'your signature' : r.awaiting.kind === 'confirmation' ? 'your confirmation' : 'an answer'}</span>}
+              </div>
             ))}
           </div>
         )}

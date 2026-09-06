@@ -105,7 +105,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context'
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer } from './orchestration.js';
-import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
+import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
@@ -1240,6 +1240,28 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 //
 // Disclosure, not authority. Every id here still needs a mandate, and no gate consults this list
 // (spec 353 §4) — publishing it grants exactly nothing, which is why it can be read without a session.
+// POST /harness/runs { session, addressee } — spec 350 W3. THE UNFINISHED RUNS on an agent that this
+// person may pick up: their own suspended asks, plus the work items left open to whoever can mint the
+// mandate. A durable run that nobody can SEE is a durable run nobody resumes — the checkpoint has always
+// recorded what it is waiting for, and this is the read that makes `runRef` a handle rather than a token
+// the browser had to keep.
+//
+// The listing carries no mandates (the DO strips the keyring): it says a run is waiting and what it waits
+// FOR. Resuming is `/harness/ask` with the runRef, which re-verifies everything as always — so seeing a
+// run here grants nothing, exactly as claiming one does not.
+app.post('/harness/runs', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address } | null;
+  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const caller = String(who.sa).toLowerCase() as Address;
+  // The SAME rule that gates a resume decides what is listed — one mechanism (ADR-0013). A run this
+  // person could not resume is a run they are not shown.
+  const runs = (await listRuns(c.env as never, addressee)).filter((r) => claimableBy(r, caller));
+  return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
+});
+
 app.get('/harness/vocabulary', async (c) => {
   // Playbook-aware disclosure (spec 354 §4.4 / K5): name the agent (`?agent=0x…`) and the vocabulary is
   // narrowed to what its assigned archetype knows how to do — the same set it will OFFER at plan time.
@@ -1558,7 +1580,7 @@ app.post('/resolution/grant', async (c) => {
 
 app.post('/harness/ask', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
-    session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | null;
+    session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
     surface?: HarnessRunInput['surface'];
   } | null;
@@ -1698,7 +1720,14 @@ app.post('/harness/ask', async (c) => {
     // ago; the message is in an inbox they may not have read and the card is on a page they may not have
     // visited. Reported alongside the answer, never instead of it, and it decides nothing.
     const waiting = await waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null);
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}) });
+    // spec 350 W3 — and the runs on THIS agent that this person could pick up, excluding the one they are
+    // in. A durable run only pays for itself if someone can find it again; the ask is the surface they
+    // opened, so it is where an unfinished one gets mentioned. A count and a handle — resuming still goes
+    // through `/harness/ask` and still re-verifies everything.
+    const otherRuns = await listRuns(c.env as never, addressee)
+      .then((rs) => rs.filter((r) => r.runRef !== runRef && claimableBy(r, String(who.sa).toLowerCase() as Address)))
+      .catch(() => []);
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: otherRuns.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })) } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

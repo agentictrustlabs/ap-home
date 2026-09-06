@@ -83,7 +83,7 @@ export function checkpointForStep(input: {
     message: askForStep(input.step, input.goal, authorityCapabilityOf(input.step) ?? undefined, input.principal),
     addressee: input.principal,
     asker: input.principal,
-    presented: null,
+    presented: [],
     supplied: [],
     openToStewards: true,
     origin: { endeavorId: input.endeavorId, stepId: input.step.stepId, principal: input.principal },
@@ -103,7 +103,7 @@ export function checkpointForStep(input: {
  *
  * The gate on ADVANCING a run is always the mandate, never this.
  */
-export function claimableBy(checkpoint: HarnessRunCheckpointV1, caller: Address): boolean {
+export function claimableBy(checkpoint: Pick<HarnessRunCheckpointV1, 'asker' | 'openToStewards' | 'supplied'>, caller: Address): boolean {
   if (checkpoint.asker.toLowerCase() === caller.toLowerCase()) return true;
   return !!checkpoint.openToStewards && checkpoint.supplied.length === 0;
 }

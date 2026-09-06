@@ -851,6 +851,18 @@ export class A2aTaskDO {
         await this.state.storage.delete(key(body.runRef));
         return Response.json({ ok: true });
       }
+      // spec 350 W3 — ENUMERATE the unfinished runs on this agent. A checkpoint already records what a run
+      // is `awaiting` and whether it is `openToStewards`, and until now nothing could read that back: a
+      // payment waiting on a signature was invisible to everyone including the person who owes it. The DO
+      // returns them all; WHOSE they are is decided by the caller's session at the route (a person sees
+      // their own; a steward additionally sees the unclaimed work items).
+      if (op === 'list') {
+        const rows = await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:run:' });
+        // Mandates are bearer-shaped wires; enumeration is a LISTING, not a resume, so the keyring never
+        // rides along. Loading the run by its ref is what hands those back, to the one who may resume it.
+        const runs = [...rows.values()].map(({ presented: _presented, ...rest }) => rest);
+        return Response.json({ ok: true, runs });
+      }
       return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });
     }
 

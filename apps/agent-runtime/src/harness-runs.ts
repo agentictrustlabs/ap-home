@@ -33,8 +33,17 @@ export interface HarnessRunCheckpointV1 {
   addressee: Address;
   /** WHO asked. Only they may resume: a run carries their session's authority and their answers. */
   asker: Address;
-  /** The mandate they granted, if they have. Re-verified on every turn — never trusted because it is here. */
-  presented?: DelegationWireV1 | null;
+  /** THE KEYRING — every mandate this run has been granted, not just the last one (spec 350 W3).
+   *
+   *  It was one wire, replaced each turn, and that is what made the 4-payment fan-out cost 13 turns: a
+   *  plan that needs a mandate PER ITEM could only ever hold the newest, so each turn settled exactly one
+   *  payee and reported authority-required for the rest. Accumulating them here means turn N sends only
+   *  the NEW mandate and the run advances with every key it has been given.
+   *
+   *  Holding a key is not holding authority. Every wire here is re-verified on every turn — signature,
+   *  revocation, intent binding, limits — and the loop still judges each step under exactly ONE selected
+   *  mandate (ADR-0013). A keyring makes the run rememberable, never more permitted. */
+  presented: DelegationWireV1[];
   /** Everything answered so far, by stepRef. */
   supplied: SuppliedInputV1[];
   /** What the run is waiting for, for a surface that lists pending work. */
@@ -55,7 +64,7 @@ export interface RunStoreEnv {
 
 const stubFor = (env: RunStoreEnv, agent: Address) => env.A2A_TASKS.get(env.A2A_TASKS.idFromName(agent.toLowerCase()));
 
-async function call(env: RunStoreEnv, agent: Address, op: 'save' | 'load' | 'drop', body: unknown): Promise<Record<string, unknown>> {
+async function call(env: RunStoreEnv, agent: Address, op: 'save' | 'load' | 'drop' | 'list', body: unknown): Promise<Record<string, unknown>> {
   const res = await stubFor(env, agent).fetch(new Request(`https://a2a-task-do/internal/harness-run/${op}`, {
     method: 'POST', headers: internalHeaders(env as never), body: JSON.stringify(body),
   }));
@@ -73,6 +82,23 @@ export async function loadRun(env: RunStoreEnv, addressee: Address, runRef: stri
   return (out.checkpoint as HarnessRunCheckpointV1 | undefined) ?? null;
 }
 
+/** One unfinished run as a LISTING shows it — everything but the keyring. A list says that something is
+ *  waiting and what it waits for; it never hands out the mandates, which only a resume does and only to
+ *  whoever may resume. */
+export type SuspendedRunV1 = Omit<HarnessRunCheckpointV1, 'presented'>;
+
+/**
+ * The unfinished runs on this agent. A checkpoint has always recorded what a run is `awaiting` and
+ * whether it is `openToStewards`; nothing could read that back, so a payment waiting on a signature was
+ * invisible to everyone — including the person who owed it (this module's own opening complaint).
+ *
+ * Returns ALL of them. Who may see which is the caller's decision, made where the session is known.
+ */
+export async function listRuns(env: RunStoreEnv, addressee: Address): Promise<SuspendedRunV1[]> {
+  const out = await call(env, addressee, 'list', {});
+  return (out.runs as SuspendedRunV1[] | undefined) ?? [];
+}
+
 /** A run that reached a terminal outcome leaves nothing behind: done is done, and a denial is terminal
  *  (ADR-0013) — keeping it invites a caller to "try the resume again" as though refusal were weather. */
 export async function dropRun(env: RunStoreEnv, addressee: Address, runRef: string): Promise<void> {
@@ -82,10 +108,21 @@ export async function dropRun(env: RunStoreEnv, addressee: Address, runRef: stri
 /** Merge a turn's inputs over the checkpoint. The stored answers come FIRST so a resend of the same
  *  stepRef adds rather than replaces — a person who signs twice has signed twice, and the port picks the
  *  signature that verifies. */
+/** A wire's identity WITHIN one run: delegator + delegate + salt. The salt is fresh per delegation, so
+ *  this separates two mandates that differ only in a caveat (one payee vs another) while collapsing the
+ *  same wire re-sent by a client that has not noticed the server remembers it. Not a security check —
+ *  it dedups a list; every wire is verified on chain regardless. */
+const wireKey = (w: DelegationWireV1): string =>
+  `${String(w.delegator).toLowerCase()}:${String(w.delegate).toLowerCase()}:${String(w.salt)}`;
+
+/** Normalise the many shapes a turn may present (nothing / one / a keyring) into a list. */
+const asList = (p: DelegationWireV1 | DelegationWireV1[] | null | undefined): DelegationWireV1[] =>
+  p == null ? [] : Array.isArray(p) ? p : [p];
+
 export function mergeTurn(
   stored: HarnessRunCheckpointV1 | null,
-  turn: { message?: string; presented?: DelegationWireV1 | null; supplied?: SuppliedInputV1[] },
-): { message: string; presented: DelegationWireV1 | null; supplied: SuppliedInputV1[] } | { error: string } {
+  turn: { message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null; supplied?: SuppliedInputV1[] },
+): { message: string; presented: DelegationWireV1[]; supplied: SuppliedInputV1[] } | { error: string } {
   const message = (turn.message ?? stored?.message ?? '').trim();
   if (!message) return { error: 'this run has no question and none was given' };
   if (stored && turn.message && turn.message.trim() !== stored.message) {
@@ -93,9 +130,25 @@ export function mergeTurn(
     // `intent-mismatch`. Saying it here names the actual mistake instead of a hash comparison.
     return { error: 'this run was started for a different question — ask it as a new one rather than changing this one mid-way' };
   }
+  // THE KEYRING GROWS, NEWEST FIRST. Replacing (the old `turn.presented ?? stored.presented`) discarded
+  // every mandate but the newest, which is why a fan-out cost a turn per payee. Accumulating keeps the
+  // earlier keys for the items they were granted for.
+  //
+  // ORDER CARRIES THE RE-GRANT RULE. This turn's mandates go in FRONT, so when a person re-grants for the
+  // same purpose (the first expired, say) the fresh wire is the one selection reaches first — the
+  // behaviour the single-slot version had — while the older keys remain available for OTHER items. A
+  // re-grant has a fresh salt, so it is a distinct key and never dedups away the one it supersedes.
+  const keyring: DelegationWireV1[] = [];
+  const seen = new Set<string>();
+  for (const w of [...asList(turn.presented), ...asList(stored?.presented)]) {
+    const k = wireKey(w);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    keyring.push(w);
+  }
   return {
     message,
-    presented: turn.presented ?? stored?.presented ?? null,
+    presented: keyring,
     supplied: [...(stored?.supplied ?? []), ...(turn.supplied ?? [])],
   };
 }

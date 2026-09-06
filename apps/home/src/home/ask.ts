@@ -191,7 +191,11 @@ export interface AskTurnState {
   resumable?: boolean;
 }
 
-async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string; waiting?: string }> {
+/** An unfinished run on the agent being asked, that this person may pick up (spec 350 W3). A handle and
+ *  what it waits for — never the mandates, which only a resume hands back. */
+export interface UnfinishedRun { runRef: string; message: string; awaiting: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number }
+
+async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string; waiting?: string; unfinishedRuns?: UnfinishedRun[] }> {
   const send = async () => {
     await ensureCsrfToken();
     return fetch('/a2a/harness/ask', {
@@ -213,7 +217,7 @@ async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; res
 }
 
 /** Ask once. The first turn carries only the sentence; later turns carry what the agent asked for. */
-export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean; waiting?: string }> {
+export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean; waiting?: string; unfinishedRuns?: UnfinishedRun[] }> {
   // What is NEW goes up; what the agent already holds does not. Once a run is checkpointed the question
   // and the earlier answers are its own, so this turn carries the runRef and whatever the person just did.
   //
@@ -235,7 +239,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
       resumable: false,
     };
   }
-  return { reply: res.reply, resumable: !!res.resumable, ...(res.waiting ? { waiting: res.waiting } : {}) };
+  return { reply: res.reply, resumable: !!res.resumable, ...(res.waiting ? { waiting: res.waiting } : {}), ...(res.unfinishedRuns?.length ? { unfinishedRuns: res.unfinishedRuns } : {}) };
 }
 
 const PAYMENT_TYPE = 'urn:ap:rar:treasury.payment.execute';

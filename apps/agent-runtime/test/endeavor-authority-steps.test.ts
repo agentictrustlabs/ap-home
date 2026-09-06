@@ -45,7 +45,7 @@ describe('the run a waiting step becomes', () => {
   });
 
   it('belongs to nobody yet, and remembers the step it exists to satisfy', () => {
-    expect(cp).toMatchObject({ asker: PRINCIPAL, openToStewards: true, presented: null, supplied: [], origin: { endeavorId: 'end_x', stepId: 'step_1', principal: PRINCIPAL } });
+    expect(cp).toMatchObject({ asker: PRINCIPAL, openToStewards: true, presented: [], supplied: [], origin: { endeavorId: 'end_x', stepId: 'step_1', principal: PRINCIPAL } });
   });
 
   it('is claimable by any steward while unanswered, and becomes theirs once they answer', () => {
