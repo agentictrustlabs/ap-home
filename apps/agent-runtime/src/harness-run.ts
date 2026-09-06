@@ -814,10 +814,33 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const transfer = encodeFunctionData({ abi: TRANSFER_ABI, functionName: 'transfer', args: [payee, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, transfer] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
+    // IDEMPOTENCY IS THE ON-CHAIN NONCE (spec 358 W4-tail). The loop's resume-with-recheck re-invokes a
+    // step that already ran (§3.4), and its contract is that the invoker makes that a no-op. For a
+    // payment the authoritative "already done" signal is the PaymentEnforcer's own single-use nonce:
+    // keccak(intentDigest:stepRef) is consumed exactly when this precise payment settled, so a used nonce
+    // means THIS payment happened. Reading it and returning idempotently is not a fallback to a weaker
+    // mechanism (ADR-0013) — it is reading the one authority that already decided, before asking it again
+    // and being told NonceReused. Without this, the second-party-approval resume re-submits every
+    // fanned-out payment and each reverts (finding W4-FANOUT-RESUME-1).
+    const dHash = hashDelegation(wire, Number(env.CHAIN_ID), dm);
+    const alreadySettled = enforcers.payment
+      ? await deps.readContract({ address: enforcers.payment as Address, abi: IS_NONCE_USED_ABI, functionName: 'isNonceUsed', args: [wire.delegator, dHash, nonce] }).catch(() => false)
+      : false;
+    if (alreadySettled) {
+      // This exact payment already happened. Report it done, without a txHash we did not just create —
+      // the receipt of the settling run holds that; re-inventing one would be a claim (spec 357 §4).
+      return { asset, payee, amount: amount.toString(), payer: wire.delegator, alreadySettled: true };
+    }
     const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
     return { txHash, asset, payee, amount: amount.toString(), payer: wire.delegator };
   };
 }
+
+/** PaymentEnforcer.isNonceUsed — the on-chain idempotency read (spec 358 W4-tail). readContract only. */
+const IS_NONCE_USED_ABI = [{
+  type: 'function', name: 'isNonceUsed', stateMutability: 'view',
+  inputs: [{ type: 'address' }, { type: 'bytes32' }, { type: 'bytes32' }], outputs: [{ type: 'bool' }],
+}] as const;
 
 export interface HarnessRunInput {
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
@@ -1830,8 +1853,12 @@ fanned out.`;
       const b = fanOutBindingFor(relation);
       return b ? { maxItems: b.maxItems } : null;
     },
-    // An ask with no mandate REPORTS what it would need; a run that presented one never falls back to this.
-    ...(presented ? {} : { onMissingMandate: 'report' as const }),
+    // ALWAYS report, never throw (spec 358 W4-tail): a step whose authority is not present — nothing
+    // presented at all, OR a keyring that holds no key for THIS payee — is one the caller resolves by
+    // coming back with the mandate. Throwing `no_mandate_presented` stranded a fan-out the moment it
+    // reached its second payee, whose mandate had not been minted yet. Reporting names the step and its
+    // args; the surface mints exactly that and resumes.
+    onMissingMandate: 'report' as const,
     ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,
