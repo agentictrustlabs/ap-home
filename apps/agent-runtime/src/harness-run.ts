@@ -46,19 +46,20 @@ import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { selectPlanner, selectComposer } from './orchestration.js';
-import { ASK_DISCOVERY_TOOLS } from './ask-discovery.js';
-import { KB_QUESTION_TOOL, kbQuestionAvailable } from './kb-question.js';
-import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from './vault-question.js';
-import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from './party-resolution.js';
+import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
+import { structuredCallFor } from './context-wiring.js';
+import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
+import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
+import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
-import type { ResolvedParty } from './party-resolution.js';
-import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from './membership-read.js';
+import type { ResolvedParty } from '@agenticprimitives/context';
+import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES } from '@agenticprimitives/ontology';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
-import { deriveStanding, standingNote, type Standing, type StandingDeps } from './standing.js';
+import { deriveStanding, standingNote, type Standing, type StandingDeps } from '@agenticprimitives/context';
 
 
 export interface HarnessEnv {
@@ -1676,10 +1677,10 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // keyword search instead would answer a different question than the one it advertised (ADR-0013).
   const tools = [
     ...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS,
-    ...(kbQuestionAvailable(env as never) ? [KB_QUESTION_TOOL] : []),
+    ...(kbQuestionAvailable({ call: structuredCallFor(env as never) }) ? [KB_QUESTION_TOOL] : []),
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
-    ...(vaultQuestionAvailable(env as never, deps) ? [VAULT_QUESTION_TOOL] : []),
+    ...(vaultQuestionAvailable({ call: structuredCallFor(env as never) }, deps) ? [VAULT_QUESTION_TOOL] : []),
     MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL,
   ];
   const result = await runIntent(input.intent, {

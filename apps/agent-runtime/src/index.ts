@@ -100,16 +100,17 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from './ask-discovery.js';
-import { KB_QUESTION_TOOL, kbQuestionInvoker } from './kb-question.js';
-import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from './vault-question.js';
+import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from '@agenticprimitives/context';
+import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
+import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
+import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer } from './orchestration.js';
 import { loadRun, saveRun, dropRun, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
-import { chainStewardshipCheck, deriveStanding } from './standing.js';
+import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { charteredAgentsReader } from './chartered-agents.js';
-import { relationshipRows } from './relationship-rows.js';
+import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
 import { verifiedGrants, grantAllows } from './resolution-invitation.js';
 import { actionLink } from './resolution-request.js';
@@ -1576,15 +1577,15 @@ app.post('/harness/ask', async (c) => {
       mcpInvoke: async (toolId, args, ctx) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
-        if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker(c.env as never)(toolId, args, ctx);
+        if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCallFor(c.env) ? { call: structuredCallFor(c.env)! } : {}) })(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
         if (toolId === VAULT_QUESTION_TOOL.id) {
-          return vaultQuestionInvoker(c.env as never, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
+          return vaultQuestionInvoker({ ...(structuredCallFor(c.env) ? { call: structuredCallFor(c.env)! } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
         }
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
         return askDiscoveryInvoker({
-          ...(c.env as unknown as Record<string, unknown>),
+          fetchDiscovery: discoveryFetchFor(c.env),
           resolveName: async (name: string) => {
             if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) throw new Error('naming is not configured');
             const client = new AgentNamingClient({ rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID), registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
@@ -2454,7 +2455,7 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
     },
     findAgents: async (terms: string) => {
-      const out = await askDiscoveryInvoker(env as never)('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
+      const out = await askDiscoveryInvoker({ fetchDiscovery: discoveryFetchFor(env) })('find_agents', { terms, limit: 8 }, {} as never).catch(() => null);
       return ((out as { agents?: unknown[] } | null)?.agents ?? []) as Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>;
     },
     executeAsServiceSa: async (sender, callData) => {

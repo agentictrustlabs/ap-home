@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { isInputRequired } from '@agenticprimitives/orchestration';
-import { ownAgentsOfType } from '../src/party-resolution.js';
+import { ownAgentsOfType } from '@agenticprimitives/context';
 import { partyTypesFor, HARNESS_ACTION_TOOLS, NEVER_THE_ASKER } from '../src/harness-run.js';
 
 const NATHAN = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1';

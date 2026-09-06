@@ -19,7 +19,9 @@ import type { Address } from 'viem';
 
 /** The record family a person's held grants and pending requests live in, in their own vault. */
 export const RESOLUTION_REQUESTS_RECORD = 'resolution.requests';
-export const RESOLUTION_GRANTS_RECORD = 'resolution.grants';
+// ONE definition: the key lives with the plane that reads it (spec 358 W1); re-exported here for the
+// routes and the DO, which speak this module's vocabulary.
+export { RESOLUTION_GRANTS_RECORD } from '@agenticprimitives/context';
 /** The requester's own record of asks they are waiting on. Rides the same scope as the requests they
  *  receive: one record family for "resolution requests", whichever end of one you are. */
 export const RESOLUTION_SENT_RECORD = 'resolution.requests';
