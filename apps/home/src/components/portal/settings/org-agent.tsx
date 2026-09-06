@@ -21,6 +21,8 @@ import { DEFAULT_DISPATCH_ARCHETYPES, issueOrgConsultRoutingDelegation, toWire, 
 import { BusyButton } from '../../shared/BusyButton';
 import { Tabs, type TabItem } from '../../shared/ui';
 import { SectionShell } from '../SectionShell';
+import { BehaviourPlaybook } from '../BehaviourPlaybook';
+import { useManagedAgents } from '../ManagedAgents';
 import { mutedText } from '../theme';
 
 const sectionTitleSty: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' };
@@ -33,6 +35,11 @@ interface TopicRow { descriptor: { id: string }; title: string; assistant?: unkn
 export function OrgAgentSection({ orgSa, only }: { orgSa: string; only?: 'ask' | 'playbook' }) {
   const { session, profile: homeProfile } = useSession();
   const communityId = orgSa.toLowerCase();
+  // The org's AgentKind (org | team | church | circle) — used to filter the archetype catalog to what
+  // this org-class agent may become. Same 'any' surface OrgAgentSection is addressed by (an inactive
+  // org must still resolve here).
+  const { agents } = useManagedAgents(session?.token ?? null, 'any');
+  const orgAgent = agents.find((a) => a.agent.toLowerCase() === communityId);
   const authed = useMemo(
     () => (session ? { 'content-type': 'application/json', authorization: `Bearer ${session.token}` } : undefined),
     [session],
@@ -268,6 +275,9 @@ export function OrgAgentSection({ orgSa, only }: { orgSa: string; only?: 'ask' |
 
   const playbook = (
     <div style={{ display: 'grid', gap: '0.5rem', paddingTop: '0.9rem' }}>
+      {orgAgent && (
+        <BehaviourPlaybook agent={orgAgent.agent} kind={orgAgent.kind} name={orgAgent.name || undefined} />
+      )}
       <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
         Assistant instructions (markdown) — the <b>Playbook</b> for this organization&rsquo;s discussion
         bot. Applies to every topic; the reply contract (one reply per mention) always applies regardless.

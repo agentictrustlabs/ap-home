@@ -278,6 +278,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     return jsonCors(r.body, request, r.status);
   }
+  // Archetype assignment (spec 354 K3) — steward-only; the agent's compiled behaviour, written to its
+  // own vault through the same steward gate as the assistant playbook. Grants no authority.
+  if (body?.action === 'archetypeAssignmentGet' || body?.action === 'archetypeAssignmentPut') {
+    const r = await callInteractions(env, communityId, body.action === 'archetypeAssignmentGet' ? 'channels.archetypeAssignment.get' : 'channels.archetypeAssignment.put', {
+      session: who.token,
+      ...(body.action === 'archetypeAssignmentPut' ? { record: (body as { record?: unknown }).record } : {}),
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
   // Org-assistant enablement (spec 327) — steward-only; the DO owns the gate + name capture.
   // spec 329 §7 — the steward's member-routing ceremony + per-topic toggle. Pass-through: the
   // org's InteractionsDO verifies the wire (delegate = the interactions-session key, consult

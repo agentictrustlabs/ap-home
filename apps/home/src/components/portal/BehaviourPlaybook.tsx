@@ -15,9 +15,49 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
+import { useSession } from '../../context/session';
+import { validateAgentHarnessDefinition, definitionDigest } from '@agenticprimitives/capability-claims';
 import { catalogForKind, type CatalogArchetype } from '../../lib/archetype-catalog';
-import { readPlaybookAssignment, writePlaybookAssignment, type ArchetypeAssignmentRecord } from '../../profile-store';
 import { BusyButton } from '../shared/BusyButton';
+
+/** The record shape written to the agent's vault (`archetype.assignment`). */
+interface ArchetypeAssignmentRecord {
+  type: 'ap.archetype-assignment.v1';
+  archetypeId: string;
+  archetypeVersion: string;
+  definitionDigest: string;
+  definition: AgentHarnessDefinitionV1;
+}
+
+/** Read/write the agent's archetype assignment through the STEWARD-gated `/connect/channels` path — the
+ *  same gate the assistant playbook uses. An org / workspace / treasury agent's behaviour is authored by
+ *  its custodian, never by the agent's own session, so this is not a person self-write. */
+async function readAssignment(token: string, agent: Address): Promise<ArchetypeAssignmentRecord | null> {
+  const r = await fetch('/connect/channels', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: agent.toLowerCase() }),
+  });
+  const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: ArchetypeAssignmentRecord | null; error?: string };
+  if (!r.ok || b.ok !== true) throw new Error(b.error ?? `could not read the archetype (${r.status})`);
+  return b.record ?? null;
+}
+
+async function writeAssignment(token: string, agent: Address, definition: AgentHarnessDefinitionV1): Promise<void> {
+  const check = validateAgentHarnessDefinition(definition);
+  if (!check.ok) throw new Error(`the archetype is not a valid definition: ${check.errors[0]}`);
+  const record: ArchetypeAssignmentRecord = {
+    type: 'ap.archetype-assignment.v1', archetypeId: definition.archetypeId,
+    archetypeVersion: definition.archetypeVersion, definitionDigest: definitionDigest(definition), definition,
+  };
+  const r = await fetch('/connect/channels', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: 'archetypeAssignmentPut', communityId: agent.toLowerCase(), record }),
+  });
+  const b = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!r.ok || b.ok !== true) throw new Error(b.error ?? `archetype write failed (${r.status})`);
+}
 
 const rarLabel = (t: string) => t.replace(/^urn:ap:rar:/, '');
 
@@ -81,6 +121,8 @@ function DiffPreview({ def }: { def: AgentHarnessDefinitionV1 }) {
  * previews the diff, and on approval writes the assignment record — one write, no signature, no grant.
  */
 export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind: string; name?: string }) {
+  const { session } = useSession();
+  const token = session?.token ?? null;
   const options = useMemo(() => catalogForKind(kind), [kind]);
   const [current, setCurrent] = useState<ArchetypeAssignmentRecord | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -90,35 +132,29 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!token) return;
     let cancelled = false;
     setLoaded(false);
-    void readPlaybookAssignment(agent)
+    void readAssignment(token, agent)
       .then((rec) => { if (!cancelled) setCurrent(rec); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
-  }, [agent]);
+  }, [agent, token]);
 
   const assign = useCallback(async () => {
-    if (!selected) return;
+    if (!selected || !token) return;
     setBusy(true); setSaved(false); setError(null);
     try {
-      await writePlaybookAssignment(agent, selected.definition);
-      setCurrent({
-        type: 'ap.archetype-assignment.v1',
-        archetypeId: selected.definition.archetypeId,
-        archetypeVersion: selected.definition.archetypeVersion,
-        definitionDigest: '', // re-read below carries the authoritative digest
-        definition: selected.definition,
-      });
+      await writeAssignment(token, agent, selected.definition);
       setSaved(true);
       setSelected(null);
-      const rec = await readPlaybookAssignment(agent).catch(() => null);
+      const rec = await readAssignment(token, agent).catch(() => null);
       if (rec) setCurrent(rec);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [agent, selected]);
+  }, [agent, selected, token]);
 
   const clear = useCallback(async () => {
     setBusy(true); setSaved(false); setError(null);

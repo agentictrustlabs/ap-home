@@ -3172,6 +3172,26 @@ export class InteractionsDO {
         return json({ ok: true, ...(records ? { seeded, rejected } : {}) });
       }
 
+      // ── spec 354 K3 — the AGENT's ARCHETYPE ASSIGNMENT (Behaviour → Archetype). The steward-gated
+      //    twin of the person's self-written `archetype.assignment` record: an org / workspace / treasury
+      //    agent's playbook is authored by its CUSTODIAN, not by the agent's own session. Same steward
+      //    gate + same org grant as the assistant playbook above — writing it GRANTS NO AUTHORITY
+      //    (ADR-0041 / spec 354 §1): it changes what the agent knows how to do; the mandate still decides
+      //    what it may do. The a2a harness re-derives the digest from the embedded definition at run
+      //    admission (`src/playbook.ts`); a tampered or absent record leaves the bare harness. ──
+      if (op === 'channels.archetypeAssignment.get' || op === 'channels.archetypeAssignment.put') {
+        const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the agent’s custodian may assign an archetype' }, 403);
+        if (op === 'channels.archetypeAssignment.get') {
+          const doc = await this.readDoc<unknown>(grant, 'archetype.assignment', null);
+          return json({ ok: true, record: doc });
+        }
+        if (body.record === undefined) return json({ error: 'record required' }, 400);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.archetypeAssignmentPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-assignment', id: principal } });
+        await this.writeDoc(grant, 'archetype.assignment', body.record);
+        return json({ ok: true });
+      }
+
       // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──
       if (op === 'channels.assistantEnable' || op === 'channels.assistantDisable') {
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
