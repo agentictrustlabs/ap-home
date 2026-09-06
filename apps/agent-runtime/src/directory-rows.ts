@@ -19,7 +19,7 @@ export interface RosterRow {
   /** What to call them: their public name, their org-local label, or their display name. */
   name: string | null;
   /** How this membership is evidenced — a self-published listing, or the org's own invitation record. */
-  via: 'listing' | 'invitation';
+  via: 'listing' | 'invitation' | 'membership';
   role?: string;
 }
 
@@ -77,6 +77,34 @@ export function invitedMemberRows(recordTypes: readonly string[], bodies: Record
     const body = bodies[rt] as Record<string, unknown> | undefined;
     const name = str(body?.displayName) || str(body?.name) || null;
     out.push({ agent, name, via: 'invitation' });
+  }
+  return out;
+}
+
+/**
+ * THE ORGANIZATION'S OWN MEMBERSHIP RECORDS — `org.membership:member:<sa>`, spec 325's shape.
+ *
+ * This is the roster proper. A listing is what a member says about themselves; an invitation is how they
+ * came to be admitted (the T-box files invitations under "Enrollment instruments — NOT membership"). The
+ * membership record is the organization's own statement that they belong, carrying the role assignment
+ * and the delegation that materialises it.
+ */
+export function membershipRows(recordTypes: readonly string[], bodies: Record<string, unknown>): RosterRow[] {
+  const out: RosterRow[] = [];
+  for (const rt of recordTypes) {
+    const body = bodies[rt] as Record<string, unknown> | undefined;
+    const agent = addressIn(body?.memberAgent) || addressIn(rt.slice(rt.lastIndexOf(':') + 1));
+    if (!agent) continue;
+    // An ended membership is not a member. Kept in the vault (a roster that forgets cannot answer "who
+    // was here then"), absent from the answer to "who is here now".
+    if (str(body?.endedAt)) continue;
+    const role = (body?.roleAssignment as { assignedRole?: unknown } | undefined)?.assignedRole;
+    out.push({
+      agent,
+      name: str(body?.displayName) || null,
+      via: 'membership',
+      ...(str(role) ? { role: str(role) } : {}),
+    });
   }
   return out;
 }

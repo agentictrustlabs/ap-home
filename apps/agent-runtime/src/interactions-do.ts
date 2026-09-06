@@ -2715,6 +2715,51 @@ export class InteractionsDO {
     const audit = buildAuditSink(this.env);
 
     try {
+      if (op === 'org.recordMembership') {
+        // THE ORGANIZATION RECORDS WHOM IT ADMITTED — spec 325's OrganizationMembership, in its own
+        // vault, keyed `org.membership:member:<sa>` (finding ORG-MEM-1).
+        //
+        // Membership had no home. A listing is what a member says about THEMSELVES and most members never
+        // publish one; an invitation is how somebody came to be admitted, which the T-box files under
+        // "Enrollment instruments — NOT membership". So the only complete roster on the estate was a Home
+        // KV cache of a record that nothing ever wrote: wipe it and membership is a bereavement rather
+        // than a rebuild (ADR-0055). This is that record, in the vault the org's own agent can read —
+        // inside the `vault:org.membership:*` scope its grant already carries, so nothing is widened.
+        //
+        // THREE THINGS KEPT APART, because collapsing any two ships a bug: the invitation is provenance,
+        // the ROLE is declarative ("does not authorize execution"), and the DELEGATION is the authority.
+        // The record names all three and confers none of them — a reader that treated it as permission
+        // would be trusting the organization's note instead of the member's signature (ADR-0041).
+        //
+        // WHO MAY WRITE IT: the member, for themselves, presenting the grant they just signed. The
+        // delegation must be granted TO this principal BY that member — an organization records a
+        // membership OF ITSELF and of nobody else. Enforced here rather than only at the Home, because
+        // the Home is not the only thing that can reach this DO.
+        const record = body.record as {
+          memberAgent?: string; organizationAgent?: string;
+          roleAssignment?: { materializedByDelegation?: { delegate?: string; delegator?: string } };
+        } | undefined;
+        const member = String(record?.memberAgent ?? '').toLowerCase();
+        if (!record || !/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'record.memberAgent required' }, 400);
+        if (member !== sessionSa.toLowerCase()) {
+          return json({ error: 'a member records their own membership — the session must be the member' }, 403);
+        }
+        if (String(record.organizationAgent ?? '').toLowerCase() !== principal.toLowerCase()) {
+          return json({ error: 'a membership record belongs to the organization it names' }, 403);
+        }
+        const wire = record.roleAssignment?.materializedByDelegation;
+        if (!wire) return json({ error: 'a membership is materialized by a delegation; none was presented' }, 400);
+        if (String(wire.delegate ?? '').toLowerCase() !== principal.toLowerCase()) {
+          return json({ error: 'the membership delegation must be granted TO this organization' }, 403);
+        }
+        if (String(wire.delegator ?? '').toLowerCase() !== member) {
+          return json({ error: 'the membership delegation must be granted BY the member it records' }, 403);
+        }
+        return this.serialize(async () => {
+          await this.writeDoc(grant, `org.membership:member:${member}`, record);
+          return json({ ok: true, member });
+        });
+      }
       if (op === 'directory.publish') {
         const listing = body.listing as DirectoryListingV1 | undefined;
         if (!listing) return json({ error: 'listing required' }, 400);

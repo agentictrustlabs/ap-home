@@ -15,7 +15,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import { deriveStanding, type StandingDeps } from './standing.js';
-import { rosterRows, invitedMemberRows, mergeRoster } from './directory-rows.js';
+import { rosterRows, invitedMemberRows, membershipRows, mergeRoster } from './directory-rows.js';
 
 export const MEMBERSHIP_LIST_TOOL: ToolSpec = {
   id: 'organization.membership.list',
@@ -107,10 +107,16 @@ export function membershipListInvoker(deps: MembershipDeps, addressee: Address, 
     let invited: ReturnType<typeof invitedMemberRows> = [];
     if (deps.survey && deps.readRecords) {
       const inventory = await deps.survey(org).catch(() => []);
-      const inviteKeys = inventory.map((r) => r.recordType).filter((rt) => rt.startsWith('org.invite:agent:')).slice(0, 100);
-      if (inviteKeys.length) {
-        const bodies = await deps.readRecords(org, inviteKeys).catch(() => ({}));
-        invited = invitedMemberRows(inviteKeys, bodies);
+      const keys = inventory.map((r) => r.recordType);
+      // THE ROSTER PROPER first: the organization's own membership records (spec 325). These are inside
+      // the `vault:org.membership:*` scope its grant already carries, so unlike the invitations they are
+      // actually readable by the organization's own agent.
+      const memberKeys = keys.filter((rt) => rt.startsWith('org.membership:member:')).slice(0, 200);
+      const inviteKeys = keys.filter((rt) => rt.startsWith('org.invite:agent:')).slice(0, 100);
+      const wanted = [...memberKeys, ...inviteKeys];
+      if (wanted.length) {
+        const bodies = await deps.readRecords(org, wanted).catch(() => ({}));
+        invited = [...invitedMemberRows(inviteKeys, bodies), ...membershipRows(memberKeys, bodies)];
       }
     }
     const members = mergeRoster(published, invited)

@@ -108,5 +108,42 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', ...(displayName ? { displayName } : {}), delegation: d });
     await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
   }
-  return json({ ok: true, memberAccess: madValid });
+  // 3. THE MEMBERSHIP ITSELF, in the ORGANIZATION's own vault — spec 325's OrganizationMembership
+  //    (finding ORG-MEM-1). Steps 1 and 2 record the member's own link and a Home-side index; neither is
+  //    the organization's record of whom it admitted, and until this existed no such record was written
+  //    anywhere. The org's Members panel read the KV index and looked right; its OWN agent, asked "who
+  //    are the members", answered nobody.
+  //
+  //    Written by the member, for themselves, presenting the grant they just signed — the DO re-checks
+  //    that the delegation is TO this org and BY this member, so nothing here is trusted on its word.
+  //    Best-effort: the grant has already landed and the membership is real; a failed note costs the
+  //    org's own read, not the membership.
+  //    REPORTED, not swallowed. A silent catch here made a backfill print "recorded" for four members
+  //    whose records were never written — the endpoint's other work had succeeded, so `ok:true` was
+  //    true and useless. Best-effort must still say what happened.
+  let membershipRecorded = false;
+  let membershipError: string | undefined;
+  try {
+    const { callInteractions } = await import('./channels');
+    const r = await callInteractions(env, org, 'org.recordMembership', {
+      session: token,
+      record: {
+        type: 'ap.org.membership.v1',
+        memberAgent: person,
+        organizationAgent: org,
+        ...(displayName ? { displayName } : {}),
+        admittedVia: 'invitation',
+        admittedAt: new Date().toISOString(),
+        // The ROLE is declarative and authorizes nothing; the DELEGATION is what confers access. Both are
+        // named here so a reader can see which role a given grant materialises (aporg:RoleAssignment).
+        roleAssignment: { assignedRole: 'member', materializedByDelegation: d },
+      },
+    });
+    membershipRecorded = r.status === 200;
+    if (!membershipRecorded) membershipError = JSON.stringify(r.body).slice(0, 200);
+  } catch (e) {
+    // The membership stands on the signed grant; this is the organization's own note of it.
+    membershipError = e instanceof Error ? e.message : String(e);
+  }
+  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}) });
 };
