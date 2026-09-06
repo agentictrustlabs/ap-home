@@ -1711,6 +1711,9 @@ app.post('/harness/ask', async (c) => {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
     surface?: HarnessRunInput['surface'];
+    /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
+     *  knows its intent and parameters, so no model re-derives them; every gate is unchanged. */
+    plan?: HarnessRunInput['plan'];
   } | null;
   if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
@@ -1753,6 +1756,7 @@ app.post('/harness/ask', async (c) => {
   try {
     const { result, resolved, interactionFor } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee,
+      ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
@@ -1809,6 +1813,7 @@ app.post('/harness/ask', async (c) => {
         await saveRun(c.env as never, {
           runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
           presented: turn.presented, supplied: turn.supplied,
+          ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
           // WHY THIS RUN EXISTS survives every turn. Rebuilding the checkpoint from the turn alone
           // dropped it, so a work item claimed from an endeavor forgot which step it was for by the
           // second turn — and completed on chain with nothing to satisfy.

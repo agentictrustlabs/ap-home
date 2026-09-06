@@ -43,7 +43,8 @@ const intent = { goal: `invite ${INVITEE} to ${TEAM}`, context: { org: TEAM, inv
 const plan = { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: INVITEE } }] };
 
 // 1 — the deterministic entry, no mandate: authority_required names BOTH digests.
-const r1 = await post('/harness/ask', { session: si.homeSession, addressee: TEAM, message: intent.goal });
+// The BUTTON's entry: a supplied plan through the conversational boundary — no model re-derives a click.
+const r1 = await post('/harness/ask', { session: si.homeSession, addressee: TEAM, message: intent.goal, plan });
 const rep = r1.reply;
 if (rep?.kind !== 'authority_required') throw new Error(`expected authority_required: ${JSON.stringify(r1).slice(0, 400)}`);
 if (!rep.alsoApprove?.length) throw new Error(`authority_required carries no alsoApprove: ${JSON.stringify(rep).slice(0, 400)}`);

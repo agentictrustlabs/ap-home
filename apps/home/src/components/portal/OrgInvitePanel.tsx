@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
+import { inviteThroughHarness } from '../../home/invite-harness';
 import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-send';
 import { approveMessagingContact, COMMUNITY_MESSAGING_VALIDITY_SECONDS } from '../../lib/messaging-ceremony';
 import { ApproveMessaging } from './ApproveMessaging';
@@ -66,18 +67,22 @@ export function OrgInvitePanel({ org }: { org: string }) {
     setBusy(true); setBusyFor(hit.name); setErr(null); setNote(null);
     let grantNote = '';
     try {
-      // Pre-sign the org→invitee member-access grant and store it in the org vault; /connect/org-membership
-      // picks it up when they join. Best-effort — a failed sign/store still sends a valid (grant-less) invite.
+      // THE GOVERNED CORE GOES THROUGH THE HARNESS — spec 361 I4, execution parity's screen side. This
+      // button and the words "invite X to this team" now reach ONE implementation: the screen submits a
+      // supplied plan (a click is not a sentence — no model re-derives it), the reply names both digests,
+      // and mintApprovedMandate approveHashes mandate + grant in one org userOp: ONE signature, same as
+      // the direct pre-sign this replaces, with the mandate the Ask path always required now covered by
+      // the same prompt instead of skipped. Best-effort exactly as before — a failed grant still sends a
+      // valid (grant-less) invite, and the note says so.
       try {
         const via = resolveVia(profile?.credential, session.via);
         const sign = await signHashFor(via, communityId as Address, { token: session.token });
-        const mad = toWire(await issueOrganizationResourceAccessDelegation(communityId as Address, hit.smartAgent as Address, MCP_SERVER_ID, sign));
-        const gr = await fetch('/connect/org-invite/agent', {
-          method: 'POST', headers: authed,
-          body: JSON.stringify({ org: communityId, agent: hit.smartAgent.toLowerCase(), memberAccessDelegation: mad }),
+        const out = await inviteThroughHarness({
+          org: communityId as Address, invitee: hit.smartAgent as Address,
+          session: { token: session.token }, signHash: sign,
         });
-        const gb = (await gr.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!gr.ok || !gb.ok) throw new Error(gb.error ?? `grant store failed (${gr.status})`);
+        if (!out.ok) throw new Error(out.error);
+        if (!out.recorded) grantNote = ' (issued; the vault record could not be stored — it can be re-sent)';
       } catch (e) {
         grantNote = ` (without a pre-signed access grant: ${e instanceof Error ? e.message : String(e)})`;
       }
