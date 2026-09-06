@@ -645,7 +645,11 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
         functionName: 'isValidSignature', args: [grantDigest, '0x03'],
       }).catch(() => null);
       if (approved === '0x1626ba7e') {
-        return { grantDigest, wire: { ...grant, salt: grant.salt.toString(), signature: '0x03' }, org, invitee, approvedHash: true };
+        // The SAME result shape as the signed path — the surface's recorder (`invitationOf`) keys on
+        // `invited` + `memberAccessDelegation`, and a short-circuit that returned a different shape was
+        // an invitation the flyout silently never stored (found live: two invites issued, zero recorded).
+        const approvedWire: DelegationWireV1 = { ...grant, salt: grant.salt.toString(), signature: '0x03' as Hex };
+        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true };
       }
     }
 
