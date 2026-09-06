@@ -734,6 +734,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Ma
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
+          // The org's own INVITATION records, found through its inventory (spec 356 §2.5). A member who
+          // joined by invite never published a listing, and reading listings alone hides them.
+          ...(deps.survey ? { survey: deps.survey } : {}),
+          ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
         },
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);

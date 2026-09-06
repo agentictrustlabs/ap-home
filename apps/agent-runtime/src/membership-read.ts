@@ -15,6 +15,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import { deriveStanding, type StandingDeps } from './standing.js';
+import { rosterRows, invitedMemberRows, mergeRoster } from './directory-rows.js';
 
 export const MEMBERSHIP_LIST_TOOL: ToolSpec = {
   id: 'organization.membership.list',
@@ -33,6 +34,11 @@ interface Listing { smartAgent?: string; agent?: string; displayName?: string; n
 
 export interface MembershipDeps extends StandingDeps {
   resolveName?: (name: string) => Promise<string | null>;
+  /** The org's own record INVENTORY (spec 356 §2.5) — how the invitation records are found without
+   *  guessing member addresses. Absent ⇒ listings only, which hides everyone who joined by invite. */
+  survey?: (subject: string) => Promise<Array<{ recordType: string; updatedAt?: string }>>;
+  /** Read those invitation records, one batched call. */
+  readRecords?: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   /** The roster read, WITH its reason. Three states a bare `null` cannot tell apart: the organization
    *  never enabled its own storage (permanent, and someone can act on it), the read failed (transient),
    *  and the roster is genuinely empty. Reporting the first as the second sent people to retry something
@@ -83,13 +89,36 @@ export function membershipListInvoker(deps: MembershipDeps, addressee: Address, 
       // Unreadable is not empty. Saying "no members" here would invent an answer.
       if (doc === null) return { members: [], count: 0, refused: 'the roster could not be read just now' };
     }
-    const listings = ((doc as { listings?: Listing[] } | null)?.listings ?? []);
-    const members = listings
+    // ONE PARSER (`directory-rows.ts`). This read `doc.listings`, which is `undefined` for the ARRAY the
+    // DO actually writes — so it answered "0 members" for every organization whatever its roster held,
+    // and zero is plausible enough for a young org that nobody questioned it.
+    const published = rosterRows(doc);
+    // AND THE ORG'S OWN INVITATIONS. A listing is self-published; somebody who joined by invitation and
+    // never published one is a real member with no listing. The organization's `org.invite:agent:<sa>`
+    // records name them, in its own vault, written when it admitted them.
+    //
+    // INERT TODAY, AND DELIBERATELY LEFT IN PLACE. The survey rides the organization's OWN DO grant,
+    // whose per-record scope does not cover `org.invite:*` — so this finds nothing on the live estate
+    // even though the records are there (verified: 123 records in Missio Nexus's vault, one of them an
+    // invite, and the survey returns 122). That is per-record scope working, not failing. Reading them
+    // needs the STEWARD's delegation presented, the way the Home's own reader does it — see finding
+    // ORG-MEM-1. This runs the moment a caller supplies a survey that can see them, and asserts nothing
+    // in the meantime.
+    let invited: ReturnType<typeof invitedMemberRows> = [];
+    if (deps.survey && deps.readRecords) {
+      const inventory = await deps.survey(org).catch(() => []);
+      const inviteKeys = inventory.map((r) => r.recordType).filter((rt) => rt.startsWith('org.invite:agent:')).slice(0, 100);
+      if (inviteKeys.length) {
+        const bodies = await deps.readRecords(org, inviteKeys).catch(() => ({}));
+        invited = invitedMemberRows(inviteKeys, bodies);
+      }
+    }
+    const members = mergeRoster(published, invited)
       .map((l) => ({
-        agent: String(l.smartAgent ?? l.agent ?? '').toLowerCase(),
-        name: l.name ?? l.displayName ?? null,
+        agent: l.agent,
+        name: l.name,
+        via: l.via,
         ...(l.role ? { role: l.role } : {}),
-        ...(l.status ? { status: l.status } : {}),
       }))
       .filter((m) => /^0x[0-9a-f]{40}$/.test(m.agent));
     if (!members.length) {
