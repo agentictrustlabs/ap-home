@@ -48,6 +48,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { selectPlanner, selectComposer } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
+import { loadPlaybook } from './playbook.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
@@ -1657,10 +1658,15 @@ export function askVocabulary(): Array<AskCapabilityLike & { label: string }> {
  * complete and by the realm the person is standing in. Narrowing only — a surface that names a capability
  * this agent does not have gets nothing extra, and a realm never grants.
  */
-export function scopedActionTools(surface?: AskScopeV1): ToolSpec[] {
+export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string> } | null): ToolSpec[] {
   let tools = HARNESS_ACTION_TOOLS;
   const declared = surface?.capabilities?.length ? new Set(surface.capabilities) : null;
   if (declared) tools = tools.filter((t) => declared.has(t.capability?.id ?? t.id));
+  // THE PLAYBOOK NARROWS THE OFFER (spec 354 §4.4): only what this agent's compiled archetype knows how
+  // to do. Behavior honesty, not authority — a removed tool is one the planner will not pick; the mandate
+  // gate is untouched. Absent playbook ⇒ no narrowing (the bare harness offers everything the surface
+  // allows).
+  if (playbook) tools = tools.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id));
   // A person's own realm charters organizations; an organization charters what lives inside it. Offering
   // `organization.create` while standing in a service is offering a plan whose parent makes no sense.
   const kind = surface?.realm?.kind;
@@ -1746,6 +1752,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // and the person was told "I can't help with that" one step after being told it needed their signature.
   // Saying what the mandate covers is guidance, never authority: the verifier still judges the step, and a
   // plan that ignores this is refused by the same gates as any other.
+  // The acting agent's playbook (spec 354 §4.3), loaded from ITS vault at admission and digest-verified.
+  // Absent ⇒ the bare harness offers everything the surface allows; present ⇒ the Ask offers only what
+  // the archetype knows how to do, and the planner is told what it IS.
+  const playbook = await loadPlaybook(deps.readSubjectRecord, String(input.addressee ?? '')).catch(() => null);
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
@@ -1789,7 +1799,11 @@ The runtime expands call 2 into one act per member, each separately authorized. 
 yourself, do NOT emit one call per member, and never fan out over anything except what a tool
 enumerates. "Choose the tool" above means one CAPABILITY — this two-call form is still one capability,
 fanned out.`;
-  const selected = selectPlanner(env as never, { systemPrompt: fanOutPrompt });
+  // The playbook's own words lead: an agent set to an archetype is TOLD what it is before the rules of
+  // asking. Rendered from the compiled definition (spec 354) — versioned and receipted, never a silent
+  // prompt edit.
+  const withPlaybook = playbook ? `${playbook.instructions}\n\n---\n\n${fanOutPrompt}` : fanOutPrompt;
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook });
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
@@ -1811,7 +1825,7 @@ fanned out.`;
   // agent cannot run would have the planner pick it and the step fail — and a tool that degraded to a
   // keyword search instead would answer a different question than the one it advertised (ADR-0013).
   const tools = [
-    ...scopedActionTools(input.surface), ...ASK_DISCOVERY_TOOLS,
+    ...scopedActionTools(input.surface, playbook), ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never) }) ? [KB_QUESTION_TOOL] : []),
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.

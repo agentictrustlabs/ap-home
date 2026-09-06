@@ -352,6 +352,11 @@ export const ORG_APPLICATIONS_RESOURCE_SCOPE = 'vault:org.applications' as const
 export const COORDINATION_REQUESTS_RESOURCE_SCOPE = 'vault:coordination.requests' as const;
 export const COORDINATION_INDEX_RESOURCE_SCOPE = 'vault:coordination.index' as const;
 export const COORDINATION_ENDEAVOR_WILDCARD_SCOPE = 'vault:coordination.endeavor:*' as const;
+/** spec 354 §4.3 — the agent's compiled playbook (ArchetypeAssignmentV1). ADDITIVE, not in REQUIRED_SCOPES:
+ *  a grant signed before archetypes existed keeps working for everything else and is denied ONLY this
+ *  record until the steward re-enables — the honest "re-enable to set a playbook" signal, never a blanket
+ *  stale. Behavior, not authority: the record moves no grant. */
+export const ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE = 'vault:archetype.assignment' as const;
 
 /** spec 334 §6 — the org's OWN app-coordination records the org agent may READ (read-only) while it
  *  works an endeavor, so its deliverables are grounded in what the org has actually recorded rather
@@ -423,7 +428,7 @@ function buildInteractionsStruct(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE, ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
       // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
       { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },

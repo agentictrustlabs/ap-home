@@ -354,7 +354,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // path without landing here, so every capability save was refused by this allowlist and fell back to the
 // Home's KV cache — the save LOOKED fine and nothing reached the owner's vault. A best-effort mirror
 // hides a missing allowlist entry perfectly; only reading the vault back shows it.
-const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data']);
+const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
 const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timeline is a recent-window projection.
 
