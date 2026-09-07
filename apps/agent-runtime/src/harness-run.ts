@@ -2794,13 +2794,19 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // asked for, which somebody else still has to bring about.
       const actedReceipt = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational');
       const established = actedReceipt?.binding?.expectedOutcome ?? 'authoritative';
-      const res = (r.result && typeof r.result === 'object' ? r.result : {}) as { txHash?: string };
+      const res = (r.result && typeof r.result === 'object' ? r.result : {}) as { txHash?: string; inviteeEmail?: string; emailDelivery?: { ok: boolean; delivery?: string; error?: string } };
+      // AN EFFECT THAT DID NOT HAPPEN IS SAID. The email that carries an invitation is the act's declared
+      // consequence; a done reply that reports the grant and not the mail hid a failed send behind
+      // "submitted and recorded" (caught live 2026-09-07).
+      const mail = res.inviteeEmail
+        ? (res.emailDelivery?.ok ? ` — invitation ${res.emailDelivery.delivery === 'logged' ? 'link logged (email not configured)' : `emailed to ${res.inviteeEmail}`}` : ` — but the email to ${res.inviteeEmail} did not go: ${res.emailDelivery?.error ?? 'delivery failed'}`)
+        : '';
       const fulfillment = actedCap ? {
         capability: actedCap, established,
         ...(res.txHash ? { evidence: `tx ${res.txHash}` } : actedReceipt?.outputDigest ? { evidence: `receipt ${actedReceipt.stepRef}` } : {}),
-        words: established === 'submission'
+        words: (established === 'submission'
           ? `${CAPABILITY_WORDS[actedCap] ?? actedCap}: submitted and recorded — the outcome is not established until the other party acts`
-          : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`,
+          : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`) + mail,
       } : undefined;
       return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }

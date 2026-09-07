@@ -790,6 +790,12 @@ app.use('*', async (c, next) => {
   // no ambient cookie authority to forge, the same rationale as /interactions/*. A browser POST to the
   // same path has no marker and keeps CSRF.
   if (c.req.path === '/harness/ask' && isInternalCall(c.req.raw, c.env)) return next();
+  // /email/send (spec 365) — authorization is ENTIRELY body-carried: a broker-verified Home session (and, for
+  // `as`, stewardship derived from the chain). No ambient cookie authority to forge — a cross-site page
+  // cannot mint a session, and a JSON body is not a form post — so double-submit CSRF adds nothing; the
+  // same rationale as /interactions/*. This is what lets the Home's SERVER send an invitation through the
+  // Worker's email binding (caught live 2026-09-07: the invite ran, the mail never left — "csrf required").
+  if (c.req.path === '/email/send') return next();
   // Peer attestation (spec 338 §6) — deliberately public and CSRF-exempt.
   //
   // CSRF defends state-changing actions taken WITH THE USER'S CREDENTIALS. This endpoint takes no
