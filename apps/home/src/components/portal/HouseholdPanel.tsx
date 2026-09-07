@@ -20,6 +20,7 @@ import { BusyButton } from '../shared/BusyButton';
 import { AgentName } from '../shared/AgentName';
 import { householdThroughHarness, readHouseholdThroughHarness, type HouseholdMemberRow } from '../../home/household-harness';
 import { searchAgentsKb } from '../../lib/agent-search';
+import { ensureCsrfToken, csrfHeaders } from '../../csrf';
 import { mutedText, errorText } from './theme';
 
 const KIN = ['', 'spouse', 'child', 'parent', 'sibling'] as const;
@@ -114,8 +115,11 @@ export function HouseholdPanel() {
     if (!session?.token || !address.includes('@')) return;
     setBusy(true); setErr(''); setInvited(null);
     try {
+      // A browser POST to the a2a needs the CSRF pair like every other one — the send is an outward
+      // act, and the 403 without it ("csrf required") is the boundary doing its job.
+      await ensureCsrfToken();
       const res = await fetch('/a2a/email/send', {
-        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
+        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
         body: JSON.stringify({
           session: session.token, to: address,
           subject: 'An invitation to set up your own agent',

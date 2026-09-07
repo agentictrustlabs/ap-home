@@ -4,10 +4,15 @@
 // ENS-v2 + The-Graph pattern). No chain fallback: a KB miss means "not indexed".
 // Search is DISCOVERY, never authority — acting on a result (message, delegate)
 // re-verifies against the chain at the point of action.
-
-const MCP_URL =
-  (process.env.NEXT_PUBLIC_DISCOVERY_MCP_URL as string | undefined) ??
-  'https://demo-discovery-mcp.richardpedersen3.workers.dev';
+//
+// THROUGH THIS DEPLOYMENT'S OWN AGENT, and never a hostname held in the browser. It used to default to
+// the production discovery MCP, so faithnet.me — a Home on faithchain (34348) — searched Base Sepolia's
+// index and offered people agents that do not exist on the chain it acts on (`advisor-alpha.agent`,
+// `alvaro-ferrer.impact`). A directory from the wrong chain is not a degraded answer; it is a confident
+// wrong one, and picking a row from it means addressing an agent this Home cannot reach. `/a2a` rewrites
+// to the a2a this deployment is wired to (next.config.mjs), whose `DISCOVERY_MCP` binding is per
+// environment — so the chain decides the index, and no surface can be pointed at the wrong one.
+const DIRECTORY = '/a2a/discovery';
 
 export interface AgentSearchHit {
   /** Full agent name, e.g. `sarah.impact` (null for unnamed — filtered out below). */
@@ -29,11 +34,7 @@ export interface AgentSearchHit {
 // returns 0 when the subject is not yet endorsed. This is CORROBORATION, never authorization.
 export async function lookupIndependentEndorsers(sa: string): Promise<number | null> {
   try {
-    const res = await fetch(`${MCP_URL}/lookup`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agents: [sa] }),
-    });
+    const res = await fetch(`${DIRECTORY}/lookup?agents=${encodeURIComponent(sa)}`);
     if (!res.ok) return null;
     const out = (await res.json()) as {
       ok?: boolean;
@@ -49,7 +50,7 @@ export async function lookupIndependentEndorsers(sa: string): Promise<number | n
 }
 
 export async function searchAgentsKb(q: string, limit = 20): Promise<AgentSearchHit[]> {
-  const res = await fetch(`${MCP_URL}/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  const res = await fetch(`${DIRECTORY}/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   if (!res.ok) throw new Error(`knowledge-base search failed (${res.status})`);
   const out = (await res.json()) as {
     ok?: boolean;

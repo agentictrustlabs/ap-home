@@ -6967,6 +6967,64 @@ app.all('/custody/vault-key/:name', async (c) => {
   return new Response(await resp.text(), { status: resp.status, headers: { 'Content-Type': 'application/json' } });
 });
 
+// GET /discovery/search?q=&limit= — THE DIRECTORY THIS DEPLOYMENT ANSWERS FOR.
+//
+// A browser surface must not hold a discovery hostname. The Home serves more than one estate from one
+// build (faithnet.me and impact-agent.me), so a constant compiled into the client is a constant that is
+// wrong for one of them — and it was: searching from faithnet.me returned `.impact` and `.agent` names
+// from Base Sepolia's index, which is another chain's answer delivered confidently.
+//
+// The binding is per environment (`DISCOVERY_MCP` → `demo-discovery-mcp-faithnet` here), so asking the
+// AGENT for the directory makes "the right index" a deployment fact instead of a client's guess. Public,
+// on-chain-derived facts only (ADR-0040), so it needs no session — the same reason the capability list
+// does not.
+app.get('/discovery/search', async (c) => {
+  const q = (c.req.query('q') ?? '').trim();
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 8) || 8, 1), 25);
+  if (q.length < 2) return c.json({ ok: true, results: [] });
+  const fetchDiscovery = discoveryFetchFor(c.env);
+  const res = await fetchDiscovery(`/search?q=${encodeURIComponent(q)}&limit=${limit}`, { method: 'GET' }).catch(() => null);
+  // NO FALLBACK to another index (ADR-0013): a deployment whose discovery is unreachable answers "I
+  // could not look", never "here is what a different chain thinks".
+  if (!res || !res.ok) return c.json({ ok: false, error: 'the directory could not be reached', results: [] }, 502);
+  const body = (await res.json().catch(() => null)) as { results?: unknown[] } | null;
+  return c.json({ ok: true, results: body?.results ?? [] });
+});
+
+// GET /discovery/lookup?agents=0x..,0x.. — corroboration counts for agents somebody already named.
+// Same binding, same reason: a browser must not hold a discovery hostname, and a count from another
+// chain's index is a wrong answer wearing a number. A GET, because it is a READ — shaping it as a POST
+// would drag CSRF into a path that changes nothing.
+app.get('/discovery/lookup', async (c) => {
+  const agents = (c.req.query('agents') ?? '').split(',').map((a) => a.trim()).filter((a) => /^0x[0-9a-fA-F]{40}$/.test(a)).slice(0, 25);
+  if (!agents.length) return c.json({ ok: true, results: [] });
+  const res = await discoveryFetchFor(c.env)('/lookup', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agents }),
+  }).catch(() => null);
+  if (!res || !res.ok) return c.json({ ok: false, error: 'the directory could not be reached', results: [] }, 502);
+  const out = (await res.json().catch(() => null)) as { results?: unknown[] } | null;
+  return c.json({ ok: true, results: out?.results ?? [] });
+});
+
+// GET /discovery/names?limit= — the registered-name directory, newest first.
+app.get('/discovery/names', async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const res = await discoveryFetchFor(c.env)(`/names?limit=${limit}`, { method: 'GET' }).catch(() => null);
+  if (!res || !res.ok) return c.json({ ok: false, error: 'the directory could not be reached', names: [] }, 502);
+  const out = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  return c.json({ ok: true, ...(out ?? {}) });
+});
+
+// GET /discovery/agent?key= — one agent's public KB triples, for the name-detail pane.
+app.get('/discovery/agent', async (c) => {
+  const key = (c.req.query('key') ?? '').trim();
+  if (!key) return c.json({ ok: false, error: 'key required' }, 400);
+  const res = await discoveryFetchFor(c.env)(`/agent?key=${encodeURIComponent(key)}`, { method: 'GET' }).catch(() => null);
+  if (!res || !res.ok) return c.json({ ok: false, error: 'the directory could not be reached' }, 502);
+  const out = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  return c.json(out ?? { ok: false, error: 'unreadable directory answer' });
+});
+
 // POST /email/send { session, to, subject, text } — WRITE TO SOMEBODY BY EMAIL, from your own thread.
 //
 // The mail goes out on whichever rail this deployment has, and a copy lands in the sender's own inbox in
