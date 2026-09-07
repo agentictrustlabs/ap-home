@@ -77,8 +77,15 @@ export function HouseholdPanel() {
         <div key={m.agent} data-testid={`household-row-${m.agent}`}
           style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border, #e6e8ec)' }}>
           <strong style={{ fontSize: 13 }}>{m.label ?? <AgentName address={m.agent as Address} />}</strong>
+          {/* TWO DIFFERENT QUESTIONS, said as two different sentences. "your child · dependent" reads as
+              one label with a mysterious suffix; it is in fact HOW THEY ARE RELATED to you and WHO IS
+              RESPONSIBLE in this home, which are independent (an adult sibling is kin and neither cared
+              for nor caring). Conflating them is how a system decides a spouse may act for a spouse
+              because the words sounded close enough. */}
           <span className="muted" style={{ fontSize: 11.5 }}>
-            {m.relation ? `your ${m.relation}` : 'in your household'}{m.role && m.role !== 'member' ? ` · ${m.role}` : ''}
+            {m.relation ? `your ${m.relation}` : 'lives with you'}
+            {m.role === 'dependent' ? ' — cared for here' : m.role === 'guardian' ? ' — responsible for dependents here' : ''}
+            {m.household && m.household !== 'home' ? ` · ${m.household}` : ''}
           </span>
           <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 11 }}
             disabled={busy} onClick={() => void remove(m.agent)} data-testid={`household-remove-${m.agent}`}>
@@ -86,7 +93,15 @@ export function HouseholdPanel() {
           </button>
         </div>
       ))}
-      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+      {/* WHAT THE TWO WORDS MEAN, where the person is choosing them — not in a tooltip they will not
+          open. A role grants nothing here: a guardian still needs a delegation to act for anyone. */}
+      <p style={{ ...mutedText, fontSize: 11, marginTop: 14, marginBottom: 4 }}>
+        <strong>How related</strong> is kinship — spouse, child, parent, sibling. <strong>Role</strong> is
+        who looks after whom in this home: <em>member</em> for an adult with no dependency either way,
+        <em> guardian</em> for someone responsible, <em>dependent</em> for someone cared for. They are
+        separate questions, and neither one grants any authority.
+      </p>
+      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
         <input className="input" style={{ flex: '1 1 200px' }} placeholder="their agent (carol.me)" value={who}
           data-testid="household-who" onChange={(e) => setWho(e.target.value)} />
         <select className="input" style={{ flex: '0 0 130px' }} value={kin} data-testid="household-kin" onChange={(e) => setKin(e.target.value)}>

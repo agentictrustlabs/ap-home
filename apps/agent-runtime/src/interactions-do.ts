@@ -1841,21 +1841,40 @@ export class InteractionsDO {
           const label = String(body.label ?? '').trim().slice(0, 80);
           const remove = body.remove === true;
           const householdAudit = buildAuditSink(this.env);
+          // WHICH HOUSEHOLD. A person can belong to more than one — a child between two homes, someone
+          // with a family house and a city flat, a carer who lives part of the week elsewhere — and the
+          // T-box always said so (`memberOfHousehold` ranges over householdS). The record did not: one
+          // flat list meant one household, and adding the second person's home overwrote the first.
+          //
+          // The legacy shape (`{ members: [...] }` at the root) reads as the household named "home", so
+          // nothing already recorded is lost or needs migrating.
+          const householdName = String(body.household ?? '').trim().slice(0, 60) || 'home';
           return this.serialize(async () => {
-            const doc = (await this.readDoc<{ v?: number; members?: Array<Record<string, unknown>> }>(g, 'household.data', null as never)) ?? { v: 1, members: [] };
-            const members = (doc.members ?? []).filter((m) => String(m.agent ?? '').toLowerCase() !== member);
+            const doc = (await this.readDoc<{ v?: number; members?: Array<Record<string, unknown>>; households?: Array<Record<string, unknown>> }>(g, 'household.data', null as never)) ?? { v: 1 };
+            const households = Array.isArray(doc.households) ? [...doc.households]
+              : Array.isArray(doc.members) ? [{ id: 'home', label: 'home', members: doc.members }]
+              : [];
+            const key = householdName.toLowerCase();
+            const at = households.findIndex((h) => String(h.id ?? h.label ?? '').toLowerCase() === key);
+            const current = at >= 0 ? households[at]! : { id: key, label: householdName, members: [] as Array<Record<string, unknown>> };
+            const rows = ((current.members as Array<Record<string, unknown>>) ?? []).filter((m) => String(m.agent ?? '').toLowerCase() !== member);
             if (!remove) {
-              const prior = (doc.members ?? []).find((m) => String(m.agent ?? '').toLowerCase() === member) ?? {};
-              members.push({
+              const prior = (((current.members as Array<Record<string, unknown>>) ?? []).find((m) => String(m.agent ?? '').toLowerCase() === member)) ?? {};
+              rows.push({
                 ...prior, agent: member, role,
                 ...(kin ? { kin } : {}), ...(kinLabel ? { kinLabel } : {}),
                 ...(label ? { label } : (prior.label ? { label: prior.label } : {})),
                 since: prior.since ?? new Date().toISOString(),
               });
             }
-            await this.writeDoc(g, 'household.data', { ...doc, v: 1, members });
+            const next = { ...current, id: current.id ?? key, label: current.label ?? householdName, members: rows };
+            if (at >= 0) households[at] = next; else households.push(next);
+            // A household nobody is in is not a household — it is a name somebody typed once.
+            const kept = households.filter((h) => ((h.members as unknown[]) ?? []).length > 0);
+            const members = rows;
+            await this.writeDoc(g, 'household.data', { v: 1, households: kept });
             await householdAudit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.household.record', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'household.data' } }).catch(() => undefined);
-            return json({ ok: true, member, ...(remove ? { removed: true } : { role, ...(kin ? { kin } : {}) }), count: members.length });
+            return json({ ok: true, member, household: householdName, ...(remove ? { removed: true } : { role, ...(kin ? { kin } : {}) }), count: members.length, households: kept.length });
           });
         }
 

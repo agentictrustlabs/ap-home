@@ -381,7 +381,9 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       + 'Args: member (their agent, by name or address), role ("member" default, "guardian", '
       + '"dependent"), kin (how they are related: spouse, child, parent, sibling, or a word of your own), '
       + 'label (what to call them), remove (true to take them out). Use for "sarah is my daughter", '
-      + '"add my wife to my household", "remove X from my household". It grants nobody anything.',
+      + '"add my wife to my household", "remove X from my household". A person may keep SEVERAL '
+      + 'households (a child between two homes, a second home, a carer\'s week) — name one with '
+      + '`household` when they say which. It grants nobody anything.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -390,6 +392,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         kin: { type: 'string', description: 'spouse | child | parent | sibling — or your own word for it' },
         label: { type: 'string', description: 'What this person calls them, e.g. "Sarah"' },
         remove: { type: 'boolean', description: 'true to take them out of the household record' },
+        household: { type: 'string', description: 'Which household, when the person keeps more than one ("home", "the farm"). Omitted means their main one.' },
       },
       required: ['member'],
     },
@@ -700,7 +703,7 @@ export interface HarnessDeps {
   /** Merge named fields into the person's own contact record. Merge, never replace. */
   mergeProfile?: (person: string, fields: Record<string, string>) => Promise<{ ok: boolean; changed?: string[]; refused?: string[]; error?: string }>;
   /** Record ONE person in the asker's own household note. Private tier; grants nothing. */
-  recordHouseholdMember?: (person: string, input: { member: string; role?: string; kin?: string; label?: string; remove?: true }) => Promise<{ ok: boolean; removed?: true; role?: string; kin?: string; count?: number; error?: string }>;
+  recordHouseholdMember?: (person: string, input: { member: string; role?: string; kin?: string; label?: string; household?: string; remove?: true }) => Promise<{ ok: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string }>;
   now?: () => number;
 }
 
@@ -1161,6 +1164,7 @@ export function householdRecordInvoker(deps: HarnessDeps, person: Address | unde
     const out = await deps.recordHouseholdMember(person.toLowerCase(), {
       member,
       ...(label ? { label } : {}),
+      ...(args.household !== undefined ? { household: String(args.household) } : {}),
       ...(args.role !== undefined ? { role: String(args.role) } : {}),
       ...(args.kin !== undefined ? { kin: String(args.kin) } : {}),
       ...(args.remove === true ? { remove: true } : {}),

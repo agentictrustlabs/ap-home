@@ -1883,8 +1883,9 @@ app.post('/harness/ask', async (c) => {
               agent: m.agent, label: m.label ?? m.name ?? m.agent,
               ...(m.name ? { name: m.name } : {}),
               role: m.role ?? 'member', ...(m.kinWord ? { relation: m.kinWord } : {}),
+              ...(m.household ? { household: m.household } : {}),
             })),
-            note: 'answer by naming each person and how they are related. Say that this is a private record: it is published nowhere and it grants nobody any authority. You LOOKED SOMEBODY UP — do not say that money was sent, a message went out, or that anything is about to happen: nothing was done and saying otherwise is a claim about an act that did not occur.',
+            note: 'answer by naming each person and how they are related — kinship (spouse, child, parent, sibling) and ROLE (who is cared for, who is responsible) are separate facts, so do not merge them into one phrase. Name the household when somebody keeps more than one. Say that this is a private record: it is published nowhere and it grants nobody any authority. You LOOKED SOMEBODY UP — do not say that money was sent, a message went out, or that anything is about to happen: nothing was done and saying otherwise is a claim about an act that did not occur.',
           };
         }
         if (toolId === PROFILE_READ_CAPABILITY) {
@@ -2754,11 +2755,11 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     },
     // Spec 363 W4 — the person's own note of who they live with. Private tier, their own DO, one member
     // at a time (a whole-document write would delete the family members this sentence did not mention).
-    recordHouseholdMember: async (person: string, input: { member: string; role?: string; kin?: string; label?: string; remove?: true }) => {
+    recordHouseholdMember: async (person: string, input: { member: string; role?: string; kin?: string; label?: string; household?: string; remove?: true }) => {
       const out = await callInteractionsInternal(env, person, 'internal.household.record', input)
         .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
-      const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; count?: number; error?: string };
-      return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
+      const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string };
+      return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(r.household ? { household: r.household } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
     },
     readGrantWire: async (person: string, clientId: string) => {
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);

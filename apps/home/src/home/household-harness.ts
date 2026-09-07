@@ -8,7 +8,7 @@ import type { Address } from '@agenticprimitives/types';
 import type { AskReply } from './ask';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
-export interface HouseholdMemberRow { agent: string; label?: string; name?: string; role?: string; relation?: string }
+export interface HouseholdMemberRow { agent: string; label?: string; name?: string; role?: string; relation?: string; household?: string }
 
 const j = async (r: Response) => (await r.json().catch(() => ({}))) as { reply?: AskReply; error?: string; detail?: string };
 

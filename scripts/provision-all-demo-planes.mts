@@ -26,6 +26,10 @@ const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const INTERACTIONS_SERVICE_SA = (process.env.INTERACTIONS_SERVICE_SA ?? '0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a') as Address;
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const DRY = process.argv.includes('--dry-run');
+/** Agents this persona is listed against but does not custody — their ERC-1271 refuses the signature,
+ *  which is the system working. Counted apart from failures so a real one is visible. */
+let notMineCount = 0;
+const notMine = (why: string): boolean => /signature failed verification against the delegator|proof_invalid|not a custodian/i.test(why);
 /** Re-sign interactions grants even when /status says current — for a SCOPE WIDENING the staleness gate
  *  deliberately does not force (blanket-staling the estate is the named hazard; this flag is the
  *  explicit, targeted alternative). */
@@ -64,7 +68,10 @@ for (const handle of HANDLES) {
     // authority to enable a plane is the persona's key passing the agent's ERC-1271, which fail-closes
     // on its own. Filtering on the word skipped a team the persona CUSTODIED but was listed as a mere
     // member of — and it stayed broken while everything the filter liked got fixed.
-    ...orgs.map((o) => ({ sa: o.orgAgent.toLowerCase(), label: `${o.orgName || o.orgAgent.slice(0, 10)} [${o.kind ?? 'org'}]` })),
+    // THE ADDRESS IS PART OF THE LABEL. A failure that names only "Field Workspace" cannot be chased:
+    // two of these are custodied by a credential this persona does not hold, and telling them apart from
+    // a real breakage takes the address to look up on chain.
+    ...orgs.map((o) => ({ sa: o.orgAgent.toLowerCase(), label: `${o.orgName || o.orgAgent.slice(0, 10)} [${o.kind ?? 'org'}] ${o.orgAgent.slice(0, 10)}…` })),
   ];
 
   const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
@@ -77,8 +84,8 @@ for (const handle of HANDLES) {
 
   for (const t of targets) {
     const st = await j(await fetch(`${HOME}/a2a/interactions/${t.sa}/status`, { method: 'POST', headers: H, body: JSON.stringify({ session: token }) })) as { granted?: boolean; current?: boolean; deliveryGranted?: boolean };
-    const needIx = RESIGN || st.granted !== true || st.current !== true;
-    const needDl = st.deliveryGranted !== true;
+    let needIx = RESIGN || st.granted !== true || st.current !== true;
+    let needDl = st.deliveryGranted !== true;
     // THE THIRD LEG — the VAULT KEY (spec 278). Grants authorize the read; the KEK is what decrypts it.
     // rich-big-thompson-team had both planes ON and every read still failing, because nothing had ever
     // bound its key: an agent created outside the Home's org-create ceremony gets grants from this sweep
@@ -101,8 +108,9 @@ for (const handle of HANDLES) {
         console.log(`  ✚ ${t.label} — vault key bound (${prov.kmsKeyRef.slice(0, 24)}…)`);
         fixedCount++;
       } catch (e) {
-        console.log(`  ✗ ${t.label} vault key: ${e instanceof Error ? e.message : String(e)}`);
-        failCount++;
+        const why = e instanceof Error ? e.message : String(e);
+        if (notMine(why)) { console.log(`  · ${t.label} — not yours to enable (you are a member, not its custodian)`); notMineCount++; needIx = false; needDl = false; }
+        else { console.log(`  ✗ ${t.label} vault key: ${why}`); failCount++; }
       }
     }
     if (!needIx && !needDl) continue;
@@ -124,10 +132,16 @@ for (const handle of HANDLES) {
       console.log(`  ${ok ? '✚ FIXED' : '✗ STILL OFF'} ${t.label} — granted=${after.granted} current=${after.current} delivery=${after.deliveryGranted}`);
       if (ok) fixedCount++; else failCount++;
     } catch (e) {
-      console.log(`  ✗ ${t.label}: ${e instanceof Error ? e.message : String(e)}`);
-      failCount++;
+      const why = e instanceof Error ? e.message : String(e);
+      // A REFUSAL BY CUSTODY IS NOT A BREAKAGE. This script deliberately tries every agent a person's
+      // Home lists — filtering on the relationship label once skipped a team they DID custody — so the
+      // agent's own ERC-1271 is what decides, and it fail-closes correctly for one they merely belong
+      // to. Reporting that as "failed" ends every run with a number nobody can act on, which is how a
+      // real breakage hides among four permanent ones.
+      if (notMine(why)) { console.log(`  · ${t.label} — not yours to enable (you are a member, not its custodian)`); notMineCount++; }
+      else { console.log(`  ✗ ${t.label}: ${why}`); failCount++; }
     }
   }
 }
-console.log(`\n${fixedCount} fixed, ${failCount} failed${DRY ? ' (dry run)' : ''}`);
+console.log(`\n${fixedCount} fixed, ${failCount} failed, ${notMineCount} not yours to enable${DRY ? ' (dry run)' : ''}`);
 if (failCount) process.exit(1);
