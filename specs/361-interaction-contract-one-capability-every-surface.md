@@ -132,8 +132,12 @@ authorize a changed request). What is missing is the SHARED surface:
 
 **I4 ledger:** invite ✅ (one-prompt, `alsoApprove` bundle) · fund ✅ (mandate = the one signature; the
 legacy browser-mint DELETED with its last caller, and the converged path gains the FundingReceipt effect
-the direct mint never left) · payment — no screen button exists; the Ask is already the one
-implementation · **charters — OPEN, with a named tension:** the legacy button is ONE signature (spec
+the direct mint never left) · **primary payee ✅** (`treasury.primary.declare`, spec 355's
+`ap:primaryPayee` role: the Home's "Receive payments here" control and the sentence "payments to me
+should go to alice2.treasury" now enter at the same boundary for the same one signature; converging GAINED
+the one-primary rule — naming a new one clears the old in the same act, because two marks are ambiguity a
+payer resolves by asking, which is the question the feature exists to remove) · payment — no screen button
+exists; the Ask is already the one implementation · **charters — OPEN, with a named tension:** the legacy button is ONE signature (spec
 253's batched genesis) while the harness path costs TWO (the parent's mandate + the child's genesis),
 and the approveHash bundle cannot merge them because the mandate's delegator is the PARENT and the
 genesis batch executes as the CHILD — approving the mandate digest there registers it for the wrong SA's
@@ -142,6 +146,16 @@ parent-side authorize batched around the same ceremony (still two device prompts
 is promptless) or a design that lets the genesis signature itself discharge the parent's requirement.
 Decided when it is decided — not converted quietly at a worse prompt count. Email invites likewise stay
 on the direct pre-sign: a counterfactual address cannot run a plan.
+
+**What converging the third family exposed (and fixed for every family):** a *capability* mandate's
+`allowedMethods` caveat carried only the SYNTHETIC selector `methodSelector(<capability id>)`, which the
+off-chain verifier compares and the chain has never heard of. So any capability that redeems its own
+mandate against a contract reverted `MethodNotAllowed` **after** the person had signed — `treasury.fund`
+through the Ask had been broken this way since it converged, silently, because the scorecard's fund
+scenario stops at `authority_required` and no test carried one to settlement. `MandateRequirementV1` now
+takes `methods` (real 4-byte selectors), the app declares them where the call is made (`ONCHAIN_CALLS_FOR`
+— deployment knowledge, never a planner's), and a scenario that only reaches the authority card is now
+understood to prove the *card*, not the act.
 
 ## 6. What we deliberately do NOT adopt (from the review's catalogue)
 

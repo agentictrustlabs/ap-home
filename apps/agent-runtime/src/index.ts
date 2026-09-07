@@ -2576,6 +2576,25 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // The PUBLIC half of "what does this agent hold": `ap:charteredUnder` edges on chain (spec 355 W2).
     // Both parties signed them, so this answers for someone else's treasury without reading anything of
     // theirs — the gap that made "send alice 20 USDC" unroutable for anyone but Alice.
+    // WHAT AN AGENT HOLDS of the demo token — read on chain, for annotating a list of accounts a person
+    // is choosing between. A balance is public ERC-20 state (ADR-0040), it decides nothing, and a failed
+    // read annotates nothing rather than hiding a candidate.
+    valueHeld: async (agent: string) => {
+      const asset = (env.MOCK_USDC ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(asset)) return null;
+      const raw = await pub.readContract({
+        address: asset as Address,
+        abi: [{ type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+        functionName: 'balanceOf', args: [agent as Address],
+      }).catch(() => null) as bigint | null;
+      if (raw === null) return null;
+      // USDC is 6dp on this deployment. "empty" is a fact worth saying plainly — it is why a candidate
+      // is last, and a person scanning for the account that can pay should not have to read a zero.
+      const whole = raw / 1_000_000n;
+      const frac = Number(raw % 1_000_000n) / 1e6;
+      const display = raw === 0n ? 'empty' : `${(Number(whole) + frac).toLocaleString('en-US', { maximumFractionDigits: 2 })} USDC`;
+      return { amount: raw, display };
+    },
     // The inverse read: whose treasury is this? Used ONLY to deliver a payee-side receipt to the person
     // behind the paid treasury — the same edge, read from the other end. It grants nothing.
     ownerOf: charteredOwnerReader({

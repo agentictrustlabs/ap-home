@@ -31,7 +31,8 @@ describe('the payment receipt reaches BOTH parties', () => {
     expect(msgs.map((m) => m.recipient)).toEqual([PAYEE]);
     expect(msgs[0]!.sender).toBe(ASKER);
     // The SENTENCE still names the payer from the record — the sender is delivery, not attribution.
-    expect(msgs[0]!.bodyText).toMatch(/sent you 3 USDC/);
+    // Side-NEUTRAL: one body lands in both threads, so it names both parties rather than saying "you".
+    expect(msgs[0]!.bodyText).toMatch(/sent 3 USDC to /);
     expect(msgs[0]!.bodyText).toContain('0xTX');
   });
 
@@ -101,9 +102,15 @@ describe('the sentence is rendered from the record, never composed', () => {
   };
   it('names the amount, the treasury it reached and the transaction', () => {
     const t = receiptSentence(rec, { payerName: 'alice.me', payeeName: 'bob.treasury', usdc: USDC });
-    expect(t).toContain('alice.me sent you 21 USDC');
+    expect(t).toContain('alice.me sent 21 USDC to');
     expect(t).toContain('bob.treasury');
     expect(t).toContain('0xabc');
+  });
+  it('an UNNAMED payee is named by whose it is — an address alone tells its owner nothing', () => {
+    const t = receiptSentence(rec, { payerName: 'alice.me', payeeOwnerName: 'bob.me', usdc: USDC });
+    expect(t).toContain("bob.me's treasury");
+    // The address stays, for anyone who wants to check rather than believe.
+    expect(t).toMatch(/\(0x[0-9a-f]{4,6}…[0-9a-f]{4}\)/);
   });
   it('an unknown asset stays in BASE UNITS rather than gaining a decimal nobody verified', () => {
     expect(receiptSentence({ ...rec, asset: '0xother' }, {})).toContain('21000000 (base units)');

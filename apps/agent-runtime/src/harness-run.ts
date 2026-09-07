@@ -31,7 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
-import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
+import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer,
@@ -42,6 +42,7 @@ import {
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
   type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector,} from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
+import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -55,7 +56,7 @@ import { declaredEffectSink } from './declared-effects.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
-import { resolveParty, ownAgentsOfType, candidateHint, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
+import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
@@ -81,6 +82,8 @@ export interface HarnessEnv {
   DIGEST_BINDING_ENFORCER?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
+  /** The AgentRelationship record — where `ap:charteredUnder` edges and their roles live. */
+  AGENT_RELATIONSHIP?: string;
   [k: string]: unknown;
 }
 
@@ -119,6 +122,8 @@ export const CHILD_AGENT_TLD: Record<string, string> = Object.fromEntries(CHILD_
  * promise nobody can find.
  */
 export const ORG_INVITE_CAPABILITY = 'organization.membership.invite' as const;
+/** The "pay me here" preference (`ap:primaryPayee` on the public charteredUnder edge). Spec 355/361. */
+export const PRIMARY_PAYEE_CAPABILITY = 'treasury.primary.declare' as const;
 
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
@@ -252,6 +257,33 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // It acts on the TOKEN and needs the FUNDER's authority — the same split a payment has.
     capability: { id: 'treasury.fund', action: 'fund', resourceArg: 'asset', authorityArg: 'funder' },
     risk: 'low',
+  },
+  {
+    // "WHEN SOMEONE PAYS ME, IT GOES HERE" — the Home's `PrimaryPayee` control as a capability (spec 361
+    // I4). A preference, recorded as the `ap:primaryPayee` role on the PUBLIC charteredUnder edge so a
+    // stranger's agent can honour it. It grants nothing: nobody may spend from the marked treasury, and
+    // no gate reads the role — the resolver uses it to stop asking a payer a question only you can answer.
+    id: PRIMARY_PAYEE_CAPABILITY,
+    description:
+      'Say which of the owner\'s treasuries receives payments — the "pay me here" preference other '
+      + 'agents read before paying you, so "send alice 10 usdc" resolves instead of asking. Args: '
+      + 'treasury (its ADDRESS or NAME, e.g. "alice2.treasury"), holder (the SA whose preference this is '
+      + '— normally the person asking), on (false to stop receiving here; default true). It authorizes '
+      + 'no spending and nobody else can set it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        treasury: { type: 'string', description: 'The treasury to be paid — address or name' },
+        holder: { type: 'string', description: 'Whose preference this is (the treasury\'s owner)' },
+        on: { type: 'boolean', description: 'true to receive payments here (default), false to stop' },
+      },
+      required: ['treasury'],
+    },
+    capability: { id: PRIMARY_PAYEE_CAPABILITY, action: 'declare', resourceArg: 'record', authorityArg: 'holder' },
+    // A preference is not a payment: it moves nothing and can be reversed by the same person in one act.
+    // It IS public and it IS on chain, which is why it takes a mandate rather than nothing at all.
+    risk: 'medium',
+    interaction: { navigationTarget: 'treasuries' },
   },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
     id: capability,
@@ -480,6 +512,8 @@ export interface HarnessDeps {
   nameOf?: (address: string) => Promise<string | null>;
   /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
   ownerOf?: (agent: string) => Promise<string | null>;
+  /** What an agent holds of the deployment's value asset — annotates a choice between accounts. */
+  valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
   now?: () => number;
 }
 
@@ -743,6 +777,102 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
   };
 }
 
+const REL_ROLE_ABI = [
+  { type: 'function', name: 'getEdgeByTriple', stateMutability: 'view', inputs: [
+    { name: 'subject', type: 'address' }, { name: 'object_', type: 'address' }, { name: 'relationshipType', type: 'bytes32' },
+  ], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'hasRole', stateMutability: 'view', inputs: [{ name: 'edgeId', type: 'bytes32' }, { name: 'role', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'addRole', stateMutability: 'nonpayable', inputs: [{ name: 'edgeId', type: 'bytes32' }, { name: 'role', type: 'bytes32' }], outputs: [] },
+  { type: 'function', name: 'removeRole', stateMutability: 'nonpayable', inputs: [{ name: 'edgeId', type: 'bytes32' }, { name: 'role', type: 'bytes32' }], outputs: [] },
+] as const;
+const ZERO_EDGE = `0x${'0'.repeat(64)}` as Hex;
+
+/**
+ * `treasury.primary.declare` — "when someone pays me, it goes here" (spec 355 / spec 361 I4).
+ *
+ * THE SAME ACT THE HOME BUTTON MAKES, and now the only implementation of it: a role on the PUBLIC
+ * `ap:charteredUnder` edge, set by the OWNER, who is the object side the contract allows to set it.
+ *
+ * IT GRANTS NOTHING. Nobody may spend from the marked treasury and no gate reads the role — its whole
+ * effect is that a payer's resolver stops asking a question only the owner can answer. That is also why
+ * it is `medium` and not `high`: it moves nothing, and the same person can undo it in one act.
+ *
+ * NO EDGE, NO PREFERENCE — and that is an answer, not a failure. An agent kept off the public record
+ * (spec 338) has nothing to hang a public preference on; for those the grant you signed IS the
+ * preference, and saying so is more use than a retry.
+ */
+export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation): ToolInvoker {
+  return async (_toolId, args, ctx) => {
+    const wire = presented.wire as Delegation;
+    const relationships = (env.AGENT_RELATIONSHIP ?? '').toLowerCase() as Address;
+    if (!/^0x[0-9a-f]{40}$/.test(relationships)) throw new Error('the relationship record is not configured on this deployment');
+    const owner = wire.delegator.toLowerCase() as Address;
+    const named = String(args.holder ?? '').toLowerCase();
+    if (named && named !== owner) throw new Error(`the preference is the owner's to set (${wire.delegator}); the plan named ${named}`);
+    const treasury = await partyAddress(args.treasury, deps, 'the treasury to be paid');
+    const on = args.on === undefined ? true : args.on === true || String(args.on).toLowerCase() === 'true';
+
+    const readEdge = async (subject: string): Promise<Hex | null> => {
+      const id = await deps.readContract({
+        address: relationships, abi: REL_ROLE_ABI, functionName: 'getEdgeByTriple',
+        args: [subject as Address, owner, RELATIONSHIP_TYPE.CHARTERED_UNDER],
+      }).catch(() => null) as Hex | null;
+      return id && id !== ZERO_EDGE ? id : null;
+    };
+    const edgeId = await readEdge(treasury);
+    if (!edgeId) {
+      return {
+        declared: false,
+        treasury, owner,
+        // The screen says this in the same words. A public preference needs a public link.
+        note: 'that treasury is not in the public record, so it cannot be marked for payments — you give someone a way to reach it by answering their request instead',
+      };
+    }
+    const hasRole = async (id: Hex): Promise<boolean> => (await deps.readContract({
+      address: relationships, abi: REL_ROLE_ABI, functionName: 'hasRole', args: [id, ROLE.PRIMARY_PAYEE],
+    }).catch(() => false)) === true;
+
+    // ONE PRIMARY, OR THE PREFERENCE SAYS NOTHING. Two treasuries both marked is not "more preferred" —
+    // the payer's resolver reads it as ambiguity and asks anyway, which is the state this capability
+    // exists to remove. So a switch CLEARS the previous one, in the same mandate, with no second
+    // signature: the person said which one, and saying which one is saying which one it is not.
+    const calls: Array<{ target: Address; data: Hex; what: string }> = [];
+    if (on) {
+      const others = (await deps.charteredAgents?.(owner, 'treasury').catch(() => []) ?? [])
+        .filter((c) => c.agent.toLowerCase() !== treasury);
+      for (const other of others) {
+        const otherEdge = await readEdge(other.agent.toLowerCase());
+        if (otherEdge && await hasRole(otherEdge)) {
+          calls.push({ target: relationships, what: `cleared ${other.name ?? other.agent}`, data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: 'removeRole', args: [otherEdge, ROLE.PRIMARY_PAYEE] }) });
+        }
+      }
+    }
+    const already = await hasRole(edgeId);
+    if (already === on && !calls.length) {
+      // Nothing to do is not a failure, and pretending a transaction happened would be a claim.
+      return { declared: on, alreadySet: true, treasury, owner };
+    }
+    if (already !== on) {
+      calls.push({ target: relationships, what: on ? 'marked' : 'cleared', data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: on ? 'addRole' : 'removeRole', args: [edgeId, ROLE.PRIMARY_PAYEE] }) });
+    }
+
+    const dm = env.DELEGATION_MANAGER as Address;
+    const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
+    const digest = intentDigest(ctx.intent);
+    const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
+    const txHashes: string[] = [];
+    for (const call of calls) {
+      const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], call.target, 0n, call.data] });
+      const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
+      const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
+      txHashes.push(txHash);
+    }
+    return { declared: on, treasury, owner, txHash: txHashes[txHashes.length - 1] ?? null, ...(txHashes.length > 1 ? { txHashes } : {}) };
+  };
+}
+
 /**
  * `messaging.direct.send` — the Home's message box, said out loud.
  *
@@ -794,7 +924,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === PRIMARY_PAYEE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -832,6 +962,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
     }
     if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
+    if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -1022,6 +1153,7 @@ const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.fund': 'fund a treasury with demo USDC',
   'messaging.direct.send': 'send direct messages',
   'resolution.invitation.request': 'ask someone how to reach an agent of theirs',
+  'treasury.primary.declare': 'say which treasury receives payments to you',
 };
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
@@ -1102,7 +1234,11 @@ export type AskReply =
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
       /** Spec 361 — where the outcome LIVES: the acted capability's contract-declared binding, so a surface
        *  can offer 'open it' without a hand-kept capability→route table. Display only. */
-      interaction?: { result?: string; navigationTarget?: string } }
+      interaction?: { result?: string; navigationTarget?: string };
+      /** Spec 360 — WHAT FOLLOWED, and whether it reached anyone. An effect cannot fail the act, so a
+       *  disclosure that did not go out is otherwise invisible: money moved, both parties were promised a
+       *  receipt, and the person was told "Done". A surface must be able to say which half happened. */
+      effects?: Array<{ produces: string; ok: boolean; error?: string }> }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> };
 
 /** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
@@ -1112,6 +1248,9 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
   'messaging.direct.send': 'recipient',
+  // The CALL's target: the relationship record. See the pin in `resolveStepArgs` for why the treasury,
+  // which is what the statement is ABOUT, cannot be the caveat's location.
+  'treasury.primary.declare': 'record',
 };
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
@@ -1226,7 +1365,10 @@ async function resolveStepArgs(
             prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${partyWord(arg)}?`,
             fields: [{
               name: arg, label: partyWord(arg), type: 'choice', required: true,
-              choices: mine.map((c) => ({ value: c.agent, label: c.label, hint: candidateHint(c) })),
+              // WHAT EACH ONE HOLDS, richest first. A person who has created treasuries in conversation
+              // can hold a dozen, and a list of bare addresses puts the choice on the reader with the
+              // least to go on. The balance is evidence, never the answer — the question is still asked.
+              choices: await choicesFor(mine, lookups),
               // One of theirs may not be in their tree yet; a full name is always a valid answer.
               allowOther: true,
             }],
@@ -1368,6 +1510,14 @@ async function resolveStepArgs(
   // This deployment has exactly ONE demo token, so which token is not a choice a planner gets to make.
   // A deployment with several would make it a real choice, and would need a real check — not this.
   if (env.MOCK_USDC) out.asset = String(env.MOCK_USDC).toLowerCase();
+  // THE RECORD A PREFERENCE IS WRITTEN IN is a deployment fact for the same reason: the person is
+  // authorizing a call against the AgentRelationship contract, so that address is what the mandate's
+  // allowedTargets must name. The TREASURY the statement is about travels in the calldata and is shown
+  // on the card — a caveat cannot narrow to one edge, and pretending it can would be a worse claim than
+  // saying plainly what the authority covers.
+  if (where?.capabilityId === PRIMARY_PAYEE_CAPABILITY && env.AGENT_RELATIONSHIP) {
+    out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
+  }
   return out;
 }
 
@@ -1478,6 +1628,13 @@ export async function askReplyFor(env: HarnessEnv, input: {
       if (refusal) return { kind: 'refused', runRef: r.runRef, outcome: 'denied', error: refusal, receipts: r.receipts };
     }
     const requirement = mandateRequirementForStep({ required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
+    // THE CALLS THIS AUTHORITY MAKES. A capability mandate's `actions` are capability ids, whose synthetic
+    // selectors mean something to the verifier and nothing to the chain — so a capability that redeems its
+    // mandate against a contract must also name the real function it calls, or `AllowedMethodsEnforcer`
+    // refuses it after the person has already signed. Deployment knowledge, declared here where the call
+    // is made, never guessed by a planner.
+    const calls = ONCHAIN_CALLS_FOR[r.required.capability.id];
+    if (calls?.length) requirement.methods = [...calls];
     // ONE-PROMPT (spec 361 I4): an invitation needs a SECOND signature from the same delegator (the
     // org→invitee grant). Naming its digest here lets the surface approveHash both in one org userOp —
     // one custodian signature for the mandate AND the grant, and the invoker's run finds the grant
@@ -1597,7 +1754,8 @@ export async function askReplyFor(env: HarnessEnv, input: {
       // for; informational reads before it are how it was planned, not what was done.
       const actedCap = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational')?.capability?.id;
       const ix = actedCap ? input.interactionFor?.[actedCap] : undefined;
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      const effects = r.receipts.flatMap((rc) => rc.effects ?? []);
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(effects.length ? { effects } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
@@ -1679,6 +1837,25 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
+  'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
+};
+
+/**
+ * The EVM functions each capability calls when it redeems its mandate — real 4-byte selectors.
+ *
+ * A capability mandate bounds `allowedMethods` by the CAPABILITY's synthetic selector, which the chain has
+ * never heard of; without the real one the enforcer reverts `MethodNotAllowed` and the person has signed
+ * for nothing. Only capabilities that actually execute on chain under their own mandate appear here — an
+ * invitation derives a grant and a message rides a plane, and neither calls a contract this way.
+ */
+const methodSelectorOf = (signature: string): Hex => toFunctionSelector(`function ${signature}`);
+
+const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
+  // `mint(address,uint256)` on the demo token.
+  'treasury.fund': [methodSelectorOf('mint(address,uint256)')],
+  // `addRole(bytes32,bytes32)` / `removeRole(bytes32,bytes32)` on the relationship record — a switch
+  // clears the previous primary in the same mandate, so both are named.
+  [PRIMARY_PAYEE_CAPABILITY]: [methodSelectorOf('addRole(bytes32,bytes32)'), methodSelectorOf('removeRole(bytes32,bytes32)')],
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
@@ -2105,7 +2282,22 @@ fanned out.`;
           ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
           ...(deps.nameOf ? { nameFor: deps.nameOf } : {}),
-          ...(deps.ownerOf ? { ownerOf: deps.ownerOf } : {}),
+          // WHO A RECEIPT IS TOLD TO, asked of the run's OWN resolution record first.
+          //
+          // "Send bob 2 usdc" reaches an UNNAMED treasury of bob's — unnamed means unlisted (spec 338),
+          // so there is no public edge to read and the chain honestly answers nothing. But this run
+          // already knows whose it is: it got there through a grant bob issued or a link bob published,
+          // and the resolver recorded that as `ownedBy`. These are two different questions — "who
+          // disclosed this agent to me" and "who does the public record say holds it" — and for telling
+          // somebody their treasury was paid, the first is the right one and the only one that answers
+          // for an unlisted agent. The payment then went through and NOBODY was told, which is the exact
+          // silence spec 360 exists to end.
+          ownerOf: async (agent: string) => {
+            const low = agent.toLowerCase();
+            const known = [...resolved.values()].find((r) => r.agent.toLowerCase() === low && r.ownedBy);
+            if (known?.ownedBy) return known.ownedBy.toLowerCase();
+            return deps.ownerOf ? deps.ownerOf(low) : null;
+          },
         },
         { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}), ...(input.person ? { person: input.person } : {}) },
       ),

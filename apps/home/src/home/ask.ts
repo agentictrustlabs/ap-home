@@ -91,7 +91,10 @@ export type AskReply =
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[];
       /** Spec 361 — where the outcome lives, from the acted capability's CONTRACT (never a hand-kept
        *  capability→route table here). Resolved through the app's interaction registry. */
-      interaction?: { result?: string; navigationTarget?: string } }
+      interaction?: { result?: string; navigationTarget?: string };
+      /** Spec 360 — what FOLLOWED the act, and whether it reached anyone. Shown, always: a receipt that
+       *  could not be delivered is the difference between "they were told" and "they will never know". */
+      effects?: Array<{ produces: string; ok: boolean; error?: string }> }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
 
 /** Answers carried into the next turn of the SAME ask. */

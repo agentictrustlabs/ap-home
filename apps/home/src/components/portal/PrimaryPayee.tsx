@@ -13,7 +13,7 @@ import { encodeFunctionData, type Address, type Hex } from 'viem';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import { BusyButton } from '../shared/BusyButton';
 import { CONTRACTS } from '../../lib/chain';
-import { executeCalls } from '../../connect-client';
+import { primaryPayeeThroughHarness } from '../../home/primary-payee-harness';
 import { mutedText, errorText } from './theme';
 
 const REL_ABI = [
@@ -26,8 +26,8 @@ const REL_ABI = [
 ] as const;
 const ZERO32 = `0x${'0'.repeat(64)}`;
 
-export function PrimaryPayee({ treasury, person, via, token, signHash }: {
-  treasury: string; person: string; via: string; token: string;
+export function PrimaryPayee({ treasury, person, token, signHash }: {
+  treasury: string; person: string; token: string;
   signHash: (digest: Hex) => Promise<Hex>;
 }) {
   const [edgeId, setEdgeId] = useState<Hex | null>(null);
@@ -70,12 +70,15 @@ export function PrimaryPayee({ treasury, person, via, token, signHash }: {
   async function set(on: boolean) {
     setBusy(true); setErr('');
     try {
-      const data = encodeFunctionData({ abi: REL_ABI, functionName: on ? 'addRole' : 'removeRole', args: [edgeId!, ROLE.PRIMARY_PAYEE] });
-      // Signed as the PERSON: they are the object side of the edge, which the contract allows to set a
-      // role on it. Saying where your money should go is your say, and nobody else's.
-      const out = await executeCalls(person as Address, signHash, [
-        { to: CONTRACTS.agentRelationship as Address, value: 0n, data },
-      ]);
+      // THROUGH THE HARNESS — spec 361 I4. This used to build the `addRole` call here and submit it
+      // directly, which cost the same one signature but made the button an implementation the Ask could
+      // not reach. Now both surfaces enter at `/harness/ask`: the click supplies its plan, the sentence
+      // is interpreted, and from there it is one capability with one receipt trail. The mandate is still
+      // the only prompt, and naming a new primary now clears the old one in the same act.
+      const out = await primaryPayeeThroughHarness({
+        treasury: treasury as Address, person: person as Address, on,
+        session: { token }, signHash,
+      });
       if (!out.ok) throw new Error(out.error);
       await read();
     } catch (e) {

@@ -65,19 +65,23 @@ function displayAmount(amount: string, asset: string, usdc?: string): string {
  */
 export function receiptSentence(
   r: PaymentReceiptRecordV1,
-  opts: { payerName?: string | null; payeeName?: string | null; usdc?: string; side?: 'payee' | 'payer' },
+  opts: { payerName?: string | null; payeeName?: string | null; usdc?: string; payeeOwnerName?: string | null },
 ): string {
   const who = opts.payerName ? opts.payerName : `${r.payer.slice(0, 6)}…${r.payer.slice(-4)}`;
-  const to = opts.payeeName ? opts.payeeName : `${r.payee.slice(0, 6)}…${r.payee.slice(-4)}`;
+  const shortPayee = `${r.payee.slice(0, 6)}…${r.payee.slice(-4)}`;
+  // An UNNAMED treasury has no name to give, and printing a bare address to the person who owns it is
+  // the least useful true thing available. Whose it is, we usually know — that is how the payment was
+  // routed there at all — so say that, with the address after it for anyone who wants to check.
+  const to = opts.payeeName ? `${opts.payeeName} (${shortPayee})`
+    : opts.payeeOwnerName ? `${opts.payeeOwnerName}'s treasury (${shortPayee})`
+    : shortPayee;
   const amount = displayAmount(r.amount, r.asset, opts.usdc);
-  // BOTH SIDES ARE TOLD, each in their own voice. The payee learns they were paid; the payer gets the
-  // confirmation they would otherwise have to go looking for. Same record, same numbers, two sentences —
-  // and neither is composed: every figure came back from the chain call.
-  const lead = opts.side === 'payer'
-    ? `You sent ${amount} to ${to}.`
-    : `${who} sent you ${amount}. It went to ${to}.`;
+  // ONE SENTENCE, TWO READERS. A direct message is one body in a two-party thread: the payee's copy and
+  // the payer's copy are the same bytes, so a sentence written in the second person ("sent you") reads
+  // as a mistake in whichever thread it was not written for. Naming both parties is correct from either
+  // side, which is what lets a single message satisfy "both of them get told".
   return [
-    lead,
+    `${who} sent ${amount} to ${to}.`,
     `Transaction ${r.txHash}.`,
     `This is a receipt of a transfer that settled — it says the money moved, not what it was for.`,
   ].join(' ');
@@ -156,15 +160,15 @@ export function declaredEffectSink(
           deps.nameFor?.(payer).catch(() => null) ?? Promise.resolve(null),
           deps.nameFor?.(payee).catch(() => null) ?? Promise.resolve(null),
         ]);
-        const words = (side: 'payee' | 'payer') =>
-          receiptSentence(record, { payerName, payeeName, side, ...(ctx.usdc ? { usdc: ctx.usdc } : {}) });
-        const notify = async (to: string, side: 'payee' | 'payer') => {
+        const words = (payeeOwnerName: string | null) =>
+          receiptSentence(record, { payerName, payeeName, payeeOwnerName, ...(ctx.usdc ? { usdc: ctx.usdc } : {}) });
+        const notify = async (to: string, payeeOwnerName: string | null) => {
           // Never message yourself: a note from you to you is not a notification. The payer SIDE lands
           // here by construction — the person who authorised the payment is the sender, and their
           // confirmation is the receipt record in the payer's vault plus the run's own done reply.
           if (!/^0x[0-9a-f]{40}$/.test(to) || to === sender) return;
           const sent = await deps.sendDirectMessage!({
-            sender: sender as Address, recipient: to as Address, bodyText: words(side), session: ctx.session!,
+            sender: sender as Address, recipient: to as Address, bodyText: words(payeeOwnerName), session: ctx.session!,
           }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
           if (!sent.ok) failures.push(`notify ${to}: ${sent.error}`);
         };
@@ -174,11 +178,12 @@ export function declaredEffectSink(
           // — that their own treasury was paid — is theirs by construction. An unchartered payee keeps
           // the old behaviour: the message goes to the agent itself.
           const payeeOwner = deps.ownerOf ? await deps.ownerOf(payee).catch(() => null) : null;
-          await notify(payeeOwner ?? payee, 'payee');
+          const ownerName = payeeOwner && payeeOwner !== payee ? await deps.nameFor?.(payeeOwner).catch(() => null) ?? null : null;
+          // ONE MESSAGE REACHES BOTH. A direct message keeps a copy in each side's own thread, so telling
+          // the payee's person also puts the receipt in the payer's conversation with them — which is why
+          // there is no second send here and why "both parties get told" is one act, not two.
+          await notify(payeeOwner ?? payee, ownerName);
         }
-        // The payer's person, when someone OTHER than them authorised the act (a co-steward flow). In
-        // the common case the authoriser IS the payer's person and the self-guard above ends it.
-        if (parties.has(payer)) await notify(sender, 'payer');
       }
 
       // Throwing here reaches the loop's isolation and becomes an `EffectFailed` event: the payment

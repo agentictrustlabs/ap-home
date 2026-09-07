@@ -616,7 +616,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
                       {/* WHICH ONE RECEIVES. Holding several is ordinary; only you know which is the one
                           to be paid into, and saying so spares every payer a question about your accounts. */}
                       <PrimaryPayee
-                        treasury={t.agent} person={person} via={via} token={token}
+                        treasury={t.agent} person={person} token={token}
                         signHash={async (d) => (await signHashFor(via as Via, person as `0x${string}`, { token }))(d)}
                       />
                     </>

@@ -43,6 +43,10 @@ const SCENARIOS: Scenario[] = [
   { id: 'kb.question', persona: 'nathan', addressee: 'self', message: 'how many organizations are registered in the public directory', expect: { kind: 'answer', textLike: /\d/ } },
   { id: 'standing', persona: 'nathan', addressee: 'self', message: 'am I a member of any organizations', expect: { kind: 'answer' } },
   { id: 'unsupported.honest', persona: 'nathan', addressee: 'self', message: 'book me a flight to denver', expect: { kind: 'answer', textLike: /can't|cannot/i } },
+  // The "pay me here" preference, said out loud (spec 361 I4 · third family). Its whole point is to
+  // REMOVE a question from every future payer, which `verify-ask-primary-payee.mts` proves end to end.
+  { id: 'primary.declare', persona: 'alice', addressee: 'self', message: 'payments to me should go to alice3.treasury',
+    expect: { kind: 'authority_required', capability: 'treasury.primary.declare' } },
   // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
   { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
     plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },
@@ -50,6 +54,9 @@ const SCENARIOS: Scenario[] = [
   { id: 'parity.fund.plan', persona: 'nathan', addressee: '0x2c471607fec409516ab6de6b7517bcf95f1f2edc', message: 'fund my treasury with 5 usdc',
     plan: { steps: [{ toolId: 'treasury.fund', args: { treasury: '0x2c471607fec409516ab6de6b7517bcf95f1f2edc', amount: '5000000' } }] },
     expect: { kind: 'authority_required', capability: 'treasury.fund' } },
+  { id: 'parity.primary.plan', persona: 'alice', addressee: 'self', message: 'payments to me should go to alice3.treasury',
+    plan: { steps: [{ toolId: 'treasury.primary.declare', args: { treasury: '0xa6d91f28c0b310b3495520f96f453011ccaf3479', on: true } }] },
+    expect: { kind: 'authority_required', capability: 'treasury.primary.declare' } },
 ];
 
 const sessions = new Map<string, { token: string; agent: string; cookie: string; csrf: string }>();

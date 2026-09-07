@@ -3,7 +3,7 @@
  *
  *   npx tsx scripts/verify-ask-payment-flow.mts
  *
- * alice asks "send nathan 1 usdc"; the driver answers each prompt the way the Home surface does
+ * alice asks "send bob 1 usdc"; the driver answers each prompt the way the Home surface does
  * (choice → pick, signature → persona-sign, authority_required → mint the mandate) until done, then
  * prints the step receipt's `effects` — the spec 360 outcome: ok:true means the payee's PERSON (via the
  * on-chain ap:charteredUnder edge) was messaged and both parties hold the PaymentReceipt record.
@@ -21,7 +21,7 @@ const csrfRes=await fetch(`${HOME}/a2a/auth/csrf`,{headers:{origin:HOME}});
 const csrf=await j(csrfRes) as {token?:string}; const cookie=(csrfRes.headers.get('set-cookie')??'').split(';')[0];
 const ask=async(body:Record<string,unknown>)=>j(await fetch(`${HOME}/a2a/harness/ask`,{method:'POST',headers:{'content-type':'application/json',origin:HOME,cookie,'x-csrf-token':csrf.token??''},body:JSON.stringify({session:si.homeSession,addressee:si.agent,...body})}));
 
-let r=await ask({message:'send nathan 1 usdc'});
+let r=await ask({message:'send bob 1 usdc'});
 const runRef=r.reply?.runRef;
 for (let turn=0; turn<8; turn++) {
   const k=r.reply?.kind;

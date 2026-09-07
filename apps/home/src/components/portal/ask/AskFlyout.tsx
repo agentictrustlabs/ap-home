@@ -496,6 +496,19 @@ function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kin
             {r?.txHash ? short(r.txHash) : ''}
           </div>
         )}
+        {/* Spec 360 — WHAT FOLLOWED, said plainly. An effect never fails the act, so without this line a
+            payment that told nobody looks exactly like one that told both parties: "Done." The person who
+            just moved money is the one who needs to know the other side has not heard. */}
+        {(reply.effects ?? []).filter((e) => !e.ok).map((e, i) => (
+          <div key={i} className="muted" style={{ fontSize: 11.5, marginTop: 4, color: 'var(--color-amber-700, #b45309)' }} data-testid="ask-effect-failed">
+            It happened, but the receipt did not reach everyone — {plainReason(e.error ?? 'delivery failed')}
+          </div>
+        ))}
+        {(reply.effects ?? []).some((e) => e.ok && e.produces === 'PaymentReceipt') && (
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }} data-testid="ask-effect-ok">
+            Both sides have the receipt.
+          </div>
+        )}
         {/* Spec 361 I2 — WHERE THE OUTCOME LIVES, said by the capability's own contract. This used to be
             unknowable here: the flyout had no table of capability→screen and rightly refused to keep one.
             Now the SKILL.md declares a navigation KEY, the reply carries it for the acted step, and the
