@@ -60,6 +60,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // A person's own contact details are not assignable work either — and this one needs no mandate at
   // all, so a plan step for it would be a step with nothing to authorize.
   'profile.contact.update',
+  // Nor is recording who you live with: it needs no mandate at all, so a plan step for it would be a
+  // step with nothing to authorize.
+  'household.member.record',
 ];
 
 /** A plan step as the work loop sees it. */

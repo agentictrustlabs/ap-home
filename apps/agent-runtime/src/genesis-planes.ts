@@ -41,6 +41,7 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
     'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data', 'vault:coordination.requests',
     'vault:coordination.index', 'vault:coordination.endeavor:*', 'vault:content.*',
     'vault:resolution.requests', 'vault:resolution.grants', 'vault:archetype.assignment', 'vault:payment.receipt:*',
+    'vault:household.data',
   ], ops: ['read', 'write'] },
   { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
   { resources: ['vault:message.body:dm:*'], ops: ['read'] },

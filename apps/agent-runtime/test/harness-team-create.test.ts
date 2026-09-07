@@ -383,11 +383,12 @@ describe('ceremony negotiation (spec 353 S4)', () => {
 
   it('a surface that cannot collect a signature is not OFFERED what needs one', () => {
     const ids = scopedActionTools({ ceremonies: ['data', 'confirmation'] }).map((t) => t.capability?.id ?? t.id);
-    // What survives is exactly what asks for no signature. `profile.contact.update` writes the person's
-    // OWN contact record under their own session — the Home's form asks for nothing either, and a
-    // conversation that demanded a signature the button does not would make talking the expensive way.
-    // Every other action here binds authority a person signs, and none of them is offered.
-    expect(ids).toEqual(['profile.contact.update']);
+    // What survives is exactly what asks for no signature: the two SELF-ACTING capabilities, which write
+    // the person's own records under their own session (their contact details, and their note of who they
+    // live with). The Home's forms ask for nothing either, and a conversation that demanded a signature
+    // the button does not would make talking the expensive way. Every other action here binds authority a
+    // person signs, and none of them is offered.
+    expect(ids).toEqual(['household.member.record', 'profile.contact.update']);
     expect(scopedActionTools({ ceremonies: ['data', 'confirmation', 'signature'] }).length).toBeGreaterThan(0);
   });
 

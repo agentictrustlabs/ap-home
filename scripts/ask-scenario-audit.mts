@@ -61,6 +61,13 @@ const SCENARIOS: Scenario[] = [
     expect: { kind: 'answer', textLike: /private/i } },
   { id: 'profile.edit', persona: 'alice', addressee: 'self', message: 'set my first name to Alice',
     expect: { kind: 'done' } },
+  // The household (spec 363 W4). The read states its tier; the record is SELF-ACTING (no signature);
+  // and the payment proves the point of the whole wave — "my daughter" resolves inside the asker's own
+  // private record, so a payment to her needs no question about who she is.
+  { id: 'household.read', persona: 'alice', addressee: 'self', message: 'who is in my household',
+    expect: { kind: 'answer', textLike: /private/i } },
+  { id: 'household.payment', persona: 'alice', addressee: 'self', message: 'send my daughter 1 usdc',
+    expect: { kind: 'authority_required', capability: 'treasury.payment.execute' } },
   // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
   { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
     plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },
@@ -73,6 +80,9 @@ const SCENARIOS: Scenario[] = [
     expect: { kind: 'authority_required', capability: 'treasury.primary.declare' } },
   { id: 'parity.profile.plan', persona: 'alice', addressee: 'self', message: 'update my profile (city)',
     plan: { steps: [{ toolId: 'profile.contact.update', args: { city: 'Longmont' } }] },
+    expect: { kind: 'done' } },
+  { id: 'parity.household.plan', persona: 'alice', addressee: 'self', message: 'record carol in my household',
+    plan: { steps: [{ toolId: 'household.member.record', args: { member: '0x6fece74d4c13ba2b408a7531e6e44d02dcb3f015', kin: 'daughter', role: 'dependent' } }] },
     expect: { kind: 'done' } },
 ];
 

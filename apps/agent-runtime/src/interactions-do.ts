@@ -19,6 +19,7 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
+import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
@@ -307,6 +308,12 @@ const MESSAGING_DELIVER_SKILL = 'messaging.deliver';
 // fail closed on their own (`no delivery grant`, 409), and the vault-record-scope caveat denies an out-of-scope
 // content write at demo-mcp. Removing it restores exactly the behaviour the two paragraphs above describe.
 export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*', 'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*', 'vault:org.membership:*', 'vault:message.body:dm:*', 'vault:impact-profile', 'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data'] as const;
+
+// Spec 363 W4 — the household record is ADDITIVE, deliberately NOT in REQUIRED_SCOPES. Adding a resource
+// there marks every grant in the estate stale at once (`grantIsCurrent`), which asks every person to
+// re-sign for a record most of them will never write. New grants carry it (genesis + the Home's list);
+// an older grant refuses the write with `record_scope_denied` and the Home offers Enable — which is the
+// same shape `vault:archetype.assignment` already uses, and for the same reason.
 
 // spec 338 §7 — the resolution records are ISSUED (see the Home's interactions struct) but deliberately
 // NOT REQUIRED here. This set is the STALENESS GATE: adding to it declares every existing grant
@@ -1585,7 +1592,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1803,6 +1810,53 @@ export class InteractionsDO {
             const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
+        }
+
+        // ── WHO THEY LIVE WITH (spec 363 W4) ──────────────────────────────────────────────────
+        //
+        // ONE MEMBER AT A TIME, MERGED BY AGENT. "Sarah is my daughter" says one thing about a record
+        // that may hold four people; writing the document would delete the rest, which is the same data
+        // loss the profile merge exists to prevent.
+        //
+        // PRIVATE TIER, and this op is the only writer. The record never leaves the vault: no projection
+        // to the directory, no row in the KB, no copy in the Home's storage. Who lives with whom is not
+        // derivable from chain state, so ADR-0040 forbids it reaching the public read tier at all.
+        //
+        // IT GRANTS NOTHING. A `guardian` role here does not let anyone act for a dependent; that is a
+        // delegation the dependent's custodian issues. No gate reads this record.
+        if (op === 'internal.household.record') {
+          const member = String(body.member ?? '').trim().toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ ok: false, error: 'member must be an agent address' }, 400);
+          if (member === principal) return json({ ok: false, error: 'you are already in your own household — record the people you live WITH' }, 400);
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          // THE ONTOLOGY'S OWN WORDS. `kinTermFor` reads the T-box's prefLabels and altLabels, so
+          // "daughter" is `aphh:child` here and in the resolver — it was recorded as `other` in one and
+          // matched as `child` in the other while each kept its own set.
+          const role = householdRoleFor(String(body.role ?? ''));
+          const kinRaw = String(body.kin ?? '').trim().toLowerCase();
+          // A word the vocabulary does not name is kept VERBATIM as `otherKin`'s label rather than
+          // squeezed into the nearest term — the T-box says why the list is deliberately short.
+          const kin = kinRaw ? (kinTermFor(kinRaw) ?? 'other') : undefined;
+          const kinLabel = kin === 'other' ? kinRaw.slice(0, 40) : undefined;
+          const label = String(body.label ?? '').trim().slice(0, 80);
+          const remove = body.remove === true;
+          const householdAudit = buildAuditSink(this.env);
+          return this.serialize(async () => {
+            const doc = (await this.readDoc<{ v?: number; members?: Array<Record<string, unknown>> }>(g, 'household.data', null as never)) ?? { v: 1, members: [] };
+            const members = (doc.members ?? []).filter((m) => String(m.agent ?? '').toLowerCase() !== member);
+            if (!remove) {
+              const prior = (doc.members ?? []).find((m) => String(m.agent ?? '').toLowerCase() === member) ?? {};
+              members.push({
+                ...prior, agent: member, role,
+                ...(kin ? { kin } : {}), ...(kinLabel ? { kinLabel } : {}),
+                ...(label ? { label } : (prior.label ? { label: prior.label } : {})),
+                since: prior.since ?? new Date().toISOString(),
+              });
+            }
+            await this.writeDoc(g, 'household.data', { ...doc, v: 1, members });
+            await householdAudit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.household.record', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'household.data' } }).catch(() => undefined);
+            return json({ ok: true, member, ...(remove ? { removed: true } : { role, ...(kin ? { kin } : {}) }), count: members.length });
+          });
         }
 
         // ── THE PERSON'S OWN CONTACT PROFILE, MERGED (spec 323 W2 record `impact-profile`) ──

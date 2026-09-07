@@ -86,17 +86,21 @@ export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
     + 'NEVER THE FIRST STEP FOR A PAYMENT OR A MESSAGE: if the ask is to send money or write to someone, '
     + 'choose the capability that DOES that — it resolves who is meant and asks for whatever it needs. '
     + 'This one is for the case where that has already failed because the thing to reach is unlisted, or '
-    + 'where the person explicitly asks for an introduction, an invitation, or a way to reach something. '
+    + 'where the person explicitly asks for an introduction or a way to reach something. '
+    + 'NEVER FOR INVITING SOMEBODY TO AN ORGANIZATION OR TEAM: a person\'s own agent is public and '
+    + 'resolvable by name, so use organization.membership.invite — asking Bob for "a way to reach your '
+    + 'treasury" in order to add him to a team is a question he cannot act on and was never asked. '
     + 'It sends the owner a request THEY decide on; if they agree you are given a way to resolve that '
     + 'agent. It moves no money and grants no authority over anything. '
     + 'IT NOTIFIES THEM ITSELF — do NOT also send a direct message; this one step is the whole ask. '
-    + 'Args: owner (the person to ask — a name or address), wants (what kind of theirs: "treasury"), '
+    + 'Args: owner (the person to ask — a name or address), wants (WHICH KIND of theirs: "treasury", '
+    + '"org", "team", "agent" — say it, there is no default and a wrong one produces a nonsense request), '
     + 'purpose (why, in your own words).',
   inputSchema: {
     type: 'object',
     properties: {
       owner: { type: 'string', description: 'The person to ask — an agent name (alice.me) or address' },
-      wants: { type: 'string', description: "What kind of theirs you need to reach: 'treasury'" },
+      wants: { type: 'string', description: "WHICH KIND of theirs you need to reach — 'treasury' (to send money), 'org', 'team', 'agent'. No default: if the ask does not say, omit it and the person will be asked." },
       purpose: { type: 'string', description: 'Why you are asking, in your own words' },
       usdc: { type: 'string', description: 'The amount you were trying to send, in whole USDC, when the ask named one. Pass it so the payment can be finished in one step later.' },
     },

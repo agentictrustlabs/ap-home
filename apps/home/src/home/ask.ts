@@ -71,6 +71,9 @@ export interface AskEvidence {
 
 export type AskReply =
   | { kind: 'answer'; text: string; runRef: string;
+      /** Spec 361 — the structured result, when THIS surface supplied the plan. A screen renders rows;
+       *  parsing the composed sentence would make it disagree with the record eventually. */
+      results?: Array<{ toolId: string; result: unknown }>;
       /** HOW IT KNOWS. When a step wrote a query to answer, the query comes back with the answer —
        *  otherwise "the directory does not list any organizations" and "I searched names for the word
        *  'organizations' and matched none" are the same sentence to a reader, and only one of them is

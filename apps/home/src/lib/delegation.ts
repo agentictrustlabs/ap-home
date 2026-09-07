@@ -332,6 +332,10 @@ export const SKILLS_DATA_RESOURCE_SCOPE = 'vault:skills.data' as const;
 export const HOME_MANIFEST_RESOURCE_SCOPE = 'vault:home.manifest' as const;
 /** The person's portable control-plane timeline (spec 323 W2.3) — append via bridge, read self. */
 export const CONTROL_EVENTS_RESOURCE_SCOPE = 'vault:control-events.data' as const;
+/** Spec 363 W4 — the person's own note of WHO THEY LIVE WITH. Private tier by construction: not on
+ *  chain, not derivable from it, and therefore never in the discovery KB (ADR-0040). Distinct from
+ *  `vault:family:*`, which is the skills-app FAMILY-OFFICE namespace and a different subject entirely. */
+export const HOUSEHOLD_RESOURCE_SCOPE = 'vault:household.data' as const;
 /** Content-fabric records (spec 335 / ADR-0055): the person's Content Artifacts / releases, keyed
  *  `vault:content.<type>.<id>` — one namespace, read+write via the interactions grant. */
 export const CONTENT_RECORDS_RESOURCE_SCOPE = 'vault:content.*' as const;
@@ -435,7 +439,7 @@ function buildInteractionsStruct(
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
     buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE, ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE, PAYMENT_RECEIPT_RESOURCE_SCOPE], ops: ['read', 'write'] },
+      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE, ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE, PAYMENT_RECEIPT_RESOURCE_SCOPE, HOUSEHOLD_RESOURCE_SCOPE], ops: ['read', 'write'] },
       // spec 354 K3 — the PLAYBOOK may also be REMOVED, which is a real custodial act: an agent goes
       // back to the bare harness. A tombstone (`data: null`) is a DISTINCT op at the record-scope gate
       // (spec 317 §3.2 / audit F1 — a write-only delegate must not be able to censor records), so the

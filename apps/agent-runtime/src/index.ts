@@ -100,7 +100,7 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker } from '@agenticprimitives/context';
+import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
@@ -122,7 +122,7 @@ import { RELATIONSHIP_TYPE, ROLE, ROLE_IRI } from '@agenticprimitives/agent-rela
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY } from './harness-run.js';
+import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -1779,6 +1779,26 @@ app.post('/harness/ask', async (c) => {
         // from the session — their own contact record, read by their own agent. The TIER is stated in
         // the interpretation, because "my profile" means three different records to three different
         // screens and a person acting on the wrong one edits something nobody reads.
+        // WHO I LIVE WITH (spec 363 W4). The subject is the CONNECTED person, from the session; a
+        // household is private tier and cannot be asked about on anyone else's behalf.
+        if (toolId === HOUSEHOLD_READ_CAPABILITY) {
+          const members = await householdMembers(String(who.sa).toLowerCase(), { readSubjectRecord: askDeps.readSubjectRecord! });
+          const named = await Promise.all(members.map(async (m) => ({
+            ...m, name: await askDeps.nameOf?.(m.agent).catch(() => null) ?? null,
+          })));
+          return {
+            count: named.length,
+            interpretation: named.length
+              ? 'the people you have recorded as living with you — your own private note, published nowhere'
+              : 'you have not recorded anyone in your household yet',
+            members: named.map((m) => ({
+              agent: m.agent, label: m.label ?? m.name ?? m.agent,
+              ...(m.name ? { name: m.name } : {}),
+              role: m.role ?? 'member', ...(m.kinWord ? { relation: m.kinWord } : {}),
+            })),
+            note: 'answer by naming each person and how they are related. Say that this is a private record: it is published nowhere and it grants nobody any authority. You LOOKED SOMEBODY UP — do not say that money was sent, a message went out, or that anything is about to happen: nothing was done and saying otherwise is a claim about an act that did not occur.',
+          };
+        }
         if (toolId === PROFILE_READ_CAPABILITY) {
           const doc = await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), 'impact-profile').catch(() => null);
           // `{ v, contact, attestations }` — the record's own shape, the one the Home's form writes.
@@ -1819,6 +1839,7 @@ app.post('/harness/ask', async (c) => {
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
       intent, result, addressee, composer: selectComposer(c.env), deps: askDeps, interactionFor,
+      ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
       // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
@@ -2642,6 +2663,14 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
       const r = out as { ok?: boolean; changed?: string[]; refused?: string[]; error?: string };
       return { ok: r.ok === true, ...(r.changed ? { changed: r.changed } : {}), ...(r.refused ? { refused: r.refused } : {}), ...(r.error ? { error: r.error } : {}) };
+    },
+    // Spec 363 W4 — the person's own note of who they live with. Private tier, their own DO, one member
+    // at a time (a whole-document write would delete the family members this sentence did not mention).
+    recordHouseholdMember: async (person: string, input: { member: string; role?: string; kin?: string; label?: string; remove?: true }) => {
+      const out = await callInteractionsInternal(env, person, 'internal.household.record', input)
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; count?: number; error?: string };
+      return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
     },
     readGrantWire: async (person: string, clientId: string) => {
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);

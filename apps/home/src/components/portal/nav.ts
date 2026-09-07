@@ -318,6 +318,9 @@ export function buildSettingsPane(
  *  agent, and a per-agent item for a non-per-agent fact invents a distinction that does not exist. */
 export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   const items: NavItem[] = [{ id: 'you', label: 'Your profile', href: '/profile', Icon: UserIcon, status: 'live' }];
+  // Spec 363 W4 — the people you live with, beside your profile because it is the same kind of fact:
+  // private, yours, and about who you are rather than what you steward.
+  items.push({ id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' });
   if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   if (wl.services.connectedApps) {
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });

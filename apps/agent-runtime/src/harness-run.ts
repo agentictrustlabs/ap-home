@@ -131,6 +131,31 @@ export const ACCESS_LIST_CAPABILITY = 'access.grants.list' as const;
 export const ACCESS_REVOKE_CAPABILITY = 'access.grant.revoke' as const;
 /** THE PERSON'S OWN CONTACT DETAILS — the PRIVATE vault record, never the public directory listing. */
 export const PROFILE_READ_CAPABILITY = 'profile.contact.read' as const;
+/** WHO THEY LIVE WITH — spec 363 W4. Their own record, private tier, never published. */
+export const HOUSEHOLD_READ_CAPABILITY = 'household.roster' as const;
+export const HOUSEHOLD_RECORD_CAPABILITY = 'household.member.record' as const;
+
+/**
+ * WHO I LIVE WITH — the person's own household record (spec 363 W4).
+ *
+ * PRIVATE TIER, and the read says so. A household is not on chain, not in the directory, and not
+ * something another agent can ask about: this answers for the person asking, from their own vault.
+ */
+export const HOUSEHOLD_READ_TOOL: ToolSpec = {
+  id: HOUSEHOLD_READ_CAPABILITY,
+  description:
+    'ANSWERS A QUESTION: who is in this person\'s household — the people they live with, as they have '
+    + 'recorded them, with each one\'s role (guardian / dependent / member) and how they are kin '
+    + '(spouse, child, parent, sibling). Use for "who is in my household", "who do I live with", "who is '
+    + 'my family here". Takes no arguments and answers only for the person asking. '
+    + 'NEVER A STEP TOWARD PAYING OR MESSAGING SOMEONE: if the ask is to send money to "my daughter" or '
+    + 'write to "my wife", choose the capability that DOES that and pass the words — it resolves who is '
+    + 'meant from this same household record, and it actually acts. Listing the household and then '
+    + 'saying the money was sent is the one thing this tool must never be used for.',
+  inputSchema: { type: 'object', properties: {} },
+  interaction: { navigationTarget: 'household' },
+};
+
 export const PROFILE_UPDATE_CAPABILITY = 'profile.contact.update' as const;
 
 /**
@@ -221,7 +246,7 @@ export const UNSUPPORTED_TOOL: ToolSpec = {
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
-    description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA or name), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
+    description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA, NAME, or the words the person used — "bob", "my daughter", "sarah" all work: the payee is resolved from the asker\'s own household and links, so pass what they said), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -336,6 +361,37 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // It IS public and it IS on chain, which is why it takes a mandate rather than nothing at all.
     risk: 'medium',
     interaction: { navigationTarget: 'treasuries' },
+  },
+  {
+    // RECORDING WHO YOU LIVE WITH. Self-acting for the same reason a profile edit is: it is a note in
+    // the person's own vault about their own life, and the Home's form asks for no signature either.
+    //
+    // IT SAYS NOTHING ABOUT AUTHORITY. Recording somebody as a guardian does not let them act for a
+    // dependent — that is a delegation the dependent's custodian issues, and no gate reads this record.
+    // Recording somebody as your spouse does not let you spend their money. The household answers "who
+    // did you mean" and nothing else.
+    id: HOUSEHOLD_RECORD_CAPABILITY,
+    description:
+      'Record someone as part of this person\'s household — the private note of who they live with. '
+      + 'Args: member (their agent, by name or address), role ("member" default, "guardian", '
+      + '"dependent"), kin (how they are related: spouse, child, parent, sibling, or a word of your own), '
+      + 'label (what to call them), remove (true to take them out). Use for "sarah is my daughter", '
+      + '"add my wife to my household", "remove X from my household". It grants nobody anything.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        member: { type: 'string', description: 'Their agent — a name (sarah.me) or an address' },
+        role: { type: 'string', description: '"member" (default), "guardian" or "dependent"' },
+        kin: { type: 'string', description: 'spouse | child | parent | sibling — or your own word for it' },
+        label: { type: 'string', description: 'What this person calls them, e.g. "Sarah"' },
+        remove: { type: 'boolean', description: 'true to take them out of the household record' },
+      },
+      required: ['member'],
+    },
+    capability: { id: HOUSEHOLD_RECORD_CAPABILITY, action: 'execute', resourceArg: 'record', authorityArg: 'holder' },
+    risk: 'low',
+    selfAuthorized: true,
+    interaction: { navigationTarget: 'household' },
   },
   {
     // CHANGING YOUR OWN CONTACT DETAILS. The Home's profile form needs no signature — it is the person's
@@ -632,6 +688,8 @@ export interface HarnessDeps {
   readGrantWire?: (person: string, clientId: string) => Promise<{ wire: unknown; hash: string } | null>;
   /** Merge named fields into the person's own contact record. Merge, never replace. */
   mergeProfile?: (person: string, fields: Record<string, string>) => Promise<{ ok: boolean; changed?: string[]; refused?: string[]; error?: string }>;
+  /** Record ONE person in the asker's own household note. Private tier; grants nothing. */
+  recordHouseholdMember?: (person: string, input: { member: string; role?: string; kin?: string; label?: string; remove?: true }) => Promise<{ ok: boolean; removed?: true; role?: string; kin?: string; count?: number; error?: string }>;
   now?: () => number;
 }
 
@@ -1062,6 +1120,49 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
 }
 
 /**
+ * `household.member.record` — "Sarah is my daughter", said out loud.
+ *
+ * SELF-ACTING (spec 350 §3.2a): a note in the person's own vault about their own life. No mandate, and
+ * the Home's form will ask for no signature either — a conversation that cost one where a form does not
+ * would teach people that talking to their agent is the expensive way.
+ *
+ * IT GRANTS NOBODY ANYTHING. Recording a guardian does not let them act for a dependent (that is a
+ * delegation the dependent's custodian issues); recording a spouse does not open an account. The
+ * household answers "who did you mean" and stops a directory search leaving the asker's own tier.
+ */
+export function householdRecordInvoker(deps: HarnessDeps, person: Address | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    if (!person) throw new Error('a household is recorded as you, and there is no signed-in person on this run');
+    if (!deps.recordHouseholdMember) throw new Error('the household record is not reachable from this agent');
+    const member = String(args.member ?? '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(member)) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: 'Who should I add to your household?',
+        fields: [{ name: 'member', label: 'who', type: 'text', required: true, hint: 'their name (sarah.me) or address — they need an agent for you to record them' }],
+      });
+    }
+    // WHAT TO CALL THEM, when the person did not say. Their public agent name is a better label than the
+    // words of the sentence ("my daughter" reads oddly on a payment card six weeks later), and it is a
+    // fact anyone could read — nothing private is being added by naming a named agent.
+    const label = String(args.label ?? '').trim() || (await deps.nameOf?.(member).catch(() => null)) || '';
+    const out = await deps.recordHouseholdMember(person.toLowerCase(), {
+      member,
+      ...(label ? { label } : {}),
+      ...(args.role !== undefined ? { role: String(args.role) } : {}),
+      ...(args.kin !== undefined ? { kin: String(args.kin) } : {}),
+      ...(args.remove === true ? { remove: true } : {}),
+    });
+    if (!out.ok) throw new Error(out.error ?? 'the household record could not be written');
+    return {
+      ...out, member, tier: 'private', record: 'household.data',
+      note: 'this is your own private record of who you live with — it is not published anywhere, and it grants nobody any authority',
+    };
+  };
+}
+
+/**
  * `profile.contact.update` — the Home's profile form, said out loud.
  *
  * NO MANDATE, DELIBERATELY, and the reason is not that it is unimportant: the record is the person's
@@ -1202,6 +1303,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
+    if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -1396,6 +1498,7 @@ const CAPABILITY_WORDS: Record<string, string> = {
   'access.grants.list': 'say which apps can read your records',
   'access.grant.revoke': 'revoke an app\'s access on chain',
   'profile.contact.update': 'change your own contact details',
+  'household.member.record': 'record who is in your household',
 };
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
@@ -1457,7 +1560,16 @@ export type AskReply =
       /** WHAT IT READ TO SAY THAT. A generated query is the one kind of evidence a person cannot
        *  reconstruct from the answer, and an answer whose query nobody can inspect is a claim (spec 357
        *  §4). Present when a step produced one; display only, and it decides nothing. */
-      evidence?: AskEvidence[] }
+      evidence?: AskEvidence[];
+      /**
+       * THE STRUCTURED RESULT, for a caller that supplied its own plan (spec 361).
+       *
+       * A person gets the sentence; a SCREEN that asked for exactly one informational capability wants
+       * its rows — and rendering a table by parsing composed prose is how a surface starts disagreeing
+       * with the record it is showing. Present only for a supplied plan: a conversational answer carries
+       * evidence (what was looked at) and never the raw shape, which nothing but the composer should read.
+       */
+      results?: Array<{ toolId: string; result: unknown }> }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
       /** What the ASKER is to the delegator, derived (spec 353 S5). Absent when nothing could read it —
        *  which is not "no standing", so a surface must not render absence as a refusal. */
@@ -1497,6 +1609,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
   'access.grant.revoke': 'manager',
   'profile.contact.update': 'record',
+  'household.member.record': 'record',
 };
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
@@ -1910,6 +2023,7 @@ export async function resolveStepArgs(
   // The RECORD a profile edit writes. Not an address and not a contract — it is a vault record type, and
   // naming it is what lets a receipt say WHICH of the three "profiles" was changed.
   if (where?.capabilityId === PROFILE_UPDATE_CAPABILITY) out.record = 'impact-profile';
+  if (where?.capabilityId === HOUSEHOLD_RECORD_CAPABILITY) out.record = 'household.data';
   return out;
 }
 
@@ -1976,6 +2090,10 @@ export async function askReplyFor(env: HarnessEnv, input: {
   /** Read-only checks that spare a person a ceremony whose outcome is already knowable (spec 352 §2).
    *  Absent ⇒ no early refusal; the chain still decides. */
   deps?: HarnessDeps;
+  /** Spec 361 — the caller supplied its own plan (a SCREEN), so an informational answer carries the
+   *  structured result as well as the sentence: a table rendered by parsing prose is a surface that will
+   *  eventually disagree with the record it is showing. */
+  suppliedPlan?: boolean;
   /** Resolve a NAME the planner passed where an address is needed. The requirement is built from the
    *  step's args BEFORE any invoker runs, so "as nathan.treasury" has to become an address here or the
    *  person is asked to grant authority as a string nothing can sign. */
@@ -2157,7 +2275,13 @@ export async function askReplyFor(env: HarnessEnv, input: {
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
-    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}) });
+    // A SCREEN'S OWN PLAN gets its rows back; a person gets the sentence. Only for a supplied plan, and
+    // only the informational steps — nothing here is a second copy of an ACT's result, which lives on the
+    // receipt where it can be checked.
+    const results = input.suppliedPlan
+      ? r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result }))
+      : [];
+    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}) });
     if (!input.composer) return withEvidence(raw);
     try {
       // GROUNDED COMPOSITION — spec 358 W3. Every real gate ran before the invoker; this is the one
@@ -2653,7 +2777,7 @@ fanned out.`;
     MEMBERSHIP_LIST_TOOL,
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
-    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL] : []),
+    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];
   const result = await runIntent(input.intent, {

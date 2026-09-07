@@ -31,6 +31,14 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
       return { href: '/messages', label: 'Open messages' };
     case 'agents':
       return { href: '/agents', label: 'Open agents' };
+    case 'household':
+      // A PERSON'S surface: an organization has members, not a household, and resolving this key under
+      // an org would offer a page whose subject does not exist there.
+      return realm.kind === 'person' || !realm.kind ? { href: '/household', label: 'Open household' } : null;
+    case 'profile':
+      return realm.kind === 'person' || !realm.kind ? { href: '/profile', label: 'Open profile' } : null;
+    case 'settings':
+      return { href: '/settings', label: 'Open settings' };
     case 'work':
       return org ? { href: `/org/${org}/work`, label: 'Open work' } : { href: '/work', label: 'Open work' };
     default:
