@@ -286,6 +286,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   const onAudioRef = useRef(onAudio); onAudioRef.current = onAudio;
   /** Open the mic for one utterance — and warm the agent's ear meanwhile, so hearing costs only the transcription. */
   const listen = () => {
+    // Tapping the mic IS asking for a dialog: from here the agent reads its replies aloud and listens again
+    // after each one, until Voice is switched off. A toggle nobody found was a dialog nobody had.
+    if (!voice.enabled) voice.setEnabled(true);
     if (session) warmHearing(session, addressee);
     void voice.startListening((blob) => void onAudioRef.current(blob), (m) => setErr(`${m} — you can type it instead.`));
   };
@@ -431,7 +434,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {voice.canSpeak && (
           <button
             type="button" className="btn ghost" data-testid="ask-voice-toggle" aria-pressed={voice.enabled}
-            title="Voice: read replies aloud and listen after a question. Never signs anything."
+            title={voice.enabled ? 'Voice is on: replies are read aloud and the mic reopens after each one. Switch off to end the dialog.' : 'Voice: read replies aloud and listen after each one. Never signs anything.'}
             style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
             onClick={() => voice.setEnabled(!voice.enabled)}
           >
@@ -456,6 +459,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.
             Anything that changes the world will ask you to grant the authority for it first, and you will
             see exactly what you are granting.
+            {voice.canListen && <> Tap 🎙 to talk instead: it answers aloud and listens for your reply until you switch Voice off. Signing always happens on screen.</>}
           </p>
         )}
         {thread.map((e, i) => (
