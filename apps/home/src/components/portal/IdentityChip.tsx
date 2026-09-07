@@ -25,7 +25,9 @@ export function IdentityChip() {
         role="menu"
         panelClassName="identity-popover"
         trigger={(p) => (
-          <button type="button" className="identity-chip" {...p}>
+          <button type="button" className="identity-chip" {...p} aria-label={agentName ?? 'Your portal'}>
+            {/* On a phone the chip is the initial alone; the name is in the menu it opens. */}
+            <span className="identity-chip-initial" aria-hidden>{(agentName ?? 'Y').trim().charAt(0).toUpperCase()}</span>
             <span className="identity-chip-name">{agentName ?? 'Your portal'}</span>
             <ChevronDownIcon size={16} />
           </button>

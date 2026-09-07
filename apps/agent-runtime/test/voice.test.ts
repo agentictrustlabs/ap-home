@@ -49,7 +49,7 @@ describe('what is said', () => {
 
   it('reads an answer with markdown stripped and addresses named', async () => {
     const s = await spokenFor({ kind: 'answer', text: '**Bob** is at `0x00000000000000000000000000000000000000b0`, and 0xdeadbeefcafe is not.' }, nameOf, words);
-    expect(s).toBe('Bob is at bob.me, and an address is not.');
+    expect(s).toBe('Bob is at bob dot me, and an address is not.');
   });
 
   it('says what a submission established, not the outcome', async () => {
@@ -57,16 +57,16 @@ describe('what is said', () => {
     expect(s).toBe('Submitted — invite someone: submitted and recorded.');
   });
 
-  it('authority and signatures are READ, never answered by voice', async () => {
+  it('authority and signatures are read and ask for "approve" — the word is the click, the credential signs', async () => {
     expect(await spokenFor({ kind: 'authority_required', capability: 'treasury.payment.execute' }, nameOf, words))
-      .toBe('This needs your authority to send money. Review it and use Grant and continue on screen to sign.');
-    expect(await spokenFor({ kind: 'prompt', prompt: { kind: 'signature', prompt: 'Sign the invitation.' } }, nameOf, words))
-      .toBe('Sign the invitation. This needs your signature — use Sign and continue on screen.');
+      .toBe('This needs your authority to send money. Say approve to grant it for this request, or no to cancel.');
+    expect(await spokenFor({ kind: 'prompt', prompt: { kind: 'signature', prompt: 'Sign the genesis of voice-test.org — an organization under 0x00000000000000000000000000000000000000b0.' } }, nameOf, words))
+      .toBe('Sign the genesis of voice test dot org — an organization under bob dot me. Say approve to sign it, or no to cancel.');
   });
 
   it('lists choices with ordinals so they can be answered by ear', async () => {
     const s = await spokenFor({ kind: 'prompt', prompt: { kind: 'data', prompt: 'Which Nathan?', fields: [{ name: 'recipient', label: 'who', type: 'choice', choices: [{ value: '0x1', label: 'nathan.me' }, { value: '0x2', label: 'nathan.org' }] }] } }, nameOf, words);
-    expect(s).toBe('Which Nathan? Options: first, nathan.me; second, nathan.org.');
+    expect(s).toBe('Which Nathan? Options: first, nathan dot me; second, nathan dot org.');
   });
 
   it('plain speech strips markdown', () => {

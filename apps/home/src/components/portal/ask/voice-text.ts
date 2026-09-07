@@ -7,7 +7,7 @@ import type { AskReply } from '../../../home/ask';
 export function yesNo(t: string): 'yes' | 'no' | null {
   const s = ` ${t.toLowerCase().replace(/[^a-z'\s]/g, ' ')} `;
   if (/\b(no|nope|cancel|stop|don't|do not|never mind|nevermind)\b/.test(s)) return 'no';
-  if (/\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|confirm|continue|do it|proceed)\b/.test(s)) return 'yes';
+  if (/\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|confirm|continue|do it|proceed|approve|approved|grant|granted|sign|agree|agreed)\b/.test(s)) return 'yes';
   return null;
 }
 
@@ -31,12 +31,14 @@ export function matchChoice(t: string, choices: ReadonlyArray<{ value: string; l
 }
 
 /**
- * May the mic reopen after this reply? A question, yes — that is what makes it a dialog. Authority and a
- * signature, no: the person signs on screen, and a spoken "yes" is not a signature (spec 350 §3.6).
+ * May the mic reopen after this reply? After a question, yes — that is what makes it a dialog. After an
+ * authority card or a signature prompt, ALSO yes: "approve" is listened for, and does what the button does —
+ * hands the digest to the connected credential, which signs (or whose device asks). The word is never the
+ * signature (spec 350 §3.6; spec 369 §1.1); the surface only relays it to the same signer a click reaches.
+ * Every reply kind listens; the function stays so the policy has one name and one test.
  */
 export function listenAfter(reply: AskReply): boolean {
-  if (reply.kind === 'authority_required') return false;
-  if (reply.kind === 'prompt') return reply.prompt.kind !== 'signature';
+  void reply;
   return true;
 }
 

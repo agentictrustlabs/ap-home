@@ -157,6 +157,9 @@ export interface SpeakableReply {
  * screen, and the words say so. Addresses become names where the agent knows one, else "an address".
  */
 export async function spokenFor(reply: SpeakableReply, nameOf: (address: string) => Promise<string | null>, words: (capability: string) => string): Promise<string> {
+  // A name is read as a name: "abc.org" is "abc dot org" to a voice, and "voice-test.team" is "voice test
+  // dot team" — a typed suffix said aloud is a word, not punctuation.
+  const sayable = (s: string) => s.replace(/\b([a-z0-9-]+)\.(me|org|team|svc|workspace|treasury|registry|church|circle|household|impact|agent)\b/gi, (_m, l: string, t: string) => `${l.replace(/-/g, ' ')} dot ${t}`);
   const name = async (s: string) => {
     const addrs = [...new Set(s.match(/0x[0-9a-fA-F]{40}/g) ?? [])];
     let out = s;
@@ -164,7 +167,7 @@ export async function spokenFor(reply: SpeakableReply, nameOf: (address: string)
       const n = await nameOf(a.toLowerCase()).catch(() => null);
       out = out.split(a).join(n ?? 'an address');
     }
-    return out.replace(/0x[0-9a-fA-F]{6,}/g, 'an address');
+    return sayable(out.replace(/0x[0-9a-fA-F]{6,}/g, 'an address'));
   };
   switch (reply.kind) {
     case 'answer': return name(plainSpeech(reply.text ?? ''));
@@ -173,11 +176,14 @@ export async function spokenFor(reply: SpeakableReply, nameOf: (address: string)
       return name(f ? (f.established === 'submission' ? `Submitted — ${plainSpeech(f.words)}.` : `Done — ${plainSpeech(f.words)}.`) : 'Done.');
     }
     case 'refused': return name(`${reply.outcome === 'denied' ? 'Refused — the authority does not cover this' : 'That did not go through'}${reply.error ? `: ${plainSpeech(reply.error)}` : '.'}`);
-    case 'authority_required': return `This needs your authority to ${words(reply.capability ?? '')}. Review it and use Grant and continue on screen to sign.`;
+    // Authority and a signature are ANSWERED by voice — "approve" does what Grant and continue does: it hands
+    // the digest to the connected credential, and the credential signs (or its device asks). The word is
+    // never the signature (spec 350 §3.6); it is the same click, said (spec 369 §1.1).
+    case 'authority_required': return `This needs your authority to ${words(reply.capability ?? '')}. Say approve to grant it for this request, or no to cancel.`;
     case 'prompt': {
       const p = reply.prompt;
       if (!p) return '';
-      if (p.kind === 'signature') return name(`${plainSpeech(p.prompt)} This needs your signature — use Sign and continue on screen.`);
+      if (p.kind === 'signature') return name(`${plainSpeech(p.prompt)} Say approve to sign it, or no to cancel.`);
       if (p.kind === 'confirmation') return name(`${plainSpeech(p.prompt)} Say yes to continue, or no to cancel.`);
       const choice = (p.fields ?? []).find((f) => f.type === 'choice' && f.choices?.length);
       const opts = choice?.choices ? ` Options: ${choice.choices.map((c, i) => `${ORDINALS[i] ?? i + 1}, ${c.label}`).join('; ')}.` : '';

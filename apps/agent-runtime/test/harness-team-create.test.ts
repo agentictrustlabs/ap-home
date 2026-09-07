@@ -63,8 +63,16 @@ describe('organization.team.create — the conversational ceremony', () => {
 
   it('rejects a label the naming rule refuses and says so in the hint', async () => {
     const g = fakeGenesis();
-    const r = await run(g.deps, { parent: WORKSPACE, label: 'X Y!' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: EOA } } }]);
+    // Too short even once normalised. "X Y!" is no longer refused: a spoken or typed name becomes its
+    // label (`x-y`) — see the next test.
+    const r = await run(g.deps, { parent: WORKSPACE, label: 'ab' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: EOA } } }]);
     expect(r.prompt?.kind === 'data' ? r.prompt.fields[0] : null).toMatchObject({ name: 'label', hint: expect.stringContaining('not a valid team name') });
+  });
+
+  it('takes the name as said — "the Outreach Team" is outreach.team (spec 369)', async () => {
+    const g = fakeGenesis();
+    const r = await run(g.deps, { parent: WORKSPACE, label: 'the Outreach Team' }, [{ stepRef: 's0', data: { custodian: { kind: 'eoa', address: EOA } } }]);
+    expect(r.prompt?.kind === 'signature' ? r.prompt.prompt : r).toContain('outreach.team');
   });
 
   it('asks again with the reason when the name is taken', async () => {

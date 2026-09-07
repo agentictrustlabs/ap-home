@@ -90,6 +90,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   const voice = useVoice();
   const pendingRef = useRef<typeof pending>(null);
   useEffect(() => { pendingRef.current = pending; }, [pending]);
+  const busyRef = useRef<string | null>(null);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, pending]);
 
@@ -220,8 +222,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
 
   /**
    * Spec 369 — WHAT WAS HEARD, routed. A pending prompt takes the words as its answer (yes/no, a choice by
-   * ordinal or label, or the field's text); otherwise they are an ask. Authority and a signature are never
-   * answered by voice — the person signs on screen, and these words simply fall through.
+   * ordinal or label, or the field's text); otherwise they are an ask. An authority card and a signature
+   * prompt take "approve" (or "no"): the word does what the button does — hands the digest to the connected
+   * credential, which signs, or whose device asks on screen. The word is never the signature (spec 350 §3.6).
    */
   const onVoice = (text: string, opts?: { viaHearing?: boolean }) => {
     // The hearing turn itself sets `busy` ("Hearing…") — the words it produces must not be refused by it.
@@ -238,7 +241,13 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         else voice.speak('Yes or no?', () => listenRef.current());
         return;
       }
-      if (prompt.kind === 'signature') return;
+      if (prompt.kind === 'signature') {
+        const yn = yesNo(text);
+        if (yn === 'yes') void answer(p.reply as never, p.state);
+        else if (yn === 'no') { setPending(null); voice.speak('Okay — not signed.'); }
+        else voice.speak('Say approve to sign it, or no to cancel.', () => listenRef.current());
+        return;
+      }
       const fields = prompt.fields.filter((f) => f.type !== 'credential');
       const target = fields.find((f) => f.required && !(answers[f.name] ?? '').trim()) ?? fields[0];
       if (!target) return;
@@ -255,7 +264,15 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       else void answer(p.reply as never, p.state, next);
       return;
     }
-    if (p) return; // an authority card: signed on screen only
+    if (p?.reply.kind === 'authority_required') {
+      setThread((t) => [...t, { role: 'you', text: `🎙 ${text}` }]);
+      const yn = yesNo(text);
+      if (yn === 'yes') void grant(p.reply as never, p.state);
+      else if (yn === 'no') { setPending(null); voice.speak('Okay — not granted.'); }
+      else voice.speak('Say approve to grant it for this request, or no to cancel.', () => listenRef.current());
+      return;
+    }
+    if (p) return;
     void send(text, 'voice');
   };
   /** The recording goes to the AGENT to hear; what comes back is shown before anything acts on it. */
@@ -267,7 +284,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       const h = await hear(session, addressee, await blobToBase64(blob), blob.type);
       if (!h.ok) {
         setErr(`${h.error} — you can type it instead.`);
-        voice.speak('I could not hear that. You can type it instead.');
+        voice.speak('I could not hear that. Say it again, or type it.', () => listenRef.current());
         return;
       }
       // A repaired name is shown AS a repair: the person sees what was heard and what it was taken to mean.
@@ -289,10 +306,26 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     // Tapping the mic IS asking for a dialog: from here the agent reads its replies aloud and listens again
     // after each one, until Voice is switched off. A toggle nobody found was a dialog nobody had.
     if (!voice.enabled) voice.setEnabled(true);
+    voice.prime(); // this tap is the gesture the speaker is unlocked by (iOS)
     if (session) warmHearing(session, addressee);
-    void voice.startListening((blob) => void onAudioRef.current(blob), (m) => setErr(`${m} — you can type it instead.`));
+    setVoiceNote(null);
+    void voice.startListening(
+      (blob) => void onAudioRef.current(blob),
+      (m) => setErr(`${m} — you can type it instead.`),
+      // Nothing was said: the dialog pauses here rather than holding an open mic on a room. A tap resumes it.
+      () => setVoiceNote('I didn’t hear anything — tap 🎙 when you’re ready.'),
+    );
   };
   const listenRef = useRef(listen); listenRef.current = listen;
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+
+  // A turn takes as long as it takes (a plan, chain reads, sometimes a userOp). Silence for ten seconds
+  // sounds like a dead line; one "one moment" after three says the agent is still there.
+  useEffect(() => {
+    if (!voice.enabled || !busy || busy === 'Hearing…' || busy === 'Listening…') return;
+    const t = setTimeout(() => voice.speak('One moment.', undefined, { append: true }), 3_000);
+    return () => clearTimeout(t);
+  }, [busy, voice.enabled]);
 
   // SPEAK what the agent said, once per entry, from the agent's own spoken rendering; after an answer the
   // mic reopens once (a dialog). Prompts and authority are spoken by the pending effect below.
@@ -308,7 +341,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     }
     spokenIdx.current = thread.length;
     const text = parts.filter(Boolean).join(' ');
-    if (text) voice.speak(text, () => { if (!pendingRef.current && voice.enabled) listenRef.current(); });
+    // Appended, not spoken over: "Done — …" and "abc.org is in your agents now." arrive a second apart and
+    // are one breath. The mic reopens when nothing is pending and no turn is running — a mic opened while
+    // the agent works would record the agent's next sentence.
+    if (text) voice.speak(text, () => { if (!pendingRef.current && !busyRef.current && voice.enabled) listenRef.current(); }, { append: true });
   }, [thread, voice.enabled]);
   const spokenPending = useRef('');
   useEffect(() => {
@@ -318,7 +354,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     spokenPending.current = key;
     const text = pending.reply.spoken ?? '';
     const again = listenAfter(pending.reply);
-    voice.speak(text, () => { if (again && voice.enabled) listenRef.current(); });
+    voice.speak(text, () => { if (again && voice.enabled && pendingRef.current) listenRef.current(); }, { append: true });
   }, [pending, voice.enabled]);
 
   // Spec 367 §7 — THE SAME COMMAND, FILLED BY CONTROLS. "Do" offers the agent's capabilities as forms whose
@@ -434,7 +470,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {voice.canSpeak && (
           <button
             type="button" className="btn ghost" data-testid="ask-voice-toggle" aria-pressed={voice.enabled}
-            title={voice.enabled ? 'Voice is on: replies are read aloud and the mic reopens after each one. Switch off to end the dialog.' : 'Voice: read replies aloud and listen after each one. Never signs anything.'}
+            title={voice.enabled ? 'Voice is on: replies are read aloud and the mic reopens after each one. Switch off to end the dialog.' : 'Voice: read replies aloud and listen after each one. Saying “approve” does what the button does; the credential signs.'}
             style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
             onClick={() => voice.setEnabled(!voice.enabled)}
           >
@@ -459,7 +495,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.
             Anything that changes the world will ask you to grant the authority for it first, and you will
             see exactly what you are granting.
-            {voice.canListen && <> Tap 🎙 to talk instead: it answers aloud and listens for your reply until you switch Voice off. Signing always happens on screen.</>}
+            {voice.canListen && <> Tap 🎙 to talk instead: it answers aloud and listens for your reply until you switch Voice off. When it needs your authority or a signature, say “approve” — your credential signs, and a device that asks will still ask.</>}
           </p>
         )}
         {thread.map((e, i) => (
@@ -549,9 +585,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           </select>
         </div>
       )}
-      {(voice.listening || voice.speaking) && (
+      {(voice.listening || voice.speaking || voiceNote) && (
         <div aria-live="polite" className="muted" data-testid="ask-voice-status" style={{ fontSize: 11, padding: '0 2px 2px' }}>
-          {voice.listening ? `Listening… ${'▮'.repeat(Math.round(voice.level * 6))}` : 'Speaking…'}
+          {voice.listening ? `Listening… ${'▮'.repeat(Math.round(voice.level * 6))}` : voice.speaking ? 'Speaking…' : voiceNote}
         </div>
       )}
       <div className="ask-flyout-f">

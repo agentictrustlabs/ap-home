@@ -979,6 +979,8 @@
         background: linear-gradient(var(--color-surface-sunken), var(--color-surface-sunken)) padding-box;
         position: sticky; top: 0; z-index: 20;
       }
+      .portal-topbar-l { display: flex; align-items: center; gap: .5rem; min-width: 0; flex: 1 1 auto; }
+      .portal-topbar-r { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
       /* ── The Ask flyout (spec 350 §3.5) — one panel, addressed to the realm you are standing in ── */
       .portal-ask-btn {
         display: inline-flex; align-items: center; gap: .35rem; min-height: 36px; padding: .34rem .7rem;
@@ -1099,6 +1101,7 @@
       .identity-popover-up { top: auto; bottom: calc(100% + .4rem); left: 0; right: auto; z-index: 45; max-height: calc(100dvh - var(--topbar-h) - 4rem); overflow-y: auto; }
       .identity-chip { display: inline-flex; align-items: center; gap: .3rem; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: 999px; padding: .3rem .6rem; cursor: pointer; font-size: .85rem; font-weight: 600; color: var(--color-text-body); min-height: 36px; }
       .identity-chip-name { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .identity-chip-initial { display: none; }
       .identity-popover { position: absolute; right: 0; top: calc(100% + .4rem); min-width: 14rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-12); box-shadow: var(--shadow-modal); padding: .6rem; display: flex; flex-direction: column; gap: .35rem; z-index: 30; }
       .identity-popover-name { font-weight: 700; color: var(--color-text-primary); font-size: .9rem; }
       .identity-popover-divider { height: 1px; background: var(--color-border); margin: .25rem 0; }
@@ -1201,6 +1204,21 @@
       }
       @media (max-width: 559px) {
         .manage-grid { grid-template-columns: 1fr; }
+      }
+      /* ── The topbar on a phone: shield · workspace · Ask · a small identity chip. Nothing else. ── */
+      @media (max-width: 767px) {
+        .portal-topbar { padding: 0 .6rem; }
+        .portal-topbar-l { gap: .3rem; }
+        .portal-topbar-r { gap: .35rem; }
+        .portal-brand-name, .portal-topbar-action { display: none; }
+        /* The workspace switcher yields before Ask does: it truncates, Ask never wraps or shrinks. */
+        .portal-topbar-l > div { min-width: 0; }
+        .portal-topbar-l button { max-width: 44vw; }
+        .portal-ask-btn { padding: .34rem .55rem; flex: none; }
+        /* Connect/disconnect: the chip is the person's initial; the name lives in its menu. */
+        .portal-topbar .identity-chip { padding: 0; width: 36px; justify-content: center; gap: 0; }
+        .portal-topbar .identity-chip-initial { display: inline-block; font-size: .9rem; }
+        .portal-topbar .identity-chip-name, .portal-topbar .identity-chip svg { display: none; }
       }
 
       /* ── Buttons (greenfield) ────────────────────────────────────────── */

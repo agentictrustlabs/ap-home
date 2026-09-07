@@ -7,19 +7,23 @@ import { AgentSwitcher } from './AgentSwitcher';
 import { WorkspaceAction } from './WorkspaceAction';
 import { ChatIcon } from '../shared/Icons';
 
+// On a phone the bar carries FOUR things and no more: the shield (home), the workspace you stand in, Ask,
+// and a small identity chip whose menu holds Sign out. The brand name and the workspace action are desktop
+// furniture — with them, the Ask button was the thing squeezed off a 390px screen (`.portal-topbar-*` rules
+// in globals.css).
 export function PortalTopbar({ brandName, askOpen, onToggleAsk }: { brandName: string; askOpen?: boolean; onToggleAsk?: () => void }) {
   return (
     <header className="portal-topbar" role="banner">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
+      <div className="portal-topbar-l">
         <a className="portal-brand" href="/" aria-label={`${brandName} — your portal`}>
           <BrandShield size={26} />
-          <span>{brandName}</span>
+          <span className="portal-brand-name">{brandName}</span>
         </a>
         <AgentSwitcher />
         {/* Primary action for the selected workspace: person → Add organization; org → Invite member. */}
-        <WorkspaceAction />
+        <span className="portal-topbar-action"><WorkspaceAction /></span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+      <div className="portal-topbar-r">
         {/* Ask the realm you are standing in — the addressee follows the switcher, never a second picker. */}
         {onToggleAsk && (
           <button

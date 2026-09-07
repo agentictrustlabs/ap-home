@@ -516,6 +516,22 @@ export interface GenesisUserOpJson {
 
 export const CHILD_LABEL_PATTERN = '^[a-z0-9-]{3,63}$';
 
+/**
+ * The name label a spoken or typed name becomes: lowercased, words joined by hyphens, anything that is not a
+ * letter, digit or hyphen dropped, and the KIND WORD removed when it is said as part of the name ("abc
+ * organization" → `abc`, "the outreach team" → `outreach`, "ABC Org" → `abc`) — the typed suffix already says
+ * what it is, and `abc-organization.org` says it twice. A church or circle keeps its word: it is not the
+ * suffix being created here. A name that is already a label passes through unchanged.
+ */
+export function labelFromName(raw: string, noun: string, tld: string): string {
+  const s = raw.trim().toLowerCase();
+  if (new RegExp(CHILD_LABEL_PATTERN).test(s)) return s;
+  const kindWords = [noun, tld, `${noun}s`, ...(noun === 'organization' ? ['organisation', 'org'] : [])];
+  const words = s.replace(/[’']/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+  const kept = words.filter((w, i) => !kindWords.includes(w) && !(i === 0 && (w === 'the' || w === 'a' || w === 'an')));
+  return (kept.length ? kept : words).join('-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+}
+
 /** What the Worker supplies for a team's genesis — the substrate the Home ceremony already uses, behind a
  *  port so the protocol (ask → derive → check → submit) is testable without a chain. */
 export interface TeamGenesisDeps {
@@ -571,7 +587,10 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
     if (!person) throw new Error(`no connected user: ${aNoun} is custodied by the connected user, and there is none on this run`);
 
     const data = dataFor(ctx.supplied, stepRef);
-    const rawLabel = String(data.label ?? args.label ?? '').trim().toLowerCase();
+    // Spoken or typed, a name is what the person SAID: "ABC Organization" becomes `abc.org`, "Riverside
+    // Fellowship" becomes `riverside-fellowship.org`. Refusing "abc organization" as "not a valid name" and
+    // asking again — for a name the person then says the same way — is the loop this replaces (spec 369).
+    const rawLabel = labelFromName(String(data.label ?? args.label ?? ''), noun, tld);
     const label = new RegExp(CHILD_LABEL_PATTERN).test(rawLabel) ? rawLabel : '';
     const credential = parseCredential(data.custodian);
     const ask = (fields: InputFieldV1[], prompt: string): never => {
