@@ -170,3 +170,17 @@ describe('an amount the planner wrote in the wrong unit', () => {
     expect(out.usdc).toBeUndefined();
   });
 });
+
+// ── THE TOKEN IS A DEPLOYMENT FACT (it was lost in a refactor and the mandate carried asset: "") ──
+describe('the asset a payment is in', () => {
+  const env = { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x'.padEnd(42, '1'), MOCK_USDC: '0xdae09066a2cc32f6203605619137dcf01a9b49ae' } as never;
+
+  it('is pinned from the deployment, whatever the planner wrote', async () => {
+    for (const wrote of [{}, { asset: 'usdc' }, { asset: '0x036cbd53842c5426634e7929541ec2318f3dcf7e' }]) {
+      const out = await resolveStepArgs({ ...wrote, usdc: '1' }, env, {}, {
+        stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute',
+      });
+      expect(out.asset, `planner wrote ${JSON.stringify(wrote)}`).toBe('0xdae09066a2cc32f6203605619137dcf01a9b49ae');
+    }
+  });
+});

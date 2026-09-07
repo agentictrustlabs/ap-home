@@ -496,6 +496,15 @@ function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kin
             {r?.txHash ? short(r.txHash) : ''}
           </div>
         )}
+        {/* Spec 363 W6 — WHAT WAS DECIDED FOR THEM, after the fact. A person who was never asked which
+            account paid should still be able to see which one did and why: before the act the authority
+            card says it, and afterwards this does, because by then the card is gone and "why did it use
+            that one" is exactly the question a receipt should answer. */}
+        {(reply.decisions ?? []).map((d, i) => (
+          <div key={i} className="muted" style={{ fontSize: 11.5, marginTop: 3 }} data-testid={`ask-decided-${d.arg}`}>
+            {d.arg}: <AgentName address={d.chose as `0x${string}`} /> — {d.because}
+          </div>
+        ))}
         {/* Spec 360 — WHAT FOLLOWED, said plainly. An effect never fails the act, so without this line a
             payment that told nobody looks exactly like one that told both parties: "Done." The person who
             just moved money is the one who needs to know the other side has not heard. */}

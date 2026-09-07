@@ -57,7 +57,7 @@ import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/c
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
-import { decide, PAYMENT_SOURCE_ACCOUNT, argTypesFor, readValue } from '@agenticprimitives/ontology';
+import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
@@ -275,6 +275,11 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
     // authority as an ERC-20 contract, which nothing can sign.
     capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer' },
+    // Spec 363 W5 — the questions this act lets the substrate answer instead of asking: which account
+    // pays (when its owner marked one), and who a bare first name means (when their household says).
+    // A contract may restate or narrow this; naming none would mean asking every time, which is safe
+    // and was the behaviour before the decision plane existed.
+    decisions: [PAYMENT_SOURCE_ACCOUNT.id, PAYMENT_RECIPIENT.id],
     risk: 'high',
   },
   INVITE_TOOL,
@@ -1595,7 +1600,11 @@ export type AskReply =
       /** Spec 360 — WHAT FOLLOWED, and whether it reached anyone. An effect cannot fail the act, so a
        *  disclosure that did not go out is otherwise invisible: money moved, both parties were promised a
        *  receipt, and the person was told "Done". A surface must be able to say which half happened. */
-      effects?: Array<{ produces: string; ok: boolean; error?: string }> }
+      effects?: Array<{ produces: string; ok: boolean; error?: string }>;
+      /** Spec 363 W6 — WHAT WAS DECIDED, and why, for the act that just happened. A person who was never
+       *  asked which account paid should be able to see which one did and on what basis, AFTER as well as
+       *  before: the authority card is gone by then, and the receipt is where the answer lives. */
+      decisions?: NonNullable<RunResult['receipts'][number]['decisions']> }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> };
 
 /** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
@@ -1687,6 +1696,9 @@ export async function resolveStepArgs(
   lookups: PartyLookups,
   where?: {
     stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[];
+    /** Spec 363 W5 — the DECISION POINTS this step's capability consults, from its contract (or the
+     *  built-in declaration). A point not named here is not consulted: the question is asked. */
+    consults?: readonly string[];
     /**
      * THE BASE-UNIT FIGURE IN THESE ARGS WAS COMPUTED BY US, not written by a planner.
      *
@@ -1826,7 +1838,7 @@ export async function resolveStepArgs(
           // A marked account that cannot cover the act does NOT decide: paying from it would fail, and
           // using it silently would turn a preference into a wrong answer. The question comes back with
           // what is known, which is the fail-closed default this table always ends in.
-          if (where.capabilityId === 'treasury.payment.execute' && arg === 'payer') {
+          if (where.consults?.includes(PAYMENT_SOURCE_ACCOUNT.id) && arg === 'payer') {
             const chosen = decide(PAYMENT_SOURCE_ACCOUNT, mine.map((c) => ({ value: c, satisfies: c.roles ?? [] })));
             if (chosen) {
               const held = lookups.valueHeld ? await lookups.valueHeld(chosen.value.agent).catch(() => null) : null;
@@ -1835,6 +1847,7 @@ export async function resolveStepArgs(
                 lookups.onResolved?.({
                   arg, raw: partyWord(arg), agent: chosen.value.agent, label: chosen.value.label,
                   hint: candidateHint(chosen.value), because: chosen.because, ruleId: chosen.ruleId,
+                  pointId: PAYMENT_SOURCE_ACCOUNT.id,
                 });
                 out[arg] = chosen.value.agent;
                 found = true;
@@ -1915,6 +1928,8 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Which questions this capability lets the substrate answer for the person (spec 363 W5).
+        ...(where.consults?.length ? { consults: where.consults } : {}),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
         // answer is an honest "unknown" — never a widening to a public search.
         ...(where.subject ? { subject: where.subject } : {}),
@@ -2144,6 +2159,25 @@ export async function resolveStepArgs(
     // written — there is nobody to ask here, and a silent guess is the thing to avoid.
     const resolved = raw.includes('.') && lookups.resolveName ? await lookups.resolveName(raw.toLowerCase()).catch(() => null) : null;
     if (resolved) out[key] = resolved.toLowerCase();
+  }
+
+  // ── THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT ───────────────────────────
+  //
+  // Asked to send USDC, a model wrote Base Sepolia's token address — recalled from memory, well-formed,
+  // and wrong for this chain. Accepting it would put a contract that does not exist here inside a signed
+  // mandate's allowedTargets, and the person granting would read "make payments" over a token nobody can
+  // name. This deployment has exactly ONE demo token, so which token is not a planner's choice to make.
+  //
+  // It was lost in a refactor and the mandate then carried `asset: ""`, which the caveat builder refused
+  // — after the person had already answered twice. A test pins it now.
+  const usesAsset = where?.capabilityId === 'treasury.payment.execute' || where?.capabilityId === 'treasury.fund'
+    || where?.toolId === 'treasury.payment.execute' || where?.toolId === 'treasury.fund';
+  if (env.MOCK_USDC && usesAsset) out.asset = String(env.MOCK_USDC).toLowerCase();
+
+  // The RECORD a standing preference is written in: the relationship record, because a caveat cannot
+  // narrow to one edge and the treasury the statement is ABOUT travels in the calldata.
+  if (where?.capabilityId === PRIMARY_PAYEE_CAPABILITY && env.AGENT_RELATIONSHIP) {
+    out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
   }
 
   if (where?.capabilityId === ACCESS_REVOKE_CAPABILITY && env.DELEGATION_MANAGER) {
@@ -2400,7 +2434,8 @@ export async function askReplyFor(env: HarnessEnv, input: {
       const actedCap = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational')?.capability?.id;
       const ix = actedCap ? input.interactionFor?.[actedCap] : undefined;
       const effects = r.receipts.flatMap((rc) => rc.effects ?? []);
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(effects.length ? { effects } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      const decided = r.receipts.flatMap((rc) => rc.decisions ?? []);
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
@@ -2693,6 +2728,12 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
     // screen, never an unauthorized act. Merged like description; a surface with no registration for the
     // name falls back to generic rendering.
     ...(contract.interaction ? { interaction: contract.interaction } : {}),
+    // Spec 363 W5 — WHICH QUESTIONS this capability may answer for the person instead of asking. A
+    // domain author owns that (it is behaviour), the RULES stay in the ontology (they decide whose money
+    // moves), and a point the substrate does not publish is refused rather than silently ignored — a
+    // contract naming a decision nobody implements would read as "this asks nothing" while asking
+    // everything.
+    ...(contract.decisions?.length ? { decisions: [...contract.decisions] } : {}),
     // Raised only — never lowered.
     ...(builtin.risk || contract.risk
       ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
@@ -2912,6 +2953,12 @@ fanned out.`;
   const result = await runIntent(input.intent, {
     planner, tools,
     invoke: harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook),
+    // WHAT WAS DECIDED FOR THE PERSON, onto the receipt (spec 363 W6). The resolver reports each party it
+    // decided rather than asked, WITH the rule that answered; this hands those to the loop for the step
+    // they belong to, so a run can be audited for its decisions and not only for its authority.
+    decisionsFor: (toolId, args) => [...resolved.values()]
+      .filter((r) => r.pointId && r.ruleId && r.because && Object.values(args).some((v) => String(v).toLowerCase() === r.agent.toLowerCase()))
+      .map((r) => ({ point: r.pointId!, ruleId: r.ruleId!, arg: r.arg, chose: r.agent, because: r.because! })),
     // The person's words become this substrate's own ONCE, before the capability is extracted, before the
     // verifier judges the step and before any invoker reads an argument. Anywhere later and the run is
     // judging "alice2.treasury" against an allowlist of addresses.
@@ -2928,6 +2975,8 @@ fanned out.`;
       stepRef: 'pending', toolId, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}),
       // A SCREEN'S OWN PLAN may state base units; a planner may not (see the unit guard above).
       ...(input.plan ? { computedUnits: true } : {}),
+      // What this capability lets the substrate decide rather than ask (spec 363 W5).
+      ...(tool.decisions?.length ? { consults: tool.decisions } : {}),
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),

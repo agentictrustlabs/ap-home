@@ -101,7 +101,9 @@ export type AskReply =
       interaction?: { result?: string; navigationTarget?: string };
       /** Spec 360 — what FOLLOWED the act, and whether it reached anyone. Shown, always: a receipt that
        *  could not be delivered is the difference between "they were told" and "they will never know". */
-      effects?: Array<{ produces: string; ok: boolean; error?: string }> }
+      effects?: Array<{ produces: string; ok: boolean; error?: string }>;
+      /** Spec 363 W6 — what was DECIDED for the person on the way here, and on what basis. */
+      decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }> }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
 
 /** Answers carried into the next turn of the SAME ask. */
