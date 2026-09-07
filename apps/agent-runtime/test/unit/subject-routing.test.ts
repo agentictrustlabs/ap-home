@@ -87,3 +87,14 @@ describe('a context-side party is filled from the realm the person stands in (sp
     expect(out.parent).toBe(ORG);
   });
 });
+
+import { InputRequired } from '@agenticprimitives/orchestration';
+describe('a required usdc is satisfied by the amount it became (caught live 2026-09-07)', () => {
+  it('does not ask for usdc after reading it into amount', async () => {
+    const out = await resolveStepArgs({ payee: ORG, usdc: '1.2' }, {} as never, {}, {
+      stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute', subject: ALICE, addressee: ALICE, realmKind: 'person', required: ['payee', 'usdc'],
+    }).catch((e: unknown) => (e instanceof InputRequired ? { asked: e.request.prompt } : Promise.reject(e))) as Record<string, unknown>;
+    expect(out.asked).toBeUndefined();
+    expect(out.amount).toBe('1200000');
+  });
+});

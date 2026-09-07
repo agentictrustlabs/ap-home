@@ -2186,7 +2186,11 @@ export async function resolveStepArgs(
   // which names no figure — reached the mandate handler and died there on "args.amount is required to
   // bound the authority it needs": true, unactionable, and after the person had already typed. The loop
   // can just ask. `amount` and `usdc` are the same requirement in two units, so either satisfies it.
-  const ALTERNATIVES: Record<string, readonly string[]> = { amount: ['amount', 'usdc'] };
+  // BOTH DIRECTIONS. The unit reader above turns `usdc` into base-unit `amount` and deletes `usdc`, so a
+  // contract that requires `usdc` (the person's unit) must be satisfied by `amount` (ours) — one way only,
+  // and "send bob.me 1.2 usdc" asked for the usdc it had just been given, the moment the payee resolved
+  // without a question of its own (caught live 2026-09-07).
+  const ALTERNATIVES: Record<string, readonly string[]> = { amount: ['amount', 'usdc'], usdc: ['usdc', 'amount'] };
   const WORD_FOR_ARG: Record<string, { label: string; hint: string }> = {
     amount: { label: 'How much', hint: 'in whole USDC, e.g. 10 or 12.50' },
     message: { label: 'Message', hint: 'what to say' },
