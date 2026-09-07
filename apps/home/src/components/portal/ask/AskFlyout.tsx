@@ -319,15 +319,20 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       // A repaired name is shown AS a repair: the person sees what was heard and what it was taken to mean.
       if (h.repairs.length) setThread((t) => [...t, { role: 'agent', text: `Heard “${h.heard}” — taken as ${h.repairs.map((r) => `“${r.to}”`).join(', ')}.` }]);
       setBusy(null);
-      if (h.transcript.trim()) onVoiceRef.current(h.transcript.trim(), { viaHearing: true });
-      else {
-        // Silence is an answer too — said, never swallowed.
+      if (h.transcript.trim()) { emptyHears.current = 0; onVoiceRef.current(h.transcript.trim(), { viaHearing: true }); }
+      else if (++emptyHears.current < 2) {
+        // Silence is an answer too — said, never swallowed. Said ONCE: a room whose noise keeps opening the
+        // mic would otherwise hear "I didn't catch anything" every few seconds forever.
         setThread((t) => [...t, { role: 'agent', text: 'I didn’t catch anything — try again, a little closer to the microphone.' }]);
+      } else {
+        emptyHears.current = 0;
+        setVoiceNote('I didn’t hear anything — tap 🎙 when you’re ready.');
       }
     } finally {
       setBusy((b) => (b === 'Hearing…' ? null : b));
     }
   };
+  const emptyHears = useRef(0);
   const onVoiceRef = useRef(onVoice); onVoiceRef.current = onVoice;
   const onAudioRef = useRef(onAudio); onAudioRef.current = onAudio;
   /** Open the mic for one utterance — and warm the agent's ear meanwhile, so hearing costs only the transcription. */
