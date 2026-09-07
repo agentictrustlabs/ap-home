@@ -23,6 +23,7 @@ import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
+import { loadPlaybook } from './playbook.js';
 import { adoptionStage, classifyDivergence, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
 import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
@@ -149,10 +150,11 @@ const ASSISTANT_READ_LIMIT = 20;
 const ASSISTANT_BODY_CLIP = 2000;
 
 // ── spec 328 — the PERSON inbox auto-reply assistant (the person twin of spec 327). ──
-// Config + playbook are VAULT records, deliberately keyed under `conversation.topic:` so they ride
-// the EXISTING `vault:conversation.topic:*` grant scope (the 327 §4b carve) — no grant re-enable.
+// Config is a VAULT record, deliberately keyed under `conversation.topic:` so it rides the EXISTING
+// `vault:conversation.topic:*` grant scope (the 327 §4b carve) — no grant re-enable. The person's
+// PLAYBOOK is not a second record here: it is the compiled archetype (`archetype.assignment`, spec 354),
+// read through `loadPlaybook` by the inbox/consult turns.
 const PERSON_ASSISTANT_RESOURCE = 'conversation.topic:person-assistant';
-const PERSON_ASSISTANT_SKILL_RESOURCE = 'conversation.topic:person-assistant-skill';
 /** DO-storage gate flag — a CACHE of the canonical vault record's `enabled`, maintained ONLY by
  *  the enable/disable ops (single writer), so disabled inboxes exit every scan in O(1) with no
  *  vault read. The canonical record is re-read before any dispatch AND at the write (§5). */
@@ -2166,8 +2168,12 @@ export class InteractionsDO {
             const fromAddr = (String(e.from).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
             return { id: e.id, from: e.from, mine: fromAddr === principal, ...(e.actor ? { actor: e.actor } : {}), createdAt: e.createdAt, bodyText: text };
           }));
-          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, PERSON_ASSISTANT_SKILL_RESOURCE, null);
-          return json({ ok: true, displayName: cfg.displayName, messages, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });
+          // spec 354 K3 — the auto-reply turn speaks under the person's COMPILED ARCHETYPE (the digest-
+          // verified `archetype.assignment` in their own vault), never a hand-typed markdown: one playbook,
+          // one source, the same one every receipt cites. Absent or unverifiable ⇒ no instructions (the
+          // turn keeps its built-in default — a config default, not a fallback mechanism).
+          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal);
+          return json({ ok: true, displayName: cfg.displayName, messages, ...(playbook ? { playbook: playbook.instructions } : {}) });
         }
         if (op === 'internal.inbox.post') {
           // The assistant's reply write (spec 328 §5). `from`/`actor` are PINNED server-side to
@@ -2424,11 +2430,12 @@ export class InteractionsDO {
           });
         }
         if (op === 'internal.consult.context') {
-          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, PERSON_ASSISTANT_SKILL_RESOURCE, null);
+          // Same source as `internal.inbox.read`: the person's compiled archetype (spec 354 K3).
+          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal);
           const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
           return json({
             ok: true,
-            ...(skill?.markdown?.trim() ? { skillMarkdown: skill.markdown } : {}),
+            ...(playbook ? { playbook: playbook.instructions } : {}),
             ...(cfg?.displayName ? { displayName: cfg.displayName } : {}),
           });
         }
@@ -2971,7 +2978,6 @@ export class InteractionsDO {
       'readgrant.put', 'readgrant.list', 'readgrant.revoke',
       'relationships.get', 'relationships.merge',
       'inbox.assistantEnable', 'inbox.assistantDisable', 'inbox.assistantGet',
-      'inbox.assistantSkill.get', 'inbox.assistantSkill.put',
       'member.profile.put', 'membership.put', 'grants.list',
     ]);
     if (skillsClientId && OWNER_ONLY.has(op)) {
@@ -4265,24 +4271,11 @@ export class InteractionsDO {
       //    an org steward or relying app cannot enable someone's assistant). Config + playbook are
       //    vault records under the existing `conversation.topic:*` scope; the DO keeps only the
       //    O(1) gate flag + the seen ledger (caches/dedup, never the source of truth). ──
-      if (op === 'inbox.assistantGet' || op === 'inbox.assistantEnable' || op === 'inbox.assistantDisable' || op === 'inbox.assistantSkill.get' || op === 'inbox.assistantSkill.put') {
+      if (op === 'inbox.assistantGet' || op === 'inbox.assistantEnable' || op === 'inbox.assistantDisable') {
         if (sessionSa.toLowerCase() !== principal) return json({ error: 'the inbox assistant belongs to the principal — self access only' }, 403);
         if (op === 'inbox.assistantGet') {
           const cfg = await this.readDoc<PersonAssistantV1 | null>(grant, PERSON_ASSISTANT_RESOURCE, null);
-          const skill = await this.readDoc<AssistantSkillDocV1 | null>(grant, PERSON_ASSISTANT_SKILL_RESOURCE, null);
-          return json({ ok: true, assistant: cfg, skill });
-        }
-        if (op === 'inbox.assistantSkill.get') {
-          const doc = await this.readDoc<AssistantSkillDocV1 | null>(grant, PERSON_ASSISTANT_SKILL_RESOURCE, null);
-          return json({ ok: true, skill: doc });
-        }
-        if (op === 'inbox.assistantSkill.put') {
-          const markdown = String(body.markdown ?? '');
-          if (markdown.length > ASSISTANT_SKILL_MAX_CHARS) return json({ error: `playbook too long (max ${ASSISTANT_SKILL_MAX_CHARS} chars)` }, 400);
-          const doc: AssistantSkillDocV1 = { version: 'ap.assistant-skill.v1', markdown, updatedBy: sessionSa.toLowerCase(), updatedAt: new Date().toISOString() };
-          await audit.write({ id: crypto.randomUUID(), timestamp: doc.updatedAt, action: 'interactions.inbox.assistantSkillPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'assistant-skill', id: principal } });
-          await this.writeDoc(grant, PERSON_ASSISTANT_SKILL_RESOURCE, doc);
-          return json({ ok: true });
+          return json({ ok: true, assistant: cfg });
         }
         if (op === 'inbox.assistantDisable') {
           const cfg = await this.readDoc<PersonAssistantV1 | null>(grant, PERSON_ASSISTANT_RESOURCE, null);

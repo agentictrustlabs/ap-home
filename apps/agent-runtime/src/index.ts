@@ -111,7 +111,7 @@ import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams
 import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
-import { internalHeaders } from './internal-marker.js';
+import { internalHeaders, isInternalCall } from './internal-marker.js';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
@@ -783,6 +783,12 @@ app.use('*', async (c, next) => {
   if (c.req.path === '/custody/oidc/resolve' || c.req.path === '/custody/google/resolve') return next();
   if (c.req.path === '/custody/oidc/sign-site-delegation' || c.req.path === '/custody/google/sign-site-delegation') return next();
   if (c.req.path === '/custody/oidc/activate-vault' || c.req.path === '/custody/google/activate-vault') return next();
+  // Spec 366 R1 — an ask ROUTED from another agent's harness in this Worker (`askSubjectAgent`). It
+  // carries the in-Worker marker; its authorization is entirely body-carried (the asker's Home session,
+  // re-verified by `verifyHomeSession`, and the standing the receiver derives against its own records) —
+  // no ambient cookie authority to forge, the same rationale as /interactions/*. A browser POST to the
+  // same path has no marker and keeps CSRF.
+  if (c.req.path === '/harness/ask' && isInternalCall(c.req.raw, c.env)) return next();
   // Peer attestation (spec 338 §6) — deliberately public and CSRF-exempt.
   //
   // CSRF defends state-changing actions taken WITH THE USER'S CREDENTIALS. This endpoint takes no
@@ -2690,7 +2696,7 @@ async function callInteractionsInternal(env: Env, principal: string, op: string,
 
 function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
   const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
-  return {
+  const deps: HarnessDeps = {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
@@ -2952,6 +2958,49 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       return { txHash: receipt.transactionHash as Hex };
     },
   };
+  // ── Spec 366 R1 — ASK THE SUBJECT'S OWN AGENT. ─────────────────────────────────────────────────
+  //
+  // The routed step is the SAME step, posted to the subject agent's own `/harness/ask` as a supplied plan
+  // (spec 361 I4: a caller is just another proposer — every gate at the receiver is unchanged) with the
+  // asker's own Home session. The receiver verifies that session against the Home's keys, derives the
+  // asker's standing against ITS OWN records (`deriveStanding`, spec 366 R1's org-side membership check),
+  // runs the step under ITS playbook, and answers. Nothing here reads the subject's records.
+  //
+  // Which wire: a host under a base domain THIS Worker serves is this Worker — Cloudflare refuses a
+  // Worker's subrequest to a hostname its own account serves (CF-1042 loopback), so the hop is made
+  // in-process through the same handler the public URL reaches (chosen by a fact known before the call,
+  // never by watching a request fail — ADR-0013). Anything else is a network call. Either way the
+  // receiver is the subject's serving handler, and the answer says which wire it came over.
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session }) => {
+    const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
+    if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
+    const served = a2aBaseDomains(env);
+    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+    if (!host) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name ?? subject} publishes no endpoint this agent can ask` };
+    const url = `https://${host}/harness/ask`;
+    const inProcess = served.some((d) => host === d || host.endsWith(`.${d}`));
+    const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] } });
+    const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
+    const via = { agent: subject, name, host, observedVia: (inProcess ? 'serving-handler' : 'network') as 'serving-handler' | 'network' };
+    let res: Response;
+    try {
+      res = inProcess ? await app.fetch(req, env) : await fetch(req);
+    } catch (e) {
+      return { ok: false, via, refused: `could not reach ${name ?? subject} at ${host}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const reply = (await res.json().catch(() => null)) as ({ ok?: boolean; error?: string; kind?: string; runRef?: string; text?: string; summary?: string; results?: Array<{ toolId: string; result: unknown }> } | null);
+    if (!reply) return { ok: false, via, refused: `${name ?? subject} answered with something that was not a reply (${res.status})` };
+    if (reply.ok === false || reply.error) return { ok: false, via, refused: `${name ?? subject} refused: ${reply.error ?? res.status}` };
+    const viaRun = { ...via, ...(reply.runRef ? { runRef: reply.runRef } : {}) };
+    if (reply.kind === 'answer') {
+      const hit = reply.results?.find((r) => r.toolId === toolId) ?? reply.results?.[0];
+      return { ok: true, via: viaRun, result: hit ? hit.result : { text: reply.text } };
+    }
+    // authority_required / prompt / done: for a READ none of these is an answer — relay what it said.
+    return { ok: false, via: viaRun, refused: `${name ?? subject} needs more before it can answer (${reply.kind}): ${reply.summary ?? reply.text ?? ''}`.trim() };
+  };
+  return deps;
 }
 
 function sessionManagerFor(env: Env, accountAddress: Address): SessionManager {

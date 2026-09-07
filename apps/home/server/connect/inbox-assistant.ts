@@ -6,10 +6,9 @@
 // for the org assistant (spec 327). STRICTLY the person's own inbox: no `?agent=` managed-inbox
 // scoping here (spec 328 §10 — org 1:1 mail stays human-triaged).
 //
-//   GET                                   → { ok, assistant, skill }
+//   GET                                   → { ok, assistant }
 //   POST { action:'enable', displayName? }
 //   POST { action:'disable' }
-//   POST { action:'skillPut', markdown }
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -63,12 +62,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (body?.action === 'autoWorkStatus' || body?.action === 'autoWorkEnable' || body?.action === 'autoWorkDisable') {
     const op = body.action === 'autoWorkStatus' ? 'autowork.get' : body.action === 'autoWorkEnable' ? 'autowork.enable' : 'autowork.disable';
     const r = await callInteractions(env, who.person, op, { session: who.token });
-    return jsonCors(r.body, request, r.status);
-  }
-  if (body?.action === 'skillPut') {
-    const r = await callInteractions(env, who.person, 'inbox.assistantSkill.put', {
-      session: who.token, markdown: body.markdown ?? '',
-    });
     return jsonCors(r.body, request, r.status);
   }
   return jsonCors({ error: 'unknown action' }, request, 400);

@@ -426,7 +426,7 @@ describe('owner-only ops are not reachable by an app authenticated as the person
   const OWNER_ONLY = [
     'readgrant.put', 'readgrant.list', 'readgrant.revoke',
     'relationships.get', 'relationships.merge',
-    'inbox.assistantSkill.put', 'member.profile.put', 'membership.put', 'grants.list',
+    'member.profile.put', 'membership.put', 'grants.list',
   ];
 
   it('every one of them refuses a caller proving someone ELSE', async () => {

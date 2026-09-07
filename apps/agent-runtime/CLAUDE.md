@@ -64,6 +64,13 @@ proxies selected MCP requests during local demos.
 `package.json` (scripts) → `src/index.ts` (route map + wiring; contains a stray non-UTF8 byte — `grep -a`) →
 `src/validate.ts` → `../demo-mcp/CLAUDE.md` when changing MCP proxy behavior.
 
+**How the harness works (the whole picture):** start at the **Reading map** in
+[`docs/architecture/harness-architecture-diagrams.md`](../../docs/architecture/harness-architecture-diagrams.md)
+— it indexes, by question, the intent flow (`harness-run.ts` → `orchestration/loop.ts` → `delegation/mandate.ts`),
+persistent/long-lasting runs (`harness-runs.ts`, `a2a-task-do.ts`, `harness-workflow*.ts` — spec 350 W3 + spec 362),
+the knowledge/memory tiers (`ask-discovery.ts` + `@agenticprimitives/context` + vault; specs 356–358), and how
+`~/skills` archetypes reach a run (`playbook.ts` `loadPlaybook`; spec 354).
+
 ## Validate
 
 `pnpm --filter @agenticprimitives-demo/a2a typecheck` + `pnpm --filter @agenticprimitives-demo/a2a test`.

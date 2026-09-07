@@ -11,9 +11,10 @@
 //                      Also spec 329 §12: a per-org ROLE input ("tax advisor") — self-asserted and
 //                      member-signed (saving re-signs the listing with `orgRole`), which is what
 //                      the org assistant routes role-addressed questions on.
-//   · "Playbook"     — the playbook docs (`apguide:AgentSkillPackage`; on disk SKILL.md, and the
-//                      `skill-md` tab id is legacy). Today: the personal playbook (auto-replies AND, per
-//                      spec 329, consult answers); the list is structured so more docs can join.
+// The person's PLAYBOOK is not here any more: it is the compiled archetype on `/playbook`
+// (`BehaviourPlaybook`, spec 354 K3). The free-text "assistant instructions" markdown this tab used to
+// edit was a second behaviour source the digest never covered; the auto-reply and consult turns now
+// read the archetype's instructions instead.
 // Reuses /connect/inbox-assistant + /connect/consultability + the spec-323 delivery activation.
 // MessagesView shares useMessagingDelivery for its in-context nudge banner.
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -84,12 +85,6 @@ export function useMessagingDelivery(targetAgent?: Address): {
 
 const sectionTitleSty: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' };
 
-/** The playbooks the tab can edit (`apguide:AgentSkillPackage`, on disk as SKILL.md — the SKILL_DOCS
- *  identifier is legacy). One today; the list is the seam more playbooks join through. */
-const SKILL_DOCS = [
-  { id: 'messages', label: 'Messages — personal auto-reply playbook' },
-] as const;
-
 /** spec 329 §2.3 — the consent copy the opt-in MUST state (verbatim; topic-context disclosure). */
 const CONSULT_CONSENT_COPY =
   "Questions from this organization's discussions — including surrounding discussion context — " +
@@ -109,14 +104,14 @@ interface ConsultOrgRow {
 }
 
 /** Which stored tab id each left item renders. The ids are legacy state keys; the LABELS moved to the
- *  nav (`Ask` / `Discussion replies` / `Playbook`) and the ids stay put. */
-const ONLY_TAB = { ask: 'message-bot', discussion: 'discussions', playbook: 'skill-md' } as const;
+ *  nav (`Ask` / `Discussion replies`) and the ids stay put. */
+const ONLY_TAB = { ask: 'message-bot', discussion: 'discussions' } as const;
 
-/** spec 348 §2.3 — the three panels are three unrelated configurations, and each is now its own left
+/** spec 348 §2.3 — the two panels are two unrelated configurations, and each is now its own left
  *  item rather than a sub-tab. `only` renders one of them with no tab strip; omitting it keeps the
- *  original three-tab page, which nothing routes to any more but which is still the whole thing in one
+ *  original tabbed page, which nothing routes to any more but which is still the whole thing in one
  *  place if a surface ever wants it. */
-export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } = {}) {
+export function AgentTab({ only }: { only?: 'ask' | 'discussion' } = {}) {
   const { session, agentAddress, agentName, profile: homeProfile } = useSession();
   const delivery = useMessagingDelivery();
 
@@ -127,10 +122,6 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } 
   // spec 334 §6 — the person's auto-work switch (the agent does the work on the person's endeavors).
   const [autoWork, setAutoWork] = useState<boolean | null>(null);
   const [autoWorkBusy, setAutoWorkBusy] = useState(false);
-  const [skillDoc, setSkillDoc] = useState<(typeof SKILL_DOCS)[number]['id']>('messages');
-  const [skillText, setSkillText] = useState('');
-  const [skillBusy, setSkillBusy] = useState(false);
-  const [skillSaved, setSkillSaved] = useState(false);
 
   // spec 329 §7 — per-org discussion-participation (consultability) state.
   const [consultOrgs, setConsultOrgs] = useState<ConsultOrgRow[] | null>(null);
@@ -151,10 +142,9 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } 
     let cancelled = false;
     void fetch('/connect/inbox-assistant', { headers: authedHeaders })
       .then((r) => r.json())
-      .then((d: { ok?: boolean; assistant?: { enabled?: boolean; displayName?: string } | null; skill?: { markdown?: string } | null }) => {
+      .then((d: { ok?: boolean; assistant?: { enabled?: boolean; displayName?: string } | null }) => {
         if (cancelled || !d.ok) return;
         setAssistant({ enabled: d.assistant?.enabled === true, displayName: d.assistant?.displayName });
-        setSkillText(d.skill?.markdown ?? '');
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -307,22 +297,6 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } 
       setConsultError(e instanceof Error ? e.message : String(e));
     } finally { setRoleBusyOrg(null); }
   }, [session, agentAddress, agentName, authedHeaders, homeProfile?.credential, roleDraft, loadConsultOrgs]);
-
-  const saveSkill = useCallback(async () => {
-    if (!authedHeaders) return;
-    setSkillBusy(true); setSkillSaved(false); setError(null);
-    try {
-      const res = await fetch('/connect/inbox-assistant', {
-        method: 'POST', headers: authedHeaders,
-        body: JSON.stringify({ action: 'skillPut', markdown: skillText }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `save failed (${res.status})`);
-      setSkillSaved(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setSkillBusy(false); }
-  }, [authedHeaders, skillText]);
 
   if (!session) return <p style={mutedText}>Sign in to configure your agent.</p>;
 
@@ -512,69 +486,9 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' | 'playbook' } 
     </div>
   );
 
-  const skillPanel = (
-    <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.9rem' }}>
-      <div role="group" aria-label="Playbooks" style={{ display: 'grid', gap: '0.25rem' }}>
-        {SKILL_DOCS.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            onClick={() => setSkillDoc(d.id)}
-            aria-pressed={skillDoc === d.id}
-            className="ghost"
-            style={{
-              justifyContent: 'flex-start', textAlign: 'left', fontSize: '0.82rem',
-              fontWeight: skillDoc === d.id ? 700 : 400,
-              border: `1px solid ${skillDoc === d.id ? 'var(--color-amber-400)' : 'var(--color-border)'}`,
-              background: skillDoc === d.id ? 'var(--color-amber-50)' : 'transparent',
-              borderRadius: 8, padding: '0.4rem 0.65rem',
-            }}
-          >
-            📝 {d.label}
-          </button>
-        ))}
-      </div>
-
-      {skillDoc === 'messages' && (
-        <div>
-          <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>
-            Assistant instructions (markdown; the reply contract — one reply per message — always applies
-            regardless). Governs your personal 1:1 auto-replies AND how your agent answers questions
-            routed from organization discussions you opted into (it may decline classes of questions).
-            Organization board playbooks are edited on each organization&rsquo;s Manage → Agent → Playbook tab.
-            {assistant !== null && !assistant.enabled && (
-              <> The message bot is currently <b>off</b> — these instructions take effect when it&rsquo;s on.</>
-            )}
-          </div>
-          <textarea
-            value={skillText}
-            onChange={(e) => { setSkillText(e.target.value); setSkillSaved(false); }}
-            rows={8}
-            maxLength={8192}
-            aria-label="Assistant instructions"
-            placeholder={'# Assistant playbook\n\nDescribe how your assistant should reply: tone, what it may say on your behalf, what to defer to you…'}
-            style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', lineHeight: 1.45, padding: '0.5rem 0.65rem', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)', resize: 'vertical' }}
-          />
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{skillText.length} / 8192</span>
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
-              {skillSaved && <span role="status" style={{ fontSize: '0.78rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
-              <BusyButton busy={skillBusy} busyLabel="Saving instructions…" onClick={() => void saveSkill()} className="btn">
-                Save instructions
-              </BusyButton>
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   const tabs: TabItem[] = [
     { id: 'message-bot', label: 'Assistant', content: messageBot },
     { id: 'discussions', label: 'Discussions', content: discussionsPanel },
-    // `skill-md` — the tab id is a legacy state key; the LABEL is the canonical term for
-    // `apguide:AgentSkillPackage` (facet-registries.md §7). The on-disk file is still SKILL.md.
-    { id: 'skill-md', label: 'Playbook', content: skillPanel },
   ];
 
   return (

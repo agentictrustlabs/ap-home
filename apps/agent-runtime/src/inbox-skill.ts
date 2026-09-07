@@ -38,8 +38,9 @@ export interface InboxIo {
 /** What `internal.inbox.read` returns (the slice the goal-context builder needs). */
 interface ConversationReadResult {
   messages?: Array<{ from?: string; actor?: string; bodyText?: string; mine?: boolean }>;
-  /** spec 328 §4b — the owner-authored person playbook (SKILL.md projection), if any. */
-  skillMarkdown?: string;
+  /** spec 354 K3 — the instructions of the person's COMPILED ARCHETYPE (digest-verified by the DO), if
+   *  one is assigned. The doctrine the agent answers under; it grants nothing. */
+  playbook?: string;
 }
 
 export const INBOX_TOOLS: ToolSpec[] = [
@@ -50,8 +51,9 @@ export const INBOX_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** The default playbook (spec 328 §4b) — used when the owner hasn't authored one. A config
- *  default, not a fallback mechanism: the load path is one read; absent means this constant. */
+/** The inbox SITUATION — always part of the system prompt. Alone when the person has no archetype;
+ *  after the archetype's doctrine when they do. A config default, not a fallback mechanism: the load
+ *  path is one read; absent means this constant. */
 export const DEFAULT_PERSON_ASSISTANT_SKILL_MD =
   "You are this person's personal inbox assistant, replying on their behalf while they are away. " +
   'Be concise, warm, and honest that you are their assistant; answer what you can from the recent ' +
@@ -86,8 +88,8 @@ export async function handleInboxRespond(
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
   // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
   // not authority and not a second mechanism: a failed read just means a trigger-only goal and the
-  // default playbook. Also carries the owner-authored PLAYBOOK (spec 328 §4b), which becomes the
-  // planner's system prompt with the tool contract appended.
+  // default playbook. Also carries the archetype's compiled INSTRUCTIONS (spec 354 K3), which open the
+  // planner's system prompt; the inbox situation below and the tool contract are appended after.
   const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
   let conversationContext = '';
   let playbook = DEFAULT_PERSON_ASSISTANT_SKILL_MD;
@@ -95,7 +97,7 @@ export async function handleInboxRespond(
     try {
       const read = (await io.readConversation()) as ConversationReadResult;
       conversationContext = contextLines(read);
-      if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
+      if (read.playbook?.trim()) playbook = `${read.playbook.trim()}\n\n${DEFAULT_PERSON_ASSISTANT_SKILL_MD}`;
     } catch { /* trigger-only context + default playbook */ }
   }
 

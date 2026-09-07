@@ -690,6 +690,15 @@ export interface HarnessDeps {
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean; roles?: readonly string[] }>>;
   /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
+  /**
+   * Spec 366 R1 — ASK THE SUBJECT'S OWN AGENT. A step about another agent (an organization's roster,
+   * asked at a person's agent) is sent to that agent's harness as the same step, with the asker's own
+   * session presented; the receiver verifies the credential and derives the asker's standing against ITS
+   * OWN records, runs the step under ITS playbook, and answers. Nothing is granted by routing: a person
+   * with no standing there gets the same refusal by either route. Absent ⇒ the step is refused in words
+   * (never a local read of the other agent's records — ADR-0013, one mechanism).
+   */
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string }) => Promise<SubjectAnswerV1>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
   /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
@@ -705,6 +714,31 @@ export interface HarnessDeps {
   /** Record ONE person in the asker's own household note. Private tier; grants nothing. */
   recordHouseholdMember?: (person: string, input: { member: string; role?: string; kin?: string; label?: string; household?: string; remove?: true }) => Promise<{ ok: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string }>;
   now?: () => number;
+}
+
+/** What the subject's agent said (spec 366). `result` is that agent's own tool result, verbatim; `via`
+ *  names who answered so the composer can say so and a receipt can cite it. */
+export interface SubjectAnswerV1 {
+  ok: boolean;
+  /** The subject agent's structured result for the routed step (its invoker's own shape). */
+  result?: unknown;
+  /** Who answered, and where. */
+  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network' };
+  /** When the subject's agent did not answer: its words, relayed verbatim (a refusal is an answer). */
+  refused?: string;
+}
+
+/**
+ * Spec 366 — WHICH AGENT ANSWERS THIS STEP. A tool that declares a `subject` argument is answered by the
+ * agent that argument names; when that agent is not the one addressed, the step is routed there. Pure:
+ * reads the tool's declaration and the (already-resolved) args, decides nothing about permission.
+ */
+export function routedSubjectFor(tool: { subject?: string } | undefined, args: Record<string, unknown>, addressee: Address | undefined): Address | null {
+  if (!tool?.subject) return null;
+  const v = String(args[tool.subject] ?? '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(v)) return null;
+  if (addressee && v === addressee.toLowerCase()) return null;
+  return v as Address;
 }
 
 export function harnessEnforcers(env: HarnessEnv): EnforcerAddresses {
@@ -1688,6 +1722,25 @@ const partyWord = (arg: string): string => PARTY_ROLES.find((r) => r.arg === arg
  * "alice" dead-ended because alice2.treasury does not look like "alice". `check:ontology-bindings` now
  * fails the build if a binding names a term the T-box does not declare.
  */
+/**
+ * The organization a "members of …" sentence names — the WORDS only, never an agent. "how many members
+ * are in missio nexus organization" → "missio nexus"; a sentence that names none → undefined (the tool
+ * then means the agent being asked). Generic tail nouns are stripped because the private tier matches a
+ * display name whole ("Missio Nexus"), and "missio nexus organization" is not that name. Resolution is
+ * the resolver's (`resolveStepArgs` → `resolveParty`): this never looks anything up.
+ */
+export function orgPhraseOf(goal: string): string | undefined {
+  const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?.,;!]+?)\s*[?.!]*$/i);
+  if (!m) return undefined;
+  const phrase = (m[1] ?? '')
+    // "… of missio nexus 1 usdc" (the fan-out sentence) — the amount is the payment's, not the name's.
+    .replace(/\s+\d+(?:\.\d+)?\s*[a-z]*$/i, '')
+    .replace(/\s+(organization|organisation|org|team|workspace|circle|church|treasury|group)$/i, '')
+    .trim();
+  // A pronoun or a bare generic noun names nothing — "members of my org" means the agent being asked.
+  return phrase && !/^(it|this|that|there|here|my|our|your|their|the|org|organization|team|workspace|circle|church)$/i.test(phrase) ? phrase : undefined;
+}
+
 export function partyTypesFor(capabilityId: string, arg: string): readonly string[] | undefined {
   const suffixes = suffixesFor(partyRole(capabilityId, arg));
   return suffixes.length ? suffixes : undefined;
@@ -2880,7 +2933,13 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   const compiledRead = (goal: string): Plan | null => {
     const g = goal.toLowerCase();
     if (/\bmembers?\b.*\b(of|on|in)\b|\bwho (are|is|belongs)\b.*\bmembers?\b|\bwho belongs\b/.test(g)) {
-      return { steps: [{ toolId: MEMBERSHIP_LIST_TOOL.id, args: {} }] };
+      // THE ORGANIZATION THE SENTENCE NAMES travels with the step. This plan used to carry no args, so
+      // the roster read fell to the addressee: asked at alice.me, "how many members are in Missio Nexus"
+      // read ALICE's own roster and answered "none listed" — while the same words at the org's own
+      // surface listed four. The phrase is resolved by `resolveStepArgs` in the asker's private tier
+      // (the `org` party role), or asked; nothing here decides which agent it is.
+      const org = orgPhraseOf(goal);
+      return { steps: [{ toolId: MEMBERSHIP_LIST_TOOL.id, args: org ? { org } : {} }] };
     }
     if (/\b(what|which|how many)\b.*\b(kinds?|types?|records?)\b.*\b(hold|have|vault|keep)|\brecords? (do|does) .* hold\b/.test(g)) {
       return { steps: [{ toolId: VAULT_QUESTION_TOOL.id, args: { question: goal } }] };
@@ -2895,9 +2954,10 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     const g = goal.toLowerCase();
     if (!/\b(pay|send)\b/.test(g) || !/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/.test(g)) return null;
     const amount = g.match(/(\d+(?:\.\d+)?)\s*usdc/)?.[1];
+    const org = orgPhraseOf(goal);
     return {
       steps: [
-        { toolId: MEMBERSHIP_LIST_TOOL.id, args: {}, ref: 'roster', id: 's0' },
+        { toolId: MEMBERSHIP_LIST_TOOL.id, args: org ? { org } : {}, ref: 'roster', id: 's0' },
         // No amount ⇒ the argument is OMITTED and the capability asks — never a placeholder (§3.5).
         { toolId: 'treasury.payment.execute', args: { payee: { $item: 'agent' }, ...(amount ? { usdc: amount } : {}) }, id: 's1', forEach: { ref: 'roster.members' } },
       ],
@@ -2962,9 +3022,29 @@ fanned out.`;
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];
+  const localInvoke = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
   const result = await runIntent(input.intent, {
     planner, tools,
-    invoke: harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook),
+    // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
+    // names its subject; the resolver has already turned the person's words into an address in THEIR
+    // tier; if that address is not the agent addressed, the step goes to the subject's own harness with
+    // the asker's session, and what comes back is the subject's own answer (or its refusal, in its
+    // words). The local invoker never reads another principal's records for a routed step.
+    invoke: async (toolId, args, ctx) => {
+      const tool = tools.find((t) => t.id === toolId);
+      const subject = routedSubjectFor(tool, args, input.addressee);
+      if (!subject) return localInvoke(toolId, args, ctx);
+      if (!deps.askSubjectAgent) {
+        return { refused: `this agent cannot ask ${subject} — agent-to-agent asks are not wired here`, via: { agent: subject } };
+      }
+      const answer = await deps.askSubjectAgent({ subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}) });
+      const who = answer.via.name ? `${answer.via.name} (${subject})` : subject;
+      if (!answer.ok) {
+        return { refused: answer.refused ?? `${who} did not answer`, via: answer.via, note: `${who}'s own agent was asked and answered this way; relay its words, do not retry or guess.` };
+      }
+      const r = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };
+      return { ...r, via: answer.via, note: `${String(r.note ?? '')} Answered by ${who}'s own agent — say so in one clause.`.trim() };
+    },
     // WHAT WAS DECIDED FOR THE PERSON, onto the receipt (spec 363 W6). The resolver reports each party it
     // decided rather than asked, WITH the rule that answered; this hands those to the loop for the step
     // they belong to, so a run can be audited for its decisions and not only for its authority.

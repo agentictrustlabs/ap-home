@@ -7,6 +7,52 @@ file or symbol behind it; where a box is designed but not live it is marked **pl
 
 ---
 
+## Reading map — the harness document set (start here)
+
+This is the canonical index for **how the `demo-a2a` harness works**, organised by the four questions
+people actually ask. Every other harness doc and spec links back here. Read top-to-bottom for a first
+pass; jump by question after that.
+
+**A · The whole picture (read first)**
+
+| Doc | What it gives you |
+| --- | --- |
+| **This doc** (`harness-architecture-diagrams.md`) | Five planes (§1), one full Ask turn (§2), the per-step authority state machine (§5), where state lives (§7), component-by-component vs LangGraph/MAF/Dapr/OpenAI (§8), ordered next steps (§12) |
+| [`ask-inside-an-agent.md`](ask-inside-an-agent.md) | Plain-language walkthrough of two sentences (`send a message to alice`, `send 10 usdc to alice`) end to end; the honest "why it stumbles" inventory (§5) |
+| [`agent-action-program.md`](agent-action-program.md) | The "how an agent is allowed to act" picture; orchestration (within one agent) vs coordination (between agents) |
+| [spec 350](../../specs/350-authority-aware-agent-harness.md) | Normative harness: Ask → Intent → Mandate → Plan → per-step Verify → Receipt |
+| [`apps/demo-a2a/CLAUDE.md`](../../apps/demo-a2a/CLAUDE.md) + [`README.md`](../../apps/demo-a2a/README.md) | What the Worker owns; the routes; what it does NOT own |
+
+**B · What happens when an intent comes in** (intent → plan → verify → execute → receipt)
+
+- Diagrams: **§2** (one Ask turn sequence), **§5** (authority per step), **§6** (fan-out + keyring).
+- Story: [`ask-inside-an-agent.md`](ask-inside-an-agent.md) §4.
+- Specs: [352](../../specs/352-ask-capability-program.md) (the Ask), [353](../../specs/353-app-scoped-ask.md) (scope narrows offers, never authority), [355](../../specs/355-ontology-driven-ask-and-orchestration.md) (ontology owns plan shape + party resolution).
+- Code: `apps/demo-a2a/src/index.ts` (`POST /harness/ask`) → `src/harness-run.ts` (`runUnderMandate`, `scopedActionTools`, `mergeContractTool`) → `packages/orchestration/src/loop.ts` (`runIntent`) → `packages/delegation/src/mandate.ts` (`verifyMandateForStep`).
+
+**C · Persistent / long-lasting flows** (durability, resume, approvals, multi-agent)
+
+- Diagrams: **§7** (where state lives — the checkpoint is a rebuild, receipts/assignments/preferences are bereavements), **§12** #2–#3 (per-step checkpoint + durable approvals).
+- Specs: [350](../../specs/350-authority-aware-agent-harness.md) W3 (durable runs — keyring + findable shipped; per-step checkpoint + alarms open), **[362](../../specs/362-durable-executor-port-and-cloudflare-workflows.md)** (the Ring-0 `DurableStepPort` + the first Cloudflare Workflows binding: *Cloudflare remembers where work stopped; the substrate decides if the next act is still authorized*).
+- Multi-agent / long-lived work: [`coordination-vs-orchestration.md`](coordination-vs-orchestration.md), [ADR-0054](decisions/0054-coordination-endeavor-doctrine.md), specs [332](../../specs/332-coordination-endeavor-core.md)–[334](../../specs/334-coordination-work-surface.md); worked example [`scenarios/charter-team-and-enroll-workspace.md`](scenarios/charter-team-and-enroll-workspace.md).
+- Code: `apps/demo-a2a/src/harness-runs.ts` (`HarnessRunCheckpointV1` + the checkpoint law: inputs, never conclusions), `src/a2a-task-do.ts` (`A2aTaskDO`, spec 269 — the canonical run record), `src/harness-workflow.ts` + `src/harness-workflow-core.ts` (the Workflows adapter — refs only), `src/endeavor-authority-steps.ts`.
+
+**D · Knowledge & memory strategy** (three stores, never joined)
+
+- Diagrams: **§3** (public KB = generated SPARQL over world-readable RDF; private vault = compiled selectors over encrypted envelopes; memory = the smallest tier).
+- Specs: [356](../../specs/356-ontology-grounded-vault-questions.md) (vault questions), [357](../../specs/357-natural-language-questions-of-the-public-kb.md) (public KB questions), [358](../../specs/358-semantic-context-plane.md) (`@agenticprimitives/context`), ADRs [0040](decisions/0040-knowledge-base-only-public-onchain-data.md) (KB = public only), [0025](decisions/0025-related-agent-links-are-private.md)/[0055](decisions/0055-vaults-are-the-canonical-system-of-record-for-content.md).
+- Code: `packages/context/src/` (`party-resolution.ts`, `standing.ts`, `memory.ts` — `LearnedPreferenceV1`), `apps/demo-a2a/src/ask-discovery.ts` (public KB), vault via `demo-mcp`.
+
+**E · How skill artifacts play in** (archetype → compiled definition → run → receipt)
+
+- Diagrams: **§4** (the playbook pipeline: `~/skills` → `AgentHarnessDefinitionV1` by digest → vault `archetype.assignment` → `loadPlaybook` → prompt + narrowed tools + `skillRef`).
+- Specs: **[354](../../specs/354-archetype-driven-agent-behavior.md)** (this program), agent-rules [`one-capability-model-generates-both.md`](agent-rules/one-capability-model-generates-both.md), [`ontology-drives-behavior.md`](agent-rules/ontology-drives-behavior.md), [`skill-terminology.md`](agent-rules/skill-terminology.md) (ADR-0051).
+- Code: `~/skills` (Ring 1: `archetypes/*/SKILL.md` + `ontology/*.data.ttl` + `@skills/archetype-compiler`), `packages/capability-claims/src/harness-contract.ts` (schemas + `definitionDigest`), `apps/demo-a2a/src/playbook.ts` (`loadPlaybook`, digest re-verify), `apps/demo-sso-next/src/components/portal/BehaviourPlaybook.tsx` + `src/home/default-archetype.ts` (assignment ceremony / default-on-create).
+
+**Competitive framing** (why the shape is what it is): [`harness-feature-priorities.md`](harness-feature-priorities.md), [`agentic-framework-competitive-analysis.md`](agentic-framework-competitive-analysis.md), [`product-comparison/dapr-agents.md`](product-comparison/dapr-agents.md).
+
+---
+
 ## 0. One sentence and one picture
 
 **Intelligence may be probabilistic; authority must not be.** A model chooses *which capability* and *what words*; the
@@ -227,10 +273,17 @@ Two properties to keep saying out loud: (1) **a playbook changes what an agent k
 act, so they are declared by the agent whose authority the act spends** — a payment's receipt record belongs to the
 treasury, not to the person agent the asker happened to be talking to (the "money moved and nobody was told" bug).
 
-Live today: K1–K2 (schemas, compiler, Treasury archetype, `/contexts/:id/archetypes/:aid/definition`), `loadPlaybook`,
-prompt render, tool merge, declared effects, `skillRef`. **Planned:** `createAgentHarness(definition)` as the single
-composition root (350 W3), Home Behaviour surface writing the assignment (354 K3), skill-provenance on Ask receipts
-(only the `orchestrate` rail is tagged today).
+Live today: K1–K2 (schemas, compiler, Treasury archetype, `/contexts/:id/archetypes/:aid/definition`) and most of
+**K4** — `loadPlaybook` (digest re-verify), prompt render, `scopedActionTools ∩ playbook`, `mergeContractTool`,
+declared effects, `skillRef` on receipts. **K3 is partial:** the assignment record + write path
+(`archetypeAssignmentPut` → `InteractionsDO`), the `BehaviourPlaybook` ceremony UI on **org/service** pages, and
+default-on-create (`assignDefaultArchetype`) are live; **the gap you will hit first is the *person* agent** —
+`/playbook` for a `.me` still edits discussion markdown (`AgentTab only="playbook"` → legacy `skill-md`), not the
+compiled archetype, and passkey/wallet onboarding does not call `assignDefaultArchetype` (only the Google path and
+managed-agent create do). So `alice.me` shows no playbook until `scripts/assign-person-archetype.mts` runs — and that
+script needs the `person-steward` archetype authored in the live skills registry (see 354 §6 current state).
+**Planned:** `createAgentHarness(definition)` as the single composition root (350 W3 / 354 K5), the person Behaviour
+surface (354 K3), skill-provenance on Ask receipts (only the `orchestrate` rail is tagged today).
 
 ---
 
@@ -485,8 +538,8 @@ Ordering follows spec 359: the multiplier first, then durability, then the first
 | # | Step | Why now | Owner | Evidence of done |
 | --- | --- | --- | --- | --- |
 | 1 | **Compile more plan shapes from the ontology** — `create-then-enroll` (`ap:charters` → `aporg:memberAgent` invite fan-out), `message-each-member`, `report-to-org` | §11 depends on the model emitting three calls; §6 shows compiled shapes are deterministic and re-verified per item. This is 355's rule applied twice more | `packages/ontology/src/plan-shapes.ts` + `compiledFanOut` → a table of shapes | `check:ask-truth` cases for each sentence pass without an LLM planner |
-| 2 | **Per-step checkpoint + resume-with-recheck (350 W3)** — persist `RunResult` after every receipt, resume by `runRef:stepRef`, re-verify every resumed step | The turn-level checkpoint strands multi-step runs; Dapr/MAF/LangGraph all checkpoint per step. The twist: resumption is a fresh authority check, never a replay of a verdict | `A2aTaskDO` `harness:run:*` → `HarnessRunCheckpointV1.steps[]`; `loop.ts` `resumeFrom` | 13-turn fan-out survives a worker restart; a mandate revoked mid-run denies the next resumed step |
-| 3 | **Durable approvals with timeout** — `ApprovalPort` backed by DO alarm; auto-refuse at expiry; steward ack over `approvalDigestFor` | The one Dapr feature we called "best reference" and have not built; today a pending approval is only as durable as the next turn | `suppliedApprovalsPort` → `ApprovalDO` (or alarm on `A2aTaskDO`) | approval that is not discharged in T auto-refuses with a receipt |
+| 2 | **Per-step checkpoint + resume-with-recheck (350 W3 / spec 362)** — persist `RunResult` after every receipt, resume by `runRef:stepRef`, re-verify every resumed step. **Underway:** the Ring-0 `DurableStepPort` + first Cloudflare Workflows binding (`harness-workflow.ts` / `-core.ts`) wrap whole *attempts* (never verdicts) in `step.do`; refs-only params enforced by `check:workflow-params-are-refs` | The turn-level checkpoint strands multi-step runs; Dapr/MAF/LangGraph all checkpoint per step. The twist: resumption is a fresh authority check, never a replay of a verdict (spec 362 §1) | `A2aTaskDO` `harness:run:*` → `HarnessRunCheckpointV1`; `loop.ts` `resumeFrom`; `harness-workflow.ts` | 13-turn fan-out survives a worker restart; a mandate revoked mid-run denies the next resumed step |
+| 3 | **Durable approvals with timeout** — `waitForEvent` (Workflows) or DO alarm; auto-refuse at expiry; steward ack over `approvalDigestFor` | The one Dapr feature we called "best reference"; the Workflows binding (step 2) supplies the durable wait primitive | `suppliedApprovalsPort` → Workflows `waitForEvent` / `A2aTaskDO` alarm | approval that is not discharged in T auto-refuses with a receipt |
 | 4 | **Wire `projectRunProvenance` into the Ask** — PROV-O/P-Plan A-box per run (`prov:Plan` = playbook digest, `prov:Activity` per step, `prov:used` mandate ref, `prov:generated` tx/receipt) written to the *authority-spending* agent's vault; OTel GenAI span projection with pinned version | Our receipts carry more evidentiary weight than any trace in the field; they are not yet queryable or carryable. Tier 0.3/0.4 in the priorities doc | `packages/provenance` + `declaredEffectSink` | `vault.records.query` can answer "what did my treasury pay last week and under which mandate" |
 | 5 | **`createAgentHarness(definition)` as the composition root (350 W3 / 354 K4)** — `SKILL.md`-declared tools compile to `ToolSpec`s; invokers registered by capability id; archetype selects the tool set | Today `harness-run.ts` hand-assembles tools; the compiled definition only *merges* onto builtins. Until this lands every domain costs invoker code | `packages/harness` | a new archetype adds a capability with zero edits to `harness-run.ts` |
 | 6 | **Home Behaviour surface (354 K3)** — steward assigns/revokes an archetype; writes `ArchetypeAssignmentV1`; shows digest + version + receipts citing it | K1–K2 are proven; the assignment is still written by script | `apps/demo-sso-next` | assignment appears in the vault; next Ask's receipts carry the new `skillRef` |

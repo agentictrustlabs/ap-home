@@ -74,6 +74,9 @@ async function writeAssignment(token: string, agent: Address, definition: AgentH
 }
 
 const rarLabel = (t: string) => t.replace(/^urn:ap:rar:/, '');
+/** `skill:<context>/<id>` → `<id>`: the context is already named on the line, so each driving skill
+ *  reads as its own id. The full ref stays in the chip's title for anyone who needs it verbatim. */
+const skillLabel = (ref: string) => ref.replace(/^skill:/, '').replace(/^[^/]+\//, '');
 
 /** The human words for a mandate requirement type — falls back to the bare urn tail. Kept tiny and
  *  local: the authoritative label lives with the capability in the compiler; here we only need to make
@@ -91,7 +94,7 @@ function ToolLine({ id, description, risk }: { id: string; description: string; 
   const informational = !risk || risk === 'informational';
   return (
     <li style={{ margin: '.35rem 0', lineHeight: 1.4 }}>
-      <code style={{ fontSize: '.82rem' }}>{id}</code>
+      <code style={{ fontSize: '.82rem', overflowWrap: 'anywhere' }}>{id}</code>
       {!informational && (
         <span style={{ marginLeft: '.4rem', fontSize: '.7rem', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '0 .35rem' }}>
           {risk} · needs a mandate
@@ -277,7 +280,12 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                   type="button"
                   onClick={() => { setSelected(isSel ? null : opt); setSaved(false); }}
                   style={{
-                    textAlign: 'left', cursor: 'pointer', padding: '.6rem .8rem', borderRadius: 10,
+                    // A raw <button> here is a CARD, not a CTA: the global button rule paints it as one
+                    // (white text, centred inline-flex, nowrap) — which is how the archetype label became
+                    // white on white and the skill list ran off the page. Every one of those is reset.
+                    display: 'block', width: '100%', minHeight: 0, whiteSpace: 'normal', lineHeight: 1.4,
+                    fontWeight: 400, fontSize: 'inherit', color: 'var(--color-text-body)', textAlign: 'left',
+                    cursor: 'pointer', padding: '.6rem .8rem', borderRadius: 10, transform: 'none',
                     border: `1px solid ${isSel ? 'var(--color-sage-700, #3f6212)' : 'var(--color-border)'}`,
                     background: isSel ? 'var(--color-sage-50, #f2f7ec)' : 'var(--color-surface, #fff)',
                   }}
@@ -291,13 +299,21 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                       which SKILL.md contract defines it — that file is the editable source, and an
                       archetype with no contract behind a capability is running a built-in fallback. */}
                   {opt.registry && (
-                    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.25rem' }}>
-                      from <code>{opt.registry.context}</code>
-                      {opt.registry.skills.length > 0
-                        ? <> · driven by {opt.registry.skills.map((sk) => <code key={sk} style={{ marginLeft: '.25rem' }}>{sk}</code>)}</>
-                        : <> · no SKILL.md linked yet</>}
+                    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.35rem' }}>
+                      <div>
+                        from <code>{opt.registry.context}</code>
+                        {opt.registry.skills.length === 0 && <> · no SKILL.md linked yet</>}
+                      </div>
+                      {opt.registry.skills.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.25rem .3rem', marginTop: '.25rem' }}>
+                          <span>driven by</span>
+                          {opt.registry.skills.map((sk) => (
+                            <code key={sk} title={sk} style={{ fontSize: '.68rem', whiteSpace: 'nowrap', overflowWrap: 'anywhere' }}>{skillLabel(sk)}</code>
+                          ))}
+                        </div>
+                      )}
                       {opt.registry.warnings.length > 0 && (
-                        <div style={{ color: 'var(--color-warning, #92700e)' }}>
+                        <div style={{ color: 'var(--color-warning, #92700e)', marginTop: '.2rem' }}>
                           {opt.registry.warnings.length} capabilit{opt.registry.warnings.length === 1 ? 'y has' : 'ies have'} no contract — running the built-in shape
                         </div>
                       )}

@@ -41,8 +41,8 @@ export const CONSULT_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** The default consult playbook — used when the member hasn't authored a SKILL.md (spec 328 §4b
- *  record; a config default, not a fallback mechanism: the load path is one read). */
+/** The consult SITUATION — always part of the system prompt, after the archetype's doctrine when the
+ *  member has one (a config default, not a fallback mechanism: the load path is one read). */
 export const DEFAULT_CONSULT_SKILL_MD =
   "You are this person's agent, answering a question routed from a discussion in an organization " +
   'they belong to. Answer concisely and only from the question and its carried discussion context; ' +
@@ -57,9 +57,10 @@ const CONSULT_CONTRACT =
   'answer as `answer`, OR with `declined: true` (and optionally `declineReason`) when you should ' +
   'not answer. Never answer in prose, never both answer and decline.';
 
-/** What the marker-gated `internal.consult.context` op returns (the playbook + display name). */
+/** What the marker-gated `internal.consult.context` op returns (the archetype's compiled instructions
+ *  — spec 354 K3, digest-verified by the DO — + display name). */
 interface ConsultContextRead {
-  skillMarkdown?: string;
+  playbook?: string;
   displayName?: string;
 }
 
@@ -92,7 +93,7 @@ export async function handleConsultRespond(
   if (llmConfigured) {
     try {
       const read = (await io.readContext()) as ConsultContextRead;
-      if (read.skillMarkdown?.trim()) playbook = read.skillMarkdown.trim();
+      if (read.playbook?.trim()) playbook = `${read.playbook.trim()}\n\n${DEFAULT_CONSULT_SKILL_MD}`;
       if (read.displayName?.trim()) displayName = read.displayName.trim();
     } catch { /* default playbook + nameless goal — trigger-only context, same mechanism */ }
   }
