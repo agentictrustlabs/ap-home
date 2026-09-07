@@ -1777,7 +1777,13 @@ app.post('/resolution/grant', async (c) => {
           // THE ANSWER CARRIES THE NEXT STEP (spec 364). Their surface renders this as "finish it" —
           // the same sentence they started with, now that it can resolve. A pointer, never authority:
           // the payment still needs their mandate, and every gate runs again.
-          ...(askedFor ? { contextRefs: [{ kind: 'payment-continue', id: `${owner}/${askedFor}`, label: `${askedFor} USDC to ${ownerLabel}` }] } : {}),
+          // ALWAYS the next step, with the figure when we have it. Without one the chip still puts the
+          // sentence back in their Ask and the capability asks how much — one question beats making
+          // somebody reconstruct what they were doing three days ago from a link.
+          contextRefs: [{
+            kind: 'payment-continue', id: `${owner}/${askedFor}`,
+            label: askedFor ? `${askedFor} USDC to ${ownerLabel}` : `what you were sending ${ownerLabel}`,
+          }],
         }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean };

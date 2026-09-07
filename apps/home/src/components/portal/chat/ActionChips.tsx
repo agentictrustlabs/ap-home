@@ -129,7 +129,9 @@ export function ShareWayChip({ refId, label }: { refId: string; label?: string }
 export function ContinuePaymentChip({ refId, label, names }: { refId: string; label?: string; names?: Record<string, string> }) {
   const [owner = '', usdc = ''] = refId.split('/');
   const who = names?.[owner.toLowerCase()] ?? owner;
-  const sentence = `send ${who} ${usdc} usdc`;
+  // With the figure when the request carried one; without, the sentence still names WHO, and the
+  // capability asks how much — one question, rather than remembering it from three days ago.
+  const sentence = usdc ? `send ${who} ${usdc} usdc` : `send ${who} usdc`;
   return (
     <button
       type="button" className="badge" style={chipStyle} data-testid="continue-payment"

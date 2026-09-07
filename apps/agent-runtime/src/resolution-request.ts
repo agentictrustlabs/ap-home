@@ -40,7 +40,9 @@ export interface ResolutionRequestDeps {
 }
 
 export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: Address, session?: string): ToolInvoker {
-  return async (_toolId, args) => {
+  return async (_toolId, args, ctx) => {
+    /** What the person actually typed — the figure lives here, not in a planner's rewrite of it. */
+    const goal = String((ctx?.intent as { goal?: unknown } | undefined)?.goal ?? '');
     if (!person) throw new Error('this agent does not know who is asking');
     const raw = String((args as { owner?: unknown }).owner ?? '').trim();
     if (!raw) throw new Error('resolution.invitation.request needs the person to ask');
@@ -79,7 +81,11 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // ask, and which never reaches a caveat or a gate. Losing it costs them the one-press finish, which
     // is the whole point of recording it.
     const fromArg = String((args as { usdc?: unknown }).usdc ?? '').trim();
-    const spoken = /(\d+(?:\.\d+)?)\s*usdc/i.exec(String((args as { purpose?: unknown }).purpose ?? ''))?.[1];
+    // THE PERSON'S OWN WORDS FIRST, then the planner's paraphrase. Scanning only the `purpose` lost the
+    // figure whenever the planner rewrote "I want to send 1.2 usdc" as "to send you money" — which it
+    // usually does, because a purpose is meant to read as a sentence. The goal is what they typed.
+    const said = `${goal} ${String((args as { purpose?: unknown }).purpose ?? '')}`;
+    const spoken = /(\d+(?:\.\d+)?)\s*usdc/i.exec(said)?.[1];
     const amount = /^\d+(\.\d+)?$/.test(fromArg) ? fromArg : (spoken ?? '');
     const at = new Date().toISOString();
     const request: ResolutionInvitationRequestV1 = {
