@@ -123,6 +123,7 @@ import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
+import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -1402,7 +1403,24 @@ app.get('/harness/vocabulary', async (c) => {
     const deps = harnessDeps(c.env, buildAuditSink(c.env));
     playbook = await loadPlaybook(deps.readSubjectRecord, agent).catch(() => null);
   }
-  return c.json({ ok: true, capabilities: askVocabulary(playbook) });
+  // ── WHAT IT MAY DECIDE FOR YOU, and how (spec 363 W5) ──
+  //
+  // The capability list says what an agent can be asked to DO. This says which questions it may answer
+  // on your behalf instead of interrupting, what fact each answer must rest on, and the words it will
+  // cite. A surface that shows only the first half describes an agent that always asks — which is not
+  // the one people meet.
+  //
+  // Disclosure, not authority (spec 353 §4): no gate reads this, and publishing it grants nothing. It is
+  // read without a session for the same reason the capability list is — a person deciding whether to
+  // trust an agent should not have to sign in to learn how it makes up its mind.
+  const decisions = DECISION_POINTS.map((d) => ({
+    id: d.id,
+    question: d.question,
+    /** In order — the first whose basis holds answers; none ⇒ the question is asked. */
+    rules: d.rules.map((r) => ({ id: r.id, basis: r.basis.property, cardinality: r.basis.cardinality, because: r.because })),
+    whenNoneApply: 'the question is asked',
+  }));
+  return c.json({ ok: true, capabilities: askVocabulary(playbook), decisions });
 });
 
 // GET /resolution/requests — what people have asked THIS person for a way to reach (spec 338 §7).
