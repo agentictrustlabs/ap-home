@@ -1418,40 +1418,70 @@ app.post('/harness/approve', async (c) => {
 // household, the agents chartered under them, the words its capabilities answer to), then a deterministic
 // repair of windows that normalise exactly to a known label. Processed in memory and discarded: no DO
 // record, no vault write, no transcript stored. The words go through /harness/ask like typed ones.
+// The ear's vocabulary, per asker, for a few minutes — a SERVING-PLANE cache (derived, rebuildable; ADR-0055):
+// the chain reads behind it cost ~3 s and a dialog cannot pay that per utterance. The surface WARMS it when
+// the mic opens, so by the time the recording lands only the transcription is left to do. The Cache API
+// rather than an isolate map: the warm and the hearing land on different isolates in the same colo.
+const HEARING_VOCAB_TTL_S = 300;
+const hearingCacheKey = (asker: string, addressee: string) => new Request(`https://hearing.cache.internal/${asker}/${addressee}`);
+/** The Workers-runtime default cache (colo-local); the DOM lib does not know the `default` member. */
+const colocache = () => (caches as unknown as { default: Cache }).default;
+async function readHearingVocab(asker: string, addressee: string): Promise<ReturnType<typeof hearingVocabulary> | null> {
+  try { const hit = await colocache().match(hearingCacheKey(asker, addressee)); return hit ? (await hit.json()) as ReturnType<typeof hearingVocabulary> : null; } catch { return null; }
+}
+async function writeHearingVocab(asker: string, addressee: string, vocab: ReturnType<typeof hearingVocabulary>): Promise<void> {
+  try { await colocache().put(hearingCacheKey(asker, addressee), new Response(JSON.stringify(vocab), { headers: { 'content-type': 'application/json', 'cache-control': `max-age=${HEARING_VOCAB_TTL_S}` } })); } catch { /* a cache miss next time costs the reads again */ }
+}
+
 app.post('/harness/hear', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: string; audio?: string; mime?: string; language?: string } | null;
-  if (!body?.session || !body.addressee || !body.audio) return c.json({ ok: false, error: 'session, addressee and audio (base64) are required' }, 400);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: string; audio?: string; mime?: string; language?: string; warm?: boolean } | null;
+  if (!body?.session || !body.addressee || (!body.audio && !body.warm)) return c.json({ ok: false, error: 'session, addressee and audio (base64) are required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.AI) return c.json({ ok: false, error: 'hearing is not configured on this agent (no Workers AI binding) — type it instead' }, 503);
-  if (body.audio.length > 2_100_000) return c.json({ ok: false, error: 'that recording is too long — up to about twenty seconds at a time' }, 413);
-  const bytes = Uint8Array.from(atob(body.audio), (ch) => ch.charCodeAt(0));
+  if ((body.audio ?? '').length > 2_100_000) return c.json({ ok: false, error: 'that recording is too long — up to about twenty seconds at a time' }, 413);
   const asker = String(who.sa).toLowerCase();
   const addressee = body.addressee.toLowerCase();
-  const deps = harnessDeps(c.env, buildAuditSink(c.env));
-  // THE EAR'S VOCABULARY — the private tier, read by the asker's own agent for the asker's own hearing
-  // (the same boundary the sentence already crosses to the planner). Best-effort, bounded, never stored.
-  const names: string[] = [];
+  const t0 = Date.now();
+  const cached = await readHearingVocab(asker, addressee);
+  const vocab = cached ?? await hearingVocabularyFor(c.env, asker, addressee);
+  if (!cached) await writeHearingVocab(asker, addressee, vocab);
+  const tVocab = Date.now() - t0;
+  if (body.warm && !body.audio) return c.json({ ok: true, warmed: true, cached: !!cached, vocabularyWords: vocab.labels.length, timings: { vocabularyMs: tVocab } });
+  const bytes = Uint8Array.from(atob(body.audio!), (ch) => ch.charCodeAt(0));
   try {
-    const members = deps.readSubjectRecord ? await householdMembers(asker, { readSubjectRecord: deps.readSubjectRecord }) : [];
-    for (const m of members) { if (m.label) names.push(m.label); const n = await deps.nameOf?.(m.agent).catch(() => null); if (n) names.push(n); }
-  } catch { /* no household — nothing to bias with */ }
-  for (const t of ['treasury', 'org', 'team', 'household', 'workspace']) {
-    const owned = await deps.charteredAgents?.(asker, t).catch(() => []) ?? [];
-    for (const a of owned) if (a.name) names.push(a.name);
-  }
-  if (addressee !== asker) { const n = await deps.nameOf?.(addressee).catch(() => null); if (n) names.push(n); }
-  const playbook = /^0x[0-9a-f]{40}$/.test(addressee) ? await loadPlaybook(deps.readSubjectRecord, addressee).catch(() => null) : null;
-  const verbs = askVocabulary(playbook).map((v) => v.label);
-  const vocab = hearingVocabulary({ names, verbs });
-  try {
+    const t1 = Date.now();
     const heard = await workersAiTranscriber(c.env.AI).transcribe({ audio: bytes, mime: body.mime ?? 'audio/webm', prompt: vocab.prompt, ...(body.language ? { language: body.language } : {}) });
     const repaired = repairTranscript(heard.text, vocab.labels);
-    return c.json({ ok: true, transcript: repaired.text, heard: heard.text, repairs: repaired.repairs, vocabularyWords: vocab.labels.length });
+    return c.json({ ok: true, transcript: repaired.text, heard: heard.text, repairs: repaired.repairs, vocabularyWords: vocab.labels.length, timings: { vocabularyMs: tVocab, transcribeMs: Date.now() - t1 } });
   } catch (e) {
     return c.json({ ok: false, error: `could not hear that: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
 });
+
+/** THE EAR'S VOCABULARY — the private tier, read by the asker's own agent for the asker's own hearing (the
+ *  same boundary the sentence already crosses to the planner). Best-effort, bounded, never stored. Every read
+ *  is independent, so they run at once. */
+async function hearingVocabularyFor(env: Env, asker: string, addressee: string): Promise<ReturnType<typeof hearingVocabulary>> {
+  const deps = harnessDeps(env, buildAuditSink(env));
+  const names: string[] = [];
+  const [household, ...chartered] = await Promise.all([
+    (async () => {
+      const members = deps.readSubjectRecord ? await householdMembers(asker, { readSubjectRecord: deps.readSubjectRecord }).catch(() => []) : [];
+      const named = await Promise.all(members.map(async (m) => ({ label: m.label, name: await deps.nameOf?.(m.agent).catch(() => null) ?? null })));
+      return named;
+    })(),
+    ...['treasury', 'org', 'team', 'household', 'workspace'].map((t) => deps.charteredAgents?.(asker, t).catch(() => []) ?? Promise.resolve([])),
+    addressee !== asker ? (deps.nameOf?.(addressee).catch(() => null) ?? Promise.resolve(null)) : Promise.resolve(null),
+  ] as const);
+  for (const m of household) { if (m.label) names.push(m.label); if (m.name) names.push(m.name); }
+  const addresseeName = chartered.pop() as string | null;
+  for (const owned of chartered as Array<Array<{ name?: string }>>) for (const a of owned) if (a.name) names.push(a.name);
+  if (addresseeName) names.push(addresseeName);
+  const playbook = /^0x[0-9a-f]{40}$/.test(addressee) ? await loadPlaybook(deps.readSubjectRecord, addressee).catch(() => null) : null;
+  const verbs = askVocabulary(playbook).map((v) => v.label);
+  return hearingVocabulary({ names, verbs });
+}
 
 app.get('/harness/vocabulary', async (c) => {
   // Spec 367 §7 — each capability's COMMAND FIELDS ride with it, so a screen and the Ask fill one command.

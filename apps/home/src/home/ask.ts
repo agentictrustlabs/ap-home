@@ -289,6 +289,12 @@ export async function hear(session: { token: string }, addressee: string, audioB
   return { ok: true, transcript: res.transcript, heard: res.heard ?? res.transcript, repairs: res.repairs ?? [] };
 }
 
+/** Warm the agent's ear for this asker while the mic is still open — the vocabulary reads cost seconds the
+ *  recording hides; fire-and-forget, a failure costs nothing but a slower first hearing. */
+export function warmHearing(session: { token: string }, addressee: string): void {
+  void postA2a('/a2a/harness/hear', { session: session.token, addressee: addressee.toLowerCase(), warm: true }).catch(() => undefined);
+}
+
 async function postA2a(path: string, body: unknown): Promise<Record<string, unknown>> {
   const send = async () => {
     await ensureCsrfToken();

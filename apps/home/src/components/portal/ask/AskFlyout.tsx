@@ -20,7 +20,7 @@ import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech } from './voice-text';
-import { ask, hear, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import { ask, hear, warmHearing, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
@@ -233,7 +233,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         const yn = yesNo(text);
         if (yn === 'yes') void answer(p.reply as never, p.state);
         else if (yn === 'no') { setPending(null); voice.speak('Okay — cancelled.'); }
-        else voice.speak('Yes or no?', () => void voice.startListening(onAudioRef.current));
+        else voice.speak('Yes or no?', () => listenRef.current());
         return;
       }
       if (prompt.kind === 'signature') return;
@@ -244,12 +244,12 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       if (target.type === 'choice' && target.choices?.length) {
         const m = matchChoice(text, target.choices);
         if (m) { value = m; setChosen((c) => ({ ...c, [m.toLowerCase()]: target.choices!.find((x) => x.value === m)!.label })); }
-        else if (!target.allowOther) { voice.speak("I didn't catch which one.", () => void voice.startListening(onAudioRef.current)); return; }
+        else if (!target.allowOther) { voice.speak("I didn't catch which one.", () => listenRef.current()); return; }
       }
       const next = { ...answers, [target.name]: value };
       setAnswers(next);
       const stillMissing = fields.find((f) => f.required && !(next[f.name] ?? '').trim());
-      if (stillMissing) voice.speak(stillMissing.label, () => void voice.startListening(onAudioRef.current));
+      if (stillMissing) voice.speak(stillMissing.label, () => listenRef.current());
       else void answer(p.reply as never, p.state, next);
       return;
     }
@@ -277,6 +277,12 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   };
   const onVoiceRef = useRef(onVoice); onVoiceRef.current = onVoice;
   const onAudioRef = useRef(onAudio); onAudioRef.current = onAudio;
+  /** Open the mic for one utterance — and warm the agent's ear meanwhile, so hearing costs only the transcription. */
+  const listen = () => {
+    if (session) warmHearing(session, addressee);
+    void voice.startListening((blob) => void onAudioRef.current(blob), (m) => setErr(`${m} — you can type it instead.`));
+  };
+  const listenRef = useRef(listen); listenRef.current = listen;
 
   // SPEAK what the agent said, once per entry, from the agent's own spoken rendering; after an answer the
   // mic reopens once (a dialog). Prompts and authority are spoken by the pending effect below.
@@ -292,7 +298,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     }
     spokenIdx.current = thread.length;
     const text = parts.filter(Boolean).join(' ');
-    if (text) voice.speak(text, () => { if (!pendingRef.current && voice.enabled) void voice.startListening(onAudioRef.current); });
+    if (text) voice.speak(text, () => { if (!pendingRef.current && voice.enabled) listenRef.current(); });
   }, [thread, voice.enabled]);
   const spokenPending = useRef('');
   useEffect(() => {
@@ -302,7 +308,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     spokenPending.current = key;
     const text = pending.reply.spoken ?? '';
     const again = listenAfter(pending.reply);
-    voice.speak(text, () => { if (again && voice.enabled) void voice.startListening(onAudioRef.current); });
+    voice.speak(text, () => { if (again && voice.enabled) listenRef.current(); });
   }, [pending, voice.enabled]);
 
   // Spec 367 §7 — THE SAME COMMAND, FILLED BY CONTROLS. "Do" offers the agent's capabilities as forms whose
@@ -544,7 +550,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             aria-pressed={voice.listening} aria-label={voice.listening ? 'Stop listening' : 'Speak your ask'}
             title={voice.listening ? 'Stop listening' : 'Speak — your agent hears it'}
             disabled={!!busy || pending?.reply.kind === 'authority_required' || (pending?.reply.kind === 'prompt' && pending.reply.prompt.kind === 'signature')}
-            onClick={() => (voice.listening ? voice.stopListening() : void voice.startListening(onAudioRef.current, (m) => setErr(`${m} — you can type it instead.`)))}
+            onClick={() => (voice.listening ? voice.stopListening() : listen())}
           >🎙</button>
         )}
         <input
