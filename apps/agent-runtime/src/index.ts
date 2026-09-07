@@ -119,6 +119,7 @@ import { grantBody } from '@agenticprimitives/agent-resolution';
 import { verifiedGrants, grantAllows } from './resolution-invitation.js';
 import { actionLink } from './resolution-request.js';
 import { RELATIONSHIP_TYPE, ROLE, ROLE_IRI } from '@agenticprimitives/agent-relationships';
+import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailEnv } from './email-channel.js';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
@@ -6966,7 +6967,110 @@ app.all('/custody/vault-key/:name', async (c) => {
   return new Response(await resp.text(), { status: resp.status, headers: { 'Content-Type': 'application/json' } });
 });
 
-export default app;
+// POST /email/send { session, to, subject, text } — WRITE TO SOMEBODY BY EMAIL, from your own thread.
+//
+// The mail goes out on whichever rail this deployment has, and a copy lands in the sender's own inbox in
+// the SAME conversation inbound mail from that address threads into. An outbound message a person cannot
+// see afterwards is a message they will send twice.
+//
+// It sends AS THE DEPLOYMENT'S ADDRESS, not as the person's own mailbox — we hold no credential for
+// their mail, and pretending otherwise would forge a From: header. The body says who it is from.
+app.post('/email/send', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; to?: string; subject?: string; text?: string } | null;
+  if (!body?.session || !body.to || !body.text?.trim()) return c.json({ ok: false, error: 'session, to and text are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const to = body.to.trim().toLowerCase();
+  if (!isEmailAddress(to)) return c.json({ ok: false, error: `"${body.to}" is not an email address` }, 400);
+  const sender = emailSender(c.env as unknown as EmailEnv);
+  // A DEPLOYMENT WITHOUT EMAIL SAYS SO, before a person composes into a box that cannot send.
+  if (!sender) return c.json({ ok: false, error: 'this deployment has no email provider configured' }, 503);
+
+  const from = String(who.sa).toLowerCase();
+  const fromName = c.env.AGENT_NAME_REGISTRY && c.env.AGENT_NAME_UNIVERSAL_RESOLVER
+    ? await new AgentNamingClient({
+        rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID),
+        registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+      }).reverseResolve(from as Address).catch(() => null)
+    : null;
+  const subject = (body.subject ?? '').trim() || `A message from ${fromName ?? 'an agent'}`;
+  const text = `${body.text.trim()}\n\n— ${fromName ?? from}, via ${new URL(c.env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://faithnet.me').host}`;
+  const sent = await sender.send({ to, subject, text });
+  if (!sent.ok) return c.json({ ok: false, error: sent.error ?? 'the email did not go', via: sent.via }, 502);
+
+  // THEIR OWN COPY, in the thread with that address. Best-effort: the mail HAS gone, and failing the
+  // request now would tell them it did not.
+  const recorded = await callInteractionsInternal(c.env, from, 'internal.email.admit', {
+    direction: 'out', claimedFrom: to, subject, bodyText: body.text.trim(),
+    gateway: (c.env.HARNESS_AGENT_SA ?? '').toLowerCase(),
+    ...(sent.messageId ? { messageId: sent.messageId } : {}),
+  }).catch(() => ({ ok: false }));
+
+  return c.json({ ok: true, via: sent.via, threaded: (recorded as { ok?: boolean }).ok === true });
+});
+
+/**
+ * MAIL ARRIVES HERE — spec 365. Cloudflare Email Routing calls this when a message reaches a zone this
+ * deployment answers for.
+ *
+ * It parses in memory, resolves the RECIPIENT by the address it was sent to, and admits a message into
+ * that person's own inbox. Nothing else: an email is not authority, so there is no path from here to an
+ * act, and a name nobody holds is a refusal rather than a guess at the nearest handle.
+ */
+async function handleInboundEmail(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  const zones = emailZones(env as unknown as EmailEnv);
+  if (!zones.length) return; // this deployment answers for no zone — nothing to route
+  const text = await new Response(message.raw).text().catch(() => '');
+  // The smallest honest parse: headers to the first blank line, the rest is the body. A full MIME parser
+  // is a dependency and an attack surface; what a thread needs is the words.
+  const split = text.indexOf('\r\n\r\n') >= 0 ? text.indexOf('\r\n\r\n') : text.indexOf('\n\n');
+  const head = split > 0 ? text.slice(0, split) : '';
+  const bodyRaw = split > 0 ? text.slice(split).trim() : text;
+  const header = (name: string): string => (new RegExp(`^${name}:\\s*(.+)$`, 'im').exec(head)?.[1] ?? '').trim();
+  const outcome = await admitInboundEmail(
+    {
+      to: message.to, from: message.from,
+      subject: header('subject'),
+      text: bodyRaw,
+      ...(header('message-id') ? { messageId: header('message-id') } : {}),
+    },
+    zones,
+    {
+      resolveHandle: async (handle) => {
+        if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+        const client = new AgentNamingClient({
+          rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID),
+          registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+        });
+        // A handle is a NAME in this deployment's person root — `alice` means `alice.me` here, and the
+        // typed root is the deployment's fact, not the sender's to choose.
+        return client.resolveName(`${handle}.me`).catch(() => null);
+      },
+      admit: async ({ recipient, subject, bodyText, claimedFrom, messageId }) => {
+        const out = await callInteractionsInternal(env, recipient, 'internal.email.admit', {
+          subject, bodyText, claimedFrom, gateway: (env.HARNESS_AGENT_SA ?? '').toLowerCase(),
+          ...(messageId ? { messageId } : {}),
+        }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+        const r = out as { ok?: boolean; error?: string };
+        return { ok: r.ok === true, ...(r.error ? { error: r.error } : {}) };
+      },
+    },
+  );
+  // A REFUSAL IS TOLD TO THE SENDER, not swallowed. Mail that vanishes is worse than mail that bounces:
+  // the person who wrote it has no way to learn that nobody read it.
+  if (!outcome.ok) {
+    const why = outcome.reason === 'no-such-agent' ? 'no agent here holds that name'
+      : outcome.reason === 'not-our-zone' ? 'this address is not served here'
+      : `it could not be delivered${outcome.detail ? ` (${outcome.detail})` : ''}`;
+    message.setReject(why);
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  // Present unconditionally; Cloudflare only calls it for zones routed at this Worker.
+  email: handleInboundEmail,
+};
 
 // ── spec 362 — the Worker-side ATTEMPT the workflow drives. One whole attempt = load the run's CURRENT
 //    inputs from its checkpoint (approvals a custodian delivered while the engine slept arrive as

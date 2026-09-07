@@ -43,12 +43,13 @@ Promise<{ ok: true; members: HouseholdMemberRow[] } | { ok: false; error: string
 /** Record or remove ONE member — merge, never a whole-document write. */
 export async function householdThroughHarness(input: {
   person: Address; session: { token: string };
-  member: string; kin?: string; role?: string; label?: string; remove?: true;
+  member: string; kin?: string; role?: string; label?: string; household?: string; remove?: true;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const args: Record<string, unknown> = { member: input.member };
   if (input.kin) args.kin = input.kin;
   if (input.role) args.role = input.role;
   if (input.label) args.label = input.label;
+  if (input.household) args.household = input.household;
   if (input.remove) args.remove = true;
   const out = await ask({
     session: input.session.token, addressee: input.person.toLowerCase(),

@@ -1592,7 +1592,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1810,6 +1810,75 @@ export class InteractionsDO {
             const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
+        }
+
+        // ── AN EMAIL ARRIVED (spec 365) ───────────────────────────────────────────────────────
+        //
+        // It becomes a MESSAGE in this person's own inbox and nothing else. There is no branch here that
+        // reads the body for instructions, and there will not be one: an email is not authority (spec
+        // 309 §4.2), and everything a person can do from the resulting thread they do from their own
+        // surface under their own mandate.
+        //
+        // WHO IT IS FROM, honestly. The envelope's `from` is the GATEWAY agent that delivered it —
+        // because that is what actually did — and the human's address rides as a claim on a contextRef
+        // and in the body. An envelope that named the address as its sender would be asserting an
+        // identity nobody verified, which is the whole of email fraud.
+        //
+        // ONE THREAD PER CORRESPONDENT: the conversation id is derived from the ADDRESS, so mail from
+        // one person gathers in one place instead of every email landing in a single "email" thread.
+        if (op === 'internal.email.admit') {
+          const claimedFrom = String(body.claimedFrom ?? '').trim().toLowerCase();
+          const bodyText = String(body.bodyText ?? '').trim();
+          const gateway = String(body.gateway ?? '').toLowerCase();
+          if (!claimedFrom || !bodyText || !/^0x[0-9a-f]{40}$/.test(gateway)) {
+            return json({ ok: false, error: 'claimedFrom, bodyText and gateway are required' }, 400);
+          }
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          const chainIdEmail = Number(this.env.CHAIN_ID ?? 84532);
+          const digestOf = async (v: string): Promise<string> => {
+            const bytes = new TextEncoder().encode(v);
+            const hash = await crypto.subtle.digest('SHA-256', bytes);
+            return [...new Uint8Array(hash)].slice(0, 12).map((b) => b.toString(16).padStart(2, '0')).join('');
+          };
+          // ONE THREAD PER CORRESPONDENT, BOTH DIRECTIONS. The id is derived from the address, so what
+          // this person sent to somebody and what came back sit together — two mailboxes for one
+          // relationship is how half a conversation goes missing.
+          const conversationId = `conv_email_${await digestOf(claimedFrom)}`;
+          const outbound = body.direction === 'out';
+          const emailAudit = buildAuditSink(this.env);
+          return this.serialize(async () => {
+            const built = await buildOutboundMessage({
+              // OUTBOUND is FROM this person (they wrote it); INBOUND is from the GATEWAY that delivered
+              // it, never from the address — an envelope naming an unverified address as its sender
+              // would be asserting an identity nobody checked.
+              from: caip10(chainIdEmail, (outbound ? principal : gateway) as Address) as never,
+              to: caip10(chainIdEmail, (outbound ? gateway : principal) as Address) as never,
+              bodyText,
+              ...(body.subject ? { title: String(body.subject) } : {}),
+              conversationId,
+              // The address, as a POINTER a surface can render — labelled a claim, never an identity.
+              contextRefs: [{ kind: outbound ? 'email-to' : 'email-from', id: claimedFrom, label: claimedFrom }],
+            });
+            if (!built.ok) return json({ ok: false, error: built.error }, 400);
+            const { envelope, bodyBytes } = built;
+            let bin = '';
+            for (const b of bodyBytes) bin += String.fromCharCode(b);
+            // PARSE IN MEMORY, STORE IN THE VAULT (spec 362 §6.2 / ADR-0055): the body goes to the
+            // owner's vault under their own grant, and nothing about this mail is kept DO-local.
+            await this.vaultFor(g).write({ owner: '', resource: envelope.body.resource, data: { b64: btoa(bin), contentType: 'text/plain', bodyHash: envelope.bodyHash }, classification: 'internal' } as never);
+            const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [] };
+            const envs = (doc.envelopes as AnyMessageEnvelope[] | undefined) ?? [];
+            // The same message delivered twice is one message: providers retry, and a duplicated thread
+            // entry is a person reading the same mail again and wondering what changed.
+            if (body.messageId && envs.some((e) => (e as { emailMessageId?: string }).emailMessageId === String(body.messageId))) {
+              return json({ ok: true, duplicate: true, conversationId });
+            }
+            doc.envelopes = [...envs, { ...envelope, ...(body.messageId ? { emailMessageId: String(body.messageId) } : {}) }];
+            doc.events = [...((doc.events as unknown[] | undefined) ?? []), { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: outbound ? 'sent' : 'delivered', at: envelope.createdAt }];
+            await this.writeDoc(g, INBOX_RESOURCE, doc);
+            await emailAudit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.email.admit', outcome: 'success', actor: { type: 'service', id: gateway }, subject: { type: 'message', id: envelope.id } }).catch(() => undefined);
+            return json({ ok: true, messageId: envelope.id, conversationId });
+          });
         }
 
         // ── WHO THEY LIVE WITH (spec 363 W4) ──────────────────────────────────────────────────

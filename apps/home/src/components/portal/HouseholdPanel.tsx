@@ -19,6 +19,7 @@ import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
 import { AgentName } from '../shared/AgentName';
 import { householdThroughHarness, readHouseholdThroughHarness, type HouseholdMemberRow } from '../../home/household-harness';
+import { searchAgentsKb } from '../../lib/agent-search';
 import { mutedText, errorText } from './theme';
 
 const KIN = ['', 'spouse', 'child', 'parent', 'sibling'] as const;
@@ -31,8 +32,27 @@ export function HouseholdPanel() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [who, setWho] = useState('');
+  /** Who the naming service says answers to what they typed. Nothing is chosen until they pick one. */
+  const [hits, setHits] = useState<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>([]);
+  const [picked, setPicked] = useState<{ agent: string; label: string } | null>(null);
+  const [invited, setInvited] = useState<string | null>(null);
   const [kin, setKin] = useState<string>('');
   const [role, setRole] = useState<string>('member');
+
+  // FIND THE PERSON, rather than making somebody type an address correctly from memory. The naming
+  // service is the source: a name is a public, on-chain fact (ADR-0040), so searching it discloses
+  // nothing about who is asking and nothing about the household they are building.
+  useEffect(() => {
+    const term = who.trim();
+    if (term.length < 2 || term.includes('@') || /^0x[0-9a-fA-F]{6,}$/.test(term)) { setHits([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void searchAgentsKb(term, 6)
+        .then((r) => { if (!cancelled) setHits(r.filter((x) => x.smartAgent)); })
+        .catch(() => { if (!cancelled) setHits([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [who]);
 
   const load = useCallback(async () => {
     if (!session?.token || !agentAddress) return;
@@ -44,13 +64,45 @@ export function HouseholdPanel() {
 
   async function add() {
     if (!session?.token || !agentAddress || !who.trim()) return;
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setInvited(null);
+    // WHAT THEY PICKED, or what they typed. A picked person is an address the naming service resolved;
+    // a typed one still resolves at the capability, which knows how.
+    const member = picked?.agent ?? who.trim();
     const out = await householdThroughHarness({
       person: agentAddress as Address, session: { token: session.token },
-      member: who.trim(), ...(kin ? { kin } : {}), role,
+      member, ...(kin ? { kin } : {}), role, ...(picked?.label ? { label: picked.label } : {}),
     });
-    if (!out.ok) setErr(out.error); else { setWho(''); setKin(''); setRole('member'); await load(); }
+    if (!out.ok) setErr(out.error); else { setWho(''); setKin(''); setRole('member'); setPicked(null); setHits([]); await load(); }
     setBusy(false);
+  }
+
+  /**
+   * THEY HAVE NO AGENT YET — so invite them to get one, by the address you already have for them.
+   *
+   * The household record holds AGENTS, so somebody who has none cannot be recorded in it: an invitation
+   * is the honest step, and it is theirs to accept. Nothing about the household is disclosed in the mail
+   * and no place is held for them — when they have an agent, the person adds them.
+   */
+  async function invite() {
+    const address = who.trim();
+    if (!session?.token || !address.includes('@')) return;
+    setBusy(true); setErr(''); setInvited(null);
+    try {
+      const res = await fetch('/a2a/email/send', {
+        method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          session: session.token, to: address,
+          subject: 'An invitation to set up your own agent',
+          text: 'I would like to add you to my household — the private note my agent keeps of the people I live with.\n\nIt needs you to have an agent of your own. Setting one up takes a minute and gives you your own name, your own vault and your own keys; nothing of mine is shared with it, and nothing of yours with me unless you say so.',
+        }),
+      });
+      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; via?: string };
+      if (!b.ok) throw new Error(b.error ?? `the invitation did not send (${res.status})`);
+      setInvited(`Invitation sent to ${address}${b.via ? ` (via ${b.via})` : ''} — add them once they have an agent.`);
+      setWho('');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
   }
 
   async function remove(agent: string) {
@@ -102,17 +154,38 @@ export function HouseholdPanel() {
         separate questions, and neither one grants any authority.
       </p>
       <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-        <input className="input" style={{ flex: '1 1 200px' }} placeholder="their agent (carol.me)" value={who}
-          data-testid="household-who" onChange={(e) => setWho(e.target.value)} />
+        <input className="input" style={{ flex: '1 1 200px' }} placeholder="find them by name, or type an email" value={who}
+          data-testid="household-who" onChange={(e) => { setWho(e.target.value); setPicked(null); }} />
         <select className="input" style={{ flex: '0 0 130px' }} value={kin} data-testid="household-kin" onChange={(e) => setKin(e.target.value)}>
           {KIN.map((k) => <option key={k || 'none'} value={k}>{k || 'how related…'}</option>)}
         </select>
         <select className="input" style={{ flex: '0 0 130px' }} value={role} data-testid="household-role" onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
-        <BusyButton busy={busy} busyLabel="Recording…" className="btn-primary" style={{ flex: '0 0 auto' }}
-          data-testid="household-add" onClick={() => void add()}>Record</BusyButton>
+        {who.includes('@') ? (
+          <BusyButton busy={busy} busyLabel="Sending…" className="btn-primary" style={{ flex: '0 0 auto' }}
+            data-testid="household-invite" onClick={() => void invite()}>Invite by email</BusyButton>
+        ) : (
+          <BusyButton busy={busy} busyLabel="Recording…" className="btn-primary" style={{ flex: '0 0 auto' }}
+            data-testid="household-add" onClick={() => void add()}>Record</BusyButton>
+        )}
       </div>
+      {/* WHO ANSWERS TO THAT NAME, from the naming service. Nothing is chosen for them: a household is a
+          record about real people, and the wrong Sarah recorded silently is worse than a second question. */}
+      {hits.length > 0 && !picked && (
+        <div style={{ marginTop: 6 }} data-testid="household-hits">
+          {hits.map((h) => (
+            <button key={h.smartAgent} type="button" className="btn-ghost" data-testid={`household-hit-${h.smartAgent}`}
+              style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 7px' }}
+              onClick={() => { setPicked({ agent: h.smartAgent!, label: h.displayName || h.name || h.smartAgent! }); setWho(h.name || h.smartAgent!); }}>
+              <strong>{h.name ?? h.displayName ?? 'unnamed'}</strong>
+              <span className="muted" style={{ fontSize: 11 }}> · {h.smartAgent!.slice(0, 8)}…{h.smartAgent!.slice(-4)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {picked && <p style={{ ...mutedText, fontSize: 11, marginTop: 4 }}>Adding <strong>{picked.label}</strong>.</p>}
+      {invited && <p style={{ ...mutedText, fontSize: 11.5, marginTop: 6 }} data-testid="household-invited">{invited}</p>}
       <p style={{ ...mutedText, fontSize: 11, marginTop: 8 }}>
         They need an agent for you to record them — this record holds agents, not names on a list.
       </p>
