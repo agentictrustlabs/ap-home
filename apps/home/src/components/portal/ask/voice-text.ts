@@ -47,3 +47,68 @@ export function plainSpeech(s: string): string {
   return s.replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[(.+?)\]\([^)]*\)/g, '$1')
     .replace(/0x[0-9a-fA-F]{6,}/g, 'an address').replace(/\s+/g, ' ').trim();
 }
+
+// ── Moving between the agents you can ask (a SURFACE act: the same as the workspace switcher) ─────────
+//
+// "Switch to missio nexus", "go to my organization", "open the somali corridor team", "back to me". The
+// flyout stays up; the addressee follows, as it does when the switcher is tapped. Nothing is asked of an
+// agent, so nothing here is authority — it is which room the person is standing in.
+
+/** Words that name a KIND of agent, not one agent — the typed suffixes and their long forms. */
+const KIND_WORDS = new Set(['me', 'org', 'orgs', 'team', 'teams', 'workspace', 'workspaces', 'treasury', 'treasuries', 'svc', 'service', 'services', 'registry', 'church', 'churches', 'circle', 'circles', 'household', 'households', 'organization', 'organisation', 'organizations', 'organisations', 'agent', 'agents', 'account']);
+const LEADING = new Set(['the', 'a', 'an', 'my', 'our']);
+
+/** The words that name a thing: lowercased, split, a leading article and the kind words dropped. */
+export function nameWords(said: string): string[] {
+  const s = said.trim().toLowerCase().replace(/[’']/g, '');
+  const label = s.includes('.') && !/\s/.test(s) ? (s.split('.')[0] ?? s) : s;
+  const words = label.split(/[^a-z0-9]+/).filter(Boolean);
+  const body = words.filter((w, i) => !(i === 0 && LEADING.has(w)));
+  const named = body.filter((w) => !KIND_WORDS.has(w));
+  return named.length ? named : body;
+}
+
+/** "switch to X" / "go to X" / "open X" / "change to X" / "back to me" → X; null when it is not that. */
+export function navigationTarget(said: string): string | null {
+  const m = /^\s*(?:please\s+)?(?:switch|change|go|move|jump|take me|back)\s+(?:over\s+)?(?:to|into)\s+(.+?)\s*[.!?]*$/i.exec(said) ?? /^\s*(?:please\s+)?open\s+(.+?)\s*[.!?]*$/i.exec(said);
+  if (!m) return null;
+  const target = m[1]!.trim();
+  return target ? target : null;
+}
+
+const bigrams = (s: string): string[] => { const out: string[] = []; for (let i = 0; i + 1 < s.length; i++) out.push(s.slice(i, i + 2)); return out; };
+function similarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const B = new Map<string, number>();
+  for (const g of bigrams(b)) B.set(g, (B.get(g) ?? 0) + 1);
+  let shared = 0;
+  const A = bigrams(a);
+  for (const g of A) { const n = B.get(g) ?? 0; if (n > 0) { shared++; B.set(g, n - 1); } }
+  return (2 * shared) / (A.length + bigrams(b).length);
+}
+
+/**
+ * The ONE option the words name, by closeness: the joined name words equal, every said word beginning a
+ * word of the option, or bigram similarity ≥ 0.8. Two options equally close = null (ask, never pick).
+ * "me", "myself", "my home", "you" name the person's own realm — the option flagged `self`.
+ */
+export function closestOption<T extends { label: string; self?: boolean }>(said: string, options: readonly T[]): T | null {
+  const t = said.trim().toLowerCase();
+  if (/^(me|myself|my ?home|my ?self|you|home|person|my own)$/.test(t.replace(/[.!?]/g, '').trim())) return options.find((o) => o.self) ?? null;
+  const saidWords = nameWords(t);
+  const joined = saidWords.join('');
+  if (!joined) return null;
+  const graded = options.map((o) => {
+    const words = nameWords(o.label);
+    const j = words.join('');
+    if (j === joined) return { o, g: 3 };
+    if (saidWords.every((w) => w.length >= 3 && words.some((x) => x.startsWith(w)))) return { o, g: 2 };
+    if (similarity(joined, j) >= 0.8) return { o, g: 1 };
+    return { o, g: 0 };
+  }).filter((x) => x.g > 0);
+  if (!graded.length) return null;
+  const best = Math.max(...graded.map((x) => x.g));
+  const top = graded.filter((x) => x.g === best);
+  return top.length === 1 ? top[0]!.o : null;
+}

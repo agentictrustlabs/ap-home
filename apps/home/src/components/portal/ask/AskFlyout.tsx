@@ -16,10 +16,15 @@
 // of truth for "where am I", exactly as the sidebar uses.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
+import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
+import { useManagedAgents } from '../ManagedAgents';
+import { orgHref, serviceHref } from '../../../lib/workspace';
+import { agentClassOf } from '../../../lib/agent-class';
+import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
-import { yesNo, matchChoice, listenAfter, plainSpeech } from './voice-text';
+import { yesNo, matchChoice, listenAfter, plainSpeech, navigationTarget, closestOption } from './voice-text';
 import { ask, hear, warmHearing, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
@@ -48,7 +53,30 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   seed?: string | null;
   onSeedUsed?: () => void;
 }) {
-  const { session, profile, agentAddress } = useSession();
+  const { session, profile, agentAddress, agentName, personName } = useSession();
+  const router = useRouter();
+  // The agents this person can stand in — the switcher's rows — so "switch to missio nexus" moves the Ask
+  // the way tapping the switcher does. The flyout stays up; the addressee follows the room.
+  const { agents: managed } = useManagedAgents(session?.token ?? null);
+  const rooms = () => [
+    { label: personName ?? (agentName ? nameLabel(agentName) : 'me'), self: true, href: '/' },
+    ...managed.map((a) => ({ label: a.name ? nameLabel(a.name) : a.agent, self: false, href: agentClassOf(a.kind) === 'org' ? orgHref(a.agent, 'overview') : serviceHref(a.agent) })),
+  ];
+  /** "Switch to X": a SURFACE act, never sent to an agent. Returns true when the words were that. */
+  const navigate = (text: string, spoken: boolean): boolean => {
+    const target = navigationTarget(text);
+    if (!target) return false;
+    const opts = rooms();
+    const hit = closestOption(target, opts);
+    if (hit) {
+      setThread((t) => [...t, { role: 'you', text: spoken ? `🎙 ${text}` : text }, { role: 'agent', text: `Now asking ${hit.label}.` }]);
+      router.push(hit.href);
+      return true;
+    }
+    const near = opts.filter((o) => closestOption(target, [o]));
+    setThread((t) => [...t, { role: 'you', text: spoken ? `🎙 ${text}` : text }, { role: 'agent', text: near.length > 1 ? `Which one — ${near.map((o) => o.label).join(', ')}?` : `I don’t have anywhere called “${target}”. You can stand in: ${opts.map((o) => o.label).join(', ')}.` }]);
+    return true;
+  };
   const [thread, setThread] = useState<Entry[]>([]);
   const [q, setQ] = useState('');
   // A page asked to start this ask (e.g. "finish the payment you were waiting on"). It lands in the
@@ -212,6 +240,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     const message = (text ?? q).trim();
     if (!message || !session) return;
     setQ('');
+    if (navigate(message, channel === 'voice')) return;
     setAnswers({});
     setThread((t) => [...t, { role: 'you', text: channel === 'voice' ? `🎙 ${message}` : message }]);
     // The scope is computed per ask, not per session: it is the agent's published vocabulary ∩ what this
@@ -309,6 +338,17 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     voice.prime(); // this tap is the gesture the speaker is unlocked by (iOS)
     if (session) warmHearing(session, addressee);
     setVoiceNote(null);
+    // The first tap gets a word of welcome and the question — and nothing about what can be done unless
+    // they ask. The reply's ear opens when the greeting ends.
+    if (!greetedRef.current) {
+      greetedRef.current = true;
+      voice.speak(`Hi${personName ? ` ${personName.split(/\s+/)[0]}` : ''} — what do you need?`, () => { if (voice.enabled) open(); });
+      return;
+    }
+    open();
+  };
+  const greetedRef = useRef(false);
+  const open = () => {
     void voice.startListening(
       (blob) => void onAudioRef.current(blob),
       (m) => setErr(`${m} — you can type it instead.`),
