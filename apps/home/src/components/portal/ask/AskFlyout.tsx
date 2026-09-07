@@ -223,8 +223,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
    * ordinal or label, or the field's text); otherwise they are an ask. Authority and a signature are never
    * answered by voice — the person signs on screen, and these words simply fall through.
    */
-  const onVoice = (text: string) => {
-    if (busy) return;
+  const onVoice = (text: string, opts?: { viaHearing?: boolean }) => {
+    // The hearing turn itself sets `busy` ("Hearing…") — the words it produces must not be refused by it.
+    // They were, once: "change your first name to george" was heard, routed here, and dropped in silence.
+    if (busy && !opts?.viaHearing) return;
     const p = pendingRef.current;
     if (p?.reply.kind === 'prompt') {
       const prompt = p.reply.prompt;
@@ -270,7 +272,12 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       }
       // A repaired name is shown AS a repair: the person sees what was heard and what it was taken to mean.
       if (h.repairs.length) setThread((t) => [...t, { role: 'agent', text: `Heard “${h.heard}” — taken as ${h.repairs.map((r) => `“${r.to}”`).join(', ')}.` }]);
-      if (h.transcript.trim()) onVoiceRef.current(h.transcript.trim());
+      setBusy(null);
+      if (h.transcript.trim()) onVoiceRef.current(h.transcript.trim(), { viaHearing: true });
+      else {
+        // Silence is an answer too — said, never swallowed.
+        setThread((t) => [...t, { role: 'agent', text: 'I didn’t catch anything — try again, a little closer to the microphone.' }]);
+      }
     } finally {
       setBusy((b) => (b === 'Hearing…' ? null : b));
     }
