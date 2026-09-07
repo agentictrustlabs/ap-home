@@ -708,7 +708,7 @@ export interface HarnessDeps {
    * with no standing there gets the same refusal by either route. Absent ⇒ the step is refused in words
    * (never a local read of the other agent's records — ADR-0013, one mechanism).
    */
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string } }) => Promise<SubjectAnswerV1>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
   /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
@@ -732,8 +732,8 @@ export interface SubjectAnswerV1 {
   ok: boolean;
   /** The subject agent's structured result for the routed step (its invoker's own shape). */
   result?: unknown;
-  /** Who answered, and where. */
-  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network' };
+  /** Who answered, and where — and, under the subject-ask profile, the receiver's own receipts (S) naming R. */
+  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network'; receipts?: Array<{ stepRef: string; capability?: string; status: string }> };
   /** When the subject's agent did not answer: its words, relayed verbatim (a refusal is an answer). */
   refused?: string;
 }
@@ -751,6 +751,9 @@ export function routedSubjectFor(tool: { subject?: string } | undefined, args: R
   return v as Address;
 }
 
+/** The receiver's profile answer as the sender reads it (mirror of `@agenticprimitives/a2a` SubjectAnswerV1). */
+export interface SubjectAnswerProfileV1 { extension: string; version: 1; agent: string; inResponseTo: { operationId: string; runRef: string; stepRef: string }; outcome: 'answer' | 'refused' | 'needs' | 'error'; result?: unknown; said?: string; run: { runRef: string; receipts: Array<{ stepRef: string; capability?: string; status: string; binding?: unknown }> } }
+
 /** The body `/harness/ask` answers with. The reply is NESTED under `reply`; `ok`/`error` sit on the envelope. */
 export interface AskReplyEnvelopeV1 {
   ok?: boolean; error?: string; runRef?: string;
@@ -763,8 +766,16 @@ export interface AskReplyEnvelopeV1 {
  * prompt it raised, an authority it needs) — never retried, never guessed. Reading `kind` off the
  * ENVELOPE instead of `reply` made every real answer read as "needs more" (caught live 2026-09-07).
  */
-export function readSubjectReply(envelope: AskReplyEnvelopeV1 | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; runRef?: string } {
+export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer?: SubjectAnswerProfileV1 }) | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; runRef?: string; receipts?: Array<{ stepRef: string; capability?: string; status: string }> } {
   if (!envelope) return { ok: false, refused: `${who} answered with something that was not a reply (${status})` };
+  // THE PROFILE ANSWER, when the receiver speaks it (spec 366 R2): typed outcome, the receiver's own run and
+  // receipts naming our request. A receiver that does not speak the profile answers with the plain reply.
+  const sa = envelope.subjectAnswer;
+  if (sa && sa.extension === 'https://agenticprimitives.org/a2a/subject-ask/v1') {
+    const receipts = sa.run?.receipts ?? [];
+    if (sa.outcome === 'answer') return { ok: true, result: sa.result, runRef: sa.run.runRef, receipts };
+    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), runRef: sa.run?.runRef, receipts };
+  }
   if (envelope.ok === false || envelope.error) return { ok: false, refused: `${who} refused: ${envelope.error ?? status}` };
   const reply = envelope.reply;
   if (!reply) return { ok: false, refused: `${who} answered with no reply (${status})` };
@@ -1462,8 +1473,24 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       // the receipt of the settling run holds that; re-inventing one would be a claim (spec 357 §4).
       return { asset, payee, amount: amount.toString(), payer: wire.delegator, alreadySettled: true };
     }
-    const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
-    return { txHash, asset, payee, amount: amount.toString(), payer: wire.delegator };
+    // THE EFFECT OWNER DECIDES WHAT HAPPENED (spec 367 §8). The payment's stable identity at the enforcer is
+    // (delegator, delegation hash, intent-derived nonce): submitting it twice reverts, and reading it says
+    // whether it settled. So an uncertain submit — the bundler answered nothing, the receipt read timed
+    // out — is RECONCILED against that identity before it is called a failure: settled ⇒ committed (no tx
+    // hash of our own to show; the settling run's receipt holds it); not settled ⇒ failed before effect,
+    // which a retry under the same identity may safely attempt again. Unknown never becomes a second effect.
+    let txHash: Hex;
+    try {
+      ({ txHash } = await deps.executeAsServiceSa(serviceSa, callData));
+    } catch (e) {
+      const settled = enforcers.payment
+        ? await deps.readContract({ address: enforcers.payment as Address, abi: IS_NONCE_USED_ABI, functionName: 'isNonceUsed', args: [wire.delegator, dHash, nonce] }).catch(() => null)
+        : null;
+      if (settled === true) return { asset, payee, amount: amount.toString(), payer: wire.delegator, alreadySettled: true, outcome: 'committed', effectIdentity: `${dHash}:${nonce}`, reconciled: true };
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new Error(`${settled === false ? 'failed before effect' : 'outcome unknown and not reconcilable'}: ${reason}`);
+    }
+    return { txHash, asset, payee, amount: amount.toString(), payer: wire.delegator, outcome: 'committed', effectIdentity: `${dHash}:${nonce}` };
   };
 }
 
@@ -1493,6 +1520,9 @@ export interface HarnessRunInput {
    * offer fails the loop's own unknown-tool gate.
    */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
+  /** Spec 367 §8 — when this run answers ANOTHER agent's routed request: the request it responds to, pinned
+   *  onto every receipt's binding (`correlation.inResponseTo`) so the causal chain R → S is on the record. */
+  inResponseTo?: { agent: Address; operationId: string; runRef: string; stepRef: string };
   /** The connected user (the session's SA). What they create, they custody. */
   person?: Address;
   /** Their Home session — the interactions plane authenticates a direct message with it. */
@@ -3313,6 +3343,7 @@ fanned out.`;
       expectedOutcome: outcomeClassOf(rs.tool),
       operationId: rs.idempotencyKey ?? `${rs.runRef}:${rs.stepRef}`,
       ...(parties.length ? { argSources: Object.fromEntries(parties.map(([k, v]) => [k, sourceOf(v)])) } : {}),
+      ...(input.inResponseTo ? { correlation: { inResponseTo: input.inResponseTo } } : {}),
     };
   };
   const result = await runIntent(input.intent, {
@@ -3330,7 +3361,12 @@ fanned out.`;
       if (!deps.askSubjectAgent) {
         return { refused: `this agent cannot ask ${subject} — agent-to-agent asks are not wired here`, via: { agent: subject } };
       }
-      const answer = await deps.askSubjectAgent({ subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}) });
+      const stepRef = ctx.step.id ?? `s${ctx.index}`;
+      const answer = await deps.askSubjectAgent({
+        subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
+        // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
+        correlation: { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest },
+      });
       const who = answer.via.name ? `${answer.via.name} (${subject})` : subject;
       if (!answer.ok) {
         return { refused: answer.refused ?? `${who} did not answer`, via: answer.via, note: `${who}'s own agent was asked and answered this way; relay its words, do not retry or guess.` };

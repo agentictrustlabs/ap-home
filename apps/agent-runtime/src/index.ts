@@ -128,6 +128,7 @@ import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
+import { subjectAsk, subjectAnswer, validateSubjectAsk } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -1810,6 +1811,8 @@ app.post('/harness/ask', async (c) => {
     /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
      *  knows its intent and parameters, so no model re-derives them; every gate is unchanged. */
     plan?: HarnessRunInput['plan'];
+    /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
+    subjectAsk?: unknown;
   } | null;
   if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
@@ -1818,6 +1821,20 @@ app.post('/harness/ask', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   const addressee = body.addressee.toLowerCase() as Address;
+  // ── Spec 366 R2 — A ROUTED REQUEST UNDER THE SUBJECT-ASK PROFILE. Validated structurally, then checked for
+  // CONSISTENCY with what this receiver verifies for itself: the credential in the profile is the session
+  // just verified, the asker named is the session's own agent, and the plan is the profile's request. Nothing
+  // in the profile is trusted as authority — standing is derived below against this agent's own records.
+  let inResponseTo: HarnessRunInput['inResponseTo'];
+  if (body.subjectAsk !== undefined) {
+    const v = validateSubjectAsk(body.subjectAsk);
+    if (!v.ok) return c.json({ ok: false, error: `subject-ask profile: ${v.errors.join('; ')}` }, 400);
+    const sa = v.ask;
+    if (sa.asker.credential.token !== body.session || sa.asker.agent.toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'subject-ask profile: the asker is not the session presented' }, 403);
+    const step = body.plan?.steps?.[0];
+    if (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
+    inResponseTo = { agent: sa.asker.agent.toLowerCase() as Address, operationId: sa.correlation.operationId, runRef: sa.correlation.runRef, stepRef: sa.correlation.stepRef };
+  }
 
   // ── spec 350 W3 — the durable run. A resume names the runRef; everything the person already said and
   // granted comes from the checkpoint, so it need not live in the browser between turns. It is re-planned
@@ -1852,6 +1869,7 @@ app.post('/harness/ask', async (c) => {
   try {
     const { result, resolved, interactionFor, trace } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee,
+      ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
@@ -2022,7 +2040,16 @@ app.post('/harness/ask', async (c) => {
     // without listing them; `/harness/runs` is where someone goes to see them all.
     const UNFINISHED_SHOWN = 3;
     const shown = otherRuns.slice(0, UNFINISHED_SHOWN);
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
+    // Spec 366 R2 — S: the profile answer naming R, with this agent's own run and receipts as evidence.
+    const answer = inResponseTo ? subjectAnswer({
+      agent: addressee,
+      inResponseTo: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef },
+      outcome: reply.kind === 'answer' ? 'answer' : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
+      ...(reply.kind === 'answer' ? { result: (reply.results?.find((r) => r.toolId === body.plan?.steps?.[0]?.toolId) ?? reply.results?.[0])?.result ?? { text: reply.text } } : {}),
+      ...(reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
+      run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
+    }) : undefined;
+    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -2972,7 +2999,7 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
   // in-process through the same handler the public URL reaches (chosen by a fact known before the call,
   // never by watching a request fail — ADR-0013). Anything else is a network call. Either way the
   // receiver is the subject's serving handler, and the answer says which wire it came over.
-  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session }) => {
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
     const served = a2aBaseDomains(env);
@@ -2981,7 +3008,14 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     if (!host) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name ?? subject} publishes no endpoint this agent can ask` };
     const url = `https://${host}/harness/ask`;
     const inProcess = served.some((d) => host === d || host.endsWith(`.${d}`));
-    const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] } });
+    // Spec 366 R2 — the SUBJECT-ASK PROFILE: the externally meaningful delegated request and its causal
+    // correlation, typed and versioned, beside the supplied plan the receiver's harness already understands.
+    const profile = subjectAsk({
+      request: { capability: toolId, args, goal },
+      asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session } },
+      correlation,
+    });
+    const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile });
     const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
     const via = { agent: subject, name, host, observedVia: (inProcess ? 'serving-handler' : 'network') as 'serving-handler' | 'network' };
     let res: Response;
@@ -2994,7 +3028,7 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // What the subject's agent actually said, for the log a tail can read (`[subject-ask]`).
     console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${res.status} ${JSON.stringify(envelope).slice(0, 600)}`);
     const read = readSubjectReply(envelope, toolId, name ?? subject, res.status);
-    const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}) };
+    const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}), ...(read.receipts?.length ? { receipts: read.receipts } : {}) };
     return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer` };
   };
   return deps;
