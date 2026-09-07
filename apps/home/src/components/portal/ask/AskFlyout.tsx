@@ -18,7 +18,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import { useVoice, blobToBase64 } from './useVoice';
+import { yesNo, matchChoice, listenAfter, plainSpeech } from './voice-text';
+import { ask, hear, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
@@ -83,6 +85,11 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   const [canAuthorize, setCanAuthorize] = useState<boolean | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const endRef = useRef<HTMLDivElement>(null);
+  // Spec 369 — VOICE AS A FACET. The browser captures and plays; the agent hears (`/harness/hear`) and
+  // decides what is said (`reply.spoken`). A spoken word goes down the same path a typed one does.
+  const voice = useVoice();
+  const pendingRef = useRef<typeof pending>(null);
+  useEffect(() => { pendingRef.current = pending; }, [pending]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, pending]);
 
@@ -199,17 +206,104 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     }
   };
 
-  const send = async () => {
-    const message = q.trim();
+  const send = async (text?: string, channel?: 'voice') => {
+    const message = (text ?? q).trim();
     if (!message || !session) return;
     setQ('');
     setAnswers({});
-    setThread((t) => [...t, { role: 'you', text: message }]);
+    setThread((t) => [...t, { role: 'you', text: channel === 'voice' ? `🎙 ${message}` : message }]);
     // The scope is computed per ask, not per session: it is the agent's published vocabulary ∩ what this
     // flyout can finish, and the agent being asked may not offer what the last one did.
     const surface = await homeScope(realm, addressee, selection ?? undefined);
-    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface }, 'Thinking…');
+    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface, ...(channel ? { channel } : {}) }, 'Thinking…');
   };
+
+  /**
+   * Spec 369 — WHAT WAS HEARD, routed. A pending prompt takes the words as its answer (yes/no, a choice by
+   * ordinal or label, or the field's text); otherwise they are an ask. Authority and a signature are never
+   * answered by voice — the person signs on screen, and these words simply fall through.
+   */
+  const onVoice = (text: string) => {
+    if (busy) return;
+    const p = pendingRef.current;
+    if (p?.reply.kind === 'prompt') {
+      const prompt = p.reply.prompt;
+      setThread((t) => [...t, { role: 'you', text: `🎙 ${text}` }]);
+      if (prompt.kind === 'confirmation') {
+        const yn = yesNo(text);
+        if (yn === 'yes') void answer(p.reply as never, p.state);
+        else if (yn === 'no') { setPending(null); voice.speak('Okay — cancelled.'); }
+        else voice.speak('Yes or no?', () => void voice.startListening(onAudioRef.current));
+        return;
+      }
+      if (prompt.kind === 'signature') return;
+      const fields = prompt.fields.filter((f) => f.type !== 'credential');
+      const target = fields.find((f) => f.required && !(answers[f.name] ?? '').trim()) ?? fields[0];
+      if (!target) return;
+      let value = text;
+      if (target.type === 'choice' && target.choices?.length) {
+        const m = matchChoice(text, target.choices);
+        if (m) { value = m; setChosen((c) => ({ ...c, [m.toLowerCase()]: target.choices!.find((x) => x.value === m)!.label })); }
+        else if (!target.allowOther) { voice.speak("I didn't catch which one.", () => void voice.startListening(onAudioRef.current)); return; }
+      }
+      const next = { ...answers, [target.name]: value };
+      setAnswers(next);
+      const stillMissing = fields.find((f) => f.required && !(next[f.name] ?? '').trim());
+      if (stillMissing) voice.speak(stillMissing.label, () => void voice.startListening(onAudioRef.current));
+      else void answer(p.reply as never, p.state, next);
+      return;
+    }
+    if (p) return; // an authority card: signed on screen only
+    void send(text, 'voice');
+  };
+  /** The recording goes to the AGENT to hear; what comes back is shown before anything acts on it. */
+  const onAudio = async (blob: Blob) => {
+    if (!session) return;
+    setErr(null);
+    setBusy('Hearing…');
+    try {
+      const h = await hear(session, addressee, await blobToBase64(blob), blob.type);
+      if (!h.ok) {
+        setErr(`${h.error} — you can type it instead.`);
+        voice.speak('I could not hear that. You can type it instead.');
+        return;
+      }
+      // A repaired name is shown AS a repair: the person sees what was heard and what it was taken to mean.
+      if (h.repairs.length) setThread((t) => [...t, { role: 'agent', text: `Heard “${h.heard}” — taken as ${h.repairs.map((r) => `“${r.to}”`).join(', ')}.` }]);
+      if (h.transcript.trim()) onVoiceRef.current(h.transcript.trim());
+    } finally {
+      setBusy((b) => (b === 'Hearing…' ? null : b));
+    }
+  };
+  const onVoiceRef = useRef(onVoice); onVoiceRef.current = onVoice;
+  const onAudioRef = useRef(onAudio); onAudioRef.current = onAudio;
+
+  // SPEAK what the agent said, once per entry, from the agent's own spoken rendering; after an answer the
+  // mic reopens once (a dialog). Prompts and authority are spoken by the pending effect below.
+  const spokenIdx = useRef(0);
+  useEffect(() => {
+    if (!voice.enabled) { spokenIdx.current = thread.length; return; }
+    const parts: string[] = [];
+    for (let i = spokenIdx.current; i < thread.length; i++) {
+      const e = thread[i]!;
+      if (e.role !== 'agent') continue;
+      if ('text' in e) parts.push(plainSpeech(e.text));
+      else if (e.reply.kind !== 'prompt' && e.reply.kind !== 'authority_required') parts.push(e.reply.spoken ?? '');
+    }
+    spokenIdx.current = thread.length;
+    const text = parts.filter(Boolean).join(' ');
+    if (text) voice.speak(text, () => { if (!pendingRef.current && voice.enabled) void voice.startListening(onAudioRef.current); });
+  }, [thread, voice.enabled]);
+  const spokenPending = useRef('');
+  useEffect(() => {
+    if (!voice.enabled || !pending) return;
+    const key = `${pending.reply.kind}:${pending.reply.runRef}:${pending.reply.kind === 'prompt' ? pending.reply.prompt.prompt : ''}`;
+    if (spokenPending.current === key) return;
+    spokenPending.current = key;
+    const text = pending.reply.spoken ?? '';
+    const again = listenAfter(pending.reply);
+    voice.speak(text, () => { if (again && voice.enabled) void voice.startListening(onAudioRef.current); });
+  }, [pending, voice.enabled]);
 
   // Spec 367 §7 — THE SAME COMMAND, FILLED BY CONTROLS. "Do" offers the agent's capabilities as forms whose
   // fields come from the contracts (an Agent is a party field, an Amount a number). Submitting posts the
@@ -282,14 +376,15 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
 
   /** Answer a prompt. Data goes back as typed; a signature is signed with the connected credential over
    *  the digest the agent derived — and the agent re-derives and checks it before it acts on it. */
-  const answer = async (reply: Extract<AskReply, { kind: 'prompt' }>, state: AskTurnState) => {
+  const answer = async (reply: Extract<AskReply, { kind: 'prompt' }>, state: AskTurnState, withAnswers?: Record<string, string>) => {
     const p = reply.prompt;
+    const given = withAnswers ?? answers;
     setBusy(p.kind === 'signature' ? 'Signing…' : 'Working…');
     setErr(null);
     try {
       let supplied: SuppliedInput;
       if (p.kind === 'data') {
-        supplied = { stepRef: reply.resumeToken, data: Object.fromEntries(p.fields.map((f) => [f.name, answers[f.name] ?? ''])) };
+        supplied = { stepRef: reply.resumeToken, data: Object.fromEntries(p.fields.map((f) => [f.name, given[f.name] ?? ''])) };
       } else if (p.kind === 'signature') {
         const signature = await (await signAs(agentAddress as Address))(p.digest);
         // Signed BY the person in front of us. A prompt that named no signer (an obligation with no
@@ -320,6 +415,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
               : 'Follows the workspace you are in — switch it in the topbar.'}
           </div>
         </div>
+        {voice.canSpeak && (
+          <button
+            type="button" className="btn ghost" data-testid="ask-voice-toggle" aria-pressed={voice.enabled}
+            title="Voice: read replies aloud and listen after a question. Never signs anything."
+            style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
+            onClick={() => voice.setEnabled(!voice.enabled)}
+          >
+            Voice {voice.enabled ? 'on' : 'off'}
+          </button>
+        )}
         <button
           type="button" className="btn ghost" data-testid="ask-diagnostics-toggle"
           aria-label="Show what the agent did" aria-pressed={showDiag}
@@ -427,9 +532,23 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           </select>
         </div>
       )}
+      {(voice.listening || voice.speaking) && (
+        <div aria-live="polite" className="muted" data-testid="ask-voice-status" style={{ fontSize: 11, padding: '0 2px 2px' }}>
+          {voice.listening ? `Listening… ${'▮'.repeat(Math.round(voice.level * 6))}` : 'Speaking…'}
+        </div>
+      )}
       <div className="ask-flyout-f">
+        {voice.canListen && (
+          <button
+            type="button" className={`btn ${voice.listening ? 'primary' : 'ghost'}`} data-testid="ask-mic"
+            aria-pressed={voice.listening} aria-label={voice.listening ? 'Stop listening' : 'Speak your ask'}
+            title={voice.listening ? 'Stop listening' : 'Speak — your agent hears it'}
+            disabled={!!busy || pending?.reply.kind === 'authority_required' || (pending?.reply.kind === 'prompt' && pending.reply.prompt.kind === 'signature')}
+            onClick={() => (voice.listening ? voice.stopListening() : void voice.startListening(onAudioRef.current, (m) => setErr(`${m} — you can type it instead.`)))}
+          >🎙</button>
+        )}
         <input
-          className="input" data-testid="ask-input" value={q} placeholder={`Ask ${addresseeLabel}…`}
+          className="input" data-testid="ask-input" value={q} placeholder={voice.listening ? 'Listening…' : `Ask ${addresseeLabel}…`}
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void send(); }}
           disabled={!!busy || !!pending}
         />

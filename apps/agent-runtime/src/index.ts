@@ -123,7 +123,8 @@ import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailE
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
+import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS } from './harness-run.js';
+import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
@@ -195,6 +196,9 @@ export { A2aTaskDO } from './a2a-task-do.js';
 export { InteractionsDO } from './interactions-do.js';
 
 export interface Env {
+  /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
+   *  surface says so (never a silent switch to the browser's recognizer — ADR-0013). */
+  AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
   // Durable, queryable audit destination (spec 291 §6c). Optional: when unbound
   // (no D1 yet) the audit sink is console-only. Same `audit_events` schema as
   // demo-mcp so A2A + MCP rows query together. See migrations/0001_audit_events.sql.
@@ -1410,6 +1414,45 @@ app.post('/harness/approve', async (c) => {
   return c.json({ ok: true, runRef: body.runRef });
 });
 
+// ── Spec 369 — THE AGENT HEARS. Audio → words, biased by what THIS agent knows about the asker (their
+// household, the agents chartered under them, the words its capabilities answer to), then a deterministic
+// repair of windows that normalise exactly to a known label. Processed in memory and discarded: no DO
+// record, no vault write, no transcript stored. The words go through /harness/ask like typed ones.
+app.post('/harness/hear', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: string; audio?: string; mime?: string; language?: string } | null;
+  if (!body?.session || !body.addressee || !body.audio) return c.json({ ok: false, error: 'session, addressee and audio (base64) are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  if (!c.env.AI) return c.json({ ok: false, error: 'hearing is not configured on this agent (no Workers AI binding) — type it instead' }, 503);
+  if (body.audio.length > 2_100_000) return c.json({ ok: false, error: 'that recording is too long — up to about twenty seconds at a time' }, 413);
+  const bytes = Uint8Array.from(atob(body.audio), (ch) => ch.charCodeAt(0));
+  const asker = String(who.sa).toLowerCase();
+  const addressee = body.addressee.toLowerCase();
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  // THE EAR'S VOCABULARY — the private tier, read by the asker's own agent for the asker's own hearing
+  // (the same boundary the sentence already crosses to the planner). Best-effort, bounded, never stored.
+  const names: string[] = [];
+  try {
+    const members = deps.readSubjectRecord ? await householdMembers(asker, { readSubjectRecord: deps.readSubjectRecord }) : [];
+    for (const m of members) { if (m.label) names.push(m.label); const n = await deps.nameOf?.(m.agent).catch(() => null); if (n) names.push(n); }
+  } catch { /* no household — nothing to bias with */ }
+  for (const t of ['treasury', 'org', 'team', 'household', 'workspace']) {
+    const owned = await deps.charteredAgents?.(asker, t).catch(() => []) ?? [];
+    for (const a of owned) if (a.name) names.push(a.name);
+  }
+  if (addressee !== asker) { const n = await deps.nameOf?.(addressee).catch(() => null); if (n) names.push(n); }
+  const playbook = /^0x[0-9a-f]{40}$/.test(addressee) ? await loadPlaybook(deps.readSubjectRecord, addressee).catch(() => null) : null;
+  const verbs = askVocabulary(playbook).map((v) => v.label);
+  const vocab = hearingVocabulary({ names, verbs });
+  try {
+    const heard = await workersAiTranscriber(c.env.AI).transcribe({ audio: bytes, mime: body.mime ?? 'audio/webm', prompt: vocab.prompt, ...(body.language ? { language: body.language } : {}) });
+    const repaired = repairTranscript(heard.text, vocab.labels);
+    return c.json({ ok: true, transcript: repaired.text, heard: heard.text, repairs: repaired.repairs, vocabularyWords: vocab.labels.length });
+  } catch (e) {
+    return c.json({ ok: false, error: `could not hear that: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
+});
+
 app.get('/harness/vocabulary', async (c) => {
   // Spec 367 §7 — each capability's COMMAND FIELDS ride with it, so a screen and the Ask fill one command.
   // Playbook-aware disclosure (spec 354 §4.4 / K5): name the agent (`?agent=0x…`) and the vocabulary is
@@ -1882,6 +1925,8 @@ app.post('/harness/ask', async (c) => {
     plan?: HarnessRunInput['plan'];
     /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
     subjectAsk?: unknown;
+    /** Spec 369 — how the words arrived (recorded on the trace; the words themselves are the person's). */
+    channel?: 'text' | 'voice';
   } | null;
   if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
@@ -1939,6 +1984,7 @@ app.post('/harness/ask', async (c) => {
     const { result, resolved, interactionFor, trace } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee,
       ...(inResponseTo ? { inResponseTo } : {}),
+      ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
@@ -2118,7 +2164,9 @@ app.post('/harness/ask', async (c) => {
       ...(reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
       run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
     }) : undefined;
-    return c.json({ ok: true, addressee, reply, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
+    // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
+    const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

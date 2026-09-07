@@ -167,6 +167,33 @@ export function HouseholdPanel() {
     } finally { setBusy(false); }
   }
 
+  /**
+   * MAKE THIS HOUSEHOLD THE AGENT'S — every person recorded in a section is invited into the household
+   * agent, one after another, each under its own signature (an invitation is the household's own act and
+   * batching signatures across invitees is not something the ceremony does yet — said here rather than
+   * pretended). A person already reported invited is skipped by the household's own record, not by us.
+   */
+  async function inviteEveryone(people: HouseholdMemberRow[], house: { agent: string; name?: string | null }) {
+    if (!session?.token) return;
+    setBusy(true); setErr(''); setInvited(null);
+    const done: string[] = []; const failed: string[] = [];
+    try {
+      const via = resolveVia(profile?.credential, session.via);
+      for (const m of people) {
+        try {
+          const sign = await signHashFor(via, house.agent as Address, { token: session.token });
+          const out = await inviteThroughHarness({
+            org: house.agent as Address, invitee: m.agent as Address, session: { token: session.token }, signHash: sign,
+            ...(m.relation ? { kin: m.relation } : {}), ...(m.role ? { role: m.role } : {}),
+          });
+          if (out.ok) done.push(m.label ?? m.agent); else failed.push(`${m.label ?? m.agent} (${out.error})`);
+        } catch (e) { failed.push(`${m.label ?? m.agent} (${e instanceof Error ? e.message : String(e)})`); }
+      }
+      const label = house.name ? house.name.split('.')[0] : 'your household';
+      setInvited(`${done.length ? `Invited to ${label}: ${done.join(', ')}.` : ''}${failed.length ? ` Not invited: ${failed.join('; ')}.` : ''}`.trim() || 'Nobody to invite.');
+    } finally { setBusy(false); }
+  }
+
   /** Removing names the household too: the same person can be in two, and taking them out of one is not
    *  taking them out of the other. */
   async function remove(agent: string, house: string) {
@@ -202,6 +229,17 @@ export function HouseholdPanel() {
               <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}> · {people.length} {people.length === 1 ? 'person' : 'people'}</span>
             </div>
           )}
+          {householdAgents.length > 0 && people.length > 1 && (() => {
+            const target = householdAgents.find((a) => (a.name ?? '').toLowerCase().split('.')[0] === house.toLowerCase()) ?? householdAgents[0]!;
+            return (
+              <div style={{ margin: '4px 0 2px' }}>
+                <button type="button" className="btn-ghost" style={{ fontSize: 11 }} disabled={busy} data-testid={`household-invite-all-${house}`}
+                  onClick={() => void inviteEveryone(people, target)}>
+                  Invite everyone here to {target.name ? target.name.split('.')[0] : 'the household'} — one signature each
+                </button>
+              </div>
+            );
+          })()}
           {people.map((m) => (
         <div key={m.agent} data-testid={`household-row-${m.agent}`}
           style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border, #e6e8ec)' }}>

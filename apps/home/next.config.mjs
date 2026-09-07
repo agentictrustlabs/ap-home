@@ -22,7 +22,8 @@ const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()' },
+  // Spec 369 — the Ask listens (one utterance at a time, the agent hears it); the microphone is ours only.
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()' },
   // HSTS — long max-age + includeSubDomains because the deployment is HTTPS-only on
   // *.impact-agent.me. Preload is intentionally NOT requested here (would lock the
   // apex into HTTPS-everywhere on the entire registrable, harder to back out).

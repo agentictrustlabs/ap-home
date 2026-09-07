@@ -49,7 +49,9 @@ proxies selected MCP requests during local demos.
   facts, read-only, no GraphDB credential here, and the indexer stays the KB's only writer); the private vault
   is not reachable from this surface. **faithnet only** (`demo-discovery-mcp-faithnet`; the production binding
   is find_members' and projects Base Sepolia). Live checks:
-  `scripts/verify-harness-payment.mts`, `-team-create.mts`, `verify-ask-surface.mts`.
+  `scripts/verify-harness-payment.mts`, `-team-create.mts`, `verify-ask-surface.mts`. **`POST /harness/hear`**
+  (spec 369): audio → words, Workers AI Whisper behind `TranscriberPort` (`src/voice.ts`), biased by what the
+  agent knows about the asker and repaired against known labels; in memory only. Every ask reply carries `spoken`.
 
 ## What this app does not own
 

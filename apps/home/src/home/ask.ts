@@ -124,7 +124,12 @@ export interface PlannerTrace {
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: string; because?: string }>;
   surface?: { realm?: string; capabilities?: number };
 }
-export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTrace };
+export type AskReply = AskReplyVariant & {
+  plannerTrace?: PlannerTrace;
+  /** Spec 369 — what a VOICE says for this reply, decided by the agent (markdown stripped, addresses named;
+   *  authority and signatures are read, never answered). */
+  spoken?: string;
+};
 
 /** Spec 361 I5 — THE DRAFT: a suspended run's sentence, plan and answers, as a screen reads them. */
 export interface RunDraft { runRef: string; addressee: string; message: string; plan?: { steps: Array<{ toolId: string; args: Record<string, unknown> }> }; supplied: SuppliedInput[]; awaiting: { kind: string; prompt: string; stepRef: string } | null; presentedCount: number }
@@ -246,6 +251,8 @@ export async function homeScope(
 }
 
 export interface AskTurnState {
+  /** Spec 369 — the words arrived by voice (the agent's own transcript). Trace only. */
+  channel?: 'text' | 'voice';
   message: string;
   addressee: Address;
   surface?: AskSurface;
@@ -264,9 +271,28 @@ export interface AskTurnState {
 export interface UnfinishedRun { runRef: string; message: string; awaiting: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number }
 
 async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string; waiting?: string; unfinishedRuns?: UnfinishedRun[]; unfinishedTotal?: number }> {
+  return postA2a('/a2a/harness/ask', body) as never;
+}
+
+/**
+ * Spec 369 — THE AGENT HEARS. The recording goes to the asker's own agent, which transcribes it biased by what
+ * it knows about them and repairs the names it can prove; the words come back to be SEEN, then sent through
+ * `ask()` like typed ones. Audio is processed and discarded on the agent. A failure is said, never papered
+ * over by the browser's recognizer (ADR-0013).
+ */
+export async function hear(session: { token: string }, addressee: string, audioBase64: string, mime: string): Promise<
+  { ok: true; transcript: string; heard: string; repairs: Array<{ from: string; to: string }> } | { ok: false; error: string }
+> {
+  const res = await postA2a('/a2a/harness/hear', { session: session.token, addressee: addressee.toLowerCase(), audio: audioBase64, mime, language: (typeof navigator !== 'undefined' ? navigator.language : 'en').split('-')[0] }) as
+    { ok: boolean; transcript?: string; heard?: string; repairs?: Array<{ from: string; to: string }>; error?: string; detail?: string };
+  if (!res.ok || typeof res.transcript !== 'string') return { ok: false, error: res.detail ?? res.error ?? 'the agent could not hear that' };
+  return { ok: true, transcript: res.transcript, heard: res.heard ?? res.transcript, repairs: res.repairs ?? [] };
+}
+
+async function postA2a(path: string, body: unknown): Promise<Record<string, unknown>> {
   const send = async () => {
     await ensureCsrfToken();
-    return fetch('/a2a/harness/ask', {
+    return fetch(path, {
       method: 'POST', credentials: 'include',
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
       body: JSON.stringify(body),
@@ -302,6 +328,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     // re-plans from the edited version and re-verifies from scratch.
     ...(state.plan ? { plan: state.plan } : {}),
     ...(state.presented ? { presented: state.presented } : {}),
+    ...(state.channel ? { channel: state.channel } : {}),
     supplied: state.supplied,
   });
   if (!res.ok || !res.reply) {

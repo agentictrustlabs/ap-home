@@ -109,7 +109,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const dKey = `delegated-idx:${org}`;
   const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; displayName?: string; delegation: unknown }>;
   if (!dIdx.some((x) => x.orgAgent.toLowerCase() === person)) {
-    dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', ...(displayName ? { displayName } : {}), delegation: d });
+    dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', ...(displayName ? { displayName } : {}), delegation: d, ...(facets.kin ? { kin: facets.kin } : {}), ...(facets.role ? { role: facets.role } : {}) });
     await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
   }
   // 3. THE MEMBERSHIP ITSELF, in the ORGANIZATION's own vault — spec 325's OrganizationMembership

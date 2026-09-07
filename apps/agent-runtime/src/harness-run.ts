@@ -1626,6 +1626,8 @@ export interface HarnessRunInput {
    * protect it).
    */
   surface?: AskScopeV1;
+  /** Spec 369 — the words arrived by voice (the transcript the agent itself produced). Trace only. */
+  channel?: 'text' | 'voice';
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -1695,7 +1697,7 @@ export function mandateCapabilityWords(presented: { caveats?: Array<{ enforcer?:
 
 /** Plain words for the capabilities an agent offers, for a refusal that says what it CAN do. An id with no
  *  word falls back to the id — an unfamiliar capability must still be readable, never silently dropped. */
-const CAPABILITY_WORDS: Record<string, string> = {
+export const CAPABILITY_WORDS: Record<string, string> = {
   'organization.team.create': 'create teams',
   'organization.create': 'create organizations',
   'household.create': 'create a household',
@@ -1837,7 +1839,7 @@ export interface PlannerTraceV1 {
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
-  surface?: { realm?: string; capabilities?: number };
+  surface?: { realm?: string; capabilities?: number; channel?: 'text' | 'voice' };
 }
 
 export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTraceV1 };
@@ -3479,7 +3481,7 @@ fanned out.`;
     planner: plannerUsed, toolsExposed: [], playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
     promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
     admission: [], plan: [], bindings: [],
-    ...(input.surface ? { surface: { ...(input.surface.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface.capabilities ? { capabilities: input.surface.capabilities.length } : {}) } } : {}),
+    ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
   };
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.

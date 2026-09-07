@@ -73,6 +73,13 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
                     {m.displayName}{you && <span style={{ ...mutedText, fontWeight: 400 }}> (you)</span>}
                   </div>
                   {m.publicName && <div style={{ ...mutedText, fontSize: '.78rem' }}>{m.publicName}</div>}
+                  {/* Spec 368 — a household membership says how they are related and who is responsible for
+                      whom: two facts, two words, neither of which grants anything. */}
+                  {(m.kin || (m.role && m.role !== 'member')) && (
+                    <div style={{ ...mutedText, fontSize: '.78rem' }} data-testid={`member-facets-${m.address}`}>
+                      {m.kin ? `${m.kin}` : ''}{m.kin && m.role && m.role !== 'member' ? ' · ' : ''}{m.role && m.role !== 'member' ? m.role : ''}
+                    </div>
+                  )}
                   <div style={{ marginTop: '.25rem' }}><AddressChip address={m.address as `0x${string}`} size="sm" /></div>
                 </div>
                 {!you && (

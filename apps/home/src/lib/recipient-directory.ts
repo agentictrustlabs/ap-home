@@ -33,6 +33,8 @@ export interface RosterMember {
   /** Their CURRENT naming-service name — null for the nameless. */
   publicName: string | null;
   role?: string;
+  /** Household membership (spec 368): how this member is related to the founder — `aphh:kinRelation`. */
+  kin?: string;
 }
 
 /** The directory response shape the Home proxies from the org's InteractionsDO `directory.list`. */
@@ -72,7 +74,7 @@ export function rosterFromDirectoryResponse(body: DirectoryResponse): RosterMemb
  *  redeemed an invite and delegated to the org, with the display name they chose at join. Keyed by
  *  the ORG they joined (`viaOrg`); the member's own SA is — confusingly — `orgAgent`. */
 export interface ReceivedMembersResponse {
-  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string }>;
+  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string; kin?: string; role?: string }>;
 }
 
 /** Pure: the members of `org` from the received-delegations index. Empty for an org the person does
@@ -90,7 +92,7 @@ export function membersFromReceivedDelegations(body: ReceivedMembersResponse, or
     // With no chosen name the address is the honest label; the DM header resolves a naming-service
     // name once the thread opens.
     const displayName = r.displayName?.trim() || `${address.slice(0, 6)}…${address.slice(-4)}`;
-    out.push({ address, displayName, publicName: null });
+    out.push({ address, displayName, publicName: null, ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}) });
   }
   return out;
 }

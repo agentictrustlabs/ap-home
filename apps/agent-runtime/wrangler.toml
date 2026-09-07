@@ -363,6 +363,10 @@ custom_domain = true
 pattern = "*.faithnet.ai/*"
 zone_name = "faithnet.ai"
 
+# Spec 369 — Workers AI for HEARING (`/harness/hear`, Whisper). Audio is processed in memory and discarded.
+[env.faithnet.ai]
+binding = "AI"
+
 [env.faithnet.vars]
 # Spec 365 — the zones whose inbound mail this Worker routes (`<handle>@<zone>` → the naming service).
 EMAIL_ZONES = "faithnet.me"
