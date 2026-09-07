@@ -7,6 +7,7 @@
 // It grants nothing on arrival. A pending request is a question; the answer is the owner's, made in their
 // own Home, and until they make it Nathan knows exactly what he knew before.
 import { InputRequired, type ToolInvoker } from '@agenticprimitives/orchestration';
+import { readValue, agentKindChoices } from '@agenticprimitives/ontology';
 import type { Address } from 'viem';
 import { RESOLUTION_REQUESTS_RECORD, RESOLUTION_SENT_RECORD, type ResolutionInvitationRequestV1, type SentResolutionRequestV1 } from './resolution-invitation.js';
 
@@ -48,22 +49,21 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // way to reach your treasury — to invite bob to join this team"*, which is two unrelated sentences
     // stapled together and nothing he could act on. A default nobody modelled is exactly the improvised
     // decision spec 363 exists to remove; the honest move is to ask, in the person's own terms.
-    const wantsRaw = String((args as { wants?: unknown }).wants ?? '').trim().toLowerCase();
     const purpose = String((args as { purpose?: unknown }).purpose ?? '').trim() || 'to send you money';
-    const WANTS = ['treasury', 'org', 'team', 'workspace', 'service', 'agent'];
-    const wants = WANTS.includes(wantsRaw) ? wantsRaw : '';
+    // THE KIND, READ BY ITS TYPE (spec 363 W2). The allowlist that used to live here is now the
+    // `AgentKind` reader, whose vocabulary is the derived agent types themselves (ADR-0061) — so this
+    // file cannot drift from what the naming service actually mints.
+    const read = readValue('AgentKind', (args as { wants?: unknown }).wants);
+    const wants = read.ok ? read.value : '';
     if (!wants) {
       throw new InputRequired({
         kind: 'data', stepRef: 'pending', toolId: _toolId,
         prompt: `What of ${raw}'s do you need a way to reach?`,
         fields: [{
           name: 'wants', label: 'what you need', type: 'choice', required: true,
-          choices: [
-            { value: 'treasury', label: 'their treasury', hint: 'to send them money' },
-            { value: 'org', label: 'an organization of theirs', hint: 'to reach the body, not the person' },
-            { value: 'team', label: 'a team of theirs' },
-            { value: 'agent', label: 'another agent of theirs' },
-          ],
+          // The kinds come from the ONTOLOGY's own list, so a new derived type appears here the day it
+          // is declared rather than the day somebody remembers this array.
+          choices: agentKindChoices().map((c) => ({ value: c.value, label: `their ${c.label}` })),
           allowOther: true,
         }],
       });

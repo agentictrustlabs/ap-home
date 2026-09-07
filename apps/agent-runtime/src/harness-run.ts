@@ -57,7 +57,7 @@ import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/c
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
-import { decide, PAYMENT_SOURCE_ACCOUNT } from '@agenticprimitives/ontology';
+import { decide, PAYMENT_SOURCE_ACCOUNT, argTypesFor, readValue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
@@ -1194,10 +1194,13 @@ export function profileUpdateInvoker(deps: HarnessDeps, person: Address | undefi
         ],
       });
     }
-    // A BAD EMAIL IS WORSE THAN NO EMAIL: it is where somebody's mail goes. Checked before it is stored,
-    // and reported as what it is rather than accepted and discovered later by whoever tried to write.
-    if (fields.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fields.email)) {
-      throw new Error(`"${fields.email}" is not an email address — give it in full, like name@example.org`);
+    // A BAD EMAIL IS WORSE THAN NO EMAIL: it is where somebody's mail goes. Read by its declared TYPE
+    // (spec 363 W2), so the check is the same one the normaliser and the Home's form use — a second
+    // regex here is how two surfaces come to disagree about what an address is.
+    if (fields.email) {
+      const read = readValue('EmailAddress', fields.email);
+      if (!read.ok) throw new Error(`"${read.said}" ${read.because} — give it in full, like name@example.org`);
+      fields.email = read.value;
     }
     const out = await deps.mergeProfile(person.toLowerCase(), fields);
     if (!out.ok) throw new Error(out.error ?? 'the profile could not be written');
@@ -1713,30 +1716,32 @@ export async function resolveStepArgs(
     if (typeof v === 'string' && PLACEHOLDER.test(v.trim())) delete out[k];
   }
 
-  const NUMERIC = new Set(['amount', 'usdc']);
-  // PEOPLE WRITE AMOUNTS THE WAY PEOPLE WRITE AMOUNTS. Asked "how much?", they answer "10 usdc", "$10",
-  // "10 dollars", "1,000" — and the strict number test read every one of those as no answer at all, so
-  // the identical question came back with nothing said about why. That is the same silent-refusal shape
-  // as the treasury prompt loop, and a person cannot debug it: the box says 10 and the agent says "how
-  // much?".
+  // ── EVERY DECLARED VALUE, READ ONCE, BY ITS TYPE (spec 363 W2) ───────────────────────────────────
   //
-  // Normalising is NOT guessing: a currency word or symbol next to a figure adds no information this
-  // deployment does not already have (one demo token), a thousands comma is punctuation, and anything
-  // that still is not a number is REPORTED rather than dropped.
-  const readAmount = (raw: string): string | null => {
-    const v = raw.trim().toLowerCase()
-      .replace(/^[$€£]/, '')
-      .replace(/\b(usdc|usd|dollars?|bucks?)\b/g, '')
-      .replace(/(\d),(?=\d{3}\b)/g, '$1')   // thousands separator only — "10,50" stays unreadable
-      .replace(/\s+/g, '');
-    return /^\d+(\.\d+)?$/.test(v) ? v : null;
-  };
-  for (const k of NUMERIC) {
-    const raw = String(out[k] ?? '').trim();
-    if (!raw || /^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) continue;
-    const read = readAmount(raw);
-    if (read) out[k] = read;
+  // The parsing that used to live here — a NUMERIC set, a currency-word regex, an email check in one
+  // invoker, a `wants` allowlist in another — is now ONE reader per type in the ontology package, bound
+  // to the argument by `ARG_TYPES`. A person's phrasing is understood identically wherever they typed it,
+  // and an unreadable value comes back with the words that could not be read instead of being dropped.
+  const unreadable = new Map<string, { said: string; because: string; word: string; hint?: string }>();
+  for (const b of argTypesFor(where?.capabilityId ?? where?.toolId ?? '')) {
+    if (out[b.arg] === undefined || out[b.arg] === '') continue;
+    const read = readValue(b.type, out[b.arg], { ...(env.MOCK_USDC ? { assets: [env.MOCK_USDC.toLowerCase()] } : {}) });
+    if (read.ok) { out[b.arg] = read.value; continue; }
+    // A placeholder reports no `said`: it is the planner's, and quoting `<UNKNOWN>` back at somebody who
+    // typed "a tenner" tells them about our plumbing and nothing about their answer.
+    delete out[b.arg];
+    if (read.said) unreadable.set(b.arg, { said: read.said, because: read.because, word: b.word, ...(b.hint ? { hint: b.hint } : {}) });
   }
+  // WHAT THEY WROTE THAT COULD NOT BE READ, asked once more WITH the reason — never the same question
+  // again as though nothing had been typed.
+  for (const [arg, u] of unreadable) {
+    throw new InputRequired({
+      kind: 'data', stepRef: where?.stepRef ?? 'pending', toolId: where?.toolId ?? '',
+      prompt: `“${u.said}” — ${u.because}. What should ${u.word} be?`,
+      fields: [{ name: arg, label: u.word, type: 'text', required: true, ...(u.hint ? { hint: u.hint } : {}) }],
+    });
+  }
+
   // ── A UNIT THE PLANNER COMPUTED IS NOT A UNIT ────────────────────────────────────────────────────
   //
   // THE INCIDENT: asked to send 20 USDC, the planner wrote `amount: "20"` into the base-unit field —
@@ -1949,32 +1954,16 @@ export async function resolveStepArgs(
     message: { label: 'Message', hint: 'what to say' },
     label: { label: 'Name', hint: 'lowercase letters, digits and hyphens' },
   };
-  // A PLACEHOLDER IS NOT AN ANSWER. Asked to "send money to alice" with no figure, the planner filled the
-  // amount with the literal string "<UNKNOWN>" — so the argument was present, this check passed, and the
-  // person was shown a mandate whose ceiling was a placeholder. An argument counts as given only if it is
-  // the KIND of value it is supposed to be; for a quantity that means a number.
-  const given = (k: string): boolean => {
-    const v = String(out[k] ?? '').trim();
-    if (!v) return false;
-    if (/^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(v)) return false;
-    if (NUMERIC.has(k)) return /^\d+(\.\d+)?$/.test(v);
-    return true;
-  };
   if (where?.required?.length) {
+    // A PLACEHOLDER IS NOT AN ANSWER — and by here it cannot BE one: the placeholder sweep at the top
+    // deleted it, and a value of a declared type has already been read by its own reader. What is left
+    // for this check is the simple question it should always have been: was anything given at all.
+    const given = (k: string): boolean => {
+      const v = String(out[k] ?? '').trim();
+      return !!v && !/^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(v);
+    };
     const missing = where.required.filter((k) => !PARTY_ARGS.includes(k)
       && (ALTERNATIVES[k] ?? [k]).every((alt) => !given(alt)));
-    // WHAT THEY WROTE THAT WE COULD NOT READ. Kept before the placeholder sweep deletes it, so the
-    // question can name it — asking again in the same words, as though nothing had been typed, is the
-    // one thing this must never do.
-    const unreadable = new Map<string, string>();
-    for (const k of NUMERIC) {
-      const raw = String(out[k] ?? '').trim();
-      // A PLACEHOLDER IS THE PLANNER'S, NOT THE PERSON'S. Quoting `<UNKNOWN>` back at somebody who typed
-      // "a tenner" tells them about our plumbing and nothing about their answer.
-      if (raw && !given(k) && !/^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) unreadable.set(k, raw);
-    }
-    // A placeholder must not survive into the step either: it would be encoded into a caveat.
-    for (const k of NUMERIC) if (String(out[k] ?? '').trim() && !given(k)) delete out[k];
     if (missing.length) {
       const fields: InputFieldV1[] = missing.map((k) => ({
         name: (ALTERNATIVES[k]?.[1] ?? k),
@@ -1982,41 +1971,181 @@ export async function resolveStepArgs(
         type: 'text' as const, required: true,
         ...(WORD_FOR_ARG[k]?.hint ? { hint: WORD_FOR_ARG[k]!.hint } : {}),
       }));
-      const said = [...unreadable.values()][0];
       throw new InputRequired({
         kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-        prompt: said
-          ? `I could not read “${said}” as an amount. How much, as a figure?`
-          : missing.length === 1 && missing[0] === 'amount' ? 'How much should I send?' : 'I need a little more to do that.',
+        prompt: missing.length === 1 && missing[0] === 'amount' ? 'How much should I send?' : 'I need a little more to do that.',
         fields,
       });
     }
   }
 
-  // ONE UNIT, ONCE. The planner may say `usdc: "2"` or `amount: "2000000"` — both are honest readings of
-  // "2 usdc" — but everything downstream (the caveat's ceiling, the balance check, the invoker) must see
-  // exactly one. Converting here means the delegation package never learns a token symbol and no reader
-  // has to guess which field to trust; leaving it to them is how `stepLimits` came to throw on an amount
-  // the person had plainly stated.
 
-  // THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT.
+  // ── WHOSE AGENT ACTS ─────────────────────────────────────────────────────────────────────────────
+  // The acting party is the one whose authority the step spends, and it is the argument most likely to be
+  // silently wrong: it is rarely spoken aloud ("send alice 20 USDC" names neither the sender nor the
+  // payer), so it gets defaulted, and a default nobody checks becomes an authority request naming the
+  // wrong agent.
   //
-  // Asked to send USDC, a model wrote `0x036CbD53842c5426634e7929541eC2318f3dCF7e` — Base Sepolia's USDC,
-  // recalled from memory, address-shaped and confidently wrong for this chain. Accepting it would have put
-  // a contract that does not exist here inside a signed mandate's allowedTargets, and the person granting
-  // would have read "make payments" over a token nobody can name.
-  //
-  // This deployment has exactly ONE demo token, so which token is not a choice a planner gets to make.
-  // A deployment with several would make it a real choice, and would need a real check — not this.
-  if (env.MOCK_USDC) out.asset = String(env.MOCK_USDC).toLowerCase();
-  // THE RECORD A PREFERENCE IS WRITTEN IN is a deployment fact for the same reason: the person is
-  // authorizing a call against the AgentRelationship contract, so that address is what the mandate's
-  // allowedTargets must name. The TREASURY the statement is about travels in the calldata and is shown
-  // on the card — a caveat cannot narrow to one edge, and pretending it can would be a worse claim than
-  // saying plainly what the authority covers.
-  if (where?.capabilityId === PRIMARY_PAYEE_CAPABILITY && env.AGENT_RELATIONSHIP) {
-    out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
+  // Two failures this closes, both from one omission — nobody had ever set it:
+  //   · messaging declares `authorityArg: 'sender'` and no `sender` argument existed, so the delegator
+  //     fell through to the RESOURCE and Nathan was asked to authorize a message AS ALICE, its recipient.
+  //   · a payment took the realm the person was standing in — their person SA — as the payer, and died on
+  //     a balance check against an account that holds no money and never could.
+  if (where?.authorityArg && where.subject) {
+    const arg = where.authorityArg;
+    const current = String(out[arg] ?? '').trim();
+    // Unspoken ⇒ the person asking. Acting as yourself is the only reading of "send alice a message".
+    if (!current) out[arg] = where.subject.toLowerCase();
+    const types = partyTypesFor(where.capabilityId ?? where.toolId, arg);
+    const isAsker = String(out[arg] ?? '').toLowerCase() === where.subject.toLowerCase();
+    // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
+    // one of THEIR agents that is — the typed suffix already says which. Never a widening: their tree only.
+    if (types?.length && isAsker && !types.includes('me')) {
+      let found = false;
+      for (const type of types) {
+        const mine = await ownAgentsOfType(where.subject, type, lookups);
+        if (mine.length === 1) {
+          const c = mine[0]!;
+          lookups.onResolved?.({ arg, raw: partyWord(arg), agent: c.agent, label: c.label, hint: candidateHint(c) });
+          out[arg] = c.agent;
+          found = true;
+          break;
+        }
+        if (mine.length > 1) {
+          // WHAT THE ACT COSTS, when the figure is already known — so the list can say which accounts can
+          // actually do it. Offering an account that will revert as an equal choice is offering a wrong
+          // answer politely, and the person asking for 20 was shown six accounts holding less.
+          const needs = /^\d+$/.test(String(out.amount ?? ''))
+            ? { amount: BigInt(String(out.amount)), display: `${(Number(out.amount) / 1e6).toLocaleString('en-US', { maximumFractionDigits: 6 })} USDC` }
+            : undefined;
+
+          // ── THE DECISION PLANE (spec 363 §2) ──
+          //
+          // The person may have said which account they pay from — `ap:primaryPayer`, a mark on the
+          // public charteredUnder edge. When exactly one carries it, that IS the answer and the question
+          // is not worth asking; the rule says so, and the reply CITES it, because a decision that
+          // cannot say why is indistinguishable from a guess.
+          //
+          // A marked account that cannot cover the act does NOT decide: paying from it would fail, and
+          // using it silently would turn a preference into a wrong answer. The question comes back with
+          // what is known, which is the fail-closed default this table always ends in.
+          if (where.capabilityId === 'treasury.payment.execute' && arg === 'payer') {
+            const chosen = decide(PAYMENT_SOURCE_ACCOUNT, mine.map((c) => ({ value: c, satisfies: c.roles ?? [] })));
+            if (chosen) {
+              const held = lookups.valueHeld ? await lookups.valueHeld(chosen.value.agent).catch(() => null) : null;
+              const covers = !needs || !held || held.amount >= needs.amount;
+              if (covers) {
+                lookups.onResolved?.({
+                  arg, raw: partyWord(arg), agent: chosen.value.agent, label: chosen.value.label,
+                  hint: candidateHint(chosen.value), because: chosen.because, ruleId: chosen.ruleId,
+                });
+                out[arg] = chosen.value.agent;
+                found = true;
+                break;
+              }
+            }
+          }
+
+          // Two of yours could pay — a person may hold several treasuries, and creating one in a sentence
+          // makes that ordinary. Which one is yours to say, not ours to rank.
+          const choices = await choicesFor(mine, lookups, needs);
+          // NOT ONE OF THEM CAN DO IT. Asking someone to choose between accounts that will all revert is
+          // asking them to pick which failure they would like; the useful answer is the shortfall and
+          // what would fix it. The list stays — they may be about to fund one, and hiding a person's own
+          // accounts to make a point is worse — but the question stops pretending it is a choice.
+          const noneCover = !!needs && choices.length > 0 && choices.every((c) => /not enough for/.test(c.hint));
+          const fullest = noneCover ? choices[0]!.hint.split(' · ')[0]!.split(' — ')[0] : '';
+          throw new InputRequired({
+            kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+            prompt: noneCover
+              ? `None of your ${type === 'treasury' ? 'treasuries' : `${type}s`} holds ${needs!.display} — the fullest has ${fullest}. Fund one first, or pick it anyway if you are about to.`
+              : needs
+                ? `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should pay the ${needs.display}?`
+                : `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${partyWord(arg)}?`,
+            fields: [{
+              name: arg, label: partyWord(arg), type: 'choice', required: true,
+              // WHAT EACH ONE HOLDS, and whether it can cover this act — the ones that can, first. The
+              // balance is evidence, never the answer: the question is still asked, because an account
+              // that cannot pay today may be the one they mean to fund.
+              choices,
+              // One of theirs may not be in their tree yet; a full name is always a valid answer.
+              allowOther: true,
+            }],
+          });
+        }
+      }
+      // NONE OF THEIRS IS OF THE RIGHT KIND — and the person SA it was defaulted to is NOT a fallback.
+      // The capability says a payer is a treasury or an organization precisely because a person agent is
+      // neither, and leaving it in place is how a payment came out of someone's PERSON agent while their
+      // seven treasuries sat untouched. It succeeded, which was the worst part: the money left an account
+      // nobody meant to spend from and the run said "done".
+      if (!found) {
+        throw new InputRequired({
+          kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+          prompt: `You have no ${types[0]} to be ${partyWord(arg)}. Which agent should be?`,
+          fields: [{
+            name: arg, label: partyWord(arg), type: 'text', required: true,
+            hint: `give a name (yours2.${types[0]}) or an address — a ${types[0]} is what holds what would be spent`,
+          }],
+        });
+      }
+    }
   }
+  for (const key of PARTY_ARGS) {
+    const raw = String(out[key] ?? '').trim();
+    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
+      // Nothing to resolve — and still worth reporting. An address here is usually the answer a person
+      // just PICKED from a list of four Nathans; showing them a bare 0x… on the next card asks them to
+      // re-verify a choice they made a moment ago against a string that tells them nothing.
+      lookups.onResolved?.({ arg: key, raw, agent: raw.toLowerCase() });
+      continue;
+    }
+    // A party the TOOL requires and the sentence did not name is a QUESTION. Skipping it because the field
+    // was empty let "send a direct message to zzz-nobody-here" sail past resolution into an authority
+    // request for a recipient that could not exist — failing at the last possible moment, after the person
+    // had granted. An OPTIONAL party (a funder that defaults to the asker) still skips.
+    if (!raw && !(where && (where.required ?? []).includes(key))) continue;
+    if (where) {
+      // Inside a run: resolve properly, and ASK when the words name several agents or none.
+      // A party that arrived as the asker's own address was not resolved from the sentence — it was
+      // borrowed from the context. Ask before that becomes an authority request naming the wrong person.
+      if (NEVER_THE_ASKER.has(key) && where.subject && raw.toLowerCase() === where.subject.toLowerCase()) {
+        throw new InputRequired({
+          kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+          prompt: `That would be you. Who is ${partyWord(key)}?`,
+          fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
+        });
+      }
+      out[key] = await resolveParty(raw, lookups, {
+        stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
+        // answer is an honest "unknown" — never a widening to a public search.
+        ...(where.subject ? { subject: where.subject } : {}),
+        // WHAT KIND of agent this argument is, so "nathan" means his treasury when money moves and him
+        // when a message is sent. Undeclared ⇒ no narrowing: a capability that has not said what it acts
+        // on gets every candidate and, if there are several, a question.
+        ...(() => { const t = partyTypesFor(where.capabilityId ?? where.toolId, key); return t ? { types: t } : {}; })(),
+        // What the ask was FOR, so a request raised from this dead end can carry it and be finished in
+        // one press later. EITHER UNIT: the planner writes `usdc: "3"` or `amount: "3000000"` and both
+        // are honest readings of "3 usdc" — reading only the first meant the amount was dropped exactly
+        // when the sentence had named one.
+        ...(() => {
+          const whole = String(out.usdc ?? '').trim();
+          if (/^\d+(\.\d+)?$/.test(whole)) return { pendingAmount: whole };
+          const smallest = String(out.amount ?? '').trim();
+          if (!/^\d+$/.test(smallest)) return {};
+          const n = Number(smallest) / 1e6;
+          return Number.isFinite(n) && n > 0 ? { pendingAmount: String(n) } : {};
+        })(),
+      });
+      continue;
+    }
+    // Outside a run (building a requirement to display): resolve what is certain, leave the rest as
+    // written — there is nobody to ask here, and a silent guess is the thing to avoid.
+    const resolved = raw.includes('.') && lookups.resolveName ? await lookups.resolveName(raw.toLowerCase()).catch(() => null) : null;
+    if (resolved) out[key] = resolved.toLowerCase();
+  }
+
   if (where?.capabilityId === ACCESS_REVOKE_CAPABILITY && env.DELEGATION_MANAGER) {
     out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
   }
