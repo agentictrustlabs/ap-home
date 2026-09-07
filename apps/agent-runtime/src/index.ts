@@ -123,7 +123,7 @@ import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailE
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
+import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
@@ -1399,6 +1399,7 @@ app.post('/harness/approve', async (c) => {
 });
 
 app.get('/harness/vocabulary', async (c) => {
+  // Spec 367 §7 — each capability's COMMAND FIELDS ride with it, so a screen and the Ask fill one command.
   // Playbook-aware disclosure (spec 354 §4.4 / K5): name the agent (`?agent=0x…`) and the vocabulary is
   // narrowed to what its assigned archetype knows how to do — the same set it will OFFER at plan time.
   // No agent named ⇒ the bare-harness vocabulary (unchanged), so an unnarrowed reader still works. The
@@ -1427,7 +1428,7 @@ app.get('/harness/vocabulary', async (c) => {
     rules: d.rules.map((r) => ({ id: r.id, basis: r.basis.property, cardinality: r.basis.cardinality, because: r.because })),
     whenNoneApply: 'the question is asked',
   }));
-  return c.json({ ok: true, capabilities: askVocabulary(playbook), decisions });
+  return c.json({ ok: true, capabilities: (() => { const fields = commandFieldsFor(playbook as never); return askVocabulary(playbook).map((cap) => ({ ...cap, ...(fields[cap.id]?.length ? { fields: fields[cap.id] } : {}) })); })(), decisions });
 });
 
 // GET /resolution/requests — what people have asked THIS person for a way to reach (spec 338 §7).

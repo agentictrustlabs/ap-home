@@ -165,7 +165,9 @@ export interface AskSurface {
 export const HOME_CEREMONIES = ['data', 'confirmation', 'signature'] as const;
 
 /** One agent's published Ask vocabulary. Disclosure only — every id still needs a mandate. */
-export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[]; label?: string }
+/** Spec 367 §7 — one field of the command behind a capability, typed by the ontology class its contract gave it. */
+export interface CommandField { name: string; label: string; kind: 'agent' | 'amount' | 'text' | 'flag' | 'asset'; required: boolean; types?: string[]; hint?: string }
+export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[]; label?: string; fields?: CommandField[] }
 
 /**
  * The scope this surface declares: the INTERSECTION of what the agent publishes and what this app can
@@ -179,6 +181,19 @@ export interface AskVocabularyEntry { id: string; description?: string; riskTier
  */
 const vocabularyMemo = new Map<string, { at: number; caps: AskVocabularyEntry[] }>();
 const VOCABULARY_TTL_MS = 5 * 60_000;
+
+/** The agent's published vocabulary entries (with command fields), memoised like `homeScope`. */
+export async function homeVocabulary(agent?: string): Promise<AskVocabularyEntry[]> {
+  const memoKey = (agent ?? '').toLowerCase();
+  const cached = vocabularyMemo.get(memoKey);
+  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.caps;
+  try {
+    const r = await fetch(`/a2a/harness/vocabulary${memoKey ? `?agent=${memoKey}` : ''}`);
+    const body = (await r.json()) as { capabilities?: AskVocabularyEntry[] };
+    if (body.capabilities) { vocabularyMemo.set(memoKey, { at: Date.now(), caps: body.capabilities }); return body.capabilities; }
+  } catch { /* no vocabulary ⇒ no commands to offer; the sentence path still works */ }
+  return [];
+}
 
 export async function homeScope(
   realm?: { kind?: 'person' | 'org' | 'service' },
@@ -218,6 +233,9 @@ export interface AskTurnState {
   message: string;
   addressee: Address;
   surface?: AskSurface;
+  /** Spec 361 I4 / 367 §7 — a SCREEN's own plan: the command it knows, with the person's words as arguments.
+   *  Sent on the first turn only; a resume carries the runRef and the agent holds the plan. */
+  plan?: { steps: Array<{ toolId: string; args: Record<string, unknown> }> };
   runRef: string;
   presented: DelegationWire | null;
   supplied: SuppliedInput[];
@@ -264,6 +282,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     runRef: state.runRef,
     ...(state.surface ? { surface: state.surface } : {}),
     ...(state.resumable ? {} : { message: state.message }),
+    ...(state.resumable || !state.plan ? {} : { plan: state.plan }),
     ...(state.presented ? { presented: state.presented } : {}),
     supplied: state.supplied,
   });

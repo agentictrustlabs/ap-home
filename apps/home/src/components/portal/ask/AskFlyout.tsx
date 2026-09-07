@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace } from '../../../home/ask';
+import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
@@ -208,6 +208,29 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface }, 'Thinking…');
   };
 
+  // Spec 367 §7 — THE SAME COMMAND, FILLED BY CONTROLS. "Do" offers the agent's capabilities as forms whose
+  // fields come from the contracts (an Agent is a party field, an Amount a number). Submitting posts the
+  // command as a supplied plan through the SAME turn as a sentence would take: the same resolver, the same
+  // prompts when something is missing, the same authority card, the same receipt. A click is not a sentence
+  // (no model re-derives it), and a form is not a second path.
+  const [commands, setCommands] = useState<AskVocabularyEntry[]>([]);
+  const [command, setCommand] = useState<AskVocabularyEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void homeVocabulary(addressee).then((caps) => { if (!cancelled) setCommands(caps.filter((c) => c.fields?.length)); });
+    return () => { cancelled = true; };
+  }, [addressee]);
+  const doCommand = async (cap: AskVocabularyEntry, args: Record<string, unknown>) => {
+    if (!session) return;
+    setCommand(null);
+    setAnswers({});
+    const said = Object.entries(args).filter(([, v]) => v !== '' && v !== undefined && v !== false).map(([k, v]) => `${k}: ${String(v)}`).join(', ');
+    const message = `${cap.label ?? cap.id}${said ? ` — ${said}` : ''}`;
+    setThread((t) => [...t, { role: 'you', text: message }]);
+    const surface = await homeScope(realm, addressee);
+    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface, plan: { steps: [{ toolId: cap.id, args }] } }, 'Working…');
+  };
+
   /** Grant the authority the agent said it needs — signed by the credential that custodies the DELEGATOR
    *  (the parent), which for a steward is their own. Then run the same ask again, with it. */
   const grant = async (reply: Extract<AskReply, { kind: 'authority_required' }>, state: AskTurnState) => {
@@ -373,6 +396,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
 
       {showDiag && <DiagnosticsPane entries={diag} onClose={() => setShowDiag(false)} />}
 
+      {command && <CommandForm command={command} onSubmit={(args) => void doCommand(command, args)} onCancel={() => setCommand(null)} />}
+      {commands.length > 0 && !command && !pending && (
+        <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
+          <span>Do:</span>
+          <select data-testid="ask-command" className="input" style={{ fontSize: 11.5, padding: '2px 6px', minHeight: 0, width: 'auto' }} value="" onChange={(e) => { const c = commands.find((x) => x.id === e.target.value); if (c) setCommand(c); }} disabled={!!busy}>
+            <option value="">choose an action…</option>
+            {commands.map((c) => <option key={c.id} value={c.id}>{c.label ?? c.id}</option>)}
+          </select>
+        </div>
+      )}
       <div className="ask-flyout-f">
         <input
           className="input" data-testid="ask-input" value={q} placeholder={`Ask ${addresseeLabel}…`}
@@ -380,6 +413,54 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
           disabled={!!busy || !!pending}
         />
         <BusyButton busy={busy === 'Thinking…'} busyLabel="Thinking…" disabled={!q.trim() || !!pending} onClick={() => void send()} className="btn primary">Ask</BusyButton>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Spec 367 §7 — a command's form, generated from its fields. An agent field takes a name or address (the
+ * agent resolves it in the person's own tier, and asks with choices when it cannot — the same prompt the
+ * sentence path shows); an amount is a number in whole units as the person says it; a flag is a checkbox.
+ * The values are the person's WORDS: nothing here resolves, ranks, or fills in what was not given.
+ */
+function CommandForm({ command, onSubmit, onCancel }: { command: AskVocabularyEntry; onSubmit: (args: Record<string, unknown>) => void; onCancel: () => void }) {
+  const [values, setValues] = useState<Record<string, string | boolean>>({});
+  const fields = command.fields ?? [];
+  const missing = fields.filter((f) => f.required && !String(values[f.name] ?? '').trim());
+  const submit = () => {
+    const args: Record<string, unknown> = {};
+    for (const f of fields) {
+      const v = values[f.name];
+      if (f.kind === 'flag') { if (v === true) args[f.name] = true; continue; }
+      if (typeof v === 'string' && v.trim()) args[f.name] = v.trim();
+    }
+    onSubmit(args);
+  };
+  return (
+    <div className="ask-card" data-testid="ask-command-form" style={{ margin: '0 0 6px' }}>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>{command.label ?? command.id}</div>
+      {fields.map((f: CommandField) => (
+        <div key={f.name} style={{ marginTop: 8 }}>
+          <label className="muted" style={{ fontSize: 11.5, display: 'block' }} htmlFor={`ask-c-${f.name}`}>
+            {f.label}{f.required ? '' : ' (optional)'}{f.kind === 'agent' && f.types?.length ? ` — a ${f.types.join(' / ')}` : ''}
+          </label>
+          {f.hint && <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{f.hint}</div>}
+          {f.kind === 'flag' ? (
+            <input id={`ask-c-${f.name}`} type="checkbox" checked={values[f.name] === true} onChange={(e) => setValues({ ...values, [f.name]: e.target.checked })} />
+          ) : (
+            <input
+              id={`ask-c-${f.name}`} className="input" data-testid={`ask-command-${f.name}`}
+              type={f.kind === 'amount' ? 'number' : 'text'} inputMode={f.kind === 'amount' ? 'decimal' : undefined} step={f.kind === 'amount' ? 'any' : undefined}
+              placeholder={f.kind === 'agent' ? 'a name (alice.me), a person you know, or an address' : f.kind === 'amount' ? 'e.g. 10' : ''}
+              value={String(values[f.name] ?? '')} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+            />
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button type="button" className="btn primary" data-testid="ask-command-submit" disabled={missing.length > 0} onClick={submit}>{missing.length ? `Needs ${missing.map((f) => f.label).join(', ')}` : 'Do it'}</button>
+        <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   );

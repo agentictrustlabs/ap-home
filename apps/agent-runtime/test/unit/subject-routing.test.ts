@@ -47,3 +47,17 @@ describe('readSubjectReply — the subject agent’s /harness/ask envelope', () 
     expect(readSubjectReply(null, 't', 'x.org', 502).ok).toBe(false);
   });
 });
+
+import { commandFieldsFor } from '../../src/harness-run.js';
+describe('commandFieldsFor — one command, two ways of filling it (spec 367 §7)', () => {
+  it('derives typed fields from the tool schema: parties are agent fields with their allowed types, usdc is an amount', () => {
+    const fields = commandFieldsFor(null);
+    const pay = fields['treasury.payment.execute']!;
+    const payee = pay.find((f) => f.name === 'payee')!;
+    expect(payee.kind).toBe('agent');
+    expect(payee.types).toContain('treasury');
+    expect(pay.find((f) => f.name === 'usdc')!.kind).toBe('amount');
+    const invite = fields['organization.membership.invite']!;
+    expect(invite.find((f) => f.name === 'invitee')!.kind).toBe('agent');
+  });
+});

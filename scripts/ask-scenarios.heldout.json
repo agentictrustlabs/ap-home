@@ -1,0 +1,17 @@
+{
+  "$comment": "Spec 367 §10 — HELD-OUT evaluations: phrasings the planner has never seen in its examples. This file is read by check:ask-scenarios only and is NEVER compiled into a definition or a prompt. Add a case when a phrasing fails live; never copy it into a contract's utterances.",
+  "cases": [
+    { "says": "could you wire 25 usdc over to bob.me", "tool": "treasury.payment.execute", "kind": "act" },
+    { "says": "I'd like to pay my sibling 4 usdc", "tool": "treasury.payment.execute", "kind": "act" },
+    { "says": "please drop nathan a note saying thanks", "tool": "messaging.direct.send", "kind": "act" },
+    { "says": "bring carol.me into missio nexus", "tool": "organization.membership.invite", "kind": "act" },
+    { "says": "how many people belong to missio nexus", "tool": "organization.membership.list", "kind": "read" },
+    { "says": "list everyone in calvary.org", "tool": "organization.membership.list", "kind": "read" },
+    { "says": "which circles do I belong to", "tool": "person.affiliations.list", "kind": "read" },
+    { "says": "am I on any teams", "tool": "person.affiliations.list", "kind": "read" },
+    { "says": "what receipts do I have", "tool": "vault.records.query", "kind": "read" },
+    { "says": "who do I live with", "tool": "household.roster", "kind": "read" },
+    { "says": "start a treasury under missio nexus", "tool": "treasury.create", "kind": "act" },
+    { "says": "who did I pay last week", "tool": "vault.records.query", "kind": "read" }
+  ]
+}

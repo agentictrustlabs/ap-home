@@ -2857,6 +2857,49 @@ export async function waitingOn(
   return `${what}${where ? ` You decide at ${where}.` : ''}`;
 }
 
+/**
+ * Spec 367 §7 — THE COMMAND behind a capability: its fields, typed by the ontology class the contract gave
+ * each input. A screen renders these as controls (an Agent is a party picker, an Amount a number, a Flag a
+ * checkbox); Ask fills the same fields from words. Both post the same supplied plan to the same boundary,
+ * and a missing value comes back as the same structured prompt. Projection only — it permits nothing.
+ */
+export interface CommandFieldV1 {
+  name: string;
+  label: string;
+  kind: 'agent' | 'amount' | 'text' | 'flag' | 'asset';
+  required: boolean;
+  /** For an agent field: the typed-name suffixes it may resolve to (from the party role), if declared. */
+  types?: string[];
+  hint?: string;
+}
+
+export function commandFieldsFor(playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): Record<string, CommandFieldV1[]> {
+  const tools = playbook
+    ? HARNESS_ACTION_TOOLS.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id)).map((t) => mergeContractTool(t, playbook.tools?.[t.capability?.id ?? t.id]))
+    : HARNESS_ACTION_TOOLS;
+  const out: Record<string, CommandFieldV1[]> = {};
+  for (const t of tools) {
+    if (t.id === UNSUPPORTED_TOOL.id) continue;
+    const id = t.capability?.id ?? t.id;
+    const schema = (t.inputSchema ?? {}) as { properties?: Record<string, { description?: string; 'x-ap-class'?: string }>; required?: string[] };
+    const required = new Set(schema.required ?? []);
+    out[id] = Object.entries(schema.properties ?? {}).map(([name, prop]) => {
+      const cls = String(prop?.['x-ap-class'] ?? '').toLowerCase();
+      const kind: CommandFieldV1['kind'] = cls === 'agent' || PARTY_ARGS.includes(name) ? 'agent'
+        : cls === 'amount' || name === 'usdc' || name === 'amount' ? 'amount'
+        : cls === 'flag' ? 'flag' : cls === 'asset' || name === 'asset' ? 'asset' : 'text';
+      const types = kind === 'agent' ? partyTypesFor(id, name) : undefined;
+      return {
+        name, kind, required: required.has(name),
+        label: kind === 'agent' ? partyWord(name) : name === 'usdc' ? 'amount (USDC)' : name,
+        ...(types?.length ? { types: [...types] } : {}),
+        ...(prop?.description ? { hint: prop.description } : {}),
+      };
+    });
+  }
+  return out;
+}
+
 export function askVocabulary(
   playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null,
 ): Array<AskCapabilityLike & { label: string }> {
