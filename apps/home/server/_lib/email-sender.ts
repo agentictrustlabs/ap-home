@@ -101,7 +101,7 @@ export function otpEmail(to: string, otp: string, brand: string): OutboundEmail 
 }
 
 /** `appName` names the relying app this invitation is TO — the org is the community inside it. */
-export function inviteEmail(to: string, joinUrl: string, orgName: string, brand: string, appName?: string | null): OutboundEmail {
+export function inviteEmail(to: string, joinUrl: string, orgName: string, brand: string, appName?: string | null, declineUrl?: string | null): OutboundEmail {
   const subject = appName ? `You're invited to ${appName} (${orgName})` : `You're invited to join ${orgName}`;
   const lead = appName
     ? `You've been invited to ${appName} to join ${orgName}.`
@@ -112,9 +112,10 @@ export function inviteEmail(to: string, joinUrl: string, orgName: string, brand:
   return {
     to,
     subject,
-    text: `${lead} ${detail} Join here: ${joinUrl}`,
+    text: `${lead} ${detail} Join here: ${joinUrl}${declineUrl ? `\n\nNot interested? ${declineUrl}` : ''}`,
     html: wrap(`<p style="font-size:15px"><b>${lead}</b></p>
       <p style="font-size:13px;color:#6b7280;margin:8px 0 16px">${detail}</p>
-      <a href="${joinUrl}" style="display:inline-block;background:#4338ca;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Accept invitation</a>`, brand),
+      <a href="${joinUrl}" style="display:inline-block;background:#4338ca;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Accept invitation</a>${declineUrl ? `
+      <p style="font-size:11px;color:#9ca3af;margin-top:28px"><a href="${declineUrl}" style="color:#9ca3af;text-decoration:underline">Not interested</a></p>` : ''}`, brand),
   };
 }

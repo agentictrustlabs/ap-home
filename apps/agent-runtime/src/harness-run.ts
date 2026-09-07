@@ -59,7 +59,7 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
-import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, relationshipRows } from '@agenticprimitives/context';
+import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, INVITATIONS_LIST_TOOL, invitationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, SUFFIX_FOR_CLASS, fanOutBindingFor } from '@agenticprimitives/ontology';
@@ -1393,6 +1393,17 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           // joined by invite never published a listing, and reading listings alone hides them.
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
+        },
+        (addressee ?? person ?? ('0x' as Address)), person,
+      )(toolId, args, ctx);
+    }
+    if (toolId === INVITATIONS_LIST_TOOL.id) {
+      return invitationsListInvoker(
+        {
+          ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+          ...(deps.survey ? { survey: deps.survey } : {}),
+          ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
+          ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
         },
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);
@@ -3420,6 +3431,8 @@ fanned out.`;
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never) }, deps) ? [VAULT_QUESTION_TOOL] : []),
     MEMBERSHIP_LIST_TOOL,
+    // What became of an organization's invitations — accepted, waiting, declined, expired.
+    ...(deps.survey && deps.readRecords ? [INVITATIONS_LIST_TOOL] : []),
     // What the asker is PART OF, by agent type (ADR-0061) — their own links, private tier.
     ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
     // The person's own access audit — informational, always available on their own surface.

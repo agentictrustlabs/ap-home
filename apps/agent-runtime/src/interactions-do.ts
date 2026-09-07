@@ -1594,7 +1594,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1769,6 +1769,30 @@ export class InteractionsDO {
         // org-level doc as the discussion assistant, so ONE steward-authored SKILL.md governs both the
         // @ask assistant and the endeavor agent. Absent ⇒ no markdown (the turn keeps its built-in
         // contract, unchanged). Read-only, in-Worker marker only.
+        // "NOT INTERESTED" — an emailed invitation, declined by the person who holds its token (spec 315;
+        // 365 rule 1 stands: this is not an act of authority, it is a NO, and it changes nothing but the
+        // invitation's own status). Token-bound: only a pending record moves, and only to `declined`; a
+        // redeemed one is never un-joined by a link, and an unknown token learns nothing. The agent-keyed
+        // twin (`org.invite:agent:<predicted>`) is marked too, so the roster's invitation row says so.
+        if (op === 'internal.invite.decline') {
+          const token = String(body.token ?? '');
+          if (!/^[a-f0-9]{40,80}$/.test(token)) return json({ error: 'invalid token' }, 400);
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — this organization keeps no invitations' }, 409);
+          const rec = ((await this.vaultFor(dg).read<Record<string, unknown>>({ owner: '', resource: `org.invite:${token}` }))?.data ?? null) as Record<string, unknown> | null;
+          if (!rec) return json({ ok: false, error: 'no such invitation' }, 404);
+          if (rec.status === 'redeemed') return json({ ok: true, status: 'redeemed', changed: false });
+          if (rec.status === 'declined') return json({ ok: true, status: 'declined', changed: false });
+          const declinedAt = Date.now();
+          await this.vaultFor(dg).write({ owner: '', resource: `org.invite:${token}`, data: { ...rec, status: 'declined', declinedAt } });
+          const delegate = String((rec.memberAccessDelegation as { delegate?: string } | undefined)?.delegate ?? '').toLowerCase();
+          if (/^0x[0-9a-f]{40}$/.test(delegate)) {
+            const twin = ((await this.vaultFor(dg).read<Record<string, unknown>>({ owner: '', resource: `org.invite:agent:${delegate}` }))?.data ?? null) as Record<string, unknown> | null;
+            if (twin && twin.status !== 'redeemed') await this.vaultFor(dg).write({ owner: '', resource: `org.invite:agent:${delegate}`, data: { ...twin, status: 'declined', declinedAt } });
+          }
+          await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: new Date(declinedAt).toISOString(), action: 'interactions.invite.declined', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'invitation', id: token.slice(0, 8) } });
+          return json({ ok: true, status: 'declined', changed: true, ...(typeof rec.invitedBy === 'string' ? { invitedBy: rec.invitedBy } : {}), ...(typeof rec.orgName === 'string' ? { orgName: rec.orgName } : {}) });
+        }
         if (op === 'internal.assistantSkill.get') {
           const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null);
           return json({ ok: true, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });

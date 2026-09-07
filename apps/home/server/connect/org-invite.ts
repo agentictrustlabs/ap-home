@@ -241,7 +241,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Sent AS THE ORGANIZATION through the Worker rail (Cloudflare Email Service) under the steward's own
   // session — the Worker re-derives stewardship for itself and threads a copy into the org's inbox.
   const session = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
-  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName), session ? { session, as: org } : undefined);
+  // "Not interested" lands on the Worker (the token is the credential); the inviter sees the answer.
+  const declineUrl = env.A2A_CUSTODY_URL?.trim() ? `${env.A2A_CUSTODY_URL.trim().replace(/\/$/, '')}/invite/decline?org=${org}&token=${token}` : null;
+  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName, declineUrl), session ? { session, as: org } : undefined);
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
   return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}) });
 };

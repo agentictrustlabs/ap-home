@@ -792,6 +792,9 @@ app.use('*', async (c, next) => {
   // no ambient cookie authority to forge, the same rationale as /interactions/*. A browser POST to the
   // same path has no marker and keeps CSRF.
   if (c.req.path === '/harness/ask' && isInternalCall(c.req.raw, c.env)) return next();
+  // /invite/decline — "not interested", from an emailed link. The credential is possession of the emailed
+  // token; the effect is a status on that one invitation, nothing else. A browser form post, no session.
+  if (c.req.path === '/invite/decline') return next();
   // /email/send (spec 365) — authorization is ENTIRELY body-carried: a broker-verified Home session (and, for
   // `as`, stewardship derived from the chain). No ambient cookie authority to forge — a cross-site page
   // cannot mint a session, and a JSON body is not a form post — so double-submit CSRF adds nothing; the
@@ -1818,6 +1821,39 @@ app.post('/resolution/grant', async (c) => {
  * edited plan (`POST /harness/ask { runRef, plan }`) and is re-derived and re-verified from scratch —
  * the form's last edit is what the mandate is judged against. Only the asker (or a claimant) may read it.
  */
+/**
+ * NOT INTERESTED — spec 315 invite, the answer the invitation never had. The emailed link lands here (a GET
+ * that CHANGES NOTHING: mail clients prefetch links, and a prefetch must not decline for a person); one
+ * button confirms. The token the email carried is the credential — possession of the inbox — and the only
+ * thing it can do is move that one invitation from pending to declined. The inviter sees it on the roster
+ * and can ask their agent about it.
+ */
+const declinePage = (org: string, token: string, state: 'ask' | 'done' | 'already' | 'gone', orgName?: string | null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not interested</title>
+<style>body{font-family:system-ui,sans-serif;max-width:440px;margin:4rem auto;padding:1.5rem;color:#14181f}button{font:inherit;padding:10px 18px;border-radius:8px;border:1px solid #d8dbe0;background:#fff;cursor:pointer}p{line-height:1.5}.muted{color:#6b7280;font-size:13px}</style></head><body>
+${state === 'ask' ? `<h1 style="font-size:1.3rem">Not interested?</h1><p>You were invited to join <b>${orgName ?? 'an organization'}</b>. If you would rather not, say so here — the person who invited you will see that you declined, and nothing else happens.</p>
+<form method="post" action="/invite/decline"><input type="hidden" name="org" value="${org}"><input type="hidden" name="token" value="${token}"><button type="submit">Yes, I'm not interested</button></form><p class="muted">Changed your mind? Just ignore this page; the invitation in your email still works until it expires.</p>`
+: state === 'done' ? `<h1 style="font-size:1.3rem">Thanks</h1><p><b>${orgName ?? 'The organization'}</b> will see that you're not interested. Nothing was set up for you and nothing else will follow.</p>`
+: state === 'already' ? `<h1 style="font-size:1.3rem">Already answered</h1><p>This invitation has already been accepted or declined, so there is nothing to change here.</p>`
+: `<h1 style="font-size:1.3rem">Nothing here</h1><p>This invitation could not be found — it may have expired.</p>`}
+</body></html>`;
+const declineParams = (org: string, token: string): { org: Address; token: string } | null =>
+  /^0x[0-9a-f]{40}$/.test(org.toLowerCase()) && /^[a-f0-9]{40,80}$/.test(token) ? { org: org.toLowerCase() as Address, token } : null;
+app.get('/invite/decline', async (c) => {
+  const p = declineParams(c.req.query('org') ?? '', c.req.query('token') ?? '');
+  if (!p) return c.html(declinePage('', '', 'gone'), 404);
+  const name = await harnessDeps(c.env, buildAuditSink(c.env)).nameOf?.(p.org).catch(() => null) ?? null;
+  return c.html(declinePage(p.org, p.token, 'ask', name));
+});
+app.post('/invite/decline', async (c) => {
+  const form = await c.req.parseBody().catch(() => ({} as Record<string, unknown>));
+  const p = declineParams(String(form.org ?? ''), String(form.token ?? ''));
+  if (!p) return c.html(declinePage('', '', 'gone'), 404);
+  const r = await callInteractionsInternal(c.env, p.org, 'internal.invite.decline', { token: p.token }).catch(() => ({ ok: false, error: 'unreachable' })) as { ok?: boolean; status?: string; changed?: boolean; orgName?: string; error?: string };
+  const name = (r.orgName ?? null) || (await harnessDeps(c.env, buildAuditSink(c.env)).nameOf?.(p.org).catch(() => null)) || null;
+  if (!r.ok) return c.html(declinePage(p.org, p.token, 'gone', name), 404);
+  return c.html(declinePage(p.org, p.token, r.changed ? 'done' : 'already', name));
+});
+
 app.get('/harness/run', async (c) => {
   const session = c.req.query('session') ?? '';
   const addressee = (c.req.query('addressee') ?? '').toLowerCase() as Address;
