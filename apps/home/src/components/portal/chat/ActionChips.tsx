@@ -38,7 +38,7 @@ export function ShareWayChip({ refId, label }: { refId: string; label?: string }
   const { session, profile, agentAddress } = useSession();
   const [state, setState] = useState<'idle' | 'busy' | 'shared' | 'error'>('idle');
   const [note, setNote] = useState<string | null>(null);
-  const [choices, setChoices] = useState<Array<{ agent: string; name?: string; primary?: boolean }> | null>(null);
+  const [choices, setChoices] = useState<Array<{ agent: string; name?: string; label?: string; hint?: string; primary?: boolean }> | null>(null);
   const [requester = '', wants = 'treasury'] = refId.split('/');
 
   const share = useCallback(async (target?: string) => {
@@ -62,7 +62,7 @@ export function ShareWayChip({ refId, label }: { refId: string; label?: string }
         const res = await fetch(`/a2a/resolution/candidates?wants=${encodeURIComponent(wants)}`, {
           credentials: 'include', headers: { authorization: `Bearer ${session.token}` },
         });
-        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; candidates?: Array<{ agent: string; name?: string; primary?: boolean }> };
+        const b = (await res.json().catch(() => ({}))) as { ok?: boolean; candidates?: Array<{ agent: string; name?: string; label?: string; hint?: string; primary?: boolean }> };
         const cands = b.candidates ?? [];
         const marked = cands.filter((c) => c.primary);
         if (marked.length === 1) chosen = marked[0]!.agent;
@@ -90,8 +90,12 @@ export function ShareWayChip({ refId, label }: { refId: string; label?: string }
         <>
           {choices.map((c) => (
             <button key={c.agent} type="button" className="badge" style={chipStyle}
-              data-testid={`share-way-pick-${c.agent}`} onClick={() => void share(c.agent)}>
-              Share {c.name ?? `${c.agent.slice(0, 6)}…${c.agent.slice(-4)}`}
+              data-testid={`share-way-pick-${c.agent}`} onClick={() => void share(c.agent)}
+              title={c.hint ?? c.agent}>
+              {/* WHAT IT HOLDS, on the row. Twenty-six unnamed treasuries look identical, and picking
+                  blind is how somebody shares an account they never use. */}
+              Share {c.name ?? c.label ?? `${c.agent.slice(0, 6)}…${c.agent.slice(-4)}`}
+              {c.hint ? <span className="muted" style={{ fontWeight: 400 }}> · {c.hint.split(' · ')[0]}</span> : null}
             </button>
           ))}
         </>

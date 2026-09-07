@@ -100,7 +100,7 @@ import {
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
-import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers } from '@agenticprimitives/context';
+import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgentsOfType, choicesFor } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
@@ -1588,15 +1588,34 @@ app.get('/resolution/candidates', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const wants = (c.req.query('wants') ?? 'treasury').toLowerCase();
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
-  const mine = await deps.charteredAgents?.(String(who.sa).toLowerCase(), wants).catch(() => []) ?? [];
+  // THEIR OWN TIER, not the public edges. The public `charteredUnder` record answers "which treasury does
+  // alice hold" FOR SOMEBODY ELSE; the person deciding what to disclose is choosing among agents they
+  // hold, and the usual answer here is an UNNAMED one — unlisted precisely because it has no name, which
+  // is why a grant is needed at all. Reading the public list returned nothing for exactly the people this
+  // flow exists for.
+  const mine = await ownAgentsOfType(String(who.sa).toLowerCase(), wants, {
+    ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+    ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}),
+  }).catch(() => []);
   const PAYEE = 'https://agenticprimitives.dev/ns/core#primaryPayee';
+  // WHAT EACH ONE HOLDS, richest first — the same evidence the payer picker shows, for the same reason.
+  // Bob holds twenty-six treasuries and twenty-four are empty; a list of identical unnamed rows asks him
+  // to pick blind, which is how a person shares the wrong account. A balance is public ERC-20 state and
+  // decides nothing: it orders the list and says what he is looking at.
+  const ranked = await choicesFor(
+    mine.map((m) => ({ agent: m.agent, label: m.label, ...(m.name ? { name: m.name } : {}), provenance: m.provenance })),
+    { ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}) },
+  );
+  const marks = new Map(mine.map((m) => [m.agent.toLowerCase(), m.roles ?? []]));
   return c.json({
     ok: true,
-    candidates: mine.map((m) => ({
-      agent: m.agent, ...(m.name ? { name: m.name } : {}),
-      // The mark they already made, so a surface can stop asking a question they answered once.
-      ...(m.roles?.includes(PAYEE) || m.primary ? { primary: true } : {}),
+    candidates: ranked.slice(0, 8).map((r) => ({
+      agent: r.value, label: r.label, hint: r.hint,
+      // The mark they already made, so a surface can stop asking a question they answered once. It comes
+      // from the public edge because that is where a preference others must read has to live.
+      ...(marks.get(r.value.toLowerCase())?.includes(PAYEE) ? { primary: true } : {}),
     })),
+    total: mine.length,
   });
 });
 
