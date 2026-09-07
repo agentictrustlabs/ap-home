@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun } from '../../../home/ask';
+import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace } from '../../../home/ask';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
@@ -134,6 +134,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
         ...(state.message ? { question: state.message } : {}),
         evidence: (reply as { evidence?: AskEvidence[] }).evidence ?? [],
         ...(reply.kind === 'refused' ? { error: reply.error } : {}),
+        ...(reply.plannerTrace ? { trace: reply.plannerTrace } : {}),
       }]);
       // Once the agent holds this run, later turns carry the runRef and the new answers only — the
       // mandate stops living here between turns.
@@ -407,6 +408,8 @@ interface DiagEntry {
   question?: string;
   evidence: AskEvidence[];
   error?: string;
+  /** Spec 367 wave 1 — what the planner received: planner, tools, playbook, admission, plan, bindings. */
+  trace?: PlannerTrace;
 }
 
 /**
@@ -445,6 +448,7 @@ function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: 
           {e.error && <div style={{ color: 'var(--c-danger, #dc2626)' }}>{e.error}</div>}
           {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
           {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
+          {e.trace && <PlannerTraceView trace={e.trace} />}
           {e.evidence.map((ev, k) => (
             <div key={k} style={{ marginTop: 4 }}>
               <div className="muted">
@@ -470,6 +474,47 @@ function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: 
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * WHAT THE PLANNER RECEIVED — spec 367 wave 1. Before a turn is called a reasoning failure, this answers
+ * whether the capability was even offered, which playbook was in force, what admission said, what plan the
+ * executor got, and where each party came from. Compact by default; the plan and tool list expand.
+ */
+function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
+  const [open, setOpen] = useState(false);
+  const short = (h: string) => (h.length > 14 ? `${h.slice(0, 10)}…${h.slice(-4)}` : h);
+  const refusals = trace.admission.filter((a) => a.refused.length);
+  return (
+    <div className="muted" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
+      <div>
+        <strong>planner</strong> {trace.planner}
+        {' · '}<strong>playbook</strong> {trace.playbook ? `${trace.playbook.archetypeId.replace(/^skill:archetypes\//, '')} v${trace.playbook.archetypeVersion} ${short(trace.playbook.digest)}` : 'none (bare harness)'}
+        {' · '}<strong>examples</strong> {trace.examplesRendered}
+        {' · '}<strong>tools</strong> {trace.toolsExposed.length}
+        {trace.surface ? <> · <strong>surface</strong> {trace.surface.realm ?? '?'}{typeof trace.surface.capabilities === 'number' ? ` (${trace.surface.capabilities} caps)` : ''}</> : null}
+        {' '}<button type="button" className="btn ghost" style={{ fontSize: 10, padding: '0 6px', minHeight: 0 }} onClick={() => setOpen((o) => !o)}>{open ? 'less' : 'more'}</button>
+      </div>
+      {refusals.map((a, i) => (
+        <div key={i} style={{ color: 'var(--c-warning, #92700e)' }}>
+          admission refused{a.replanned ? ' (re-planned)' : ' (final)'}: {a.refused.map((v) => `${v.code}${v.toolId ? ` @${v.toolId}` : ''}`).join(', ')}
+        </div>
+      ))}
+      {trace.plan.length > 0 && (
+        <div>plan: {trace.plan.map((s) => `${s.toolId}${Object.keys(s.args).length ? ` ${JSON.stringify(s.args)}` : ''}`).join(' → ')}</div>
+      )}
+      {trace.bindings.length > 0 && (
+        <div>bindings: {trace.bindings.map((b) => `${b.arg}: “${b.raw}” → ${b.label ?? short(b.agent)} (${b.source}${b.because ? `: ${b.because}` : ''})`).join('; ')}</div>
+      )}
+      {open && (
+        <>
+          <div>prompt {short(trace.promptDigest)}</div>
+          <div>tools exposed: {trace.toolsExposed.join(', ')}</div>
+          {refusals.map((a, i) => a.refused.map((v, k) => <div key={`${i}-${k}`}>· {v.message}</div>))}
+        </>
+      )}
     </div>
   );
 }

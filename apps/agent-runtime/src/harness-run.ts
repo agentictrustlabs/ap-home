@@ -1648,7 +1648,7 @@ export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
 
 /** What the Ask surface gets back: an answer, the authority it would need, a question for the person, or
  *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
-export type AskReply =
+export type AskReplyVariant =
   | { kind: 'answer'; text: string; runRef: string;
       /** WHAT IT READ TO SAY THAT. A generated query is the one kind of evidence a person cannot
        *  reconstruct from the answer, and an answer whose query nobody can inspect is a claim (spec 357
@@ -1691,6 +1691,36 @@ export type AskReply =
        *  before: the authority card is gone by then, and the receipt is where the answer lives. */
       decisions?: NonNullable<RunResult['receipts'][number]['decisions']> }
   | { kind: 'refused'; runRef: string; outcome: RunResult['outcome']; error: string; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown> };
+
+/**
+ * Spec 367 wave 1 — WHAT THE PLANNER ACTUALLY RECEIVED, on every reply. Before blaming a model, a failing turn
+ * must answer: was the capability exposed; which playbook and contract versions; which planner (a supplied
+ * screen plan, a compiled shape, the model); what did admission say; what did the executor get; where did
+ * each bound party come from. The deployed planner consumes the context assembled for THAT turn, not an
+ * architecture document. Display and evals only; it decides nothing and no gate reads it.
+ */
+export interface PlannerTraceV1 {
+  /** Who proposed the plan: the screen (supplied), a compiled one-correct-plan shape, or the model. */
+  planner: 'supplied' | 'compiled' | 'anthropic' | 'rule-based' | string;
+  /** The tool ids the planner could choose from — a capability absent here was never an option. */
+  toolsExposed: string[];
+  /** The playbook this run was admitted under (digest-pinned), or null for the bare harness. */
+  playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
+  /** keccak256 of the exact system prompt the model was given (doctrine + rules + examples). */
+  promptDigest: Hex;
+  /** How many contract examples were rendered into that prompt. */
+  examplesRendered: number;
+  /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
+  admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
+  /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
+  plan: Array<{ toolId: string; args: Record<string, unknown> }>;
+  /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
+  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
+  /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
+  surface?: { realm?: string; capabilities?: number };
+}
+
+export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTraceV1 };
 
 /** Which arg a capability's RESOURCE is read from — the same declaration the tool makes, restated where
  *  the requirement is built so the two cannot disagree. */
@@ -2409,7 +2439,14 @@ async function settleFinishedRequests(
   }
 }
 
-export async function askReplyFor(env: HarnessEnv, input: {
+/** Spec 367 wave 1 — EVERY reply kind carries the planner trace, decorated in one place so a new return path
+ *  cannot forget it (the prompt and authority paths had). */
+export async function askReplyFor(env: HarnessEnv, input: Parameters<typeof askReplyForInner>[1]): Promise<AskReply> {
+  const reply = await askReplyForInner(env, input);
+  return input.plannerTrace && !reply.plannerTrace ? { ...reply, plannerTrace: input.plannerTrace } : reply;
+}
+
+async function askReplyForInner(env: HarnessEnv, input: {
   intent: { goal: string }; result: RunResult; addressee: Address;
   /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
   surface?: AskScopeV1;
@@ -2430,6 +2467,8 @@ export async function askReplyFor(env: HarnessEnv, input: {
   principal?: Address;
   /** Verifies a stewardship wire on chain. Absent ⇒ a held wire is not upgraded to `steward` on its word. */
   verifyStewardship?: StandingDeps['verifyStewardship'];
+  /** Spec 367 wave 1 — attached to every reply kind so the How pane can show what the planner saw. */
+  plannerTrace?: PlannerTraceV1;
   /** What the run's party words resolved to, for the surface to show back before a signature. */
   resolved?: ResolvedParties;
   /** Spec 361 — contract interaction bindings by capability id, from the run's own merged tools. */
@@ -2442,7 +2481,7 @@ export async function askReplyFor(env: HarnessEnv, input: {
   // spec 354 §4.5 — the playbook provenance manifest for this run's outbound artifact (undefined when
   // the agent ran the bare harness). Attached to every terminal reply that carries a result.
   const prov = playbookProvenanceFromReceipts(r.receipts, input.addressee);
-  const withProv = <T extends AskReply>(reply: T): T => (prov ? ({ ...reply, skillProvenance: prov } as T) : reply);
+  const withProv = <T extends AskReply>(reply: T): T => ({ ...reply, ...(prov ? { skillProvenance: prov } : {}), ...(input.plannerTrace ? { plannerTrace: input.plannerTrace } : {}) } as T);
   if (r.outcome === 'authority-required' && r.required) {
     // Already normalised by the loop (`normalizeArgs`); re-run defensively for a caller that did not.
     // RE-NORMALISING WHAT THE LOOP ALREADY NORMALISED. `computedUnits` because the base-unit figure in
@@ -2963,7 +3002,7 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> }> {
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1 }> {
   const resolved: ResolvedParties = new Map();
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
@@ -3110,15 +3149,27 @@ fanned out.`;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
+  // Spec 367 wave 1 — the trace starts here: which planner actually proposed, and what it could see.
+  let plannerUsed: PlannerTraceV1['planner'] = input.plan ? 'supplied' : selected.kind;
   const planner: Planner = input.plan
     // The screen's plan verbatim — interpretation is what Ask ADDS in front of the same boundary, not a
     // toll every caller pays. One-shot: a failed supplied step is the caller's to correct, not a model's
     // to re-plan around (re-planning a click would act on something nobody clicked).
     ? { plan: async () => ({ steps: input.plan!.steps }) }
     : {
-        plan: async (pin) => compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal) ?? selected.planner.plan(pin),
+        plan: async (pin) => {
+          const compiled = compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal);
+          if (compiled) { plannerUsed = 'compiled'; return compiled; }
+          plannerUsed = selected.kind; return selected.planner.plan(pin);
+        },
       };
   const kind = input.plan ? 'supplied' : selected.kind;
+  const trace: PlannerTraceV1 = {
+    planner: plannerUsed, toolsExposed: [], playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
+    promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
+    admission: [], plan: [], bindings: [],
+    ...(input.surface ? { surface: { ...(input.surface.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface.capabilities ? { capabilities: input.surface.capabilities.length } : {}) } } : {}),
+  };
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -3147,8 +3198,10 @@ fanned out.`;
     UNSUPPORTED_TOOL,
   ];
   const localInvoke = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
+  trace.toolsExposed = tools.map((t) => t.id);
   const result = await runIntent(input.intent, {
     planner, tools,
+
     // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
     // names its subject; the resolver has already turned the person's words into an address in THEIR
     // tier; if that address is not the agent addressed, the step goes to the subject's own harness with
@@ -3200,6 +3253,10 @@ fanned out.`;
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],
     }),
     ports: {
+      events: (e) => {
+        if (e.type === 'PlanRefused') trace.admission.push({ refused: e.violations, replanned: e.replanning });
+        else if (e.type === 'PlanCreated') trace.admission.push({ refused: [], replanned: false });
+      },
       mandateVerifier: verifier, policyEvaluator: policy,
       approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink,
       // PLAN ADMISSION (spec 367 W1) — the plan's SHAPE, judged from declarations before any step runs:
@@ -3290,5 +3347,12 @@ fanned out.`;
   // capability id, so the reply can say where its outcome lives. Display data; decides nothing.
   const interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> = {};
   for (const t of tools) if (t.interaction) interactionFor[t.capability?.id ?? t.id] = t.interaction;
-  return { result, plannerKind: kind, resolved, interactionFor };
+  trace.planner = plannerUsed;
+  trace.plan = result.plan.steps.map((s) => ({ toolId: s.toolId, args: s.args }));
+  trace.bindings = [...resolved.values()].map((r) => ({
+    arg: r.arg, raw: r.raw, agent: r.agent, ...(r.label ? { label: r.label } : {}),
+    source: r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
+    ...(r.because ? { because: r.because } : {}),
+  }));
+  return { result, plannerKind: kind, resolved, interactionFor, trace };
 }

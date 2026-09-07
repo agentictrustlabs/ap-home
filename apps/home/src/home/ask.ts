@@ -69,7 +69,7 @@ export interface AskEvidence {
   reason?: string;
 }
 
-export type AskReply =
+export type AskReplyVariant =
   | { kind: 'answer'; text: string; runRef: string;
       /** Spec 361 — the structured result, when THIS surface supplied the plan. A screen renders rows;
        *  parsing the composed sentence would make it disagree with the record eventually. */
@@ -105,6 +105,20 @@ export type AskReply =
       /** Spec 363 W6 — what was DECIDED for the person on the way here, and on what basis. */
       decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }> }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
+
+/** Spec 367 wave 1 — what the planner actually received on this turn (mirror of the a2a `PlannerTraceV1`). Display only. */
+export interface PlannerTrace {
+  planner: string;
+  toolsExposed: string[];
+  playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
+  promptDigest: string;
+  examplesRendered: number;
+  admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
+  plan: Array<{ toolId: string; args: Record<string, unknown> }>;
+  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: string; because?: string }>;
+  surface?: { realm?: string; capabilities?: number };
+}
+export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTrace };
 
 /** Answers carried into the next turn of the SAME ask. */
 export interface SuppliedInput {
