@@ -38,6 +38,10 @@ export interface EffectDeps {
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** A name for an address, when one is known. Display only; absence is not an error. */
   nameFor?: (address: string) => Promise<string | null>;
+  /** The owner an agent is chartered under (`ap:charteredUnder`, on chain). A payee treasury's receipt
+   *  message is delivered to ITS OWNER — the same reasoning already applied to the payer side: a
+   *  treasury's inbox is not a place anyone looks. Null = unchartered = tell the payee agent itself. */
+  ownerOf?: (agent: string) => Promise<string | null>;
 }
 
 const lc = (v: unknown): string => String(v ?? '').toLowerCase();
@@ -138,7 +142,16 @@ export function declaredEffectSink(
 
       // THE THREAD is a projection of the record, not a second source of truth. It is where a person
       // actually looks, which is the whole reason the incident was invisible.
-      if (effect.surface.includes('thread') && deps.sendDirectMessage && ctx.session) {
+      // THE SENDER IS THE PERSON WHOSE SIGNATURE MOVED THE MONEY. The first cut sent as the PAYER
+      // agent — but a treasury or an org has no session of its own, and its outbound rail rightly
+      // demands a stewardship presentation (SEC-C1) the payment run does not and must not carry: a
+      // payment mandate becoming a speak-as-the-org grant would be authority widened by a side effect.
+      // So every notification rides the acting person's OWN rail (their session, their DO, isSelf) —
+      // one mechanism chosen by a fact, never a fallback (ADR-0013) — and the SENTENCE still names the
+      // payer from the record, so nothing is misattributed: "Missio Nexus sent you 100 USDC" from the
+      // steward who executed it is exactly what happened.
+      const sender = String(ctx.person ?? '').toLowerCase();
+      if (effect.surface.includes('thread') && deps.sendDirectMessage && ctx.session && /^0x[0-9a-f]{40}$/.test(sender)) {
         const [payerName, payeeName] = await Promise.all([
           deps.nameFor?.(payer).catch(() => null) ?? Promise.resolve(null),
           deps.nameFor?.(payee).catch(() => null) ?? Promise.resolve(null),
@@ -146,19 +159,26 @@ export function declaredEffectSink(
         const words = (side: 'payee' | 'payer') =>
           receiptSentence(record, { payerName, payeeName, side, ...(ctx.usdc ? { usdc: ctx.usdc } : {}) });
         const notify = async (to: string, side: 'payee' | 'payer') => {
-          // Never message an agent as itself: a note from you to you is not a notification, it is a
-          // resolution that went nowhere.
-          if (!/^0x[0-9a-f]{40}$/.test(to) || to === payer) return;
+          // Never message yourself: a note from you to you is not a notification. The payer SIDE lands
+          // here by construction — the person who authorised the payment is the sender, and their
+          // confirmation is the receipt record in the payer's vault plus the run's own done reply.
+          if (!/^0x[0-9a-f]{40}$/.test(to) || to === sender) return;
           const sent = await deps.sendDirectMessage!({
-            sender: payer as Address, recipient: to as Address, bodyText: words(side), session: ctx.session!,
+            sender: sender as Address, recipient: to as Address, bodyText: words(side), session: ctx.session!,
           }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
           if (!sent.ok) failures.push(`notify ${to}: ${sent.error}`);
         };
-        if (parties.has(payee)) await notify(payee, 'payee');
-        // The payer SIDE, told to the person who authorised it. Deliberately not the payer agent's own
-        // inbox: a treasury's inbox is not a place anyone looks, and the point of a confirmation is that
-        // somebody reads it.
-        if (parties.has(payer) && ctx.person) await notify(String(ctx.person).toLowerCase(), 'payer');
+        if (parties.has(payee)) {
+          // THE PAYEE'S PERSON, not the payee's inbox. The payee named in the mandate is a treasury; the
+          // ap:charteredUnder edge (public, both-parties-signed) says whose it is, and the fact disclosed
+          // — that their own treasury was paid — is theirs by construction. An unchartered payee keeps
+          // the old behaviour: the message goes to the agent itself.
+          const payeeOwner = deps.ownerOf ? await deps.ownerOf(payee).catch(() => null) : null;
+          await notify(payeeOwner ?? payee, 'payee');
+        }
+        // The payer's person, when someone OTHER than them authorised the act (a co-steward flow). In
+        // the common case the authoriser IS the payer's person and the self-guard above ends it.
+        if (parties.has(payer)) await notify(sender, 'payer');
       }
 
       // Throwing here reaches the loop's isolation and becomes an `EffectFailed` event: the payment

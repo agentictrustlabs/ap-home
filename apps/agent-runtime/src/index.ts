@@ -113,7 +113,7 @@ export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders } from './internal-marker.js';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
-import { charteredAgentsReader } from './chartered-agents.js';
+import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
 import { verifiedGrants, grantAllows } from './resolution-invitation.js';
@@ -1892,7 +1892,9 @@ app.post('/harness/run', async (c) => {
   try {
     const { result, plannerKind } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
       ...(body.plan ? { plan: body.plan } : {}),
-      intent: body.intent, presented: body.presented ?? null, person: who.sa as Address,
+      // The session rides along for the declared-effect thread leg (spec 360): the notification is
+      // sent on the acting person's own rail, and that rail is driven by their session.
+      intent: body.intent, presented: body.presented ?? null, person: who.sa as Address, session: body.session,
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(body.supplied ? { supplied: body.supplied } : {}), ...(body.runRef ? { runRef: body.runRef } : {}),
       mcpInvoke: async () => { throw new Error('informational tools are not wired on /harness/run yet — use the orchestrate skill'); },
     });
@@ -2574,6 +2576,13 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // The PUBLIC half of "what does this agent hold": `ap:charteredUnder` edges on chain (spec 355 W2).
     // Both parties signed them, so this answers for someone else's treasury without reading anything of
     // theirs — the gap that made "send alice 20 USDC" unroutable for anyone but Alice.
+    // The inverse read: whose treasury is this? Used ONLY to deliver a payee-side receipt to the person
+    // behind the paid treasury — the same edge, read from the other end. It grants nothing.
+    ownerOf: charteredOwnerReader({
+      readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
+      relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
+      ...(env.AGENT_RELATIONSHIP ? { relationships: env.AGENT_RELATIONSHIP as Address } : {}),
+    }),
     charteredAgents: charteredAgentsReader({
       readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
       relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,

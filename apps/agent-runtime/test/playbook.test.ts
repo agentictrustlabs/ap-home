@@ -128,6 +128,28 @@ const PAY_BUILTIN = {
 };
 
 describe('mergeContractTool — behaviour merges, authority does not', () => {
+  it('a contract schema UNIONS properties — it may not hide an argument the capability binds', () => {
+    // The live loop: the treasury contract's inputs named payee/asset/amount, replacing the schema hid
+    // `payer`, and the loop's supplied-answer filter then discarded every answer to "Which of your
+    // treasuries?" — the identical question forever.
+    const builtin = {
+      id: 'treasury.payment.execute', description: 'pay',
+      inputSchema: { type: 'object', properties: { payer: { type: 'string' }, payee: { type: 'string' }, usdc: { type: 'string' } }, required: ['payee'] },
+      capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer' },
+      risk: 'high',
+    } as never;
+    const contract = {
+      id: 'treasury.payment.execute',
+      inputSchema: { type: 'object', properties: { payee: { type: 'string', description: 'their treasury' }, asset: { type: 'string' }, amount: { type: 'string' } }, required: ['payee', 'amount'] },
+    } as never;
+    const merged = mergeContractTool(builtin, contract);
+    const props = (merged.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(Object.keys(props).sort()).toEqual(['amount', 'asset', 'payee', 'payer', 'usdc']);
+    // The contract's per-key description wins where both speak.
+    expect((props.payee as { description?: string }).description).toBe('their treasury');
+    expect((merged.inputSchema as { required: string[] }).required.sort()).toEqual(['amount', 'payee']);
+  });
+
   it('takes the DESCRIPTION from the contract — the sentence a planner chooses by', () => {
     const out = mergeContractTool(PAY_BUILTIN as never, { id: 'x', description: 'the domain author’s words' } as DefinitionToolV1);
     expect(out.description).toBe('the domain author’s words');

@@ -114,6 +114,11 @@ const n3 = await run(intent);
 console.log(`outcome ${n3.outcome} — ${(n3.error ?? '').slice(0, 160)}`);
 const final = await bal(ORG);
 console.log(`org after replay attempt: ${final} (${final === after.org ? 'unchanged ✓' : 'CHANGED ✗'})`);
-if (n3.outcome === 'completed' || final !== after.org) throw new Error('the identical intent settled TWICE — the on-chain nonce must derive from the intent');
+// Since spec 360, a replay COMPLETES IDEMPOTENTLY: the invoker sees the intent-derived nonce already
+// consumed on chain and reports `alreadySettled` instead of failing — same guarantee (no second
+// transfer, no second receipt — the sink skips alreadySettled), stated as what it is. The invariant
+// that must hold is the balance: the identical intent may never move funds twice.
+const replayedIdempotently = n3.outcome === 'completed' && n3.result?.alreadySettled === true;
+if ((n3.outcome === 'completed' && !replayedIdempotently) || final !== after.org) throw new Error('the identical intent settled TWICE — the on-chain nonce must derive from the intent');
 
 console.log('\n✓ W2 scenario 3 on faithchain: mandate → verify → approve → re-verify → redeem on chain → receipt; twins refused.');

@@ -17,6 +17,7 @@ const ZERO32 = `0x${'0'.repeat(64)}` as Hex;
 const ACTIVE = 3;
 
 const EDGES_BY_OBJECT_ABI = [{ type: 'function', name: 'getEdgesByObject', stateMutability: 'view', inputs: [{ name: 'object_', type: 'address' }], outputs: [{ type: 'bytes32[]' }] }] as const;
+const EDGES_BY_SUBJECT_ABI = [{ type: 'function', name: 'getEdgesBySubject', stateMutability: 'view', inputs: [{ name: 'subject', type: 'address' }], outputs: [{ type: 'bytes32[]' }] }] as const;
 const HAS_ROLE_ABI = [{ type: 'function', name: 'hasRole', stateMutability: 'view', inputs: [{ name: 'edgeId', type: 'bytes32' }, { name: 'role', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 const GET_EDGE_ABI = [{ type: 'function', name: 'getEdge', stateMutability: 'view', inputs: [{ name: 'edgeId', type: 'bytes32' }], outputs: [
   { type: 'tuple', components: [
@@ -80,5 +81,31 @@ export function charteredAgentsReader(deps: CharteredDeps) {
       out.push({ agent: m.agent, name: m.name, ...(primary ? { primary: true } : {}) });
     }
     return out;
+  };
+}
+
+/**
+ * The OWNER an agent is chartered under — the inverse read (`getEdgesBySubject`), for delivering a
+ * consequence to the person behind a treasury. A treasury's inbox is not a place anyone looks; the
+ * `ap:charteredUnder` edge both parties signed says whose it is, and that edge is the ONLY basis —
+ * never a name resemblance (spec 355). Returns null when no ACTIVE edge exists: an unchartered agent
+ * has no owner to tell, and null is the answer, not a trigger for a weaker lookup (ADR-0013).
+ */
+export function charteredOwnerReader(deps: CharteredDeps) {
+  return async (agent: string): Promise<string | null> => {
+    if (!deps.relationships) return null;
+    const ids = (await deps.readContract({
+      address: deps.relationships, abi: EDGES_BY_SUBJECT_ABI, functionName: 'getEdgesBySubject', args: [agent],
+    } as never).catch(() => [])) as Hex[];
+    for (const id of ids.slice(0, deps.maxEdges ?? 12)) {
+      if (id === ZERO32) continue;
+      const edge = (await deps.readContract({
+        address: deps.relationships, abi: GET_EDGE_ABI, functionName: 'getEdge', args: [id],
+      } as never).catch(() => null)) as { object_?: string; relationshipType?: string; status?: number } | null;
+      if (edge && edge.status === ACTIVE && String(edge.relationshipType).toLowerCase() === deps.relationshipType.toLowerCase()) {
+        return String(edge.object_).toLowerCase();
+      }
+    }
+    return null;
   };
 }

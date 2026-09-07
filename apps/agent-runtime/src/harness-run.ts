@@ -478,6 +478,8 @@ export interface HarnessDeps {
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
+  /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
+  ownerOf?: (agent: string) => Promise<string | null>;
   now?: () => number;
 }
 
@@ -1833,8 +1835,21 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
   }
   const builtinReq = ((builtin.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
   const contractReq = ((contract.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
+  // PROPERTIES ARE A UNION TOO — the contract's description of an argument wins per key, but an argument
+  // it does not mention SURVIVES. Replacing the schema hid `payer` (the treasury contract's inputs name
+  // payee/asset/amount; `authorityArg: payer` is bound by the RUNNING capability) — and the loop only
+  // accepts a supplied answer for a declared argument, so "Which of your treasuries?" became
+  // unanswerable: every answer was filtered out and the identical question asked forever. Describing an
+  // act may add words; hiding an argument the capability binds is weakening the gate's resumability.
+  const builtinProps = ((builtin.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {};
+  const contractProps = ((contract.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {};
   const inputSchema = contract.inputSchema
-    ? { ...(contract.inputSchema as Record<string, unknown>), required: [...new Set([...builtinReq, ...contractReq])] }
+    ? {
+        ...(builtin.inputSchema as Record<string, unknown> | undefined ?? {}),
+        ...(contract.inputSchema as Record<string, unknown>),
+        properties: { ...builtinProps, ...contractProps },
+        required: [...new Set([...builtinReq, ...contractReq])],
+      }
     : builtin.inputSchema;
   return {
     ...builtin,
@@ -2089,6 +2104,8 @@ fanned out.`;
         {
           ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
+          ...(deps.nameOf ? { nameFor: deps.nameOf } : {}),
+          ...(deps.ownerOf ? { ownerOf: deps.ownerOf } : {}),
         },
         { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}), ...(input.person ? { person: input.person } : {}) },
       ),
