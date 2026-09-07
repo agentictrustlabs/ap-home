@@ -57,7 +57,7 @@ import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/c
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
-import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue } from '@agenticprimitives/ontology';
+import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
@@ -1000,7 +1000,7 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const named = String(args.holder ?? '').toLowerCase();
     if (named && named !== owner) throw new Error(`the preference is the owner's to set (${wire.delegator}); the plan named ${named}`);
     const treasury = await partyAddress(args.treasury, deps, 'the treasury to be paid');
-    const on = args.on === undefined ? true : args.on === true || String(args.on).toLowerCase() === 'true';
+    const on = args.on === undefined ? true : isFlagTrue(args.on);
     // WHICH STANDING ROLE. Receiving and spending are different questions about the same account, and
     // conflating them would move money out of the one its owner publishes.
     const roleWord = /^pay(er|ing|s)?$|from|spend/i.test(String(args.role ?? '')) ? 'payer' : 'payee';
@@ -1167,7 +1167,9 @@ export function householdRecordInvoker(deps: HarnessDeps, person: Address | unde
       ...(args.household !== undefined ? { household: String(args.household) } : {}),
       ...(args.role !== undefined ? { role: String(args.role) } : {}),
       ...(args.kin !== undefined ? { kin: String(args.kin) } : {}),
-      ...(args.remove === true ? { remove: true } : {}),
+      // ONE READER FOR A YES/NO. `remove: true` arrives from a reader as the string "true"; comparing
+      // to the boolean dropped it, and "take Dave out of the farm" silently put him back in.
+      ...(isFlagTrue(args.remove) ? { remove: true as const } : {}),
     });
     if (!out.ok) throw new Error(out.error ?? 'the household record could not be written');
     return {

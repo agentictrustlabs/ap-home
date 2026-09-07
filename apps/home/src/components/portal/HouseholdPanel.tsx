@@ -13,7 +13,7 @@
 //
 // IT GRANTS NOBODY ANYTHING. A guardian recorded here cannot act for a dependent; that is a delegation
 // their custodian issues. No gate reads this record — it answers "who did you mean".
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
@@ -38,6 +38,23 @@ export function HouseholdPanel() {
   const [invited, setInvited] = useState<string | null>(null);
   const [kin, setKin] = useState<string>('');
   const [role, setRole] = useState<string>('member');
+  /** Which household the form is adding to. `#new` opens a box for one that does not exist yet — a
+   *  person with two homes should not have to discover that typing a name creates one. */
+  const [into, setInto] = useState<string>('home');
+  const [newName, setNewName] = useState('');
+
+  /** The rows as SECTIONS — one per household, in the order they were first seen, with the one called
+   *  "home" first because that is the one most people only ever have. */
+  const groups = useMemo(() => {
+    const by = new Map<string, HouseholdMemberRow[]>();
+    for (const m of rows) {
+      const key = (m.household ?? 'home').trim() || 'home';
+      by.set(key, [...(by.get(key) ?? []), m]);
+    }
+    return [...by.entries()].sort((a, b) => (a[0] === 'home' ? -1 : b[0] === 'home' ? 1 : a[0].localeCompare(b[0])));
+  }, [rows]);
+  /** The households they already keep, plus "home" so there is always somewhere to add the first person. */
+  const houses = useMemo(() => [...new Set(['home', ...groups.map(([h]) => h)])], [groups]);
 
   // FIND THE PERSON, rather than making somebody type an address correctly from memory. The naming
   // service is the source: a name is a public, on-chain fact (ADR-0040), so searching it discloses
@@ -68,11 +85,20 @@ export function HouseholdPanel() {
     // WHAT THEY PICKED, or what they typed. A picked person is an address the naming service resolved;
     // a typed one still resolves at the capability, which knows how.
     const member = picked?.agent ?? who.trim();
+    // WHICH HOUSEHOLD they are being recorded in. A name typed for a new one is used as given; an empty
+    // one falls back to "home" rather than creating a household called nothing.
+    const house = into === '#new' ? (newName.trim() || 'home') : into;
     const out = await householdThroughHarness({
       person: agentAddress as Address, session: { token: session.token },
-      member, ...(kin ? { kin } : {}), role, ...(picked?.label ? { label: picked.label } : {}),
+      member, ...(kin ? { kin } : {}), role, household: house, ...(picked?.label ? { label: picked.label } : {}),
     });
-    if (!out.ok) setErr(out.error); else { setWho(''); setKin(''); setRole('member'); setPicked(null); setHits([]); await load(); }
+    if (!out.ok) setErr(out.error);
+    else {
+      setWho(''); setKin(''); setRole('member'); setPicked(null); setHits([]);
+      // Stay in the household they just added to — the next person usually lives there too.
+      setInto(house); setNewName('');
+      await load();
+    }
     setBusy(false);
   }
 
@@ -105,10 +131,12 @@ export function HouseholdPanel() {
     } finally { setBusy(false); }
   }
 
-  async function remove(agent: string) {
+  /** Removing names the household too: the same person can be in two, and taking them out of one is not
+   *  taking them out of the other. */
+  async function remove(agent: string, house: string) {
     if (!session?.token || !agentAddress) return;
     setBusy(true); setErr('');
-    const out = await householdThroughHarness({ person: agentAddress as Address, session: { token: session.token }, member: agent, remove: true });
+    const out = await householdThroughHarness({ person: agentAddress as Address, session: { token: session.token }, member: agent, household: house, remove: true });
     if (!out.ok) setErr(out.error); else await load();
     setBusy(false);
   }
@@ -119,13 +147,26 @@ export function HouseholdPanel() {
         The people you live with, as you record them. It is held in your own vault, published nowhere, and
         it gives nobody any authority — a guardian here still needs a delegation to act for anyone.
         What it does is let your agent understand you: <em>“send my daughter 20 usdc”</em> resolves here,
-        without a directory learning who you asked about.
+        without a directory learning who you asked about. You can keep more than one — a second home, a
+        week somewhere else, a house you share part of the time.
       </p>
       {err && <p style={errorText}>{err}</p>}
       {loaded && rows.length === 0 && (
         <p style={{ ...mutedText, fontSize: 12 }}>Nobody recorded yet.</p>
       )}
-      {rows.map((m) => (
+      {/* ONE SECTION PER HOUSEHOLD. A person can keep more than one — a child between two homes, a
+          second home, a carer's week — and appending "· the farm" to a row in one long list makes the
+          second household look like a note about a person rather than a place they live. The heading
+          appears once there IS more than one: a single home needs no label. */}
+      {groups.map(([house, people]) => (
+        <div key={house} data-testid={`household-group-${house}`} style={{ marginTop: 10 }}>
+          {groups.length > 1 && (
+            <div style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted, #6b7280)' }}>
+              {house}
+              <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}> · {people.length} {people.length === 1 ? 'person' : 'people'}</span>
+            </div>
+          )}
+          {people.map((m) => (
         <div key={m.agent} data-testid={`household-row-${m.agent}`}
           style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border, #e6e8ec)' }}>
           <strong style={{ fontSize: 13 }}>{m.label ?? <AgentName address={m.agent as Address} />}</strong>
@@ -137,12 +178,13 @@ export function HouseholdPanel() {
           <span className="muted" style={{ fontSize: 11.5 }}>
             {m.relation ? `your ${m.relation}` : 'lives with you'}
             {m.role === 'dependent' ? ' — cared for here' : m.role === 'guardian' ? ' — responsible for dependents here' : ''}
-            {m.household && m.household !== 'home' ? ` · ${m.household}` : ''}
           </span>
           <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 11 }}
-            disabled={busy} onClick={() => void remove(m.agent)} data-testid={`household-remove-${m.agent}`}>
+            disabled={busy} onClick={() => void remove(m.agent, m.household ?? house)} data-testid={`household-remove-${m.agent}`}>
             Remove
           </button>
+        </div>
+          ))}
         </div>
       ))}
       {/* WHAT THE TWO WORDS MEAN, where the person is choosing them — not in a tooltip they will not
@@ -162,6 +204,18 @@ export function HouseholdPanel() {
         <select className="input" style={{ flex: '0 0 130px' }} value={role} data-testid="household-role" onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
+        {/* WHICH HOME. Present even when there is only one, so a person can see that "home" is a choice
+            and not a fixed fact about them — the second household is discoverable rather than something
+            you have to know the conversation can do. */}
+        <select className="input" style={{ flex: '0 0 150px' }} value={into} data-testid="household-into"
+          onChange={(e) => { setInto(e.target.value); if (e.target.value !== '#new') setNewName(''); }}>
+          {houses.map((h) => <option key={h} value={h}>{h}</option>)}
+          <option value="#new">a different household…</option>
+        </select>
+        {into === '#new' && (
+          <input className="input" style={{ flex: '0 0 150px' }} placeholder="what you call it (the farm)"
+            value={newName} data-testid="household-new-name" onChange={(e) => setNewName(e.target.value)} />
+        )}
         {who.includes('@') ? (
           <BusyButton busy={busy} busyLabel="Sending…" className="btn-primary" style={{ flex: '0 0 auto' }}
             data-testid="household-invite" onClick={() => void invite()}>Invite by email</BusyButton>
