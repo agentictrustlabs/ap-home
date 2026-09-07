@@ -700,6 +700,12 @@ export interface HarnessDeps {
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean; roles?: readonly string[] }>>;
   /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
+  /** The COUNTERFACTUAL agent a Home will deploy for an email (spec 321 W2 predict) — deterministic from the
+   *  custodian derivation; asked of the Home under the steward's session, which is the gate on knowing it. */
+  predictAgentForEmail?: (input: { org: Address; email: string; session: string }) => Promise<Address | null>;
+  /** WHAT FOLLOWS an email invitation (spec 360): the invitation record in the org's vault and the link,
+   *  delivered by mail from the organization. Never the act itself — the grant is the act. */
+  deliverEmailInvitation?: (input: { org: Address; email: string; memberAccessDelegation: unknown; session: string }) => Promise<{ ok: boolean; delivery?: string; error?: string }>;
   /**
    * Spec 366 R1 — ASK THE SUBJECT'S OWN AGENT. A step about another agent (an organization's roster,
    * asked at a person's agent) is sent to that agent's harness as the same step, with the asker's own
@@ -919,7 +925,7 @@ export function inviteGrantForRequirement(
  * surface to store in the org's vault. It does NOT make anyone a member: the invitee redeems it on join,
  * which is the whole reason the org-side capability is the INVITATION and not the membership.
  */
-export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined, deps?: Pick<HarnessDeps, 'readContract'>): ToolInvoker {
+export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined, deps?: Pick<HarnessDeps, 'readContract' | 'deliverEmailInvitation'>, session?: string): ToolInvoker {
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const wire = presented.wire as Delegation;
@@ -960,7 +966,13 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
         // `invited` + `memberAccessDelegation`, and a short-circuit that returned a different shape was
         // an invitation the flyout silently never stored (found live: two invites issued, zero recorded).
         const approvedWire: DelegationWireV1 = { ...grant, salt: grant.salt.toString(), signature: '0x03' as Hex };
-        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true };
+        // WHAT FOLLOWS, when the invitee was named by email: the org's invitation record and the link, by
+        // mail from the organization (spec 360 — an effect never fails the act; it is reported).
+        const inviteeEmail = typeof args.inviteeEmail === 'string' ? args.inviteeEmail : undefined;
+        const delivered = inviteeEmail && deps?.deliverEmailInvitation && session
+          ? await deps.deliverEmailInvitation({ org, email: inviteeEmail, memberAccessDelegation: approvedWire, session }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+          : undefined;
+        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
       }
     }
 
@@ -1400,7 +1412,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       )(toolId, args, ctx);
     }
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
-    if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps)(toolId, args, ctx);
+    if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps, session)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
       return childAgentCreateInvoker(deps.teamGenesis, env, presented!, person)(toolId, args, ctx);
@@ -1941,6 +1953,8 @@ export async function resolveStepArgs(
      *  from the party role's declared classes — never from "the first one available". */
     addressee?: string;
     realmKind?: string;
+    /** For a party a role `alsoAccepts` by email: the session that lets the Home predict their agent. */
+    session?: string;
   },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
@@ -2036,8 +2050,20 @@ export async function resolveStepArgs(
   if (where?.authorityArg && where.subject) {
     const arg = where.authorityArg;
     const current = String(out[arg] ?? '').trim();
-    // Unspoken ⇒ the person asking. Acting as yourself is the only reading of "send alice a message".
-    if (!current) out[arg] = where.subject.toLowerCase();
+    // Unspoken ⇒ the agent ADDRESSED when the realm's class admits it (a person standing in an organization
+    // means that organization — "invite carol" at missio-nexus.org acts as the org), else the person asking.
+    // Acting as yourself is the only reading of "send alice a message"; acting as the room you stand in is
+    // the only reading of "invite carol" said inside it. Declared classes decide, never proximity.
+    if (!current) {
+      const realmSuffix = where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined;
+      const typesHere = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
+      if (where.addressee && realmSuffix && typesHere.includes(realmSuffix) && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
+        out[arg] = where.addressee.toLowerCase();
+        lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.addressee.toLowerCase(), hint: 'the organization you are standing in', via: 'context' });
+      } else {
+        out[arg] = where.subject.toLowerCase();
+      }
+    }
     const types = partyTypesFor(where.capabilityId ?? where.toolId, arg);
     const isAsker = String(out[arg] ?? '').toLowerCase() === where.subject.toLowerCase();
     // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
@@ -2132,6 +2158,32 @@ export async function resolveStepArgs(
           }],
         });
       }
+    }
+  }
+  // ── A PARTY NAMED BY EMAIL (spec 315/321, one flow) ─────────────────────────────────────────────
+  //
+  // "Invite carol@example.org to missio nexus": the role admits an email (`alsoAccepts`), the person has no
+  // agent yet, and the agent their Home WILL deploy for that email is deterministic — so it is bound in
+  // the email's place and the email is kept beside it, for the invitation to reach them. Nothing is
+  // guessed: a role that does not admit email leaves the value for the ordinary resolver to ask about.
+  if (where && lookups.predictAgentForEmail && where.session) {
+    for (const key of PARTY_ARGS) {
+      const raw = String(out[key] ?? '').trim().toLowerCase();
+      if (!raw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) continue;
+      const role = partyRole(where.capabilityId ?? where.toolId, key);
+      if (!role?.alsoAccepts?.includes('email')) continue;
+      const orgArg = String(out.org ?? where.addressee ?? '').toLowerCase();
+      const predicted = /^0x[0-9a-f]{40}$/.test(orgArg) ? await lookups.predictAgentForEmail({ org: orgArg as Address, email: raw, session: where.session }).catch(() => null) : null;
+      if (!predicted) {
+        throw new InputRequired({
+          kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+          prompt: `I could not work out the agent ${raw} will get. Which organization is this for?`,
+          fields: [{ name: 'org', label: 'the organization', type: 'text', required: true, hint: 'the organization inviting them (its name or address)' }],
+        });
+      }
+      out[key] = predicted.toLowerCase();
+      out[`${key}Email`] = raw;
+      lookups.onResolved?.({ arg: key, raw, agent: predicted.toLowerCase(), label: raw, hint: 'the agent their Home will hold for this email — they join by the link' });
     }
   }
   // ── THE REALM YOU STAND IN SUPPLIES A CONTEXT PARTY (spec 367 §7) ──────────────────────────────
@@ -2929,6 +2981,8 @@ export interface CommandFieldV1 {
   required: boolean;
   /** For an agent field: the typed-name suffixes it may resolve to (from the party role), if declared. */
   types?: string[];
+  /** For an agent field: the role also accepts an email address (someone with no agent yet). */
+  acceptsEmail?: boolean;
   hint?: string;
 }
 
@@ -2948,10 +3002,12 @@ export function commandFieldsFor(playbook?: { capabilityIds: Set<string>; tools?
         : cls === 'amount' || name === 'usdc' || name === 'amount' ? 'amount'
         : cls === 'flag' ? 'flag' : cls === 'asset' || name === 'asset' ? 'asset' : 'text';
       const types = kind === 'agent' ? partyTypesFor(id, name) : undefined;
+      const acceptsEmail = kind === 'agent' && !!partyRole(id, name)?.alsoAccepts?.includes('email');
       return {
         name, kind, required: required.has(name),
         label: kind === 'agent' ? partyWord(name) : name === 'usdc' ? 'amount (USDC)' : name,
         ...(types?.length ? { types: [...types] } : {}),
+        ...(acceptsEmail ? { acceptsEmail: true } : {}),
         ...(prop?.description ? { hint: prop.description } : {}),
       };
     });

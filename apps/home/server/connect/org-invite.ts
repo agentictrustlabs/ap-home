@@ -238,7 +238,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   join.searchParams.set('o', org);
   if (namedApp) join.searchParams.set('app', namedApp);
   const joinUrl = join.toString();
-  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName));
+  // Sent AS THE ORGANIZATION through the Worker rail (Cloudflare Email Service) under the steward's own
+  // session — the Worker re-derives stewardship for itself and threads a copy into the org's inbox.
+  const session = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName), session ? { session, as: org } : undefined);
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
   return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}) });
 };

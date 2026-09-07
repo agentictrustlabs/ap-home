@@ -19,8 +19,11 @@ import {
 /** The bindings and secrets the two providers need. All optional: email is a capability a deployment
  *  HAS or does not, and the surfaces ask before they offer it. */
 export interface EmailEnv {
-  /** Cloudflare Email binding (`[[send_email]]`). Present only where the account has it configured. */
-  SEND_EMAIL?: { send(msg: unknown): Promise<void> };
+  /** Cloudflare Email Service binding (`[[send_email]]`, `name = "SEND_EMAIL"`). Sends to ANY address from a
+   *  domain onboarded to Email Sending (`wrangler email sending enable <zone>`); `EMAIL_FROM` must be on it. */
+  SEND_EMAIL?: { send(msg: { to: string; from: { email: string; name?: string }; subject: string; text: string; html?: string; headers?: Record<string, string> }): Promise<{ messageId?: string } | void> };
+  /** The display name mail goes out under. */
+  EMAIL_FROM_NAME?: string;
   SENDGRID_API_KEY?: string;
   /** The verified sender address mail goes out as. Required by both rails. */
   EMAIL_FROM?: string;
@@ -28,21 +31,12 @@ export interface EmailEnv {
   EMAIL_ZONES?: string;
 }
 
-/** RFC 5322 the smallest way that is honest: a single-part text message with the headers we set. */
-function rawMessage(from: string, msg: OutboundEmailV1): string {
-  const lines = [
-    `From: ${from}`,
-    `To: ${msg.to}`,
-    `Subject: ${msg.subject}`,
-    ...(msg.inReplyTo ? [`In-Reply-To: ${msg.inReplyTo}`, `References: ${msg.inReplyTo}`] : []),
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="utf-8"',
-    '',
-    msg.text,
-  ];
-  return lines.join('\r\n');
-}
-
+/**
+ * Cloudflare Email Service (2025+): `env.SEND_EMAIL.send({ to, from, subject, text, html })` from a domain
+ * onboarded to Email Sending — any destination, no verified-address list. The earlier Email Workers
+ * `EmailMessage` rail (verified destinations only) is gone: it could not invite a stranger, which is the
+ * one thing an invitation must do.
+ */
 export function cloudflareSender(env: EmailEnv): EmailSenderPort {
   return {
     name: 'cloudflare',
@@ -50,16 +44,18 @@ export function cloudflareSender(env: EmailEnv): EmailSenderPort {
     async send(msg) {
       const from = env.EMAIL_FROM!.trim();
       try {
-        // The binding takes an EmailMessage; constructing it needs the runtime's own class, which only
-        // exists in the Worker. Imported dynamically so this module still loads (and tests) elsewhere.
-        const mod = await import('cloudflare:email') as { EmailMessage: new (from: string, to: string, raw: string) => unknown };
-        await env.SEND_EMAIL!.send(new mod.EmailMessage(from, msg.to, rawMessage(from, msg)));
-        return { ok: true, via: 'cloudflare' };
+        const res = await env.SEND_EMAIL!.send({
+          to: msg.to,
+          from: { email: from, ...(env.EMAIL_FROM_NAME?.trim() ? { name: env.EMAIL_FROM_NAME.trim() } : {}) },
+          subject: msg.subject, text: msg.text,
+          ...(msg.html ? { html: msg.html } : {}),
+          ...(msg.inReplyTo ? { headers: { 'In-Reply-To': msg.inReplyTo, References: msg.inReplyTo } } : {}),
+        });
+        const messageId = res && typeof res === 'object' && typeof res.messageId === 'string' ? res.messageId : undefined;
+        return { ok: true, via: 'cloudflare', ...(messageId ? { messageId } : {}) };
       } catch (e) {
-        // The usual refusal here is a destination the account has not verified — say that, because it is
-        // fixable and "email failed" is not.
         const why = e instanceof Error ? e.message : String(e);
-        return { ok: false, via: 'cloudflare', error: /verif/i.test(why) ? `${msg.to} is not a verified destination for this account` : why };
+        return { ok: false, via: 'cloudflare', error: /onboard|not enabled|domain/i.test(why) ? `${from}'s domain is not onboarded to Email Sending (wrangler email sending enable): ${why}` : why };
       }
     },
   };

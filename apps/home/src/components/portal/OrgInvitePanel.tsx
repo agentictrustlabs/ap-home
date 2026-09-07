@@ -152,21 +152,17 @@ export function OrgInvitePanel({ org }: { org: string }) {
           });
         }
       }
-      const res = await fetch('/connect/org-invite/email', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({
-          org: communityId,
-          email: addr,
-          ...(memberAccessDelegation ? { memberAccessDelegation } : {}),
-          ...(dest.returnUrl ? { returnUrl: dest.returnUrl } : {}),
-          ...(dest.app ? { app: dest.app } : {}),
-        }),
-      });
-      const b = (await res.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string };
-      if (!res.ok || !b.ok) throw new Error(b.error ?? `invite failed (${res.status})`);
-      setNote((b.delivery === 'logged'
+      // ONE FLOW (spec 367 §7): the email invite is the SAME capability the sentence and the agent button use —
+      // the harness predicts the agent this email's Home will hold, signs the organization's grant to it in
+      // the one-prompt ceremony, and delivers the link by mail from the organization as the act's effect.
+      const via = resolveVia(profile?.credential, session.via);
+      const sign = await signHashFor(via, communityId as Address, { token: session.token });
+      const out = await inviteThroughHarness({ org: communityId as Address, invitee: addr, session: { token: session.token }, signHash: sign });
+      if (!out.ok) throw new Error(out.error);
+      const d = out.emailDelivery;
+      setNote((!d ? `Invited — the agent did not report the email delivery.` : !d.ok ? `The invitation was recorded, but the email did not go: ${d.error ?? 'delivery failed'}.` : d.delivery === 'logged'
         ? `Email sending isn't configured yet — the invite link was logged server-side (dev).`
-        : `Invitation emailed to ${email.trim()}.`) + grantNote);
+        : `Invitation emailed to ${email.trim()} from this organization.`) + grantNote);
       setEmail('');
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }, [authed, communityId, dest.app, dest.returnUrl, email, profile?.credential, session?.via, session?.token]);

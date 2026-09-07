@@ -3,6 +3,9 @@
 // EMAIL_FROM (a verified sender) to send for real. Uses the SendGrid v3 REST API directly (no npm dep →
 // provider stays swappable, build stays lean).
 export interface EmailEnv {
+  /** The a2a Worker that holds the Cloudflare Email Service binding (spec 365). When set and a steward
+   *  session is given, mail goes out through its `/email/send`, AS the organization, with a thread copy. */
+  A2A_CUSTODY_URL?: string;
   SENDGRID_API_KEY?: string;
   /** Verified sender, e.g. `no-reply@impact-agent.me` — REQUIRED by SendGrid (must be a verified sender/domain). */
   EMAIL_FROM?: string;
@@ -17,12 +20,32 @@ export interface OutboundEmail {
 
 /** True once a provider is configured — the UI shows "email login/invite available" only when this is set. */
 export function emailSendingEnabled(env: EmailEnv): boolean {
-  return !!(env.SENDGRID_API_KEY && env.SENDGRID_API_KEY.trim() && env.EMAIL_FROM && env.EMAIL_FROM.trim());
+  return !!(env.SENDGRID_API_KEY && env.SENDGRID_API_KEY.trim() && env.EMAIL_FROM && env.EMAIL_FROM.trim()) || !!env.A2A_CUSTODY_URL?.trim();
 }
 
-export async function sendEmail(env: EmailEnv, msg: OutboundEmail): Promise<{ ok: boolean; error?: string }> {
+/** Who the mail goes out as, when a steward sends it for an organization through the Worker rail. */
+export interface SendAs { session: string; as: string }
+
+export async function sendEmail(env: EmailEnv, msg: OutboundEmail, sendAs?: SendAs): Promise<{ ok: boolean; error?: string }> {
   const key = env.SENDGRID_API_KEY?.trim();
   const from = env.EMAIL_FROM?.trim();
+  // THE WORKER RAIL (Cloudflare Email Service). This Home runs where no email binding exists; the a2a Worker
+  // holds one, sends from a zone onboarded to Email Sending, and threads a copy into the organization's own
+  // inbox. Chosen by configuration (`A2A_CUSTODY_URL`), never by a failed attempt (ADR-0013).
+  const a2a = env.A2A_CUSTODY_URL?.trim();
+  if (a2a && sendAs && !(key && from)) {
+    try {
+      const r = await fetch(`${a2a.replace(/\/$/, '')}/email/send`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session: sendAs.session, as: sendAs.as, to: msg.to, subject: msg.subject, text: msg.text ?? '', html: msg.html }),
+      });
+      const body = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; via?: string };
+      if (!r.ok || body.ok === false) return { ok: false, error: body.error ?? `worker email ${r.status}` };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'email send failed' };
+    }
+  }
   if (!key || !from) {
     // No provider → don't fail; log so a dev can grab the OTP/link locally (deploy-safe).
     console.log(`[email-sender] (SENDGRID_API_KEY/EMAIL_FROM unset) would send to ${msg.to} — "${msg.subject}"`);

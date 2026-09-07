@@ -166,7 +166,7 @@ export const HOME_CEREMONIES = ['data', 'confirmation', 'signature'] as const;
 
 /** One agent's published Ask vocabulary. Disclosure only — every id still needs a mandate. */
 /** Spec 367 §7 — one field of the command behind a capability, typed by the ontology class its contract gave it. */
-export interface CommandField { name: string; label: string; kind: 'agent' | 'amount' | 'text' | 'flag' | 'asset'; required: boolean; types?: string[]; hint?: string }
+export interface CommandField { name: string; label: string; kind: 'agent' | 'amount' | 'text' | 'flag' | 'asset'; required: boolean; types?: string[]; acceptsEmail?: boolean; hint?: string }
 export interface AskVocabularyEntry { id: string; description?: string; riskTier: string; ceremonies: string[]; label?: string; fields?: CommandField[] }
 
 /**

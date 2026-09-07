@@ -396,7 +396,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
 
       {showDiag && <DiagnosticsPane entries={diag} onClose={() => setShowDiag(false)} />}
 
-      {command && <CommandForm command={command} onSubmit={(args) => void doCommand(command, args)} onCancel={() => setCommand(null)} />}
+      {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} onSubmit={(args) => void doCommand(command, args)} onCancel={() => setCommand(null)} />}
       {commands.length > 0 && !command && !pending && (
         <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
           <span>Do:</span>
@@ -424,9 +424,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
  * sentence path shows); an amount is a number in whole units as the person says it; a flag is a checkbox.
  * The values are the person's WORDS: nothing here resolves, ranks, or fills in what was not given.
  */
-function CommandForm({ command, onSubmit, onCancel }: { command: AskVocabularyEntry; onSubmit: (args: Record<string, unknown>) => void; onCancel: () => void }) {
-  const [values, setValues] = useState<Record<string, string | boolean>>({});
+function CommandForm({ command, realm, addressee, addresseeLabel, onSubmit, onCancel }: { command: AskVocabularyEntry; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; addresseeLabel?: string; onSubmit: (args: Record<string, unknown>) => void; onCancel: () => void }) {
   const fields = command.fields ?? [];
+  // THE ROOM YOU STAND IN FILLS ITS OWN FIELD. Opened inside an organization, a command whose party may be
+  // an organization is prefilled with THIS one — the same rule the agent applies to a sentence (a
+  // context-side or acting party the realm's class admits). A person realm prefills nothing: "you" is never
+  // the default counterparty of your own command. Editable: the prefill is a value, not a lock.
+  const realmSuffix = realm?.kind === 'org' ? 'org' : realm?.kind === 'service' ? 'svc' : null;
+  const prefilled: Record<string, string | boolean> = {};
+  if (realmSuffix && addressee) for (const f of fields) if (f.kind === 'agent' && f.types?.includes(realmSuffix)) prefilled[f.name] = addressee;
+  const [values, setValues] = useState<Record<string, string | boolean>>(prefilled);
   const missing = fields.filter((f) => f.required && !String(values[f.name] ?? '').trim());
   const submit = () => {
     const args: Record<string, unknown> = {};
@@ -448,14 +455,17 @@ function CommandForm({ command, onSubmit, onCancel }: { command: AskVocabularyEn
           {f.hint && <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{f.hint}</div>}
           {f.kind === 'flag' ? (
             <input id={`ask-c-${f.name}`} type="checkbox" checked={values[f.name] === true} onChange={(e) => setValues({ ...values, [f.name]: e.target.checked })} />
-          ) : (
+          ) : (<>
             <input
               id={`ask-c-${f.name}`} className="input" data-testid={`ask-command-${f.name}`}
               type={f.kind === 'amount' ? 'number' : 'text'} inputMode={f.kind === 'amount' ? 'decimal' : undefined} step={f.kind === 'amount' ? 'any' : undefined}
-              placeholder={f.kind === 'agent' ? 'a name (alice.me), a person you know, or an address' : f.kind === 'amount' ? 'e.g. 10' : ''}
+              placeholder={f.kind === 'agent' ? (f.acceptsEmail ? 'a name (alice.me), a person you know, an address — or an email for someone without an agent yet' : 'a name (alice.me), a person you know, or an address') : f.kind === 'amount' ? 'e.g. 10' : ''}
               value={String(values[f.name] ?? '')} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
             />
-          )}
+            {f.kind === 'agent' && addressee && addresseeLabel && String(values[f.name] ?? '').toLowerCase() === addressee.toLowerCase() && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{addresseeLabel} — the one you are in; change it to name another</div>
+            )}
+          </>)}
         </div>
       ))}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>

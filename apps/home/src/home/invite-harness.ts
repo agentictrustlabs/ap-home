@@ -34,10 +34,10 @@ async function askTurn(body: Record<string, unknown>): Promise<{ reply?: AskRepl
  */
 export async function inviteThroughHarness(input: {
   org: Address;
-  invitee: Address;
+  invitee: Address | string;
   session: { token: string };
   signHash: SignHash;
-}): Promise<{ ok: true; recorded: boolean } | { ok: false; error: string }> {
+}): Promise<{ ok: true; recorded: boolean; emailDelivery?: { ok: boolean; delivery?: string; error?: string } } | { ok: false; error: string }> {
   const { org, invitee, session, signHash } = input;
   const plan = { steps: [{ toolId: 'organization.membership.invite', args: { org: org.toLowerCase(), invitee: invitee.toLowerCase() } }] };
   const message = `invite ${invitee.toLowerCase()} to ${org.toLowerCase()}`;
@@ -66,8 +66,11 @@ export async function inviteThroughHarness(input: {
   }
 
   // The surface's half: the org's vault holds the invitation record.
+  // An EMAIL invitee: the agent recorded the org-vault invitation and mailed the link itself (spec 360
+  // effect); the reply says how that went, and there is no in-app invitation record to store.
+  const emailDelivery = rep2.kind === 'done' ? (rep2.result as { emailDelivery?: { ok: boolean; delivery?: string; error?: string } } | null)?.emailDelivery : undefined;
   const inv = rep2.kind === 'done' ? invitationOf(rep2.result) : null;
-  if (!inv) return { ok: true, recorded: false };
+  if (!inv) return { ok: true, recorded: false, ...(emailDelivery ? { emailDelivery } : {}) };
   const stored = await recordInvitation(inv, session.token);
-  return { ok: true, recorded: stored.ok };
+  return { ok: true, recorded: stored.ok, ...(emailDelivery ? { emailDelivery } : {}) };
 }

@@ -2986,6 +2986,27 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       return { txHash: receipt.transactionHash as Hex };
     },
   };
+  // ── ONE INVITE FLOW (spec 315/321 email invite through the harness). The Home holds the pieces an email
+  // invitation needs — the custodian derivation that PREDICTS the invitee's future agent, and the org-vault
+  // invitation record + join link it mails — and both are steward-gated by the same session the harness
+  // runs under. The harness binds the predicted agent, signs the org's grant to it as for any invitee, and
+  // has the Home record + deliver the invitation as the act's declared effect.
+  const homeOrigin = (env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).find((o) => /^https:\/\/(www\.)?[^/]+$/.test(o) && !/localhost|127\.0\.0\.1/.test(o)) ?? null;
+  const homeCall = async (path: string, session: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> => {
+    if (!homeOrigin) return { status: 503, body: { error: 'no Home origin configured' } };
+    const r = await fetch(`${homeOrigin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}`, origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify(body) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
+  };
+  deps.predictAgentForEmail = async ({ org, email, session }) => {
+    const r = await homeCall('/connect/org-invite/predict', session, { org, email });
+    const agent = String(r.body.agent ?? '').toLowerCase();
+    return /^0x[0-9a-f]{40}$/.test(agent) ? (agent as Address) : null;
+  };
+  deps.deliverEmailInvitation = async ({ org, email, memberAccessDelegation, session }) => {
+    const r = await homeCall('/connect/org-invite/email', session, { org, email, memberAccessDelegation });
+    if (r.status >= 200 && r.status < 300 && r.body.ok !== false) return { ok: true, ...(r.body.delivery ? { delivery: String(r.body.delivery) } : {}) };
+    return { ok: false, error: String(r.body.error ?? `the Home refused the invitation (${r.status})`) };
+  };
   // ── Spec 366 R1 — ASK THE SUBJECT'S OWN AGENT. ─────────────────────────────────────────────────
   //
   // The routed step is the SAME step, posted to the subject agent's own `/harness/ask` as a supplied plan
@@ -7114,7 +7135,7 @@ app.get('/discovery/agent', async (c) => {
 // It sends AS THE DEPLOYMENT'S ADDRESS, not as the person's own mailbox — we hold no credential for
 // their mail, and pretending otherwise would forge a From: header. The body says who it is from.
 app.post('/email/send', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; to?: string; subject?: string; text?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; to?: string; subject?: string; text?: string; html?: string; as?: string } | null;
   if (!body?.session || !body.to || !body.text?.trim()) return c.json({ ok: false, error: 'session, to and text are required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
@@ -7124,7 +7145,27 @@ app.post('/email/send', async (c) => {
   // A DEPLOYMENT WITHOUT EMAIL SAYS SO, before a person composes into a box that cannot send.
   if (!sender) return c.json({ ok: false, error: 'this deployment has no email provider configured' }, 503);
 
-  const from = String(who.sa).toLowerCase();
+  // `as` — write AS AN ORGANIZATION the session's person stewards (an invitation goes out from the org, and
+  // its thread copy belongs in the org's inbox, not the steward's). Standing is DERIVED here from the
+  // person's own links and the chain (spec 353 S5) — never asserted by the caller.
+  let from = String(who.sa).toLowerCase();
+  if (body.as) {
+    const org = String(body.as).toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(org)) return c.json({ ok: false, error: '`as` must be an agent address' }, 400);
+    const askDeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const standing = await deriveStanding({
+      ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
+      verifyStewardship: chainStewardshipCheck({
+        readContract: ((args: never) => askDeps.readContract(args)) as never,
+        chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
+        allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+        isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+        ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+      }),
+    }, { principal: who.sa as Address, subject: org as Address }).catch(() => null);
+    if (standing?.relation !== 'steward' && standing?.relation !== 'self') return c.json({ ok: false, error: `you do not steward ${org} — mail goes out only as an agent you steward` }, 403);
+    from = org;
+  }
   const fromName = c.env.AGENT_NAME_REGISTRY && c.env.AGENT_NAME_UNIVERSAL_RESOLVER
     ? await new AgentNamingClient({
         rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID),
@@ -7133,7 +7174,7 @@ app.post('/email/send', async (c) => {
     : null;
   const subject = (body.subject ?? '').trim() || `A message from ${fromName ?? 'an agent'}`;
   const text = `${body.text.trim()}\n\n— ${fromName ?? from}, via ${new URL(c.env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://faithnet.me').host}`;
-  const sent = await sender.send({ to, subject, text });
+  const sent = await sender.send({ to, subject, text, ...(body.html?.trim() ? { html: body.html } : {}) });
   if (!sent.ok) return c.json({ ok: false, error: sent.error ?? 'the email did not go', via: sent.via }, 502);
 
   // THEIR OWN COPY, in the thread with that address. Best-effort: the mail HAS gone, and failing the

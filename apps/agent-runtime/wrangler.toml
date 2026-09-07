@@ -366,6 +366,9 @@ zone_name = "faithnet.ai"
 [env.faithnet.vars]
 # Spec 365 — the zones whose inbound mail this Worker routes (`<handle>@<zone>` → the naming service).
 EMAIL_ZONES = "faithnet.me"
+# Outbound mail goes out as this address (its zone is onboarded to Cloudflare Email Sending).
+EMAIL_FROM = "invites@faithnet.ai"
+EMAIL_FROM_NAME = "faithnet"
 # spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
 AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
@@ -653,12 +656,10 @@ class_name = "HarnessApprovalWorkflow"
 # zone → "Send to a Worker" → this script. The `email()` handler is exported unconditionally and is only
 # ever called for zones actually routed at it, so nothing here needs a flag.
 #
-# OUTBOUND has two rails and the deployment picks by what it configures:
-#   · SendGrid — `SENDGRID_API_KEY` + `EMAIL_FROM` secrets. Reaches ANY address, which is what an
-#     invitation needs, so it is preferred.
-#   · Cloudflare — the binding below. It can only send to addresses VERIFIED in the account, which makes
-#     it right for estate mail and wrong for inviting a stranger. Uncomment once a destination is
-#     verified; an unbound `SEND_EMAIL` simply means that rail reports itself unavailable.
-#
-# [[env.faithnet.send_email]]
-# name = "SEND_EMAIL"
+# OUTBOUND has two rails and the deployment picks by what it configures (one at a time — ADR-0013):
+#   · Cloudflare Email Service — the binding below + `EMAIL_FROM` on a zone onboarded to Email Sending
+#     (`wrangler email sending enable faithnet.ai`; `faithnet.ai` is enabled). Sends to ANY address, so it
+#     serves invitations. This is the faithnet rail.
+#   · SendGrid — `SENDGRID_API_KEY` + `EMAIL_FROM` secrets, for a deployment without the binding.
+[[env.faithnet.send_email]]
+name = "SEND_EMAIL"
