@@ -25,3 +25,25 @@ describe('routedSubjectFor', () => {
     expect(routedSubjectFor({ id: 'x' } as never, { org: ORG }, ALICE)).toBeNull();
   });
 });
+
+import { readSubjectReply } from '../../src/harness-run.js';
+
+describe('readSubjectReply — the subject agent’s /harness/ask envelope', () => {
+  const LIVE = { ok: true, addressee: ORG, runRef: 'run-1', reply: { kind: 'answer', runRef: 'run-1', text: 'Missio Nexus has 4 members', results: [{ toolId: 'organization.membership.list', result: { count: 4, members: [] } }] } };
+  it('an answer is the routed tool’s result — read from the NESTED reply, not the envelope', () => {
+    const r = readSubjectReply(LIVE, 'organization.membership.list', 'missio-nexus.org', 200);
+    expect(r.ok).toBe(true);
+    expect((r.result as { count: number }).count).toBe(4);
+    expect(r.runRef).toBe('run-1');
+  });
+  it('a prompt the subject raised is relayed in its words, never answered for it', () => {
+    const r = readSubjectReply({ ok: true, reply: { kind: 'prompt', prompt: { kind: 'data', prompt: 'Which team?', fields: [{ name: 'org' }] } } }, 'organization.membership.list', 'x.org', 200);
+    expect(r.ok).toBe(false);
+    expect(r.refused).toContain('Which team?');
+    expect(r.refused).toContain('org');
+  });
+  it('an envelope-level refusal is a refusal', () => {
+    expect(readSubjectReply({ ok: false, error: 'this run belongs to someone else' }, 't', 'x.org', 403).refused).toContain('belongs to someone else');
+    expect(readSubjectReply(null, 't', 'x.org', 502).ok).toBe(false);
+  });
+});

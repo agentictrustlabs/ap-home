@@ -741,6 +741,34 @@ export function routedSubjectFor(tool: { subject?: string } | undefined, args: R
   return v as Address;
 }
 
+/** The body `/harness/ask` answers with. The reply is NESTED under `reply`; `ok`/`error` sit on the envelope. */
+export interface AskReplyEnvelopeV1 {
+  ok?: boolean; error?: string; runRef?: string;
+  reply?: { kind?: string; runRef?: string; text?: string; summary?: string; results?: Array<{ toolId: string; result: unknown }>; prompt?: { kind?: string; prompt?: string; fields?: Array<{ name?: string }> } };
+}
+
+/**
+ * Spec 366 — WHAT THE SUBJECT'S AGENT SAID, read from its `/harness/ask` envelope. Pure. An `answer` for
+ * the routed tool is the result; anything else is relayed in the subject's own words (a refusal, a
+ * prompt it raised, an authority it needs) — never retried, never guessed. Reading `kind` off the
+ * ENVELOPE instead of `reply` made every real answer read as "needs more" (caught live 2026-09-07).
+ */
+export function readSubjectReply(envelope: AskReplyEnvelopeV1 | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; runRef?: string } {
+  if (!envelope) return { ok: false, refused: `${who} answered with something that was not a reply (${status})` };
+  if (envelope.ok === false || envelope.error) return { ok: false, refused: `${who} refused: ${envelope.error ?? status}` };
+  const reply = envelope.reply;
+  if (!reply) return { ok: false, refused: `${who} answered with no reply (${status})` };
+  const runRef = reply.runRef ?? envelope.runRef;
+  if (reply.kind === 'answer') {
+    const hit = reply.results?.find((r) => r.toolId === toolId) ?? reply.results?.[0];
+    return { ok: true, result: hit ? hit.result : { text: reply.text }, ...(runRef ? { runRef } : {}) };
+  }
+  const said = reply.kind === 'prompt'
+    ? `it asked “${reply.prompt?.prompt ?? ''}” (${reply.prompt?.kind ?? 'prompt'}${reply.prompt?.fields?.length ? `: ${reply.prompt.fields.map((f) => f.name).join(', ')}` : ''})`
+    : (reply.summary ?? reply.text ?? reply.kind ?? '');
+  return { ok: false, refused: `${who} needs more before it can answer — ${said}`.trim(), ...(runRef ? { runRef } : {}) };
+}
+
 export function harnessEnforcers(env: HarnessEnv): EnforcerAddresses {
   const base = enforcersFromEnv(env as Record<string, string | undefined>);
   const db = (env.DIGEST_BINDING_ENFORCER ?? '').toLowerCase();

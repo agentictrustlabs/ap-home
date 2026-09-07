@@ -126,7 +126,7 @@ const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stat
 import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY } from './harness-run.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
-import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
+import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -2989,16 +2989,12 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     } catch (e) {
       return { ok: false, via, refused: `could not reach ${name ?? subject} at ${host}: ${e instanceof Error ? e.message : String(e)}` };
     }
-    const reply = (await res.json().catch(() => null)) as ({ ok?: boolean; error?: string; kind?: string; runRef?: string; text?: string; summary?: string; results?: Array<{ toolId: string; result: unknown }> } | null);
-    if (!reply) return { ok: false, via, refused: `${name ?? subject} answered with something that was not a reply (${res.status})` };
-    if (reply.ok === false || reply.error) return { ok: false, via, refused: `${name ?? subject} refused: ${reply.error ?? res.status}` };
-    const viaRun = { ...via, ...(reply.runRef ? { runRef: reply.runRef } : {}) };
-    if (reply.kind === 'answer') {
-      const hit = reply.results?.find((r) => r.toolId === toolId) ?? reply.results?.[0];
-      return { ok: true, via: viaRun, result: hit ? hit.result : { text: reply.text } };
-    }
-    // authority_required / prompt / done: for a READ none of these is an answer — relay what it said.
-    return { ok: false, via: viaRun, refused: `${name ?? subject} needs more before it can answer (${reply.kind}): ${reply.summary ?? reply.text ?? ''}`.trim() };
+    const envelope = (await res.json().catch(() => null)) as AskReplyEnvelopeV1 | null;
+    // What the subject's agent actually said, for the log a tail can read (`[subject-ask]`).
+    console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${res.status} ${JSON.stringify(envelope).slice(0, 600)}`);
+    const read = readSubjectReply(envelope, toolId, name ?? subject, res.status);
+    const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}) };
+    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer` };
   };
   return deps;
 }
