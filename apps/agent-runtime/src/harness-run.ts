@@ -1953,8 +1953,6 @@ export async function resolveStepArgs(
      *  from the party role's declared classes — never from "the first one available". */
     addressee?: string;
     realmKind?: string;
-    /** For a party a role `alsoAccepts` by email: the session that lets the Home predict their agent. */
-    session?: string;
   },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
@@ -2166,14 +2164,14 @@ export async function resolveStepArgs(
   // agent yet, and the agent their Home WILL deploy for that email is deterministic — so it is bound in
   // the email's place and the email is kept beside it, for the invitation to reach them. Nothing is
   // guessed: a role that does not admit email leaves the value for the ordinary resolver to ask about.
-  if (where && lookups.predictAgentForEmail && where.session) {
+  if (where && lookups.predictAgentForEmail && lookups.session) {
     for (const key of PARTY_ARGS) {
       const raw = String(out[key] ?? '').trim().toLowerCase();
       if (!raw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) continue;
       const role = partyRole(where.capabilityId ?? where.toolId, key);
       if (!role?.alsoAccepts?.includes('email')) continue;
       const orgArg = String(out.org ?? where.addressee ?? '').toLowerCase();
-      const predicted = /^0x[0-9a-f]{40}$/.test(orgArg) ? await lookups.predictAgentForEmail({ org: orgArg as Address, email: raw, session: where.session }).catch(() => null) : null;
+      const predicted = /^0x[0-9a-f]{40}$/.test(orgArg) ? await lookups.predictAgentForEmail({ org: orgArg as Address, email: raw, session: lookups.session }).catch(() => null) : null;
       if (!predicted) {
         throw new InputRequired({
           kind: 'data', stepRef: where.stepRef, toolId: where.toolId,

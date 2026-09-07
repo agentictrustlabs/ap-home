@@ -201,6 +201,16 @@ requirement** (a choice among eligible teams); the UI renders a selector, Ask as
 same operation. This is spec 361's parity made operational, and it is stronger than deriving a SKILL.md from a
 screen.
 
+**Shipped 2026-09-07, invite as the worked example.** The organization a person stands in fills an
+organization-class party on BOTH paths (the form prefills it visibly; the resolver binds it as `context`), and
+never a person realm's own agent as a counterparty. An invitee may be an **email**: the party role declares
+`alsoAccepts: ['email']`, the resolver binds the agent that email's Home will deploy (predicted at the Home
+under the steward's session) and keeps the email beside it, the org's grant is signed to that agent in the
+one-prompt ceremony as for any invitee, and the invitation record + link go out by mail from the organization
+as the act's declared effect (spec 360) over the Worker's Cloudflare Email Service rail (spec 365). The panel's
+email button, the "Do" form and the sentence are one capability. Inbound mail never triggers an act (365 rule
+1): the join link is the acceptance, and it ends in a signature at the invitee's Home.
+
 **Application context stays separate from model context.** The model proposes a named party or candidate; trusted
 code resolves and checks the binding; the operation receives the checked binding, never the model's replacement. A
 validated current selection may supply a missing organization; "the first organization available" is never an
