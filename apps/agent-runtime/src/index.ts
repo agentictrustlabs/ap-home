@@ -2815,13 +2815,22 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // In-Worker: the asker's own agent asks on their behalf, under the session they are already holding.
     verifyGrant: async (held: unknown, type: string, asker: string, session?: string) => {
       if (!session) return [];
-      return verifiedGrants(held, type, {
+      // WHY A HELD GRANT DID NOT WORK, kept rather than flattened to null. The gate knows (withdrawn,
+      // expired, issued to somebody else, a plane that cannot answer); the holder was told "nothing
+      // called bob is a treasury", which is true and useless. The reason travels with the refusal.
+      const refusals: string[] = [];
+      const usable = await verifiedGrants(held, type, {
         asker,
         resolve: async ({ owner, grantId }) => {
           const out = await resolveThroughGate(env, { session, owner, grantId });
-          return out.ok ? out.targetAgent : null;
+          if (out.ok) return out.targetAgent;
+          refusals.push(out.error);
+          return null;
         },
       });
+      // One entry per refusal, carrying no target — the resolver counts a candidate by its target, so
+      // these are never mistaken for a way in.
+      return [...usable, ...refusals.map((why) => ({ owner: '', refusedBecause: why }))];
     },
     // The far end of one of THEIR OWN sent requests: the payment it was waiting for settled, so the note
     // stops asking to be finished. Their own vault, their own record — nothing of the issuer's changes.

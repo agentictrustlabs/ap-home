@@ -66,8 +66,12 @@ const SCENARIOS: Scenario[] = [
   // private record, so a payment to her needs no question about who she is.
   { id: 'household.read', persona: 'alice', addressee: 'self', message: 'who is in my household',
     expect: { kind: 'answer', textLike: /private/i } },
+  // `prompt` is a PASS here too, and not a hedge: a marked account that cannot cover the act must not
+  // decide (spec 363 — using it silently would turn a preference into a wrong answer), so when alice's
+  // payer runs low the question honestly comes back. What this row asserts is that "my daughter" is
+  // understood — the payment capability is reached either way.
   { id: 'household.payment', persona: 'alice', addressee: 'self', message: 'send my daughter 1 usdc',
-    expect: { kind: 'authority_required', capability: 'treasury.payment.execute' } },
+    expect: { kind: 'authority_required|prompt', capability: 'treasury.payment.execute' } },
   // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
   { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
     plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },
