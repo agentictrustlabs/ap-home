@@ -59,8 +59,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   // the way tapping the switcher does. The flyout stays up; the addressee follows the room.
   const { agents: managed } = useManagedAgents(session?.token ?? null);
   const rooms = () => [
-    { label: personName ?? (agentName ? nameLabel(agentName) : 'me'), self: true, href: '/' },
-    ...managed.map((a) => ({ label: a.name ? nameLabel(a.name) : a.agent, self: false, href: agentClassOf(a.kind) === 'org' ? orgHref(a.agent, 'overview') : serviceHref(a.agent) })),
+    // The person answers to their display name AND their handle: "switch to alice" when the profile says
+    // "Alice Okoro" — and "back to me" by the self flag.
+    { label: personName ?? (agentName ? nameLabel(agentName) : 'me'), self: true, href: '/', aliases: [agentName ?? '', agentName ? nameLabel(agentName) : ''].filter(Boolean) },
+    ...managed.map((a) => ({ label: a.name ? nameLabel(a.name) : a.agent, self: false, href: agentClassOf(a.kind) === 'org' ? orgHref(a.agent, 'overview') : serviceHref(a.agent), aliases: a.name ? [a.name] : [] })),
   ];
   /** "Switch to X": a SURFACE act, never sent to an agent. Returns true when the words were that. */
   const navigate = (text: string, spoken: boolean): boolean => {

@@ -55,7 +55,7 @@ export function plainSpeech(s: string): string {
 // agent, so nothing here is authority — it is which room the person is standing in.
 
 /** Words that name a KIND of agent, not one agent — the typed suffixes and their long forms. */
-const KIND_WORDS = new Set(['me', 'org', 'orgs', 'team', 'teams', 'workspace', 'workspaces', 'treasury', 'treasuries', 'svc', 'service', 'services', 'registry', 'church', 'churches', 'circle', 'circles', 'household', 'households', 'organization', 'organisation', 'organizations', 'organisations', 'agent', 'agents', 'account']);
+const KIND_WORDS = new Set(['me', 'person', 'people', 'org', 'orgs', 'team', 'teams', 'workspace', 'workspaces', 'treasury', 'treasuries', 'svc', 'service', 'services', 'registry', 'church', 'churches', 'circle', 'circles', 'household', 'households', 'organization', 'organisation', 'organizations', 'organisations', 'agent', 'agents', 'account']);
 const LEADING = new Set(['the', 'a', 'an', 'my', 'our']);
 
 /** The words that name a thing: lowercased, split, a leading article and the kind words dropped. */
@@ -70,9 +70,12 @@ export function nameWords(said: string): string[] {
 
 /** "switch to X" / "go to X" / "open X" / "change to X" / "back to me" → X; null when it is not that. */
 export function navigationTarget(said: string): string | null {
-  const m = /^\s*(?:please\s+)?(?:switch|change|go|move|jump|take me|back)\s+(?:over\s+)?(?:to|into)\s+(.+?)\s*[.!?]*$/i.exec(said) ?? /^\s*(?:please\s+)?open\s+(.+?)\s*[.!?]*$/i.exec(said);
+  // "please", "can you", "let's", "I want to", "now" — the ways a sentence starts before it says what.
+  const s = said.trim().replace(/^(?:(?:please|now|ok|okay|hey)[,\s]+)?(?:(?:can|could|would)\s+you\s+(?:please\s+)?|let'?s\s+|i(?:'d| would)?\s+(?:want|like)\s+to\s+|please\s+)?/i, '');
+  const m = /^(?:switch|change|go|move|jump|take\s+(?:me|us)|back|get\s+(?:me|us))\s+(?:me\s+|us\s+)?(?:over\s+|back\s+)?(?:to|into)\s+(.+?)\s*[.!?]*$/i.exec(s)
+    ?? /^(?:open|ask|address|talk\s+to|speak\s+to|switch)\s+(.+?)\s*[.!?]*$/i.exec(s);
   if (!m) return null;
-  const target = m[1]!.trim();
+  const target = m[1]!.trim().replace(/^(?:the\s+)?(?:workspace|realm|room)\s+(?:of|for)\s+/i, '');
   return target ? target : null;
 }
 
@@ -93,20 +96,23 @@ function similarity(a: string, b: string): number {
  * word of the option, or bigram similarity ≥ 0.8. Two options equally close = null (ask, never pick).
  * "me", "myself", "my home", "you" name the person's own realm — the option flagged `self`.
  */
-export function closestOption<T extends { label: string; self?: boolean }>(said: string, options: readonly T[]): T | null {
+export function closestOption<T extends { label: string; self?: boolean; aliases?: readonly string[] }>(said: string, options: readonly T[]): T | null {
   const t = said.trim().toLowerCase();
-  if (/^(me|myself|my ?home|my ?self|you|home|person|my own)$/.test(t.replace(/[.!?]/g, '').trim())) return options.find((o) => o.self) ?? null;
+  if (/^(me|myself|my ?home|my ?self|you|home|person|my own|my own realm|my person)$/.test(t.replace(/[.!?]/g, '').trim())) return options.find((o) => o.self) ?? null;
   const saidWords = nameWords(t);
   const joined = saidWords.join('');
   if (!joined) return null;
-  const graded = options.map((o) => {
-    const words = nameWords(o.label);
+  const grade = (name: string): number => {
+    const words = nameWords(name);
     const j = words.join('');
-    if (j === joined) return { o, g: 3 };
-    if (saidWords.every((w) => w.length >= 3 && words.some((x) => x.startsWith(w)))) return { o, g: 2 };
-    if (similarity(joined, j) >= 0.8) return { o, g: 1 };
-    return { o, g: 0 };
-  }).filter((x) => x.g > 0);
+    if (!j) return 0;
+    if (j === joined) return 3;
+    if (saidWords.every((w) => w.length >= 3 && words.some((x) => x.startsWith(w)))) return 2;
+    if (similarity(joined, j) >= 0.8) return 1;
+    return 0;
+  };
+  // An option answers to its label AND its aliases (a handle beside a display name: "alice" is Alice Okoro).
+  const graded = options.map((o) => ({ o, g: Math.max(grade(o.label), ...(o.aliases ?? []).map(grade)) })).filter((x) => x.g > 0);
   if (!graded.length) return null;
   const best = Math.max(...graded.map((x) => x.g));
   const top = graded.filter((x) => x.g === best);

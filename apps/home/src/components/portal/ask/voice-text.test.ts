@@ -57,7 +57,7 @@ describe('the voice and its pieces', () => {
 
 describe('moving between agents by name', () => {
   const options = [
-    { label: 'George Renner', self: true, href: '/' },
+    { label: 'George Renner', self: true, href: '/', aliases: ['alice.me', 'alice'] },
     { label: 'missio-nexus.org', href: '/org/1' },
     { label: 'Somali Corridor Team', href: '/org/2' },
     { label: 'somali-outreach-team.impact', href: '/org/3' },
@@ -67,7 +67,11 @@ describe('moving between agents by name', () => {
     expect(navigationTarget('Go to the Somali corridor team.')).toBe('the Somali corridor team');
     expect(navigationTarget('open my household')).toBe('my household');
     expect(navigationTarget('back to me')).toBe('me');
+    expect(navigationTarget('can you switch me to missio nexus')).toBe('missio nexus');
+    expect(navigationTarget("let's go to the workspace for missio nexus")).toBe('missio nexus');
+    expect(navigationTarget('talk to missio nexus organization')).toBe('missio nexus organization');
     expect(navigationTarget('send alice 10 dollars')).toBeNull();
+    expect(navigationTarget('open the door for bob')).toBe('the door for bob'); // a surface may still find nothing
   });
   it('finds the closest option, the kind word dropped; two equally close is a question', () => {
     expect(closestOption('missio nexus organization', options)?.href).toBe('/org/1');
@@ -76,6 +80,8 @@ describe('moving between agents by name', () => {
     expect(closestOption('somali', options)).toBeNull();
     expect(closestOption('me', options)?.href).toBe('/');
     expect(closestOption('my home', options)?.href).toBe('/');
+    expect(closestOption('alice', options)?.href).toBe('/');       // the handle is an alias of the display name
+    expect(closestOption('alice person', options)?.href).toBe('/');
     expect(closestOption('bob', options)).toBeNull();
   });
   it('takes grant, approve, yes and granted as consent', () => {
