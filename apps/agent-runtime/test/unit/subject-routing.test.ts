@@ -61,3 +61,29 @@ describe('commandFieldsFor — one command, two ways of filling it (spec 367 §7
     expect(invite.find((f) => f.name === 'invitee')!.kind).toBe('agent');
   });
 });
+
+import { resolveStepArgs } from '../../src/harness-run.js';
+describe('a context-side party is filled from the realm the person stands in (spec 367 §7)', () => {
+  const env = {} as never;
+  it('"create an organization" at a person realm takes the person as parent, sourced as context', async () => {
+    const seen: Array<{ arg: string; via?: string }> = [];
+    const out = await resolveStepArgs({ label: 'Riverside Fellowship' }, env, { onResolved: (r) => seen.push({ arg: r.arg, via: r.via }) }, {
+      stepRef: 's0', toolId: 'organization.create', capabilityId: 'organization.create', subject: ALICE, addressee: ALICE, realmKind: 'person', required: [],
+    });
+    expect(out.parent).toBe(ALICE);
+    expect(seen).toContainEqual({ arg: 'parent', via: 'context' });
+  });
+  it('a realm whose class the role does not admit fills nothing — the person is asked, never guessed', async () => {
+    // A team's parent is a workspace or an organization; a PERSON realm admits nothing for it.
+    const out = await resolveStepArgs({ label: 'Weld' }, env, {}, {
+      stepRef: 's0', toolId: 'organization.team.create', capabilityId: 'organization.team.create', subject: ALICE, addressee: ALICE, realmKind: 'person', required: [],
+    });
+    expect(out.parent).toBeUndefined();
+  });
+  it('a supplied parent is never overwritten by the realm', async () => {
+    const out = await resolveStepArgs({ label: 'x', parent: ORG }, env, {}, {
+      stepRef: 's0', toolId: 'organization.create', capabilityId: 'organization.create', subject: ALICE, addressee: ALICE, realmKind: 'person', required: [],
+    });
+    expect(out.parent).toBe(ORG);
+  });
+});

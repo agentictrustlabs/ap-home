@@ -31,8 +31,10 @@ const j = async (r: Response): Promise<Record<string, unknown>> => { const t = a
 // words) and by a sentence, must reach the same bound operation: same reply kind, same tool, same resolved
 // parties. Self-acting acts are still skipped live (they would execute).
 async function parityOf(H2: Record<string, string>, session: string, agent: string, t: DefinitionToolV1, u: { says: string; args?: Record<string, string> }) {
-  const asSentence = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, message: u.says }) }));
-  const asCommand = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, message: u.says, plan: { steps: [{ toolId: t.id, args: u.args ?? {} }] } }) }));
+  // Both carry the realm the Home would send: a context-side party (a parent) is filled from it on either path.
+  const surface = { ceremonies: ['data', 'confirmation', 'signature'], realm: { kind: 'person' } };
+  const asSentence = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, message: u.says, surface }) }));
+  const asCommand = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, message: u.says, surface, plan: { steps: [{ toolId: t.id, args: u.args ?? {} }] } }) }));
   const pick = (r: Record<string, unknown>) => {
     const reply = (r.reply ?? {}) as { kind?: string; plannerTrace?: { plan?: Array<{ toolId: string }>; bindings?: Array<{ arg: string; agent: string }> } };
     return { kind: reply.kind, tool: reply.plannerTrace?.plan?.[0]?.toolId, parties: (reply.plannerTrace?.bindings ?? []).map((b) => `${b.arg}=${b.agent}`).sort().join(',') };

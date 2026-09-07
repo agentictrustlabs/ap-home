@@ -62,7 +62,7 @@ import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
-import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, fanOutBindingFor } from '@agenticprimitives/ontology';
+import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, SUFFIX_FOR_CLASS, fanOutBindingFor } from '@agenticprimitives/ontology';
 import { decodePaymentTerms } from '@agenticprimitives/delegation';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
@@ -1719,7 +1719,7 @@ export interface PlannerTraceV1 {
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
   plan: Array<{ toolId: string; args: Record<string, unknown> }>;
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
-  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
+  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
   surface?: { realm?: string; capabilities?: number };
 }
@@ -1906,6 +1906,11 @@ export async function resolveStepArgs(
      * rather than spent.
      */
     computedUnits?: boolean;
+    /** Spec 367 §7 — the validated application context: the agent addressed and the realm kind the surface
+     *  declared. A CONTEXT-side party the sentence did not name is filled from these — deterministically,
+     *  from the party role's declared classes — never from "the first one available". */
+    addressee?: string;
+    realmKind?: string;
   },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
@@ -2097,6 +2102,26 @@ export async function resolveStepArgs(
           }],
         });
       }
+    }
+  }
+  // ── THE REALM YOU STAND IN SUPPLIES A CONTEXT PARTY (spec 367 §7) ──────────────────────────────
+  //
+  // "Create an organization called Riverside Fellowship" names no parent; a person standing in their own
+  // realm means THEIR realm, and a screen that already selected an organization means THAT one. The
+  // sentence path got this from the planner reading the prompt's context; a supplied command left it
+  // empty and was asked — the parity gate caught the difference. Now both are filled the same way: a
+  // `context`-side party role whose declared classes admit the realm's class takes the addressee, and
+  // the binding says it came from context. Nothing else is guessed: a realm whose class the role does not
+  // admit fills nothing, and the person is asked.
+  if (where?.addressee && where.realmKind) {
+    const realmSuffix = ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind];
+    for (const role of PARTY_ROLES) {
+      if (role.capability !== (where.capabilityId ?? where.toolId) || role.side !== 'context') continue;
+      if (String(out[role.arg] ?? '').trim()) continue;
+      const admits = role.requires.map((iri) => SUFFIX_FOR_CLASS[iri]).filter(Boolean);
+      if (!realmSuffix || !admits.includes(realmSuffix)) continue;
+      out[role.arg] = where.addressee.toLowerCase();
+      lookups.onResolved?.({ arg: role.arg, raw: partyWord(role.arg), agent: where.addressee.toLowerCase(), hint: 'the realm you are standing in', via: 'context' });
     }
   }
   for (const key of PARTY_ARGS) {
@@ -3272,7 +3297,7 @@ fanned out.`;
       const low = String(v ?? '').toLowerCase();
       const hit = [...resolved.values()].find((r) => r.agent.toLowerCase() === low);
       if (!hit) return 'said';
-      return hit.ruleId ? 'decision' : hit.hint?.startsWith('remembered') ? 'memory' : hit.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(hit.raw) ? 'said' : 'resolver';
+      return hit.via === 'context' ? 'context' : hit.ruleId ? 'decision' : hit.hint?.startsWith('remembered') ? 'memory' : hit.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(hit.raw) ? 'said' : 'resolver';
     };
     const parties = Object.entries(rs.args).filter(([, v]) => typeof v === 'string' && /^0x[0-9a-f]{40}$/i.test(v));
     const subjectArg = rs.tool.subject ? rs.args[rs.tool.subject] : undefined;
@@ -3336,6 +3361,9 @@ fanned out.`;
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),
+      // Spec 367 §7 — the validated application context a context-side party may be filled from.
+      ...(input.addressee ? { addressee: input.addressee } : {}),
+      ...(input.surface?.realm?.kind ? { realmKind: input.surface.realm.kind } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],
     }),
@@ -3439,7 +3467,7 @@ fanned out.`;
   trace.plan = result.plan.steps.map((s) => ({ toolId: s.toolId, args: s.args }));
   trace.bindings = [...resolved.values()].map((r) => ({
     arg: r.arg, raw: r.raw, agent: r.agent, ...(r.label ? { label: r.label } : {}),
-    source: r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
+    source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
     ...(r.because ? { because: r.because } : {}),
   }));
   return { result, plannerKind: kind, resolved, interactionFor, trace };
