@@ -97,6 +97,8 @@ export const CHILD_AGENT_KINDS = [
   { capability: 'organization.team.create', tld: 'team', noun: 'team', parentNoun: 'a workspace or organization' },
   { capability: 'organization.create', tld: 'org', noun: 'organization', parentNoun: 'a person (their own realm)' },
   { capability: 'treasury.create', tld: 'treasury', noun: 'treasury', parentNoun: 'a person or an organization' },
+  // Spec 368 — the family's own agent, chartered under a person; its members are the household.
+  { capability: 'household.create', tld: 'household', noun: 'household', parentNoun: 'a person (their own realm)' },
 ] as const;
 
 /** The KIND a created agent is recorded as in its owner's tree. Usually the noun; a treasury is named for
@@ -1636,6 +1638,7 @@ export function mandateCapabilityWords(presented: { caveats?: Array<{ enforcer?:
 const CAPABILITY_WORDS: Record<string, string> = {
   'organization.team.create': 'create teams',
   'organization.create': 'create organizations',
+  'household.create': 'create a household',
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
   'treasury.payment.execute': 'make payments',
@@ -2910,6 +2913,7 @@ export interface AskScopeV1 {
 export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'organization.team.create': ['signature'],        // the child's genesis
   'organization.create': ['signature'],
+  'household.create': ['signature'],
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
@@ -3207,7 +3211,7 @@ export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityI
   // A person's own realm charters organizations; an organization charters what lives inside it. Offering
   // `organization.create` while standing in a service is offering a plan whose parent makes no sense.
   const kind = surface?.realm?.kind;
-  if (kind === 'org') tools = tools.filter((t) => t.id !== 'organization.create');
+  if (kind === 'org') tools = tools.filter((t) => t.id !== 'organization.create' && t.id !== 'household.create');
   if (kind === 'service') tools = tools.filter((t) => !CHILD_AGENT_TLD[t.id] && t.id !== ORG_INVITE_CAPABILITY);
   // Do not OFFER what this surface cannot finish. A plan built from a capability whose ceremony nobody can
   // render is a plan that strands mid-run, after the person has already been asked for things.

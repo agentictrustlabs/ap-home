@@ -40,6 +40,7 @@ const KIND_LABEL: Record<AgentKind, string> = {
   team: 'Team',
   circle: 'Circle',
   church: 'Church',
+  household: 'Household',
   'org-treasury': 'Org treasury',
   service: 'Service agent',
   workspace: 'App workspace',

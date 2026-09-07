@@ -137,6 +137,7 @@ const DEFS = {
     "applicableAgentTypes": [
       "church",
       "circle",
+      "household",
       "org",
       "team"
     ],
@@ -230,6 +231,7 @@ export const KIND_TO_TYPE_SLUG: Record<string, string> = {
   team: 'team',
   circle: 'circle',
   church: 'church',
+  household: 'household',
   org: 'org',
 };
 

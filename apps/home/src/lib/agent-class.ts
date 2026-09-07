@@ -7,12 +7,12 @@ import type { AgentKind, ManagedAgent } from '../connect-client';
 /** Classify an app-level managed-agent kind into the closed Person/Org/Service set. */
 export function agentClassOf(kind: AgentKind): AgentType {
   // A team IS an organization (at:Team ⊑ at:Organization) — org-class with a distinct kind word.
-  return kind === 'org' || kind === 'team' || kind === 'circle' || kind === 'church' ? 'org' : 'service';
+  return kind === 'org' || kind === 'team' || kind === 'circle' || kind === 'church' || kind === 'household' ? 'org' : 'service';
 }
 
 /** The KIND WORD a row shows for an org-class agent — the subclass, not the class. */
 export function orgKindWordOf(kind: AgentKind): string {
-  return kind === 'team' || kind === 'circle' || kind === 'church' ? kind : 'organization';
+  return kind === 'team' || kind === 'circle' || kind === 'church' || kind === 'household' ? kind : 'organization';
 }
 
 /** The service ROLE an app-level kind carries (open set; label-only, never branched as a class). */
@@ -59,6 +59,7 @@ const FROM_PERSON: CreatableKind[] = [
   { kind: 'service', label: 'Service agent', blurb: 'A service that acts on its own — a bot, a bridge, an app\u2019s agent.', nameRequired: true },
   { kind: 'circle', label: 'Circle', blurb: 'A small group that meets.', nameRequired: true },
   { kind: 'church', label: 'Church', blurb: 'A congregation.', nameRequired: true },
+  { kind: 'household', label: 'Household', blurb: 'Your family\u2019s own agent — the people you live with as its members, with their roles and kinship.', nameRequired: true },
   { kind: 'person-treasury', label: 'Personal treasury', blurb: 'Holds and spends value on your behalf.', nameRequired: false },
 ];
 

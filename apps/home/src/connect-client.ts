@@ -466,7 +466,7 @@ async function declareTypeCalls(sa: Address, tld: string, serviceRole?: string):
  *  church are Organizations; team → Team; workspace → WorkspaceAgent; both treasuries → Treasury. */
 export function typedTldForKind(kind: AgentKind | 'person'): { tld: string; serviceRole?: string } | undefined {
   const map: Record<string, { tld: string; serviceRole?: string }> = {
-    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, team: { tld: 'team' },
+    person: { tld: 'me' }, org: { tld: 'org' }, circle: { tld: 'circle' }, church: { tld: 'church' }, household: { tld: 'household' }, team: { tld: 'team' },
     workspace: { tld: 'workspace', serviceRole: 'workspace' }, 'person-treasury': { tld: 'treasury' }, 'org-treasury': { tld: 'treasury' },
     service: { tld: 'svc', serviceRole: 'service' },
   };
@@ -1468,7 +1468,7 @@ export async function createChildAgentForSite(
 // `service` is the GENERIC service agent (`.svc`): a workspace, treasury and registry are service-class
 // too, but they carry a role the substrate knows about, and this one is the plain one (ADR-0046 — the
 // class is the trichotomy, the role is a label).
-export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church' | 'service';
+export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church' | 'household' | 'service';
 
 export interface ManagedAgent {
   agent: Address;
@@ -1594,7 +1594,7 @@ export async function createManagedAgent(
   let name = '';
   if (wantName) {
     const claim = await buildClaimCallData(input.label!, child, onStep, true, {
-      agentKind: input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' ? 'org' : 'service',
+      agentKind: input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' || input.kind === 'household' ? 'org' : 'service',
       displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
     }, typedTldForKind(input.kind) ?? {});
     if (!claim.ok) return { ok: false, error: claim.error };
@@ -1670,7 +1670,7 @@ export async function createManagedAgent(
   requestReindex([child]); // auto-index: the new managed agent (treasury/org) appears in discovery now
   // spec 321/246 — the creator is the org's FIRST MEMBER: mint their membership delegation now
   // ("deferred to first need" — this is it). Best-effort inside recordOrgMembership.
-  if (input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church') {
+  if (input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' || input.kind === 'household') {
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, signHash, sessionToken);
   }
