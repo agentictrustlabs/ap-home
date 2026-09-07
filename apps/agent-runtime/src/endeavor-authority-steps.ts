@@ -54,6 +54,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // their own tree — nobody assigns it, nothing waits on it, and putting it in a plan would invite an
   // endeavor to decide where someone else's money should land.
   'treasury.primary.declare',
+  // Revoking access is HYGIENE, not assignable work. A plan that could revoke someone's access as one
+  // of its steps is a plan that can quietly cut a person off from what they were doing.
+  'access.grant.revoke',
 ];
 
 /** A plan step as the work loop sees it. */

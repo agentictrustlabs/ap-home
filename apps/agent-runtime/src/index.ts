@@ -122,7 +122,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, waitingOn } from './harness-run.js';
+import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY } from './harness-run.js';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -1772,6 +1772,21 @@ app.post('/harness/ask', async (c) => {
         if (toolId === VAULT_QUESTION_TOOL.id) {
           return vaultQuestionInvoker({ ...(structuredCallFor(c.env) ? { call: structuredCallFor(c.env)! } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
         }
+        // WHO CAN READ MY RECORDS (spec 341 §4.3). The subject is the CONNECTED person, from the
+        // session — never an argument, so this cannot be pointed at anyone else's grants. It runs no
+        // gate because reading your own list of who you authorized changes nothing.
+        if (toolId === ACCESS_LIST_CAPABILITY) {
+          const grants = await askDeps.readGrants?.(String(who.sa).toLowerCase()) ?? [];
+          const live = grants.filter((g) => !g.revoked);
+          return {
+            count: live.length, total: grants.length,
+            interpretation: grants.length
+              ? 'the apps you have authorized to read your records, with the on-chain state of each grant'
+              : 'you have authorized no app to read your records',
+            grants: grants.map((g) => ({ app: g.clientId, since: g.storedAt, live: !g.revoked, grantHash: g.hash })),
+            note: 'answer by naming each app and whether its grant is still live. A revoked grant is one the app can no longer use ANYWHERE, not only here.',
+          };
+        }
         if (!ASK_DISCOVERY_TOOL_IDS.has(toolId)) throw new Error(`${toolId} is not available on the Ask surface`);
         return askDiscoveryInvoker({
           fetchDiscovery: discoveryFetchFor(c.env),
@@ -2594,6 +2609,18 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       const frac = Number(raw % 1_000_000n) / 1e6;
       const display = raw === 0n ? 'empty' : `${(Number(whole) + frac).toLocaleString('en-US', { maximumFractionDigits: 2 })} USDC`;
       return { amount: raw, display };
+    },
+    // spec 341 §4.3 — the person's own audit of who may read their records, and (only when something is
+    // about to revoke one) the grant itself. Their own DO, in-Worker, for the principal the session
+    // verified: the Ask cannot point either of these at somebody else's grants.
+    readGrants: async (person: string) => {
+      const out = await callInteractionsInternal(env, person, 'internal.readgrant.list', {}).catch(() => null);
+      return (out as { grants?: Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }> } | null)?.grants ?? [];
+    },
+    readGrantWire: async (person: string, clientId: string) => {
+      const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);
+      const r = out as { ok?: boolean; wire?: unknown; hash?: string } | null;
+      return r?.ok && r.wire && r.hash ? { wire: r.wire, hash: r.hash } : null;
     },
     // The inverse read: whose treasury is this? Used ONLY to deliver a payee-side receipt to the person
     // behind the paid treasury — the same edge, read from the other end. It grants nothing.

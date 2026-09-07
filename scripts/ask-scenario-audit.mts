@@ -47,6 +47,13 @@ const SCENARIOS: Scenario[] = [
   // REMOVE a question from every future payer, which `verify-ask-primary-payee.mts` proves end to end.
   { id: 'primary.declare', persona: 'alice', addressee: 'self', message: 'payments to me should go to alice3.treasury',
     expect: { kind: 'authority_required', capability: 'treasury.primary.declare' } },
+  // Access hygiene (spec 361 I4 · fourth family). The audit runs NO gate — reading your own list of who
+  // you authorized changes nothing — and the revoke is an on-chain kill, proved by
+  // `verify-ask-access-revoke.mts` rather than by this row, which proves the offer.
+  { id: 'access.audit', persona: 'alice', addressee: 'self', message: 'which apps can read my records',
+    expect: { kind: 'answer' } },
+  { id: 'access.revoke', persona: 'alice', addressee: 'self', message: 'stop demo-jp from reading my records',
+    expect: { kind: 'authority_required', capability: 'access.grant.revoke' } },
   // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
   { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
     plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },

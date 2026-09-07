@@ -14,6 +14,7 @@ import { AGENT_NAME_PARENT } from '../../lib/domain';
 import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { PrimaryPayee } from './PrimaryPayee';
+import { assignDefaultArchetype } from '../../home/default-archetype';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../../home/onboarding';
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
@@ -246,6 +247,12 @@ export function CreateAgentForm({
         console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
       }
     }
+    // THE PLAYBOOK IT IS BORN WITH (spec 354 §3). A treasury with no assignment runs the bare harness —
+    // which is a documented state, except that the spec-360 effect resolver reads the PAYER's playbook,
+    // so an unassigned treasury moves money and tells nobody. Best-effort, like every other activation
+    // above: behaviour grants nothing, and a person's new agent must not fail to exist over it.
+    const born = await assignDefaultArchetype(res.result.agent, kind, token);
+    if (!born.ok) console.warn(`[agent-create] no default playbook for ${kind}:`, born.reason);
     setBusy(false);
     // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
     void emitControlEvent(token, 'agent-added', []);

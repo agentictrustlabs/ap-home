@@ -14,10 +14,27 @@ import { validateAgentHarnessDefinition, type AgentHarnessDefinitionV1 } from '@
 import { SKILLS_REGISTRY_ORIGIN } from '../lib/domain';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
-/** ADR-0061 type slug → the archetype that type is born with. Product mapping, so it lives in the app. */
+/** ADR-0061 type slug → the archetype that type is born with. Product mapping, so it lives in the app.
+ *
+ *  A TREASURY BORN WITHOUT ONE PAYS SILENTLY. The spec-360 effect resolver reads the PAYER agent's
+ *  playbook, so an unassigned treasury promises nothing and tells nobody when its money moves — which is
+ *  exactly the incident that started spec 360, reappearing one agent at a time. An org is a payer too.
+ *  Every kind that can hold or move value is born knowing what follows the act. */
 const DEFAULT_ARCHETYPE: Record<string, { context: string; archetype: string }> = {
   person: { context: 'agentic-trust', archetype: 'person-steward' },
+  treasury: { context: 'agentic-trust', archetype: 'treasury-steward' },
+  org: { context: 'agentic-trust', archetype: 'org-steward' },
+  team: { context: 'agentic-trust', archetype: 'org-steward' },
 };
+
+/** The Home's own words for what it just created → the ADR-0061 type slug the registry answers for.
+ *  `person-treasury` and `org-treasury` are both a TREASURY; the prefix says whose it is, which is a
+ *  fact about the tree and never about the kind of agent. */
+export function typeSlugForCreatedKind(kind: string): string {
+  const k = (kind ?? '').toLowerCase();
+  if (k.endsWith('-treasury') || k === 'treasury') return 'treasury';
+  return k;
+}
 
 /**
  * Assign the default archetype for `kind` to a newly created agent. Returns what happened, for the
@@ -28,7 +45,8 @@ export async function assignDefaultArchetype(
   kind: string,
   session: string,
 ): Promise<{ ok: boolean; reason?: string; archetypeId?: string }> {
-  const target = DEFAULT_ARCHETYPE[(kind ?? '').toLowerCase()];
+  const slug = typeSlugForCreatedKind(kind);
+  const target = DEFAULT_ARCHETYPE[slug];
   if (!target) return { ok: false, reason: `no default archetype for ${kind}` };
   try {
     const base = SKILLS_REGISTRY_ORIGIN.replace(/\/$/, '');
@@ -40,8 +58,8 @@ export async function assignDefaultArchetype(
     // A definition this Home cannot validate is one it will not write: run admission would refuse the
     // assignment, and the agent would read as broken rather than as unassigned.
     if (!validateAgentHarnessDefinition(definition).ok) return { ok: false, reason: 'definition invalid' };
-    if (!definition.applicableAgentTypes.includes(kind.toLowerCase())) {
-      return { ok: false, reason: `definition does not apply to ${kind}` };
+    if (!definition.applicableAgentTypes.includes(slug)) {
+      return { ok: false, reason: `definition does not apply to ${slug}` };
     }
     await ensureCsrfToken();
     const put = await fetch('/connect/channels', {

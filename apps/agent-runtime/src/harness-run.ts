@@ -124,6 +124,30 @@ export const CHILD_AGENT_TLD: Record<string, string> = Object.fromEntries(CHILD_
 export const ORG_INVITE_CAPABILITY = 'organization.membership.invite' as const;
 /** The "pay me here" preference (`ap:primaryPayee` on the public charteredUnder edge). Spec 355/361. */
 export const PRIMARY_PAYEE_CAPABILITY = 'treasury.primary.declare' as const;
+/** WHO CAN READ MY RECORDS — the person's own audit of the apps they have authorized (spec 341 §4.3). */
+export const ACCESS_LIST_CAPABILITY = 'access.grants.list' as const;
+/** …AND STOP THEM. On-chain revocation of one grant they issued — the authority kill, not a local drop. */
+export const ACCESS_REVOKE_CAPABILITY = 'access.grant.revoke' as const;
+
+/**
+ * WHO CAN READ MY RECORDS — informational, and deliberately NOT one of `HARNESS_ACTION_TOOLS`.
+ *
+ * An action tool binds authority somebody signs; this one asks the person's own DO what they have
+ * already authorized. Keeping it out of the action list is what lets a surface that cannot collect a
+ * signature still offer it — and is what the ceremony-negotiation test means by "every action here
+ * binds authority a person signs".
+ */
+export const ACCESS_LIST_TOOL: ToolSpec = {
+  id: ACCESS_LIST_CAPABILITY,
+  description:
+    'ANSWERS A QUESTION: which apps this person has authorized to read their records, and whether each '
+    + 'grant is still live on chain. Use for "who can see my records", "which apps have access", "what '
+    + 'have I authorized". Takes no arguments — it answers for the person asking and cannot be pointed '
+    + 'at anyone else.',
+  inputSchema: { type: 'object', properties: {} },
+  interaction: { navigationTarget: 'settings' },
+};
+
 
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
@@ -284,6 +308,29 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // It IS public and it IS on chain, which is why it takes a mandate rather than nothing at all.
     risk: 'medium',
     interaction: { navigationTarget: 'treasuries' },
+  },
+  {
+    // …AND STOP THEM. The revocation is ON CHAIN, which is the difference between this and every
+    // OAuth-shaped "disconnect": it stops the app at every gate that checks, not just at this Home
+    // (ADR-0041). It is `medium` because it takes authority AWAY — the failure mode is losing access
+    // you meant to keep, which the person can restore by granting again.
+    id: ACCESS_REVOKE_CAPABILITY,
+    description:
+      'Revoke ON CHAIN a read grant this person issued to an app, so it stops working everywhere rather '
+      + 'than only here. Args: app (the client id from access.grants.list, e.g. "demo-jp"), holder (the '
+      + 'SA whose grant it is — normally the person asking). Use for "stop <app> reading my records", '
+      + '"revoke <app> access", "cut off <app>".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app: { type: 'string', description: 'The app\'s client id, as listed by access.grants.list' },
+        holder: { type: 'string', description: 'Whose grant this is (the person who issued it)' },
+      },
+      required: ['app'],
+    },
+    capability: { id: ACCESS_REVOKE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'holder' },
+    risk: 'medium',
+    interaction: { navigationTarget: 'settings' },
   },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
     id: capability,
@@ -514,6 +561,10 @@ export interface HarnessDeps {
   ownerOf?: (agent: string) => Promise<string | null>;
   /** What an agent holds of the deployment's value asset — annotates a choice between accounts. */
   valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
+  /** The apps a person has authorized to read their records, and whether each grant is still live. */
+  readGrants?: (person: string) => Promise<Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }>>;
+  /** ONE stored grant, wire and all — asked for only when something is about to revoke it. */
+  readGrantWire?: (person: string, clientId: string) => Promise<{ wire: unknown; hash: string } | null>;
   now?: () => number;
 }
 
@@ -873,6 +924,72 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
   };
 }
 
+const REVOKE_BY_OWNER_ABI = [{
+  type: 'function', name: 'revokeDelegationByOwner', stateMutability: 'nonpayable', outputs: [],
+  inputs: [{ name: 'delegation', type: 'tuple', components: [
+    { name: 'delegator', type: 'address' }, { name: 'delegate', type: 'address' }, { name: 'authority', type: 'bytes32' },
+    { name: 'caveats', type: 'tuple[]', components: [{ name: 'enforcer', type: 'address' }, { name: 'terms', type: 'bytes' }, { name: 'args', type: 'bytes' }] },
+    { name: 'salt', type: 'uint256' }, { name: 'signature', type: 'bytes' },
+  ] }],
+}] as const;
+
+/**
+ * `access.grant.revoke` — the authority kill, said out loud.
+ *
+ * THE DIFFERENCE FROM "DISCONNECT". Dropping a Home's copy of a grant stops THIS Home using it; the app
+ * keeps working anywhere else that checks. Revoking on chain stops it at every gate — which is the
+ * property an OAuth scope cannot have and the reason this capability exists rather than a local delete.
+ *
+ * WHOSE GRANT. Only one the PERSON issued: the wire is fetched from their own DO by client id, and the
+ * mandate's delegator must be its delegator. A revocation of somebody else's grant is not a thing this
+ * can express — the chain would refuse it, and so does this, earlier and with a sentence.
+ */
+export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presented: MandatePresentation, person: Address | undefined): ToolInvoker {
+  return async (_toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    const wire = presented.wire as Delegation;
+    if (!deps.readGrantWire) throw new Error('this agent cannot read the grant to revoke (no read-grant seam wired)');
+    const app = String(args.app ?? '').trim().toLowerCase();
+    if (!app) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId: _toolId,
+        prompt: 'Which app should lose access?',
+        fields: [{ name: 'app', label: 'app', type: 'text', required: true, hint: 'its client id — ask "who can read my records" to see the list' }],
+      });
+    }
+    const holder = (person ?? wire.delegator).toLowerCase();
+    if (wire.delegator.toLowerCase() !== holder) throw new Error(`a grant is revoked by the person who issued it (${holder}); the mandate is from ${wire.delegator}`);
+    const found = await deps.readGrantWire(holder, app);
+    if (!found) {
+      // NOT AN ERROR TO RETRY. There is no such grant here, which is a fact about what they authorized.
+      return { revoked: false, app, note: `no read grant for "${app}" is stored here — nothing to revoke` };
+    }
+    const grant = found.wire as unknown as { delegator: string; delegate: string; authority: string; caveats: Array<{ enforcer: string; terms: string; args?: string }>; salt: string; signature: string };
+    if (grant.delegator.toLowerCase() !== holder) throw new Error('that grant was issued by someone else — it is not yours to revoke');
+
+    const inner = encodeFunctionData({
+      abi: REVOKE_BY_OWNER_ABI, functionName: 'revokeDelegationByOwner',
+      args: [{
+        delegator: grant.delegator as Address, delegate: grant.delegate as Address, authority: grant.authority as Hex,
+        caveats: grant.caveats.map((c) => ({ enforcer: c.enforcer as Address, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex })),
+        salt: BigInt(grant.salt), signature: grant.signature as Hex,
+      }],
+    });
+    const dm = env.DELEGATION_MANAGER as Address;
+    const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
+    const digest = intentDigest(ctx.intent);
+    const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
+    // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
+    // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
+    const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
+    const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
+    const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
+    return { revoked: true, app, grantHash: found.hash, txHash, holder };
+  };
+}
+
 /**
  * `messaging.direct.send` — the Home's message box, said out loud.
  *
@@ -924,7 +1041,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
   return async (toolId, args, ctx) => {
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === PRIMARY_PAYEE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -963,6 +1080,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     }
     if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
+    if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -1154,6 +1272,8 @@ const CAPABILITY_WORDS: Record<string, string> = {
   'messaging.direct.send': 'send direct messages',
   'resolution.invitation.request': 'ask someone how to reach an agent of theirs',
   'treasury.primary.declare': 'say which treasury receives payments to you',
+  'access.grants.list': 'say which apps can read your records',
+  'access.grant.revoke': 'revoke an app\'s access on chain',
 };
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
@@ -1251,6 +1371,9 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // The CALL's target: the relationship record. See the pin in `resolveStepArgs` for why the treasury,
   // which is what the statement is ABOUT, cannot be the caveat's location.
   'treasury.primary.declare': 'record',
+  // Likewise: a revocation is a call to the DelegationManager, and WHICH grant it kills travels in the
+  // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
+  'access.grant.revoke': 'manager',
 };
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
@@ -1517,6 +1640,9 @@ async function resolveStepArgs(
   // saying plainly what the authority covers.
   if (where?.capabilityId === PRIMARY_PAYEE_CAPABILITY && env.AGENT_RELATIONSHIP) {
     out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
+  }
+  if (where?.capabilityId === ACCESS_REVOKE_CAPABILITY && env.DELEGATION_MANAGER) {
+    out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
   }
   return out;
 }
@@ -1838,6 +1964,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
+  'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
 };
 
 /**
@@ -1856,6 +1983,10 @@ const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
   // `addRole(bytes32,bytes32)` / `removeRole(bytes32,bytes32)` on the relationship record — a switch
   // clears the previous primary in the same mandate, so both are named.
   [PRIMARY_PAYEE_CAPABILITY]: [methodSelectorOf('addRole(bytes32,bytes32)'), methodSelectorOf('removeRole(bytes32,bytes32)')],
+  // `revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))` — the
+  // authority kill. The struct shape is the DelegationManager's, so the selector is computed from it
+  // rather than written down: a hand-copied selector is a revocation that reverts.
+  [ACCESS_REVOKE_CAPABILITY]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
@@ -2247,7 +2378,10 @@ fanned out.`;
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never) }, deps) ? [VAULT_QUESTION_TOOL] : []),
-    MEMBERSHIP_LIST_TOOL, UNSUPPORTED_TOOL,
+    MEMBERSHIP_LIST_TOOL,
+    // The person's own access audit — informational, always available on their own surface.
+    ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
+    UNSUPPORTED_TOOL,
   ];
   const result = await runIntent(input.intent, {
     planner, tools,

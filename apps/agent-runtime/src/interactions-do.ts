@@ -1585,7 +1585,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1803,6 +1803,42 @@ export class InteractionsDO {
             const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
+        }
+
+        // ── WHO CAN READ MY RECORDS, and the grant that says so (spec 341 §4.3, read by the Ask) ──
+        //
+        // The person's own audit of their own apps, addressed at their OWN DO and reachable only
+        // in-Worker. It answers for THIS principal and no other — the caller cannot name a subject,
+        // because the URL already did and the Ask only ever addresses the session it verified.
+        //
+        // `revoked` is the ON-CHAIN answer, as the session-facing list already insists: a person
+        // auditing access needs to see that a revoke landed, and an unreadable chain reports revoked
+        // (the conservative answer for a question whose purpose is spotting access you did not intend).
+        if (op === 'internal.readgrant.list') {
+          const rows = await this.state.storage.list({ prefix: READ_GRANT_KEY('') });
+          const grants: Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }> = [];
+          for (const [, v] of rows) {
+            const rec = v as ReadGrantRecord;
+            let revoked = false;
+            try {
+              revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [rec.hash as Hex] })) as boolean;
+            } catch { revoked = true; }
+            grants.push({ clientId: rec.clientId, hash: rec.hash, storedAt: rec.storedAt, revoked });
+          }
+          return json({ ok: true, grants });
+        }
+
+        // THE WIRE ITSELF — asked for only when something is about to REVOKE it, because
+        // `revokeDelegationByOwner` takes the whole struct and a hash cannot be expanded back into one.
+        // Handing out a signed delegation is not a disclosure risk here (it is the person's own grant,
+        // returned to the person's own agent), but it is more than a list needs, which is why it is a
+        // separate op rather than a field.
+        if (op === 'internal.readgrant.wire') {
+          const clientId = String(body.clientId ?? '').trim().toLowerCase();
+          if (!clientId) return json({ ok: false, error: 'clientId required' }, 400);
+          const rec = (await this.state.storage.get(READ_GRANT_KEY(clientId))) as ReadGrantRecord | undefined;
+          if (!rec) return json({ ok: false, error: `no read grant stored for "${clientId}"` }, 404);
+          return json({ ok: true, wire: rec.wire, hash: rec.hash, clientId: rec.clientId });
         }
 
         if (op === 'internal.coordination.vaultRead') {
