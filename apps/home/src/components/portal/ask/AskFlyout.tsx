@@ -342,7 +342,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     // they ask. The reply's ear opens when the greeting ends.
     if (!greetedRef.current) {
       greetedRef.current = true;
-      voice.speak(`Hi${personName ? ` ${personName.split(/\s+/)[0]}` : ''} — what do you need?`, () => { if (voice.enabled) open(); });
+      // No `voice.enabled` check here: this closure was made by the render BEFORE the tap switched Voice on,
+      // and read it as off — so the greeting played and the ear never opened. Voice IS on: this tap did it.
+      voice.speak(`Hi${personName ? ` ${personName.split(/\s+/)[0]}` : ''} — what do you need?`, () => open());
       return;
     }
     open();
