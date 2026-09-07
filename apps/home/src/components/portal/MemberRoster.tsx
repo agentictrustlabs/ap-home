@@ -16,11 +16,14 @@ import { SectionShell } from './SectionShell';
 import { fetchRoster, type RosterMember } from '../../lib/recipient-directory';
 import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
+import { setAskSelection } from '../../home/ask-selection';
 
 export function MemberRoster({ agent, title = 'Members' }: { agent: string; title?: string }) {
   const { session, agentAddress } = useSession();
   const [members, setMembers] = useState<RosterMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 361 I6 — the member the person has selected, handed to the Ask as context.
+  const [selected, setSelected] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!session?.token) return;
@@ -56,7 +59,15 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
           {members.map((m) => {
             const you = !!agentAddress && m.address.toLowerCase() === agentAddress.toLowerCase();
             return (
-              <div key={m.address} style={{ ...cardSty, display: 'flex', alignItems: 'center', gap: '.7rem', flexWrap: 'wrap' }}>
+              <div
+                key={m.address}
+                // Spec 361 I6 — selecting a member is context the Ask can use ("invite her", "message him"):
+                // the reference reaches the agent as validated context, never as words in a prompt.
+                role="button" tabIndex={0} aria-pressed={selected === m.address.toLowerCase()}
+                onClick={() => { const next = selected === m.address.toLowerCase() ? null : m.address.toLowerCase(); setSelected(next); setAskSelection(next ? { entity: next as `0x${string}`, kind: 'person', label: m.displayName || m.address } : null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLDivElement).click(); } }}
+                style={{ ...cardSty, display: 'flex', alignItems: 'center', gap: '.7rem', flexWrap: 'wrap', cursor: 'pointer', outline: selected === m.address.toLowerCase() ? '2px solid var(--color-sage-700, #3f6212)' : undefined }}
+              >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: '.9rem' }}>
                     {m.displayName}{you && <span style={{ ...mutedText, fontWeight: 400 }}> (you)</span>}

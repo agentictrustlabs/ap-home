@@ -1803,6 +1803,31 @@ app.post('/resolution/grant', async (c) => {
   return c.json({ ok: true, grantId, targetAgent: target, expiresAt, messaged });
 });
 
+/**
+ * GET /harness/run?session&addressee&runRef — THE DRAFT, READ (spec 361 I5). A run's checkpoint minus its
+ * keyring: the sentence, the plan as it stands (a supplied plan's args ARE the draft), everything answered
+ * so far, and what it is waiting on. A screen opens it in a form; an edit comes back as a resume with the
+ * edited plan (`POST /harness/ask { runRef, plan }`) and is re-derived and re-verified from scratch —
+ * the form's last edit is what the mandate is judged against. Only the asker (or a claimant) may read it.
+ */
+app.get('/harness/run', async (c) => {
+  const session = c.req.query('session') ?? '';
+  const addressee = (c.req.query('addressee') ?? '').toLowerCase() as Address;
+  const runRef = c.req.query('runRef') ?? '';
+  if (!session || !/^0x[0-9a-f]{40}$/.test(addressee) || !runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const stored = await loadRun(c.env as never, addressee, runRef).catch(() => null);
+  if (!stored) return c.json({ ok: false, error: 'no such run' }, 404);
+  if (!claimableBy(stored, String(who.sa).toLowerCase() as Address)) return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
+  return c.json({
+    ok: true, runRef: stored.runRef, addressee: stored.addressee, message: stored.message,
+    ...(stored.plan ? { plan: stored.plan } : {}),
+    supplied: stored.supplied ?? [], awaiting: stored.awaiting ?? null,
+    presentedCount: (stored.presented ?? []).length, updatedAt: stored.updatedAt,
+  });
+});
+
 app.post('/harness/ask', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;

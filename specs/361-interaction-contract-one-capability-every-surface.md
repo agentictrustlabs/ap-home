@@ -29,15 +29,18 @@ And the five parities (review §1), honestly scored:
 
 - **Capability parity** — ✅ mostly: `/harness/vocabulary` publishes what the playbook offers; the K5
   narrowing keeps it honest.
-- **Context parity** — ◐ `AskScopeV1` carries realm + ceremonies; selected-entity/filter/draft context
-  does not reach Ask.
+- **Context parity** — ✅ 2026-09-07 (I6): `AskScopeV1.selection` — the entity selected on the screen (the
+  member row you clicked, the team you have open) reaches the agent as a checked reference; a party the
+  sentence did not name is filled from it when the role's classes admit its kind, bound as `context`; the
+  realm fills context-side parties; a person realm never fills its own agent as a counterparty.
 - **Execution parity** — ❌ **the deepest gap and it is already named in CLAUDE.md**: "the first-party
   web↔a2a surface is RPC-shaped TODAY … the relayer verbs are legacy." A Home button and the same words
   in Ask do NOT reach one implementation.
 - **Presentation parity** — ❌ Ask cannot open a screen, populate a draft, or render the review
   component a screen already has; it renders generic prompt fields.
-- **Continuity parity** — ◐ durable runs give resume; but a draft has no identity a screen can edit and
-  Ask can then send (the checkpoint is close — it is not yet a shared surface).
+- **Continuity parity** — ✅ 2026-09-07 (I5): `GET /harness/run` reads a run's draft (sentence, plan, answers,
+  what it waits on — never the keyring); the Home's unfinished list opens it in the command form ("Edit in
+  form"); submitting resumes THAT run with the edited plan, re-derived and re-verified from scratch.
 
 ## 1. The invariants (all inherited, one new)
 
@@ -126,8 +129,8 @@ authorize a changed request). What is missing is the SHARED surface:
 | **I2** | Home interaction registry (`name → component/route`) + Ask consumes `navigationTarget` (done-reply "open it") + `review` (authority card renders the bound component) | the invite ask shows the SAME review surface the members screen uses |
 | **I3** | Coverage manifest gate `check:interaction-coverage`: every offered capability → contract → words → ceremony renderable → interaction binding or NAMED waiver; missing edges are findings, not silence | gate red on an unbound capability |
 | **I4** | Execution parity, first slice (org membership invite): the Members screen's invite submits the structured intent to `/harness/run`; the legacy verb path retired for that one feature; a parity test drives both and asserts one implementation, one receipt trail | click and Ask produce byte-comparable receipts |
-| **I5** | Draft surface: run-draft read + screen-side `supplied` write; the invite draft editable from the members screen mid-ask | prepare in Ask → edit in form → "send it" executes the edited version |
-| **I6** | Context projection: `AskScopeV1` gains `selection` (entity refs + filters + open draft), permission-filtered; presentation ops (`navigate`/`openEntity`/`prefillDraft`/`focusField`) | "invite *her*" resolves the selected member; ops are enumerable in the reply, not free-form |
+| **I5** ✅ 2026-09-07 | Draft surface: `GET /harness/run` (the checkpoint minus the keyring) + a resume that carries an edited `plan`; the Home opens an unfinished run in the capability's command form and sends the edited draft | prepare in Ask → edit in form → "send it" executes the edited version |
+| **I6** ✅ (selection) 2026-09-07 · ◐ (presentation ops) | `AskScopeV1.selection` (entity + kind + label; filter/draftRunRef declared) fills parties from validated context — selection first, realm second, never the asker as a counterparty; the roster row is the first selecting screen; the command form prefills from the selection. **Open:** enumerable presentation ops (`navigate`/`openEntity`/`prefillDraft`/`focusField`) beyond `navigationTarget` | "invite *her*" resolves the selected member; ops are enumerable in the reply, not free-form |
 | **I7…** | Repeat I4 per feature family (profile, delegation, card publication, service config), each with its parity test — the spec 359 domain cadence | per-family |
 
 **I4 ledger:** invite ✅ (one-prompt, `alsoApprove` bundle) · fund ✅ (mandate = the one signature; the
@@ -184,3 +187,20 @@ on-chain authority instead of platform metadata. Apple App Intents = the declara
 navigation precedent our vocabulary already follows. CopilotKit's component-lifecycle tool
 registration is cited as the ANTI-pattern for capability cataloguing (review §4E): Home registers
 capabilities independently of mounted screens — the playbook already is that catalogue.
+
+
+## 8. Reconciliation with spec 367 (2026-09-07)
+
+[Spec 367](367-behaviour-plane-first-time-right.md) is the newer word on the behaviour plane and this spec's
+parities are the surface half of it. Read together:
+
+| 367 wave | What it added to 361's mechanism |
+| --- | --- |
+| W1 plan admission | a plan is judged against declarations before any step runs — the execution-parity boundary (`/harness`) now refuses a plan that is not the sentence, on both entries |
+| W2 skills teach the planner | the contract's `verbs`/`utterances` compile into the definition; `check:ask-scenarios` replays them — 361 I3's coverage gate gains a behaviour gate beside it |
+| W3 shared commands | the **command projection** (`x-ap-class` on the compiled schema → `fields` in the vocabulary → the Home's "Do" form) is 361 I4 made generic: one command, filled by controls or by words, through one turn; the parity check in the gate is 361's "one implementation" test |
+| W4 distributed semantics | the subject-ask profile and causal receipts extend the boundary across agents |
+| — | 361 I5/I6 (this section's ✅s) are where 367 §7 ("context separate from model context", "structured missing information") landed |
+
+The doctrine ([one-capability-model-generates-both](../docs/architecture/agent-rules/one-capability-model-generates-both.md))
+is unchanged; 367 adds the enforcement.

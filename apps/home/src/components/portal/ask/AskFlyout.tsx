@@ -18,7 +18,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import { ask, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
@@ -33,7 +34,9 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onSeedUsed}: {
+export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed}: {
+  /** Spec 361 I6 — what the screen has selected; reaches the agent as validated context. */
+  selection?: AskSelection | null;
   addressee: Address; addresseeLabel: string;
   /** Where the person is standing, as this app understands it — the agent narrows what it OFFERS to it,
    *  and derives standing itself (spec 353 §4). */
@@ -204,7 +207,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     setThread((t) => [...t, { role: 'you', text: message }]);
     // The scope is computed per ask, not per session: it is the agent's published vocabulary ∩ what this
     // flyout can finish, and the agent being asked may not offer what the last one did.
-    const surface = await homeScope(realm, addressee);
+    const surface = await homeScope(realm, addressee, selection ?? undefined);
     await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface }, 'Thinking…');
   };
 
@@ -220,15 +223,31 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
     void homeVocabulary(addressee).then((caps) => { if (!cancelled) setCommands(caps.filter((c) => c.fields?.length)); });
     return () => { cancelled = true; };
   }, [addressee]);
+  // Spec 361 I5 — a DRAFT being edited: the run the form was opened from. Submitting resumes THAT run with
+  // the edited plan; the agent re-plans and re-verifies from scratch, so the last edit is what executes.
+  const [draftRun, setDraftRun] = useState<{ runRef: string; message: string; initial: Record<string, unknown> } | null>(null);
   const doCommand = async (cap: AskVocabularyEntry, args: Record<string, unknown>) => {
     if (!session) return;
     setCommand(null);
     setAnswers({});
+    const draft = draftRun; setDraftRun(null);
     const said = Object.entries(args).filter(([, v]) => v !== '' && v !== undefined && v !== false).map(([k, v]) => `${k}: ${String(v)}`).join(', ');
-    const message = `${cap.label ?? cap.id}${said ? ` — ${said}` : ''}`;
-    setThread((t) => [...t, { role: 'you', text: message }]);
-    const surface = await homeScope(realm, addressee);
-    await turn({ message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface, plan: { steps: [{ toolId: cap.id, args }] } }, 'Working…');
+    const message = draft?.message ?? `${cap.label ?? cap.id}${said ? ` — ${said}` : ''}`;
+    setThread((t) => [...t, { role: 'you', text: draft ? `${message} (edited: ${said})` : message }]);
+    const surface = await homeScope(realm, addressee, selection ?? undefined);
+    await turn({ message, addressee, runRef: draft?.runRef ?? `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface, plan: { steps: [{ toolId: cap.id, args }] }, ...(draft ? { resumable: true } : {}) }, draft ? 'Sending the edited draft…' : 'Working…');
+  };
+  const editDraft = async (r: UnfinishedRun) => {
+    if (!session) return;
+    const d = await readDraft(session, addressee, r.runRef);
+    const step = d?.plan?.steps?.[0];
+    const cap = step ? commands.find((c) => c.id === step.toolId) : undefined;
+    if (!d || !step || !cap) { setErr('this run has no form to edit — resume it in the conversation instead'); return; }
+    // The draft's values: the plan's args, with anything the person already answered laid over them.
+    const answered = Object.assign({}, ...d.supplied.map((s) => s.data ?? {}));
+    setDraftRun({ runRef: d.runRef, message: d.message, initial: { ...step.args, ...answered } });
+    setCommand(cap);
+    setShowUnfinished(false);
   };
 
   /** Grant the authority the agent said it needs — signed by the credential that custodies the DELEGATOR
@@ -364,6 +383,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
                   “{r.message}”
                 </button>
                 {r.awaiting && <span style={{ opacity: 0.75 }}> — waiting on {r.awaiting.kind === 'signature' ? 'your signature' : r.awaiting.kind === 'confirmation' ? 'your confirmation' : 'an answer'}</span>}
+                {/* Spec 361 I5 — the draft is the checkpoint, made a surface: open this run's plan in the form. */}
+                <button type="button" className="btn ghost" data-testid={`ask-unfinished-edit-${r.runRef}`} style={{ fontSize: 10, padding: '0 6px', minHeight: 0, marginLeft: 6 }} onClick={() => void editDraft(r)}>Edit in form</button>
               </div>
             ))}
             {showUnfinished && unfinishedTotal > unfinished.length && (
@@ -396,7 +417,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
 
       {showDiag && <DiagnosticsPane entries={diag} onClose={() => setShowDiag(false)} />}
 
-      {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} onSubmit={(args) => void doCommand(command, args)} onCancel={() => setCommand(null)} />}
+      {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} selection={selection ?? undefined} initial={draftRun?.initial} draftOf={draftRun?.message} onSubmit={(args) => void doCommand(command, args)} onCancel={() => { setCommand(null); setDraftRun(null); }} />}
       {commands.length > 0 && !command && !pending && (
         <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
           <span>Do:</span>
@@ -424,15 +445,23 @@ export function AskFlyout({ addressee, addresseeLabel, realm, onClose, seed, onS
  * sentence path shows); an amount is a number in whole units as the person says it; a flag is a checkbox.
  * The values are the person's WORDS: nothing here resolves, ranks, or fills in what was not given.
  */
-function CommandForm({ command, realm, addressee, addresseeLabel, onSubmit, onCancel }: { command: AskVocabularyEntry; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; addresseeLabel?: string; onSubmit: (args: Record<string, unknown>) => void; onCancel: () => void }) {
+function CommandForm({ command, realm, addressee, addresseeLabel, selection, initial, draftOf, onSubmit, onCancel }: { command: AskVocabularyEntry; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; addresseeLabel?: string; selection?: AskSelection; initial?: Record<string, unknown>; draftOf?: string; onSubmit: (args: Record<string, unknown>) => void; onCancel: () => void }) {
   const fields = command.fields ?? [];
   // THE ROOM YOU STAND IN FILLS ITS OWN FIELD. Opened inside an organization, a command whose party may be
   // an organization is prefilled with THIS one — the same rule the agent applies to a sentence (a
   // context-side or acting party the realm's class admits). A person realm prefills nothing: "you" is never
   // the default counterparty of your own command. Editable: the prefill is a value, not a lock.
   const realmSuffix = realm?.kind === 'org' ? 'org' : realm?.kind === 'service' ? 'svc' : null;
+  const selSuffix = selection ? ({ person: 'me', me: 'me', org: 'org', team: 'team', workspace: 'workspace', treasury: 'treasury', 'person-treasury': 'treasury', 'org-treasury': 'treasury', circle: 'circle', church: 'church', service: 'svc' } as Record<string, string>)[selection.kind] ?? selection.kind : null;
   const prefilled: Record<string, string | boolean> = {};
-  if (realmSuffix && addressee) for (const f of fields) if (f.kind === 'agent' && f.types?.includes(realmSuffix)) prefilled[f.name] = addressee;
+  // The SELECTION first (spec 361 I6 — the member you clicked, the team you have open), then the realm.
+  for (const f of fields) {
+    if (f.kind !== 'agent') continue;
+    if (selection && selSuffix && f.types?.includes(selSuffix)) prefilled[f.name] = selection.entity;
+    else if (realmSuffix && addressee && f.types?.includes(realmSuffix)) prefilled[f.name] = addressee;
+  }
+  // A DRAFT being edited (spec 361 I5) starts from its own values, not the context's.
+  if (initial) for (const [k, v] of Object.entries(initial)) if (typeof v === 'string' || typeof v === 'boolean') prefilled[k] = v;
   const [values, setValues] = useState<Record<string, string | boolean>>(prefilled);
   const missing = fields.filter((f) => f.required && !String(values[f.name] ?? '').trim());
   const submit = () => {
@@ -446,7 +475,7 @@ function CommandForm({ command, realm, addressee, addresseeLabel, onSubmit, onCa
   };
   return (
     <div className="ask-card" data-testid="ask-command-form" style={{ margin: '0 0 6px' }}>
-      <div style={{ fontWeight: 600, fontSize: 13 }}>{command.label ?? command.id}</div>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>{command.label ?? command.id}{draftOf ? <span className="muted" style={{ fontWeight: 400 }}> — editing the draft “{draftOf}”</span> : null}</div>
       {fields.map((f: CommandField) => (
         <div key={f.name} style={{ marginTop: 8 }}>
           <label className="muted" style={{ fontSize: 11.5, display: 'block' }} htmlFor={`ask-c-${f.name}`}>
@@ -462,14 +491,17 @@ function CommandForm({ command, realm, addressee, addresseeLabel, onSubmit, onCa
               placeholder={f.kind === 'agent' ? (f.acceptsEmail ? 'a name (alice.me), a person you know, an address — or an email for someone without an agent yet' : 'a name (alice.me), a person you know, or an address') : f.kind === 'amount' ? 'e.g. 10' : ''}
               value={String(values[f.name] ?? '')} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
             />
-            {f.kind === 'agent' && addressee && addresseeLabel && String(values[f.name] ?? '').toLowerCase() === addressee.toLowerCase() && (
+            {f.kind === 'agent' && selection && String(values[f.name] ?? '').toLowerCase() === selection.entity.toLowerCase() && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{selection.label ?? selection.entity} — the one you selected; change it to name another</div>
+            )}
+            {f.kind === 'agent' && addressee && addresseeLabel && String(values[f.name] ?? '').toLowerCase() === addressee.toLowerCase() && !(selection && selection.entity.toLowerCase() === addressee.toLowerCase()) && (
               <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{addresseeLabel} — the one you are in; change it to name another</div>
             )}
           </>)}
         </div>
       ))}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button type="button" className="btn primary" data-testid="ask-command-submit" disabled={missing.length > 0} onClick={submit}>{missing.length ? `Needs ${missing.map((f) => f.label).join(', ')}` : 'Do it'}</button>
+        <button type="button" className="btn primary" data-testid="ask-command-submit" disabled={missing.length > 0} onClick={submit}>{missing.length ? `Needs ${missing.map((f) => f.label).join(', ')}` : draftOf ? 'Send the edited draft' : 'Do it'}</button>
         <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
       </div>
     </div>

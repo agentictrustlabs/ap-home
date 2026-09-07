@@ -122,6 +122,14 @@ export interface PlannerTrace {
 }
 export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTrace };
 
+/** Spec 361 I5 — THE DRAFT: a suspended run's sentence, plan and answers, as a screen reads them. */
+export interface RunDraft { runRef: string; addressee: string; message: string; plan?: { steps: Array<{ toolId: string; args: Record<string, unknown> }> }; supplied: SuppliedInput[]; awaiting: { kind: string; prompt: string; stepRef: string } | null; presentedCount: number }
+export async function readDraft(session: { token: string }, addressee: string, runRef: string): Promise<RunDraft | null> {
+  const r = await fetch(`/a2a/harness/run?session=${encodeURIComponent(session.token)}&addressee=${addressee.toLowerCase()}&runRef=${encodeURIComponent(runRef)}`, { credentials: 'include' });
+  const b = (await r.json().catch(() => ({}))) as RunDraft & { ok?: boolean };
+  return r.ok && b.ok ? b : null;
+}
+
 /** Answers carried into the next turn of the SAME ask. */
 export interface SuppliedInput {
   stepRef: string;
@@ -152,6 +160,8 @@ export interface AskSurface {
    *  agent's to derive from vault and chain: an app that asserts it is supplying an authorization claim,
    *  which is the pattern ADR-0041 forbids (spec 353 §4). */
   realm?: { kind?: 'person' | 'org' | 'service' };
+  /** Spec 361 I6 — the entity selected on the screen the Ask was opened from (a checked reference). */
+  selection?: { entity?: string; kind?: string; label?: string; filter?: Record<string, string>; draftRunRef?: string };
 }
 
 /**
@@ -201,9 +211,11 @@ export async function homeScope(
    *  (spec 354 §4.4 / K5) — the classification vocabulary is `app ∩ this agent's definition capabilities`.
    *  Memoised per agent, because two agents on the same Home publish different vocabularies. */
   agent?: string,
+  /** Spec 361 I6 — what is selected on the screen, so a party the sentence did not name can be filled from it. */
+  selection?: AskSurface['selection'],
 ): Promise<AskSurface> {
   const ceremonies = [...HOME_CEREMONIES];
-  const surface: AskSurface = { ceremonies, ...(realm ? { realm } : {}) };
+  const surface: AskSurface = { ceremonies, ...(realm ? { realm } : {}), ...(selection ? { selection } : {}) };
   try {
     // Cache-first, and the cache holds the canonical answer rather than a cheaper substitute for it
     // (ADR-0013). A capability list changes when the agent is redeployed, so minutes is the right
@@ -282,7 +294,9 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     runRef: state.runRef,
     ...(state.surface ? { surface: state.surface } : {}),
     ...(state.resumable ? {} : { message: state.message }),
-    ...(state.resumable || !state.plan ? {} : { plan: state.plan }),
+    // A plan travels on the first turn AND on a resume that edits the draft (spec 361 I5): the agent
+    // re-plans from the edited version and re-verifies from scratch.
+    ...(state.plan ? { plan: state.plan } : {}),
     ...(state.presented ? { presented: state.presented } : {}),
     supplied: state.supplied,
   });

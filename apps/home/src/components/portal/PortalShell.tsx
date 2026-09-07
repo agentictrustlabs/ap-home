@@ -10,6 +10,7 @@ import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
+import { useAskSelection, setAskSelection } from '../../home/ask-selection';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { AskFlyout } from './ask/AskFlyout';
@@ -25,6 +26,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
    *  flyout is open, so a card deep in a page asks for it by event rather than by prop-drilling through
    *  every layer between them. Prefilled and not sent: the person still reads it and presses send. */
   const [askSeed, setAskSeed] = useState<string | null>(null);
+  // Spec 361 I6 — what the current screen has selected, read here and handed to the Ask as context.
+  const askSelection = useAskSelection();
   useEffect(() => {
     const onAsk = (e: Event) => {
       const message = (e as CustomEvent<{ message?: string }>).detail?.message;
@@ -36,6 +39,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     return () => window.removeEventListener('ap:ask', onAsk);
   }, []);
   const pathname = usePathname();
+  // A selection belongs to the screen it was made on: leaving the screen clears it (spec 361 I6).
+  useEffect(() => { setAskSelection(null); }, [pathname]);
   const active = parseWorkspacePath(pathname ?? '/');
   const { session, agentAddress, agentName } = useSession();
   // 'any' (spec 342): the shell must name and route the workspace the URL points at, whatever the
@@ -113,6 +118,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
           // The app knows where you are standing and what you are to this agent; the Ask should not have
           // to infer it from a sentence.
           realm={{ kind: active.kind }}
+          selection={askSelection}
           onClose={() => setAskOpen(false)}
         />
       )}

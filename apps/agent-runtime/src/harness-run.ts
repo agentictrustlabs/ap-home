@@ -1904,6 +1904,9 @@ export function utteranceExamples(tools: ReadonlyArray<{ id: string; utterances?
   return `\n\nEXAMPLES FROM THE PLAYBOOK (the domain author's own; follow their shape exactly — arguments are the person's WORDS, never addresses):\n${lines.join('\n')}`;
 }
 
+/** Selection kinds a screen declares → the typed-name suffix a party role admits (ADR-0061). */
+const KIND_SUFFIX: Record<string, string> = { person: 'me', me: 'me', org: 'org', organization: 'org', team: 'team', workspace: 'workspace', treasury: 'treasury', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc', svc: 'svc', circle: 'circle', church: 'church' };
+
 export function orgPhraseOf(goal: string): string | undefined {
   const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?.,;!]+?)\s*[?.!]*$/i);
   if (!m) return undefined;
@@ -1953,6 +1956,8 @@ export async function resolveStepArgs(
      *  from the party role's declared classes — never from "the first one available". */
     addressee?: string;
     realmKind?: string;
+    /** Spec 361 I6 — the on-screen selection the surface declared (entity + its kind). */
+    selection?: { entity?: string; kind?: string; label?: string };
   },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
@@ -2193,19 +2198,52 @@ export async function resolveStepArgs(
   // `context`-side party role whose declared classes admit the realm's class takes the addressee, and
   // the binding says it came from context. Nothing else is guessed: a realm whose class the role does not
   // admit fills nothing, and the person is asked.
-  if (where?.addressee && where.realmKind) {
-    const realmSuffix = ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind];
+  if (where && (where.selection?.entity || (where.addressee && where.realmKind))) {
+    // TWO SOURCES OF VALIDATED CONTEXT, most specific first: the entity SELECTED on the screen (spec 361
+    // I6 — a member on the roster, a team, a treasury), then the realm the person stands in. A selection is
+    // a reference the app checked before it declared it; it is never a sentence the model wrote.
+    const realmSuffix = where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined;
+    const sel = where.selection?.entity && /^0x[0-9a-f]{40}$/i.test(where.selection.entity) ? where.selection : undefined;
+    const selSuffix = sel?.kind ? ((KIND_SUFFIX as Record<string, string>)[sel.kind.toLowerCase()] ?? sel.kind.toLowerCase()) : undefined;
+    const candidates: Array<{ agent: string; suffix: string; hint: string; side: readonly string[] }> = [
+      // A selected entity may fill a CONTEXT party ("charter a team under it") or a COUNTERPARTY ("invite
+      // her") — the person pointed at it. The realm fills CONTEXT parties only: the room you stand in is
+      // never the one you are messaging or inviting.
+      ...(sel && selSuffix ? [{ agent: sel.entity!.toLowerCase(), suffix: selSuffix, hint: `the ${sel.label ?? sel.kind ?? 'one'} you have selected`, side: ['context', 'counterparty'] as const }] : []),
+      ...(where.addressee && realmSuffix ? [{ agent: where.addressee.toLowerCase(), suffix: realmSuffix, hint: 'the realm you are standing in', side: ['context'] as const }] : []),
+    ];
     for (const role of PARTY_ROLES) {
-      if (role.capability !== (where.capabilityId ?? where.toolId) || role.side !== 'context') continue;
+      if (role.capability !== (where.capabilityId ?? where.toolId)) continue;
       if (String(out[role.arg] ?? '').trim()) continue;
       const admits = role.requires.map((iri) => SUFFIX_FOR_CLASS[iri]).filter(Boolean);
-      if (!realmSuffix || !admits.includes(realmSuffix)) continue;
-      out[role.arg] = where.addressee.toLowerCase();
-      lookups.onResolved?.({ arg: role.arg, raw: partyWord(role.arg), agent: where.addressee.toLowerCase(), hint: 'the realm you are standing in', via: 'context' });
+      const hit = candidates.find((c) => c.side.includes(role.side) && admits.includes(c.suffix) && (!where.subject || c.agent !== where.subject.toLowerCase() || role.side === 'context'));
+      if (!hit) continue;
+      out[role.arg] = hit.agent;
+      lookups.onResolved?.({ arg: role.arg, raw: partyWord(role.arg), agent: hit.agent, hint: hit.hint, via: 'context' });
     }
   }
   for (const key of PARTY_ARGS) {
     const raw = String(out[key] ?? '').trim();
+    // NEVER THE ASKER — checked BEFORE the address short-circuit. A planner given the asker's address in
+    // its context wrote it as the INVITEE of "invite her", and the guard below only ever saw names, so the
+    // person was about to be asked to authorize inviting themselves. An address is not exempt from the
+    // rule; it is the form the mistake most often takes. When the screen has SELECTED someone the role
+    // admits (spec 361 I6), that selection is the answer — "her" is the member they clicked.
+    if (where && NEVER_THE_ASKER.has(key) && where.subject && raw.toLowerCase() === where.subject.toLowerCase()) {
+      const sel = where.selection?.entity && /^0x[0-9a-f]{40}$/i.test(where.selection.entity) ? where.selection : undefined;
+      const selSuffix = sel?.kind ? ((KIND_SUFFIX as Record<string, string>)[sel.kind.toLowerCase()] ?? sel.kind.toLowerCase()) : undefined;
+      const admits = partyTypesFor(where.capabilityId ?? where.toolId, key) ?? [];
+      if (sel && selSuffix && admits.includes(selSuffix) && sel.entity!.toLowerCase() !== where.subject.toLowerCase()) {
+        out[key] = sel.entity!.toLowerCase();
+        lookups.onResolved?.({ arg: key, raw: partyWord(key), agent: sel.entity!.toLowerCase(), label: sel.label ?? sel.entity, hint: `the ${sel.label ?? 'one'} you have selected`, via: 'context' });
+        continue;
+      }
+      throw new InputRequired({
+        kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
+        prompt: `That would be you. Who is ${partyWord(key)}?`,
+        fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
+      });
+    }
     if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
       // Nothing to resolve — and still worth reporting. An address here is usually the answer a person
       // just PICKED from a list of four Nathans; showing them a bare 0x… on the next card asks them to
@@ -2827,6 +2865,15 @@ export interface AskScopeV1 {
   /** The realm the person selected, as the app understands it — the delegator candidate and the private
    *  tier. NOT their standing in it. */
   realm?: { kind?: 'person' | 'org' | 'service' };
+  /**
+   * Spec 361 I6 — CONTEXT PARITY: what the person has SELECTED on the screen the Ask was opened from — an
+   * entity (a member on the roster, a team, a treasury), a filter, an open draft. A screen supplies meaning
+   * through selection long before a sentence is typed; this is how that meaning reaches the Ask. It is
+   * validated application context (a reference, never only words in a prompt): a party the sentence did
+   * not name may be filled from it when the party role's declared classes admit the selection's kind, and
+   * the binding says so (`context`). It permits nothing and reaches no verifier.
+   */
+  selection?: { entity?: string; kind?: string; label?: string; filter?: Record<string, string>; draftRunRef?: string };
 }
 
 /**
@@ -3455,9 +3502,10 @@ fanned out.`;
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),
-      // Spec 367 §7 — the validated application context a context-side party may be filled from.
+      // Spec 367 §7 / 361 I6 — the validated application context a party may be filled from.
       ...(input.addressee ? { addressee: input.addressee } : {}),
       ...(input.surface?.realm?.kind ? { realmKind: input.surface.realm.kind } : {}),
+      ...(input.surface?.selection ? { selection: input.surface.selection } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],
     }),
