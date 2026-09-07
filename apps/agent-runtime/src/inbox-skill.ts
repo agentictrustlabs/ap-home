@@ -15,7 +15,7 @@
 // config choice, not a fallback path (ADR-0013). Message bodies are DATA to the planner; the tool
 // below is the total capability surface, and the invoker enforces at-most-one reply per turn.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
 
 export interface InboxRespondInput {
   principal: string;
@@ -90,7 +90,7 @@ export async function handleInboxRespond(
   // not authority and not a second mechanism: a failed read just means a trigger-only goal and the
   // default playbook. Also carries the archetype's compiled INSTRUCTIONS (spec 354 K3), which open the
   // planner's system prompt; the inbox situation below and the tool contract are appended after.
-  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  const llmConfigured = isLlmConfigured(env);
   let conversationContext = '';
   let playbook = DEFAULT_PERSON_ASSISTANT_SKILL_MD;
   if (llmConfigured) {

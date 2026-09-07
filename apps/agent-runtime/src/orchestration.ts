@@ -112,18 +112,34 @@ export function withPlaybook(playbook: string | undefined, contract: string): st
  *  a rendering may degrade, and the EVIDENCE (receipts, observations) is identical either way. This is not
  *  the fallback ADR-0013 forbids — nothing here decides anything, and no authority path has a second
  *  mechanism. */
+/**
+ * IS A MODEL CONFIGURED — one answer, no fallback (ADR-0013).
+ *
+ * `ORCHESTRATION_LLM=anthropic` is a statement that this deployment plans and composes with a model. Without
+ * `ANTHROPIC_API_KEY` that statement cannot be honoured, and honouring it QUIETLY with the rule-based planner
+ * and the template replies is the drift this refuses: an agent that was configured to think answering with
+ * canned text, and nobody told. So: both set ⇒ true; neither ⇒ false (the deterministic paths are the
+ * configuration, not a fallback); the model named and the key missing ⇒ a thrown configuration error, at
+ * the first turn that would have needed it.
+ */
+export function llmConfigured(env: PlannerEnv): boolean {
+  if (env.ORCHESTRATION_LLM !== 'anthropic') return false;
+  if (!env.ANTHROPIC_API_KEY) throw new Error('ORCHESTRATION_LLM=anthropic but ANTHROPIC_API_KEY is not set — this deployment is configured to plan with a model and cannot; no rule-based fallback (ADR-0013)');
+  return true;
+}
+
 export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string }): AnswerComposer | null {
-  if (env.ORCHESTRATION_LLM !== 'anthropic' || !env.ANTHROPIC_API_KEY) return null;
+  if (!llmConfigured(env)) return null;
   return createAnthropicComposer({
-    client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY }),
+    client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! }),
     ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
     ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
   });
 }
 
 export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number }): { planner: Planner; kind: 'anthropic' | 'rule-based' } {
-  if (env.ORCHESTRATION_LLM === 'anthropic' && env.ANTHROPIC_API_KEY) {
-    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY });
+  if (llmConfigured(env)) {
+    const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
     const planner = createAnthropicPlanner({
       client,
       ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),

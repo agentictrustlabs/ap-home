@@ -22,7 +22,7 @@ import {
   type ConsultRequestV1,
 } from '@agenticprimitives/fabric/messaging';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
-import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
 
 export const CONSULT_TOOLS: ToolSpec[] = [
   {
@@ -87,7 +87,7 @@ export async function handleConsultRespond(
   io: ConsultIo,
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; answer: ConsultAnswerV1 | null; error?: string }> {
   const { request } = args;
-  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  const llmConfigured = isLlmConfigured(env);
   let playbook = DEFAULT_CONSULT_SKILL_MD;
   let displayName = '';
   if (llmConfigured) {

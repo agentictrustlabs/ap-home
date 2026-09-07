@@ -29,7 +29,7 @@ import {
   type ConsultCandidateV1,
   type ConsultOutcomeV1,
 } from '@agenticprimitives/fabric/messaging';
-import { selectPlanner, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
 import { gatherReferenceContext } from './endeavor-work-skill.js';
 import type { PublicGraphEnv } from './public-graph.js';
 
@@ -211,7 +211,7 @@ export async function handleDiscussionRespond(
   // not authority and not a second mechanism: a failed read just means the goal carries only the
   // trigger message and the default playbook. Also carries the org's steward-authored PLAYBOOK
   // (spec 327 §4b), which becomes the planner's system prompt with the tool contract appended.
-  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  const llmConfigured = isLlmConfigured(env);
   let topicContext = '';
   let playbook = NO_PLAYBOOK_NOTICE('missing');
   if (llmConfigured) {
@@ -428,7 +428,7 @@ export async function handleConsultSynthesis(
   input: ConsultSynthesisInput,
   io: DiscussionIo,
 ): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
-  const llmConfigured = env.ORCHESTRATION_LLM === 'anthropic' && !!env.ANTHROPIC_API_KEY;
+  const llmConfigured = isLlmConfigured(env);
   let playbook = NO_PLAYBOOK_NOTICE('missing');
   let topicContext = '';
   if (llmConfigured) {

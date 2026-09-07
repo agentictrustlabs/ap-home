@@ -5,6 +5,7 @@
 // binding here, a base URL in dev — Workers cannot fetch sibling workers.dev hosts, error 1042) and
 // WHICH vendor answers the one structured model call (the same Anthropic fetch client the planner uses,
 // so `orchestration-anthropic` stays the only vendor-touching package).
+import { llmConfigured } from './orchestration.js';
 import { createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
 import type { DiscoveryEnv } from './discovery-facets.js';
@@ -28,8 +29,8 @@ export interface ModelEnv {
 /** The one structured model call the plane may make (grounded SPARQL, record selection). `undefined`
  *  when no model is configured — the tools are then not offered rather than offered and broken. */
 export function structuredCallFor(env: ModelEnv): StructuredCall | undefined {
-  if (env.ORCHESTRATION_LLM !== 'anthropic' || !env.ANTHROPIC_API_KEY) return undefined;
-  const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY });
+  if (!llmConfigured(env)) return undefined;
+  const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
   const model = env.ORCHESTRATION_MODEL ?? 'claude-sonnet-4-6';
   return async ({ system, messages, tool, maxTokens }) => {
     const res = await client.messages.create({
