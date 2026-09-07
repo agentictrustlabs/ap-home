@@ -526,7 +526,9 @@ function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kin
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
     return (
       <div>
-        <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : `Done — ${r?.name ?? 'it'} is live.`}</div>
+        {/* Spec 367 §6 — the reply claims what the evidence ESTABLISHED and no more: an invitation is "submitted",
+            not "done"; a payment is "done, on chain". The words come from the agent's fulfillment record. */}
+        <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : reply.fulfillment ? (reply.fulfillment.established === 'submission' ? `Submitted — ${reply.fulfillment.words}.` : `Done — ${r?.name ? `${r.name} is live` : reply.fulfillment.words}.`) : `Done — ${r?.name ?? 'it'} is live.`}</div>
         {/* THE REFERENCE, whether or not an agent was created. This used to hang off `r.agent`, so a
             PAYMENT — whose result is a transfer, not an agent — reported "Done" and showed the person who
             had just moved money no transaction at all. The hash is carried in full for anything that

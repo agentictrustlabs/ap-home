@@ -34,7 +34,7 @@
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
@@ -199,6 +199,8 @@ export const ACCESS_LIST_TOOL: ToolSpec = {
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
   verbs: ['invite', 'add', 'bring'],
+  // Spec 367 §6 — an invitation is recorded, never a membership: the invitee's joining establishes that.
+  establishes: 'submission',
   description:
     'Invite an agent to join an organization or team as a member. Requires a mandate from the organization. '
     + 'Produces a signed access grant the invitee redeems when they join — it does NOT make them a member by itself. '
@@ -1679,6 +1681,8 @@ export type AskReplyVariant =
       alsoApprove?: Array<{ purpose: string; digest: Hex }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
+      /** Spec 367 §6 — what the acted step ESTABLISHED, in its outcome class's words; a surface says no more than this. */
+      fulfillment?: { capability: string; established: OutcomeClass; evidence?: string; words: string };
       /** Spec 361 — where the outcome LIVES: the acted capability's contract-declared binding, so a surface
        *  can offer 'open it' without a hand-kept capability→route table. Display only. */
       interaction?: { result?: string; navigationTarget?: string };
@@ -2638,7 +2642,20 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const ix = actedCap ? input.interactionFor?.[actedCap] : undefined;
       const effects = r.receipts.flatMap((rc) => rc.effects ?? []);
       const decided = r.receipts.flatMap((rc) => rc.decisions ?? []);
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      // Spec 367 §6 — FULFILLMENT: what the evidence established, said in the outcome class's own words.
+      // A submission ("invited", "asked") is reported as a submission — never as the outcome the person
+      // asked for, which somebody else still has to bring about.
+      const actedReceipt = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+      const established = actedReceipt?.binding?.expectedOutcome ?? 'authoritative';
+      const res = (r.result && typeof r.result === 'object' ? r.result : {}) as { txHash?: string };
+      const fulfillment = actedCap ? {
+        capability: actedCap, established,
+        ...(res.txHash ? { evidence: `tx ${res.txHash}` } : actedReceipt?.outputDigest ? { evidence: `receipt ${actedReceipt.stepRef}` } : {}),
+        words: established === 'submission'
+          ? `${CAPABILITY_WORDS[actedCap] ?? actedCap}: submitted and recorded — the outcome is not established until the other party acts`
+          : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`,
+      } : undefined;
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
@@ -2941,6 +2958,10 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
     // declares; the contract's are the domain author's). Behavioural: plan admission reads them to say an
     // instruction must be answered by an act — never which act, never authority.
     ...(builtin.verbs?.length || contract.verbs?.length ? { verbs: [...new Set([...(builtin.verbs ?? []), ...(contract.verbs ?? [])])] } : {}),
+    // Spec 367 §6 — what the step establishes: the contract's word, else the built-in's. A contract may
+    // LOWER it (authoritative → submission: "an invitation is not a membership") — that is honesty about
+    // the outcome, not authority; it may not raise a lookup into an act (a read stays a read).
+    ...(contract.establishes && (builtin.capability || contract.establishes === 'lookup') ? { establishes: contract.establishes } : builtin.establishes ? { establishes: builtin.establishes } : {}),
     // Raised only — never lowered.
     ...(builtin.risk || contract.risk
       ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
@@ -3199,8 +3220,31 @@ fanned out.`;
   ];
   const localInvoke = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
   trace.toolsExposed = tools.map((t) => t.id);
+  // Spec 367 §5 — THE EXECUTION BINDING on every receipt: the intent digest, the person, the agent the step
+  // is about, the resource and authority it names, the outcome class it was expected to establish, its
+  // stable operation identity, and where each party came from. Evidence only; no gate reads it.
+  const intentDigest = keccak256(toBytes(JSON.stringify({ goal: input.intent.goal, addressee: input.addressee ?? null, asker: input.person ?? null })));
+  const bindingFor = (rs: ResolvedStep): ExecutionBindingV1 => {
+    const sourceOf = (v: unknown): NonNullable<ExecutionBindingV1['argSources']>[string] => {
+      const low = String(v ?? '').toLowerCase();
+      const hit = [...resolved.values()].find((r) => r.agent.toLowerCase() === low);
+      if (!hit) return 'said';
+      return hit.ruleId ? 'decision' : hit.hint?.startsWith('remembered') ? 'memory' : hit.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(hit.raw) ? 'said' : 'resolver';
+    };
+    const parties = Object.entries(rs.args).filter(([, v]) => typeof v === 'string' && /^0x[0-9a-f]{40}$/i.test(v));
+    const subjectArg = rs.tool.subject ? rs.args[rs.tool.subject] : undefined;
+    return {
+      intentDigest, ...(input.person ? { principal: input.person.toLowerCase() } : {}),
+      ...(typeof subjectArg === 'string' ? { subject: subjectArg.toLowerCase() } : {}),
+      ...(rs.capability.resource ? { resource: rs.capability.resource } : {}),
+      ...(rs.capability.authority ? { authority: rs.capability.authority } : {}),
+      expectedOutcome: outcomeClassOf(rs.tool),
+      operationId: rs.idempotencyKey ?? `${rs.runRef}:${rs.stepRef}`,
+      ...(parties.length ? { argSources: Object.fromEntries(parties.map(([k, v]) => [k, sourceOf(v)])) } : {}),
+    };
+  };
   const result = await runIntent(input.intent, {
-    planner, tools,
+    planner, tools, bindingFor,
 
     // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
     // names its subject; the resolver has already turned the person's words into an address in THEIR
@@ -3267,6 +3311,7 @@ fanned out.`;
       planAdmission: planAdmission([
         instructionNeedsAct,
         noPlaceholders,
+        dependenciesProvided,
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);

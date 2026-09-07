@@ -52,7 +52,7 @@ for (const archetype of ARCHETYPES) {
         // A negative example must not be an INSTRUCTION for this act: admission must accept a read-only
         // plan for it (otherwise the sentence opens with this act's verb and the contract contradicts itself).
         const verdict = await admission.admit({ intent, plan: { steps: [{ toolId: 'ask.unsupported', args: {} }] }, tools: [...tools, { id: 'ask.unsupported', description: 'nothing' }] });
-        const demands = !verdict.admitted && verdict.violations.some((x) => x.code === 'instruction_answered_by_read' && x.message.includes(t.id));
+        const demands = !verdict.admitted && verdict.violations.some((x) => x.code === 'OUTCOME_NOT_ESTABLISHED' && x.message.includes(t.id));
         if (!demands) pass(`"${u.says}" is NOT ${t.id} (${u.isNot.slice(0, 60)}…)`);
         else fail(`"${u.says}" is declared NOT ${t.id}, but it opens with one of its verbs — the contract contradicts itself`);
       }

@@ -80,6 +80,8 @@ export interface HeldResolutionGrantV1 {
 }
 
 export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
+  // Spec 367 §6 — asking is a SUBMISSION: the answer is the owner's to give, and nothing is reachable until they do.
+  establishes: 'submission',
   id: 'resolution.invitation.request',
   description:
     'ASK SOMEONE FOR A WAY TO REACH AN AGENT OF THEIRS THAT HAS NO PUBLIC NAME. '

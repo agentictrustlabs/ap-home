@@ -96,6 +96,8 @@ export type AskReplyVariant =
       }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[];
+      /** Spec 367 §6 — what the act ESTABLISHED: a submission is said as a submission, never as the outcome. */
+      fulfillment?: { capability: string; established: 'lookup' | 'submission' | 'authoritative'; evidence?: string; words: string };
       /** Spec 361 — where the outcome lives, from the acted capability's CONTRACT (never a hand-kept
        *  capability→route table here). Resolved through the app's interaction registry. */
       interaction?: { result?: string; navigationTarget?: string };
