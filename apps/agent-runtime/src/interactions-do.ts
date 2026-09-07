@@ -1585,7 +1585,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1803,6 +1803,42 @@ export class InteractionsDO {
             const needsEnable = /record_scope_denied|scope|auth failed|no grant|grant_absent|not enabled/i.test(msg);
             return json({ ok: false, recordType, ...(needsEnable ? { needsEnable: true } : {}), error: msg });
           }
+        }
+
+        // ── THE PERSON'S OWN CONTACT PROFILE, MERGED (spec 323 W2 record `impact-profile`) ──
+        //
+        // MERGE, NEVER REPLACE. "My email is x@y.z" says one thing about a record that holds several,
+        // and a whole-document write would silently delete the phone number and address the person
+        // never mentioned. A partial update that erases what it did not name is data loss wearing the
+        // clothes of an edit.
+        //
+        // ONLY THE FIELDS THIS RECORD IS FOR. The allowlist is the shape (`ImpactContactProfile`): an
+        // op that accepted arbitrary keys would be a general vault-write path with a friendly name.
+        // PII, and the person's OWN: the DO is addressed at their SA and reachable only in-Worker,
+        // which is the same footing every other internal read here stands on.
+        if (op === 'internal.profile.merge') {
+          const ALLOWED = new Set(['firstName', 'lastName', 'email', 'phone', 'organizationName', 'organizationCountry', 'country', 'city']);
+          const patch = (body.fields ?? {}) as Record<string, unknown>;
+          const clean: Record<string, string> = {};
+          const refused: string[] = [];
+          for (const [k, v] of Object.entries(patch)) {
+            if (!ALLOWED.has(k)) { refused.push(k); continue; }
+            const value = String(v ?? '').trim();
+            if (value) clean[k] = value.slice(0, 200);
+          }
+          if (!Object.keys(clean).length) {
+            return json({ ok: false, error: refused.length ? `nothing to change — this record does not hold ${refused.join(', ')}` : 'no fields given' }, 400);
+          }
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          return this.serialize(async () => {
+            const current = (await this.readDoc<Record<string, unknown>>(g, 'impact-profile', null as never)) ?? {};
+            const next = { ...current, ...clean };
+            await this.writeDoc(g, 'impact-profile', next);
+            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.profile.merge', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'impact-profile' } });
+            // What CHANGED, so a reply can say it without reading the record back out — and the refused
+            // keys, because a field this record does not hold is a fact the person should hear.
+            return json({ ok: true, changed: Object.keys(clean), ...(refused.length ? { refused } : {}) });
+          });
         }
 
         // ── WHO CAN READ MY RECORDS, and the grant that says so (spec 341 §4.3, read by the Ask) ──

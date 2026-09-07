@@ -3,7 +3,7 @@
  *
  *   npx tsx scripts/verify-ask-payment-flow.mts
  *
- * alice asks "send bob 1 usdc"; the driver answers each prompt the way the Home surface does
+ * alice asks "send money to bob"; the driver answers each prompt the way the Home surface does
  * (choice → pick, signature → persona-sign, authority_required → mint the mandate) until done, then
  * prints the step receipt's `effects` — the spec 360 outcome: ok:true means the payee's PERSON (via the
  * on-chain ap:charteredUnder edge) was messaged and both parties hold the PaymentReceipt record.
@@ -21,16 +21,18 @@ const csrfRes=await fetch(`${HOME}/a2a/auth/csrf`,{headers:{origin:HOME}});
 const csrf=await j(csrfRes) as {token?:string}; const cookie=(csrfRes.headers.get('set-cookie')??'').split(';')[0];
 const ask=async(body:Record<string,unknown>)=>j(await fetch(`${HOME}/a2a/harness/ask`,{method:'POST',headers:{'content-type':'application/json',origin:HOME,cookie,'x-csrf-token':csrf.token??''},body:JSON.stringify({session:si.homeSession,addressee:si.agent,...body})}));
 
-let r=await ask({message:'send bob 1 usdc'});
+let r=await ask({message:'send money to bob'});
 const runRef=r.reply?.runRef;
 for (let turn=0; turn<8; turn++) {
   const k=r.reply?.kind;
   if (k==='prompt' && r.reply.prompt.kind==='data') {
     const f=r.reply.prompt.fields[0];
+    // A CHOICE is answered by picking; a TEXT field is answered the way a person types it — including
+    // the currency word, which is what "send money to bob" leads to and what used to loop.
     const pick=(f.choices??[]).find((c:{label:string})=>/^alice2|^nathan/.test(c.label))??(f.choices??[])[0];
-    if(!pick){console.log('data prompt no choices:',r.reply.prompt.prompt);break;}
-    console.log(`turn${turn}: answer ${f.name}=${pick.label}`);
-    r=await ask({runRef,supplied:[{stepRef:r.reply.prompt.stepRef,data:{[f.name]:pick.value}}]});
+    const value = pick ? pick.value : '1 usdc';
+    console.log(`turn${turn}: answer ${f.name}=${pick ? pick.label : value}`);
+    r=await ask({runRef,supplied:[{stepRef:r.reply.prompt.stepRef,data:{[f.name]:value}}]});
   } else if (k==='prompt' && r.reply.prompt.kind==='signature') {
     const pr=r.reply.prompt;
     console.log(`turn${turn}: sign approval`);

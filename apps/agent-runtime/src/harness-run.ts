@@ -1449,6 +1449,23 @@ export async function resolveStepArgs(
   where?: { stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[] },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
+
+  // ── A PLACEHOLDER IS AN OMISSION, IN EVERY ARGUMENT ──────────────────────────────────────────────
+  //
+  // Told not to invent values, a planner writes `payer: "<UNKNOWN>"` instead of leaving the argument
+  // out — and the resolver dutifully went looking for an agent by that name: *"I could not find
+  // <UNKNOWN>. Which agent do you mean? — nothing in the agents you are linked to … answers to
+  // <UNKNOWN>"*. The person is being asked to fix our plumbing, and the branch that would have offered
+  // them their own treasuries never ran, because the argument LOOKED answered.
+  //
+  // Swept ONCE, at the top, for every argument rather than only the numeric ones that had this guard
+  // before: an omission is an omission whatever it was going to name, and every question below reads
+  // better against an argument that is honestly absent.
+  const PLACEHOLDER = /^<.*>$|^(unknown|tbd|n\/a|none|null|undefined|todo|xxx+)$/i;
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === 'string' && PLACEHOLDER.test(v.trim())) delete out[k];
+  }
+
   // ── WHOSE AGENT ACTS ─────────────────────────────────────────────────────────────────────────────
   // The acting party is the one whose authority the step spends, and it is the argument most likely to be
   // silently wrong: it is rarely spoken aloud ("send alice 20 USDC" names neither the sender nor the

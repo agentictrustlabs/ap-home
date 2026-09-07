@@ -117,3 +117,26 @@ describe('an amount a person typed', () => {
     expect((raised as { request: { prompt: string } }).request.prompt).toContain('a tenner');
   });
 });
+
+// ── A PLACEHOLDER IS AN OMISSION (the live report: "I could not find <UNKNOWN>") ──
+describe('a planner placeholder in a party argument', () => {
+  const env = { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x'.padEnd(42, '1'), MOCK_USDC: '0x'.padEnd(42, '2') } as never;
+
+  it('is never looked up as a name — the argument is absent, and the question is the right one', async () => {
+    const seen: string[] = [];
+    const lookups = {
+      resolveName: async (n: string) => { seen.push(n); return null; },
+      // One treasury of theirs, so the acting-party branch can answer rather than ask.
+      readSubjectRecord: async (_s: string, r: string) => (r === 'relationships.data'
+        ? { orgs: { '0xaaa': { org: '0xaaa', agent: '0xaaa', name: 'mine.treasury', kind: 'person-treasury', parent: '0xb0b', relationship: 'steward', updatedAt: '' } } }
+        : null),
+    } as never;
+    const out = await resolveStepArgs(
+      { payer: '<UNKNOWN>', payee: 'bob', usdc: '2' },
+      env, lookups,
+      { stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute', authorityArg: 'payer', subject: '0xb0b' },
+    ).catch((e) => e);
+    // Whatever else happened, nobody went looking for an agent called "<UNKNOWN>".
+    expect(seen.some((n) => /unknown/i.test(n))).toBe(false);
+  });
+});
