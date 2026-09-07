@@ -28,11 +28,16 @@ import type { PickedRecipient } from '../../lib/recipient-directory';
 import { ApproveMessaging } from './ApproveMessaging';
 import { MessagingWireRequiredError } from '../../lib/messaging-send';
 import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
+import { ShareWayChip, ContinuePaymentChip } from './chat/ActionChips';
 
 
 const PENDING_STATES = ['submitted', 'triaged'];
 
 function ContextChip({ r, names }: { r: { kind: string; id: string; label?: string }; names?: Record<string, string> }) {
+  // Spec 364 — a message that CARRIES a decision renders it here, where it was read. A pointer, never
+  // authority: sharing still signs a grant, and finishing a payment still takes a mandate.
+  if (r.kind === 'resolution-request') return <ShareWayChip refId={r.id} {...(r.label ? { label: r.label } : {})} />;
+  if (r.kind === 'payment-continue') return <ContinuePaymentChip refId={r.id} {...(r.label ? { label: r.label } : {})} {...(names ? { names } : {})} />;
   if (r.kind === 'discussion-topic') {
     // Restricted-topic invitation (tbox/messaging.ttl §Topic participation): the id is
     // `<orgSA>/<topicId>`. "Join discussion" converts the invitation into a DiscussionParticipation

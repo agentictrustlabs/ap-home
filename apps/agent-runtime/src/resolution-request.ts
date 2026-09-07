@@ -28,8 +28,12 @@ export function actionLink(homeOrigins: string | undefined, path: string): strin
 export interface ResolutionRequestDeps {
   /** The Home this agent's people use, for links a person can actually follow. */
   homeOrigin?: string;
-  sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) =>
-    Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
+  sendDirectMessage?: (input: {
+    sender: Address; recipient: Address; bodyText: string; session: string;
+    /** Spec 364 — typed pointers the recipient's surface renders as the decision itself. Display and
+     *  routing metadata, never authority (spec 309 §4.2). */
+    contextRefs?: Array<{ kind: string; id: string; label?: string }>;
+  }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Appends the typed request to the OWNER's own request record, so their Home can act on it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   resolveName?: (name: string) => Promise<string | null>;
@@ -107,8 +111,19 @@ export function resolutionRequestInvoker(deps: ResolutionRequestDeps, person?: A
     // common one for a first payment, and the one where "approve it in your Home" reads as nonsense.
     const where = actionLink(deps.homeOrigin, wants === 'treasury' ? '/treasuries' : '/agents');
     // A link that cannot be opened is worse than none: it reads as an instruction and goes nowhere.
-    const note = `I'd like a way to reach your ${wants} — ${purpose}. ${where ? `Decide here: ${where} — i` : 'I'}f you have a ${wants}, approving lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
-    const sent = session ? await deps.sendDirectMessage?.({ sender: person, recipient: owner, bodyText: note, session }) : undefined;
+    // THE DECISION TRAVELS WITH THE MESSAGE (spec 364). The words used to end in a link to another page:
+    // the person read a request in one place and had to go and find it in another, which is how one
+    // intent became two flows and both were abandoned. The `contextRef` is a POINTER — display and
+    // routing metadata, never authority (spec 309 §4.2) — and the Home renders it as the decision
+    // itself, taken where it was read. Approving still runs every gate the page ran.
+    const note = `I'd like a way to reach your ${wants} — ${purpose}. If you have a ${wants}, approving lets me send to it; if you do not, you can create one first. Either way it gives me no control over it.`;
+    const sent = session ? await deps.sendDirectMessage?.({
+      sender: person, recipient: owner, bodyText: note, session,
+      // WHO is asking and FOR WHAT — enough for the recipient's surface to offer the decision inline.
+      // The id is the pair the owner's own request record is keyed by, so the chip acts on a request
+      // THEY hold rather than on anything the message asserts.
+      contextRefs: [{ kind: 'resolution-request', id: `${person.toLowerCase()}/${wants}`, label: `a way to reach your ${wants}` }],
+    }) : undefined;
 
     return {
       requested: true, owner, wants, purpose,

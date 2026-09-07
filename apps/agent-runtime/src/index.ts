@@ -1572,6 +1572,34 @@ app.get('/resolution/issued', async (c) => {
 //
 // What it produces permits DISCOVERY and nothing else (ADR-0056). After this the requester knows an
 // address; moving anything from it still needs their own mandate, judged by the verifier.
+// GET /resolution/candidates?wants=treasury — WHICH OF MINE could I share?
+//
+// The person deciding is the only one who can answer "which of my treasuries do they get a way to", and
+// they should be asked once, in the place they are standing. When their own preference already answers
+// it — `ap:primaryPayee`, the account they marked (spec 363) — the surface can skip the question
+// entirely, which is what makes sharing a single press from a message.
+//
+// THEIR OWN TREE ONLY, and no authority anywhere near it: this lists agents they hold, so that they can
+// disclose one. Disclosure is not permission (ADR-0056) — a grant answers "may this party discover how
+// to reach it", never "may they use it".
+app.get('/resolution/candidates', async (c) => {
+  const token = (c.req.header('authorization') ?? '').replace(/^Bearer /i, '');
+  const who = await verifyHomeSession(token, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const wants = (c.req.query('wants') ?? 'treasury').toLowerCase();
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const mine = await deps.charteredAgents?.(String(who.sa).toLowerCase(), wants).catch(() => []) ?? [];
+  const PAYEE = 'https://agenticprimitives.dev/ns/core#primaryPayee';
+  return c.json({
+    ok: true,
+    candidates: mine.map((m) => ({
+      agent: m.agent, ...(m.name ? { name: m.name } : {}),
+      // The mark they already made, so a surface can stop asking a question they answered once.
+      ...(m.roles?.includes(PAYEE) || m.primary ? { primary: true } : {}),
+    })),
+  });
+});
+
 app.post('/resolution/grant', async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; requester?: string; targetAgent?: string; wants?: string;
@@ -1707,14 +1735,31 @@ app.post('/resolution/grant', async (c) => {
   // TELL THEM. A grant delivered silently into someone's vault is a thing they have no reason to look
   // for: they asked days ago, and nothing about their Home changed. The answer travels the way the
   // question did — as a message from the person who decided, sent on their own interactions plane.
-  const backTo = actionLink(c.env.ALLOWED_ORIGINS, '/treasuries');
-  const note = `You can reach my ${wants} now — I've sent you a way to it.${backTo ? ` Finish what you were doing here: ${backTo} —` : ''} it lets you send there; it gives you no control over it.`;
+  // WHAT THEY WERE TRYING TO DO, read from the request they sent. It carried the figure precisely so the
+  // answer could finish the sentence rather than send them back to retype it — one intent, one flow.
+  const askedFor = await (async () => {
+    const doc = await callInteractionsInternal(c.env, owner, 'internal.coordination.vaultRead', { recordType: 'resolution.requests' }).catch(() => null);
+    const rows = ((doc as { data?: { requests?: Array<Record<string, unknown>> } } | null)?.data?.requests ?? []);
+    const hit = [...rows].reverse().find((r) => String(r.requester ?? '').toLowerCase() === requester && String(r.wants ?? '') === wants);
+    const usdc = String(hit?.amount ?? '').trim();
+    return /^\d+(\.\d+)?$/.test(usdc) ? usdc : '';
+  })();
+  const ownerLabel = ownerName ?? `${owner.slice(0, 6)}…${owner.slice(-4)}`;
+  const note = askedFor
+    ? `You can reach my ${wants} now — I've sent you a way to it. Finish sending the ${askedFor} USDC whenever you like; it lets you send there and gives you no control over it.`
+    : `You can reach my ${wants} now — I've sent you a way to it. It lets you send there; it gives you no control over it.`;
   const messaged = await (async () => {
     try {
       const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
       const res = await stub.fetch(new Request(`https://do/interactions/${owner}/messaging.send`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session: body.session, recipient: requester, bodyText: note }),
+        body: JSON.stringify({
+          session: body.session, recipient: requester, bodyText: note,
+          // THE ANSWER CARRIES THE NEXT STEP (spec 364). Their surface renders this as "finish it" —
+          // the same sentence they started with, now that it can resolve. A pointer, never authority:
+          // the payment still needs their mandate, and every gate runs again.
+          ...(askedFor ? { contextRefs: [{ kind: 'payment-continue', id: `${owner}/${askedFor}`, label: `${askedFor} USDC to ${ownerLabel}` }] } : {}),
+        }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean };
       return res.ok && out.ok !== false;
@@ -2632,11 +2677,11 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
     // A direct message rides the SENDER's own interactions plane — the same `messaging.send` the Home's
     // message box posts to, so there is one conversation per counterparty and one place the bodies live.
-    sendDirectMessage: async ({ sender, recipient, bodyText, session }) => {
+    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
       const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/messaging.send`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText }),
+        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText, ...(contextRefs?.length ? { contextRefs } : {}) }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; messageId?: string };
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };

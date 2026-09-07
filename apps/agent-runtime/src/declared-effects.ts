@@ -35,7 +35,10 @@ export interface EffectDeps {
   /** Write ONE record into a principal's own vault (the internal, allowlisted op). */
   writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Deliver a direct message — the thread projection of a record. */
-  sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
+  sendDirectMessage?: (input: {
+    sender: Address; recipient: Address; bodyText: string; session: string;
+    contextRefs?: Array<{ kind: string; id: string; label?: string }>;
+  }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** A name for an address, when one is known. Display only; absence is not an error. */
   nameFor?: (address: string) => Promise<string | null>;
   /** The owner an agent is chartered under (`ap:charteredUnder`, on chain). A payee treasury's receipt

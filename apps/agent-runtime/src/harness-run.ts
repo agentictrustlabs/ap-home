@@ -652,7 +652,11 @@ export interface HarnessDeps {
    *  coordination problem we do not need to have, and it answered with a paragraph instead of acting. */
   resolveName?: (name: string) => Promise<string | null>;
   /** Send a direct message through the sender's own interactions plane. */
-  sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
+  sendDirectMessage?: (input: {
+    sender: Address; recipient: Address; bodyText: string; session: string;
+    /** Spec 364 — typed pointers the recipient's surface renders as an action. Never authority. */
+    contextRefs?: Array<{ kind: string; id: string; label?: string }>;
+  }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Public directory search — for QUESTIONS about who exists (`find_agents`), never to fill a party in an
    *  action: a directory hit proves an agent exists, not that this person knows them (spec 352 §7). */
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
@@ -678,7 +682,9 @@ export interface HarnessDeps {
   readRecords?: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   /** The agents chartered under an owner, from the on-chain `ap:charteredUnder` edges (spec 355 W2).
    *  Public: the half of "what does this agent hold" that answers for someone else's agents. */
-  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string }>>;
+  /** The agents chartered under an owner — with the modelled ROLES each carries (`ap:primaryPayee`,
+   *  `ap:primaryPayer`), so a caller can stop asking a question its owner already answered. */
+  charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean; roles?: readonly string[] }>>;
   /** The same read with its failure reason — see `membership-read.ts` for why the difference matters. */
   readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */

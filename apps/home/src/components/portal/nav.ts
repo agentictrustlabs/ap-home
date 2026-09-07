@@ -203,6 +203,15 @@ export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): Se
     ? [
         { id: 'agents', label: 'Agents', href: '/agents', Icon: BuildingIcon, status: 'live' },
         { id: 'treasuries', label: 'Treasuries', href: '/treasuries', Icon: LandmarkIcon, status: 'live' },
+        // Spec 363 W4 — the people you live with. It sits under "You steward" because that is where a
+        // person looks for the things that are theirs to keep, and it is the same shape as the rest of
+        // this pane: a surface ABOUT something other than a class of agent (Treasuries is about money,
+        // Alliances about a relationship between organizations, this about a household).
+        //
+        // A HOUSEHOLD IS NOT AN AGENT and this row does not make it one (ADR-0046, tbox/household.ttl):
+        // it is a body of people you keep a private record of. Nothing here is chartered, custodied or
+        // deployed, and the page says so.
+        { id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' },
         { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
       ]
     : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
@@ -318,9 +327,9 @@ export function buildSettingsPane(
  *  agent, and a per-agent item for a non-per-agent fact invents a distinction that does not exist. */
 export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   const items: NavItem[] = [{ id: 'you', label: 'Your profile', href: '/profile', Icon: UserIcon, status: 'live' }];
-  // Spec 363 W4 — the people you live with, beside your profile because it is the same kind of fact:
-  // private, yours, and about who you are rather than what you steward.
-  items.push({ id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' });
+  // Household is NOT here: it moved to the Stewardship pane, beside Treasuries and Alliances, because
+  // that is where a person looks for the things that are theirs to keep — and a nav item in two places
+  // is two answers to "where does this live".
   if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
   if (wl.services.connectedApps) {
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });
