@@ -222,6 +222,7 @@ export function catalogFor(agentType: string | undefined): CatalogArchetype[] {
 // / church keep their own suffix. The ceremony passes the managed agent's `.kind`; this narrows the
 // catalog to only what that class may become.
 export const KIND_TO_TYPE_SLUG: Record<string, string> = {
+  person: 'person',
   'person-treasury': 'treasury',
   'org-treasury': 'treasury',
   workspace: 'service',
