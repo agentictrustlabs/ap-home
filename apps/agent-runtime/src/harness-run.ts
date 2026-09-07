@@ -1787,6 +1787,10 @@ export function affiliationAskOf(goal: string): { type: string | null } | null {
   const asksList = /^(what|which|list|show|do i|am i)\b/.test(g);
   if (!mine || !about || !asksList) return null;
   if (/\bmembers?\b.*\b(of|in|on)\b/.test(g)) return null; // a roster question, not "what am I in"
+  // NO TYPE WORD ⇒ only the "part of / belong to / member of" phrasing is this question. "What records do
+  // I hold" opens the same way and is a records question — the live scenario set caught this shortcut
+  // taking it (spec 367 W2), which is what the set is for. A shortcut that grows is a planner in disguise.
+  if (!typeWord && !/\b(part of|belong to|member of|belong)\b/.test(g)) return null;
   return { type: typeWord ? words[typeWord]! : null };
 }
 

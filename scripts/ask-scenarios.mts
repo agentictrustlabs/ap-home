@@ -65,11 +65,16 @@ for (const archetype of ARCHETYPES) {
     const H = { 'content-type': 'application/json', origin: HOME, cookie: cookie!, 'x-csrf-token': csrf.token ?? '' };
     const s = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: process.env.ASK_SCENARIO_PERSONA ?? 'alice', client_id: 'demo-jp' }) }));
     const session = String(s.homeSession); const agent = String(s.agent).toLowerCase();
+    // A SELF-ACTING act (a capability with no mandate type — a profile edit, a household record) EXECUTES
+    // when asked: the session is its authority. Asking it live would change the persona's records on every
+    // run (it did, once: phone and city rewritten by the examples). Those are checked offline only.
+    const selfActing = (t: DefinitionToolV1): boolean => !!t.capability && !def.requiredMandateTypes.some((m) => m.endsWith(`:${t.capability!.id}`) || m === t.capability!.id);
     for (const t of withUtterances) {
+      if (selfActing(t)) { for (const u of t.utterances ?? []) if (u.isNot === undefined) console.log(`  · live "${u.says}" → ${t.id} is self-acting and would execute — offline only`); continue; }
       for (const u of t.utterances ?? []) {
         const r = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session, addressee: agent, message: u.says }) }));
-        const reply = (r.reply ?? {}) as { kind?: string; capability?: string; prompt?: { toolId?: string }; evidence?: Array<{ toolId?: string }>; error?: string; text?: string };
-        const named = reply.capability === t.id || reply.prompt?.toolId === t.id || (reply.evidence ?? []).some((e) => e.toolId === t.id) || (reply.kind === 'answer' && !t.capability && String(reply.text ?? '').length > 0 && (reply.evidence ?? []).length === 0 && t.id === 'organization.membership.list');
+        const reply = (r.reply ?? {}) as { kind?: string; capability?: string; prompt?: { toolId?: string }; evidence?: Array<{ toolId?: string }>; receipts?: Array<{ capability?: { id?: string } }>; error?: string; text?: string };
+        const named = reply.capability === t.id || reply.prompt?.toolId === t.id || (reply.evidence ?? []).some((e) => e.toolId === t.id) || (reply.receipts ?? []).some((x) => x.capability?.id === t.id) || (reply.kind === 'answer' && !t.capability && String(reply.text ?? '').length > 0 && (reply.evidence ?? []).length === 0 && t.id === 'organization.membership.list');
         if (u.isNot === undefined ? named : !named) pass(`live "${u.says}" → ${reply.kind}${reply.capability ? ` ${reply.capability}` : ''}${reply.prompt?.toolId ? ` ${reply.prompt.toolId}` : ''}`);
         else fail(`live "${u.says}" → ${reply.kind} ${reply.capability ?? reply.prompt?.toolId ?? (reply.evidence ?? []).map((e) => e.toolId).join(',') ?? reply.error ?? ''} — expected ${u.isNot === undefined ? '' : 'NOT '}${t.id}`);
       }

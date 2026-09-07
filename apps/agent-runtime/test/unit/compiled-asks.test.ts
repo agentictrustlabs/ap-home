@@ -12,6 +12,9 @@ describe('affiliationAskOf — what am I part of, by type', () => {
     expect(affiliationAskOf('what am I a part of')).toEqual({ type: null });
     expect(affiliationAskOf('who are the members of missio nexus')).toBeNull();
     expect(affiliationAskOf('send bob 2 usdc')).toBeNull();
+    // Caught live by check:ask-scenarios: a records question opens the same way and is not this.
+    expect(affiliationAskOf('what records do I hold')).toBeNull();
+    expect(affiliationAskOf('what receipts do I have')).toBeNull();
   });
 });
 
