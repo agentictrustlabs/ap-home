@@ -16,7 +16,10 @@ import { buildUserMenu } from './nav';
 import { AddressChip } from '../shared/AddressChip';
 
 export function SidebarFootMenu() {
-  const { agentName, agentAddress, signOut } = useSession();
+  const { agentName, agentAddress, personName, signOut } = useSession();
+  // The profile name leads (initial + label) when given; the handle is the fallback and, when both
+  // exist, the handle stays as the second line of the menu heading.
+  const shown = personName ?? agentName;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -29,7 +32,7 @@ export function SidebarFootMenu() {
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
-  const initial = (agentName ?? '?').trim().charAt(0).toUpperCase() || '?';
+  const initial = (shown ?? '?').trim().charAt(0).toUpperCase() || '?';
   const item: React.CSSProperties = {
     display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
     padding: '.45rem .55rem', borderRadius: 8, color: 'var(--color-text-body)', fontSize: '.875rem', textDecoration: 'none',
@@ -42,7 +45,7 @@ export function SidebarFootMenu() {
         data-testid="sidebar-person"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={agentName ?? 'Account'}
+        aria-label={shown ?? 'Account'}
         onClick={() => setOpen((v) => !v)}
         style={{
           display: 'flex', alignItems: 'center', gap: '.5rem', width: '100%', background: 'none',
@@ -54,7 +57,7 @@ export function SidebarFootMenu() {
           display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 13, flexShrink: 0,
         }}>{initial}</span>
         <span style={{ fontSize: '.85rem', fontWeight: 600, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {agentName ?? 'Account'}
+          {shown ?? 'Account'}
         </span>
       </button>
       {open && (
@@ -68,7 +71,8 @@ export function SidebarFootMenu() {
             boxShadow: '0 10px 30px rgb(15 26 42 / 14%)', padding: 8, zIndex: 60,
           }}
         >
-          <p style={{ padding: '6px 10px 2px', margin: 0, fontWeight: 700, fontSize: '.85rem' }}>{agentName ?? '—'}</p>
+          <p style={{ padding: '6px 10px 2px', margin: 0, fontWeight: 700, fontSize: '.85rem' }}>{shown ?? '—'}</p>
+          {personName && agentName && <p style={{ padding: '0 10px 2px', margin: 0, fontSize: '.75rem', opacity: 0.65 }}>{agentName}</p>}
           {agentAddress && <div style={{ padding: '0 10px 6px' }}><AddressChip address={agentAddress} size="sm" /></div>}
           <div style={{ height: 1, background: 'var(--color-border)', margin: '4px 0' }} />
           <button type="button" role="menuitem" data-testid="sidebar-signout" style={{ ...item, color: 'var(--color-danger, #b3261e)' }} onClick={signOut}>

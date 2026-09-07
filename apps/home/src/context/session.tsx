@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '../connect-client';
+import { loadImpactProfile } from '../profile-store';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
@@ -26,6 +27,11 @@ interface SessionCtx {
   /** The agent's address, derived from `profile.agent` (CAIP-10 tail). */
   agentAddress: Address | null;
   agentName: string | null;
+  /** The person's PROFILE name ("Rich Pedersen") from their own vault profile (first + last), when they
+   *  have given one — the header and the foot of the nav lead with it and fall back to the handle.
+   *  Best-effort and private: read over the person's own session, never published; null when the vault
+   *  key or interactions plane is not yet active (the handle carries the header until it is). */
+  personName: string | null;
   /** spec 257 Phase 1.5 — is the SA deployed on-chain? Distinguishes a counterfactual fresh-Google
    *  SA (false → secure-home) from a deployed-but-nameless deferred home (true → portal). */
   agentDeployed: boolean;
@@ -35,6 +41,8 @@ interface SessionCtx {
   openSession(token: string, via: string, fresh: boolean): Promise<BasicProfile | null>;
   signOut(): void;
   refreshProfile(): Promise<void>;
+  /** Re-read the profile name after the person edits their profile. */
+  refreshPersonName(): Promise<void>;
 }
 
 // Spec 311 — the authority deployment epoch. Mirrors @agenticprimitives/connect-client's
@@ -98,6 +106,7 @@ export function hasSessionHandoff(): boolean {
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<BasicProfile | null>(null);
+  const [personName, setPersonName] = useState<string | null>(null);
   // 'restoring' while we validate a stored session, finish a Google ?code exchange, or consume `#session=`.
   const [phase, setPhase] = useState<SessionPhase>(() => {
     if (typeof window === 'undefined') return 'restoring';
@@ -144,6 +153,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     if (!session) return;
     setProfile(await fetchProfile(session.token));
   }, [session]);
+
+  // The profile name is a vault read (private tier); a home whose vault key or interactions plane is
+  // not active yet simply has none — the handle leads until then. Never an error the shell surfaces.
+  const addrOf = (p: BasicProfile | null) => (p?.agent ? (p.agent.split(':').pop() as Address) : null);
+  const readPersonName = useCallback(async (p: BasicProfile | null) => {
+    const addr = addrOf(p);
+    if (!addr || !p?.deployed) { setPersonName(null); return; }
+    try {
+      const stored = await loadImpactProfile(addr);
+      const c = stored.contact ?? {};
+      const full = [c.firstName, c.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+      setPersonName(full || null);
+    } catch {
+      setPersonName(null);
+    }
+  }, []);
+  const refreshPersonName = useCallback(async () => { await readPersonName(profile); }, [profile, readPersonName]);
+  useEffect(() => { if (phase === 'authed') void readPersonName(profile); }, [phase, profile, readPersonName]);
 
   // On mount: handle a Google return (?code / connect_status), else restore a stored session.
   useEffect(() => {
@@ -340,6 +367,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     openSession,
     signOut,
     refreshProfile,
+    personName,
+    refreshPersonName,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

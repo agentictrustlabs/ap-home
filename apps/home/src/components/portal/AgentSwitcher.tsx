@@ -22,7 +22,7 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const lc = (s: string) => s.toLowerCase();
 
 export function AgentSwitcher() {
-  const { session, profile, agentAddress, agentName } = useSession();
+  const { session, profile, agentAddress, agentName, personName } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -38,7 +38,10 @@ export function AgentSwitcher() {
 
   if (!session || !profile) return null;
 
-  const personLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
+  // The PROFILE name leads when the person gave one ("Rich Pedersen"); the handle is the fallback, and it
+  // stays visible as the person row's sub-line so the canonical name is never hidden.
+  const handleLabel = agentName ? nameLabel(agentName) : agentAddress ? short(agentAddress) : 'You';
+  const personLabel = personName ?? handleLabel;
   const lineageFor = (a: (typeof agents)[number]) =>
     // The KIND WORD leads (workspace · you → …): every row answers "what class of agent is this"
     // in place, the same way org rows lead with organization/team.
@@ -121,7 +124,7 @@ export function AgentSwitcher() {
         <Row
           icon={<UserIcon size={17} />}
           title={personLabel}
-          sub="person · your home"
+          sub={personName && agentName ? `person · ${handleLabel}` : "person · your home"}
           activeRow={active.kind === 'person'}
           onClick={() => go('/')}
         />

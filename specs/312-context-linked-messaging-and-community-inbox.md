@@ -181,6 +181,25 @@ the five pillars:
 5. **Trust cues, not trust noise** — signature chip (Signal safety-number analog), audit-ref popover,
    vault-residency footnote; verification failures are loud, successes are quiet.
 
+## 7a. The Welcome topic (shipped 2026-09-07)
+
+Every organization board is DEFAULTED with a **Welcome** topic (`InteractionsDO.ensureWelcomeTopic`): created by the
+organization itself, once, the first time the board is read if none exists (title match is case-insensitive, so a
+steward's own "welcome" topic is kept). The organization's agent posts one line into it as people arrive — Discord's
+`#welcome` — from three hooks in the DO, all best-effort (a board that cannot be written never fails the act it
+narrates) and all authored by the org's public name, never by the caller:
+
+| Hook (DO op) | Line |
+| --- | --- |
+| `invite.put` of a pending `org.invite:agent:<sa>` / token record | `📨 <inviter> invited <name> to join.` (email invitations name nobody: `An invitation went to someone, by email.` — the address is never on the board) |
+| `org.recordMembership` | `👋 <name> joined.` |
+| `internal.invite.decline` (the "Not interested" link, spec 365) | `🙅 <name> is not interested in joining.` |
+
+Names are the org-local name, else the public name, else a short address. **The line is narration, never authority**:
+the invitation and the membership are the records the substrate reads (ADR-0041); a reader that took the board as a
+roster would be trusting the room's small talk. `serialize` is not re-entrant, so the hooks that already hold the DO's
+write lock (`org.recordMembership`) pass `locked = true`. Test: `interactions-do-channels.test.ts` "the Welcome topic".
+
 ## 8. Security invariants
 
 1. Context refs are covered by the envelope hash — a relabeled/re-anchored message fails verification.

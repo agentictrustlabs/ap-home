@@ -36,7 +36,7 @@ export function PersonalInfoPanel({
   onSaved?: (contact: ImpactContactProfile) => void;
   onNeedsVaultKey?: () => void;
 }) {
-  const { session, profile: homeProfile } = useSession();
+  const { session, profile: homeProfile, refreshPersonName } = useSession();
   const [stored, setStored] = useState<ImpactStoredProfile | null>(null);
   const [contact, setContact] = useState<ImpactContactProfile>({});
   const [loading, setLoading] = useState(true);
@@ -142,6 +142,7 @@ export function PersonalInfoPanel({
       setContact(savedContact);
       setSavedNotice('Saved to your encrypted vault');
       onSaved?.(savedContact);
+      void refreshPersonName();
     } catch (err) {
       if (err instanceof VaultKeyUnauthorizedError) {
         setNeedsVaultKey(true);

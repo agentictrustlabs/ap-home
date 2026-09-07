@@ -39,6 +39,9 @@ import type { Address } from 'viem';
 export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
   'organization.team.create',
   'organization.create',
+  // A household is an organization of kin (spec 368 — HouseholdAgent ⊑ OrganizationAgent): chartering one
+  // is the same class of step as chartering an organization or a team.
+  'household.create',
   'organization.membership.invite',
   'treasury.create',
   'treasury.payment.execute',

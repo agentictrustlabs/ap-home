@@ -1092,6 +1092,65 @@ export class InteractionsDO {
     return this.verifyWire(wire, principal, sessionSa);
   }
 
+  // ── THE WELCOME TOPIC — every organization board opens with one, and it narrates arrivals ──────────
+  //
+  // A board with no first topic is a room with no door: the first thing a person sees should tell them
+  // where they are. So every organization's board is DEFAULTED with a "Welcome" topic, created the first
+  // time the board is read if it is missing, and the organization's own agent posts a line into it as
+  // invitations go out and people join or decline. Those lines are NOT authority — an invitation and a
+  // membership are still the records the substrate reads; this is the room saying so out loud.
+  private async ensureWelcomeTopic(grant: IncomingDelegation, principal: string, locked = false): Promise<ChannelV1 | null> {
+    const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+    const existing = index.find((c) => c.title.trim().toLowerCase() === 'welcome');
+    if (existing) return existing;
+    const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as ChannelV1['descriptor']['owner'];
+    const create = async () => {
+      const fresh = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+      const again = fresh.find((c) => c.title.trim().toLowerCase() === 'welcome');
+      if (again) return again;
+      const r = createBoardChannel(fresh, { contextId: principal, owner: orgCaip, title: 'Welcome', createdBy: 'the organization', participationPolicy: 'open', members: [], creatorSa: principal });
+      if (!r.ok) return null;
+      await this.writeDoc(grant, CONVERSATION_INDEX_RESOURCE, fresh);
+      return fresh.find((c) => c.title.trim().toLowerCase() === 'welcome') ?? null;
+    };
+    // `locked` = the caller already holds the DO's write lock (serialize is not re-entrant).
+    return locked ? create() : this.serialize(create);
+  }
+
+  /** A line in the Welcome topic, authored BY THE ORGANIZATION (its public name), never by a caller.
+   *  Best-effort: a board that cannot be written never fails the act it narrates. `locked` as above. */
+  private async postWelcome(grant: IncomingDelegation, principal: string, bodyText: string, locked = false): Promise<void> {
+    try {
+      const topic = await this.ensureWelcomeTopic(grant, principal, locked);
+      if (!topic) return;
+      const names = await this.resolvePublicNames([principal]).catch(() => ({} as Record<string, string | null>));
+      const orgName = names[principal.toLowerCase()] ?? 'the organization';
+      const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
+      const post = async () => {
+        const messages = await this.readDoc<ChannelMessageEntryV1[]>(grant, TOPIC_RESOURCE(topic.descriptor.id), []);
+        const composed: ChannelV1[] = [{ ...topic, messages }];
+        const r = await appendBoardPost(composed, { channelId: topic.descriptor.id, from: orgCaip, authorName: orgName, bodyText, actor: orgCaip });
+        if (!r.ok) return;
+        const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
+        await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
+        await this.writeDoc(grant, TOPIC_RESOURCE(topic.descriptor.id), composed[0]!.messages);
+        await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.welcomePost', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'conversation', id: topic.descriptor.id } });
+      };
+      await (locked ? post() : this.serialize(post));
+    } catch (e) {
+      console.log(`[welcome] ${principal}: could not post — ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** How a member is called on the board: their org-local name, else their public name, else a short address. */
+  private async boardNameFor(grant: IncomingDelegation, agent: string): Promise<string> {
+    const a = agent.toLowerCase();
+    const local = (await this.readLocalNames(grant).catch(() => ({} as Record<string, string>)))[a];
+    if (local) return local;
+    const pub = (await this.resolvePublicNames([a]).catch(() => ({} as Record<string, string | null>)))[a];
+    return pub ?? `${a.slice(0, 6)}…${a.slice(-4)}`;
+  }
+
   private async readLocalNames(grant: IncomingDelegation): Promise<Record<string, string>> {
     const raw = await this.readDoc<Record<string, string>>(grant, LOCAL_NAMES_RESOURCE, {});
     return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -1791,6 +1850,7 @@ export class InteractionsDO {
             if (twin && twin.status !== 'redeemed') await this.vaultFor(dg).write({ owner: '', resource: `org.invite:agent:${delegate}`, data: { ...twin, status: 'declined', declinedAt } });
           }
           await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: new Date(declinedAt).toISOString(), action: 'interactions.invite.declined', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'invitation', id: token.slice(0, 8) } });
+          if (st0.grant) await this.postWelcome(st0.grant, principal, `🙅 ${/^0x[0-9a-f]{40}$/.test(delegate) ? await this.boardNameFor(st0.grant, delegate) : 'An invitee'} is not interested in joining.`);
           return json({ ok: true, status: 'declined', changed: true, ...(typeof rec.invitedBy === 'string' ? { invitedBy: rec.invitedBy } : {}), ...(typeof rec.orgName === 'string' ? { orgName: rec.orgName } : {}) });
         }
         if (op === 'internal.assistantSkill.get') {
@@ -2826,6 +2886,16 @@ export class InteractionsDO {
             return json({ ok: true, merged: merged.length });
           }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
+          // The room says so (Welcome topic): an invitation went out — to a named agent, or by email (the
+          // address itself is never on the board; the record never held it either).
+          if (op === 'invite.put' && st0.grant) {
+            const data = (body.data && typeof body.data === 'object' ? body.data : {}) as { invitedBy?: string; displayName?: string; status?: string };
+            if (!data.status || data.status === 'pending') {
+              const by = typeof data.invitedBy === 'string' && /^0x[0-9a-f]{40}$/i.test(data.invitedBy) ? await this.boardNameFor(st0.grant, data.invitedBy) : null;
+              const who = resource.startsWith('org.invite:agent:') ? await this.boardNameFor(st0.grant, resource.slice('org.invite:agent:'.length)) : (data.displayName || 'someone, by email');
+              await this.postWelcome(st0.grant, principal, `📨 ${by ? `${by} invited` : 'An invitation went to'} ${who}${by ? ' to join' : ''}.`);
+            }
+          }
           return json({ ok: true });
         }
         if (op === 'content.get' || op === 'content.put') {
@@ -3057,6 +3127,8 @@ export class InteractionsDO {
         }
         return this.serialize(async () => {
           await this.writeDoc(grant, `org.membership:member:${member}`, record);
+          // The room says so: a new member is announced in the Welcome topic (best-effort, never gating).
+          await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined.`, true);
           return json({ ok: true, member });
         });
       }
@@ -3194,6 +3266,8 @@ export class InteractionsDO {
           return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
         }
         const steward = presence.steward;
+        // Every board opens with a Welcome topic (created here if the organization has none yet).
+        await this.ensureWelcomeTopic(grant, principal).catch(() => null);
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
         const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};

@@ -4,12 +4,21 @@ import { agentClassOf, serviceRoleOf, orgKindWordOf, creatableKinds } from './ag
 import { typedTldForKind } from '../connect-client';
 
 const all = () => true;
+// The suffix a kind names regardless of provisioning (mirrors typedTldForKind's own table).
+const kindSuffix = (k: string) => ({ org: 'org', circle: 'circle', church: 'church', household: 'household', team: 'team', workspace: 'workspace', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc' } as Record<string, string>)[k];
 
 describe('chartering an agent', () => {
   it('offers every typed root, and each kind claims the suffix that names its type', () => {
-    const person = creatableKinds('person', all);
+    // The PRODUCT predicate: a kind is offered only when its typed root is provisioned on this deployment's
+    // chain. `.household` (spec 368) is live on faithchain and not yet on Base Sepolia, so the offered list is
+    // chain-dependent by design — what must hold everywhere is that nothing offered lacks its suffix.
+    const claimable = (k: Parameters<typeof typedTldForKind>[0]) => !!typedTldForKind(k);
+    const person = creatableKinds('person', claimable);
     expect(person.map((c) => c.kind)).toContain('service');
+    expect(person.map((c) => c.kind)).toContain('org');
     for (const c of person) expect(typedTldForKind(c.kind)?.tld, c.kind).toBeTruthy();
+    // And every kind the catalogue knows maps to SOME suffix — a root may be unprovisioned, never unnamed.
+    for (const c of creatableKinds('person', all)) expect(['me', 'org', 'team', 'svc', 'workspace', 'treasury', 'church', 'circle', 'household']).toContain(kindSuffix(c.kind));
     expect(typedTldForKind('service')).toEqual({ tld: 'svc', serviceRole: 'service' });
     expect(typedTldForKind('team')?.tld).toBe('team');
   });

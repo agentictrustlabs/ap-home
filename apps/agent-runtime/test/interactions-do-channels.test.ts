@@ -227,11 +227,21 @@ describe('topics are served as the Interactions they are (spec 340 W12)', () => 
 
   it('every topic carries its interaction view', async () => {
     const out = await (await call('channels.list', MEMBER)).json() as {
-      channels: Array<{ interaction?: { interactionId: string; profileVersion: string } }>;
+      channels: Array<{ title: string; interaction?: { interactionId: string; profileVersion: string } }>;
     };
-    expect(out.channels).toHaveLength(1);
-    expect(out.channels[0]?.interaction?.interactionId).toBe('ixn_conv_conv_abc');
-    expect(out.channels[0]?.interaction?.profileVersion).toBe('direct/1.0.0');
+    // The seeded topic plus the DEFAULTED "Welcome" topic every board opens with.
+    expect(out.channels).toHaveLength(2);
+    const seeded = out.channels.find((c) => c.interaction?.interactionId === 'ixn_conv_conv_abc');
+    expect(seeded?.interaction?.profileVersion).toBe('direct/1.0.0');
+    expect(out.channels.some((c) => c.title === 'Welcome')).toBe(true);
+  });
+
+  // Every board opens with a Welcome topic — created on first read, once, by the organization itself.
+  it('a board is DEFAULTED with a Welcome topic, created once', async () => {
+    const first = await (await call('channels.list', MEMBER)).json() as { channels: Array<{ title: string; createdBy?: string }> };
+    const second = await (await call('channels.list', MEMBER)).json() as { channels: Array<{ title: string }> };
+    expect(first.channels.filter((c) => c.title === 'Welcome')).toHaveLength(1);
+    expect(second.channels.filter((c) => c.title === 'Welcome')).toHaveLength(1);
   });
 
   // The W12 claim, end to end through the live route: an OPEN topic derives membership and stores no
@@ -290,5 +300,32 @@ describe('the injected seam is an injection point, not a bypass', () => {
     // It reaches the REAL vault transport, which is unconfigured here and fails closed — the point
     // being that it did not silently use the test double.
     expect([409, 500, 503]).toContain(r.status);
+  });
+});
+
+// THE ROOM SAYS SO — a membership recorded in the organization's vault is announced in its Welcome topic
+// by the organization itself. The line is narration, never authority: the membership record is what the
+// substrate reads, and a board that could not be written would never fail the membership.
+describe('the Welcome topic narrates arrivals', () => {
+  it('recording a membership posts a "joined" line, authored by the organization', async () => {
+    seedListing('Alice', MEMBER);
+    const r = await call('org.recordMembership', MEMBER, {
+      record: {
+        memberAgent: MEMBER, organizationAgent: ORG,
+        roleAssignment: { materializedByDelegation: { delegate: ORG, delegator: MEMBER } },
+      },
+    });
+    expect(r.status).toBe(200);
+    const index = w.records.get('conversation.index') as Array<{ descriptor: { id: string }; title: string }>;
+    const welcome = index.find((c) => c.title === 'Welcome');
+    expect(welcome).toBeDefined();
+    const messages = w.records.get(`conversation.topic:${welcome!.descriptor.id}`) as Array<{ envelope: { from: string; body?: { authorName?: string } } }>;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.envelope.from).toBe(caip(ORG));
+    // The body is sealed in the org's body store (base64 under the topic's body resource) — it reads "joined".
+    const bodies = [...w.records.values()]
+      .filter((v): v is { b64: string } => !!v && typeof (v as { b64?: unknown }).b64 === 'string')
+      .map((v) => Buffer.from(v.b64, 'base64').toString('utf8'));
+    expect(bodies.some((b) => /joined\./.test(b))).toBe(true);
   });
 });
