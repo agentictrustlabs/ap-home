@@ -54,6 +54,13 @@ const SCENARIOS: Scenario[] = [
     expect: { kind: 'answer' } },
   { id: 'access.revoke', persona: 'alice', addressee: 'self', message: 'stop demo-jp from reading my records',
     expect: { kind: 'authority_required', capability: 'access.grant.revoke' } },
+  // The profile family (spec 361 I4 · fifth). The edit needs NO signature — the record is the person's
+  // own, so the capability is SELF-ACTING — which is why this row expects `done` where every other act
+  // expects an authority card. The read states its tier, because three records answer to "profile".
+  { id: 'profile.read', persona: 'alice', addressee: 'self', message: 'what does my profile say',
+    expect: { kind: 'answer', textLike: /private/i } },
+  { id: 'profile.edit', persona: 'alice', addressee: 'self', message: 'set my first name to Alice',
+    expect: { kind: 'done' } },
   // ── parity.* — the SCREENS' deterministic entries, one per converted family ──
   { id: 'parity.invite.plan', persona: 'alice', addressee: TEAM, message: 'invite elena to this team',
     plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: TEAM, invitee: '0xa7230405fabac0e5cae7d749c35bd2af91d84472' } }] },
@@ -64,6 +71,9 @@ const SCENARIOS: Scenario[] = [
   { id: 'parity.primary.plan', persona: 'alice', addressee: 'self', message: 'payments to me should go to alice3.treasury',
     plan: { steps: [{ toolId: 'treasury.primary.declare', args: { treasury: '0xa6d91f28c0b310b3495520f96f453011ccaf3479', on: true } }] },
     expect: { kind: 'authority_required', capability: 'treasury.primary.declare' } },
+  { id: 'parity.profile.plan', persona: 'alice', addressee: 'self', message: 'update my profile (city)',
+    plan: { steps: [{ toolId: 'profile.contact.update', args: { city: 'Longmont' } }] },
+    expect: { kind: 'done' } },
 ];
 
 const sessions = new Map<string, { token: string; agent: string; cookie: string; csrf: string }>();

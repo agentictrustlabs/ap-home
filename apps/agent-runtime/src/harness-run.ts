@@ -128,6 +128,28 @@ export const PRIMARY_PAYEE_CAPABILITY = 'treasury.primary.declare' as const;
 export const ACCESS_LIST_CAPABILITY = 'access.grants.list' as const;
 /** …AND STOP THEM. On-chain revocation of one grant they issued — the authority kill, not a local drop. */
 export const ACCESS_REVOKE_CAPABILITY = 'access.grant.revoke' as const;
+/** THE PERSON'S OWN CONTACT DETAILS — the PRIVATE vault record, never the public directory listing. */
+export const PROFILE_READ_CAPABILITY = 'profile.contact.read' as const;
+export const PROFILE_UPDATE_CAPABILITY = 'profile.contact.update' as const;
+
+/**
+ * WHAT MY PROFILE SAYS — the person's own contact record, read from their own vault.
+ *
+ * TIER, STATED (the three-tier rule): this is the PRIVATE record — contact details held for them and
+ * shared only with apps they grant. It is not the public directory listing and not the on-chain profile,
+ * and an answer that blurs those invites somebody to "fix" their public name in the wrong place.
+ */
+export const PROFILE_READ_TOOL: ToolSpec = {
+  id: PROFILE_READ_CAPABILITY,
+  description:
+    'ANSWERS A QUESTION about this person\'s own contact profile — the private record holding their name, '
+    + 'email, phone and organization. Use for "what is on my profile", "what email do you have for me", '
+    + '"what name am I under". Takes no arguments and answers only for the person asking. It is NOT the '
+    + 'public directory listing.',
+  inputSchema: { type: 'object', properties: {} },
+  interaction: { navigationTarget: 'profile' },
+};
+
 
 /**
  * WHO CAN READ MY RECORDS — informational, and deliberately NOT one of `HARNESS_ACTION_TOOLS`.
@@ -308,6 +330,43 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // It IS public and it IS on chain, which is why it takes a mandate rather than nothing at all.
     risk: 'medium',
     interaction: { navigationTarget: 'treasuries' },
+  },
+  {
+    // CHANGING YOUR OWN CONTACT DETAILS. The Home's profile form needs no signature — it is the person's
+    // own record, written under their own session through their own DO — and neither does this: adding a
+    // prompt the button does not have would make the conversation the more expensive way to do the same
+    // thing (the value-steps rule). Its authority is the session, the vault-key binding and the
+    // interactions grant, exactly as the form's is.
+    //
+    // `low` and NOT informational: it writes. A receipt records it, and the ladder does not ask a second
+    // party to approve somebody correcting their own phone number.
+    id: PROFILE_UPDATE_CAPABILITY,
+    description:
+      'Change this person\'s own contact profile — the PRIVATE record. Args: any of firstName, lastName, '
+      + 'email, phone, organizationName, organizationCountry, city, country. Only the fields given are '
+      + 'changed; the rest are left alone. Use for "my email is x@y.z", "set my name to …", "I work at …". '
+      + 'This is NOT the public directory listing or the agent\'s public name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string' }, lastName: { type: 'string' },
+        email: { type: 'string' }, phone: { type: 'string' },
+        organizationName: { type: 'string' }, organizationCountry: { type: 'string' },
+        city: { type: 'string' }, country: { type: 'string' },
+      },
+    },
+    // `execute`, not `update`: the ACTION is read from the contract's mandate requirement, and this
+    // capability has none to read (no mandate, no caveat encodes an action), so the compiler's neutral
+    // default is what the contract compiles to. Disagreeing here would warn on every load about a
+    // difference that decides nothing — the capability ID is what carries the meaning.
+    capability: { id: PROFILE_UPDATE_CAPABILITY, action: 'execute', resourceArg: 'record', authorityArg: 'holder' },
+    risk: 'low',
+    // SELF-ACTING (`ToolSpec.selfAuthorized`): the invoker takes its subject from the run's principal and
+    // cannot be pointed at another person's record, so there is no second party whose authority could be
+    // needed — the session is it. Declared HERE, on the built-in, never merged from a contract: a
+    // contract may describe an act, never weaken its gate.
+    selfAuthorized: true,
+    interaction: { navigationTarget: 'profile' },
   },
   {
     // …AND STOP THEM. The revocation is ON CHAIN, which is the difference between this and every
@@ -565,6 +624,8 @@ export interface HarnessDeps {
   readGrants?: (person: string) => Promise<Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }>>;
   /** ONE stored grant, wire and all — asked for only when something is about to revoke it. */
   readGrantWire?: (person: string, clientId: string) => Promise<{ wire: unknown; hash: string } | null>;
+  /** Merge named fields into the person's own contact record. Merge, never replace. */
+  mergeProfile?: (person: string, fields: Record<string, string>) => Promise<{ ok: boolean; changed?: string[]; refused?: string[]; error?: string }>;
   now?: () => number;
 }
 
@@ -991,6 +1052,55 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
 }
 
 /**
+ * `profile.contact.update` — the Home's profile form, said out loud.
+ *
+ * NO MANDATE, DELIBERATELY, and the reason is not that it is unimportant: the record is the person's
+ * own, the write runs under their own session in their own DO, and the form beside this conversation
+ * asks for no signature either. A capability that made the spoken version cost a signature the clicked
+ * version does not would be teaching people that talking to their agent is the expensive way.
+ *
+ * MERGE, NEVER REPLACE — enforced in the DO, because that is where the record is.
+ */
+export function profileUpdateInvoker(deps: HarnessDeps, person: Address | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    if (!person) throw new Error('a profile is changed as you, and there is no signed-in person on this run');
+    if (!deps.mergeProfile) throw new Error('the profile record is not reachable from this agent');
+    const FIELDS = ['firstName', 'lastName', 'email', 'phone', 'organizationName', 'organizationCountry', 'city', 'country'] as const;
+    const fields: Record<string, string> = {};
+    for (const f of FIELDS) {
+      const v = String(args[f] ?? '').trim();
+      if (v) fields[f] = v;
+    }
+    if (!Object.keys(fields).length) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: 'What should I change on your profile?',
+        fields: [
+          { name: 'firstName', label: 'First name', type: 'text', required: false },
+          { name: 'lastName', label: 'Last name', type: 'text', required: false },
+          { name: 'email', label: 'Email', type: 'text', required: false },
+        ],
+      });
+    }
+    // A BAD EMAIL IS WORSE THAN NO EMAIL: it is where somebody's mail goes. Checked before it is stored,
+    // and reported as what it is rather than accepted and discovered later by whoever tried to write.
+    if (fields.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fields.email)) {
+      throw new Error(`"${fields.email}" is not an email address — give it in full, like name@example.org`);
+    }
+    const out = await deps.mergeProfile(person.toLowerCase(), fields);
+    if (!out.ok) throw new Error(out.error ?? 'the profile could not be written');
+    return {
+      updated: true, changed: out.changed ?? Object.keys(fields), ...(out.refused?.length ? { refused: out.refused } : {}),
+      // The tier, in the result, so the reply says it: a person who just "changed their name" should not
+      // have to guess whether the directory now shows it.
+      tier: 'private', record: 'impact-profile',
+      note: 'this is the private contact record — the public directory listing and the agent\'s public name are separate',
+    };
+  };
+}
+
+/**
  * `messaging.direct.send` — the Home's message box, said out loud.
  *
  * The message goes through the SENDER's own interactions plane (`messaging.send`), which is where a direct
@@ -1081,6 +1191,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
+    if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -1274,6 +1385,7 @@ const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.primary.declare': 'say which treasury receives payments to you',
   'access.grants.list': 'say which apps can read your records',
   'access.grant.revoke': 'revoke an app\'s access on chain',
+  'profile.contact.update': 'change your own contact details',
 };
 
 /** Which RAR type bounds a capability — the SAME map the verifier uses, so what a person is asked to sign
@@ -1374,6 +1486,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // Likewise: a revocation is a call to the DelegationManager, and WHICH grant it kills travels in the
   // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
   'access.grant.revoke': 'manager',
+  'profile.contact.update': 'record',
 };
 
 /** Arg names that hold an AGENT — a name here is the words a person used, and every one of them has to be
@@ -1697,6 +1810,9 @@ export async function resolveStepArgs(
   if (where?.capabilityId === ACCESS_REVOKE_CAPABILITY && env.DELEGATION_MANAGER) {
     out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
   }
+  // The RECORD a profile edit writes. Not an address and not a contract — it is a vault record type, and
+  // naming it is what lets a receipt say WHICH of the three "profiles" was changed.
+  if (where?.capabilityId === PROFILE_UPDATE_CAPABILITY) out.record = 'impact-profile';
   return out;
 }
 
@@ -2434,6 +2550,7 @@ fanned out.`;
     MEMBERSHIP_LIST_TOOL,
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
+    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];
   const result = await runIntent(input.intent, {

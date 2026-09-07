@@ -57,6 +57,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Revoking access is HYGIENE, not assignable work. A plan that could revoke someone's access as one
   // of its steps is a plan that can quietly cut a person off from what they were doing.
   'access.grant.revoke',
+  // A person's own contact details are not assignable work either — and this one needs no mandate at
+  // all, so a plan step for it would be a step with nothing to authorize.
+  'profile.contact.update',
 ];
 
 /** A plan step as the work loop sees it. */

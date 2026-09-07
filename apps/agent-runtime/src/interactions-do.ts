@@ -1830,11 +1830,21 @@ export class InteractionsDO {
             return json({ ok: false, error: refused.length ? `nothing to change — this record does not hold ${refused.join(', ')}` : 'no fields given' }, 400);
           }
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          // The sink is built HERE: `audit` in the enclosing scope is declared further down, and reaching
+          // it from up here threw "Cannot access 'audit' before initialization" AFTER the record had been
+          // written — an op that both succeeded and reported failure, which is the worst of both.
+          const profileAudit = buildAuditSink(this.env);
           return this.serialize(async () => {
+            // THE RECORD'S OWN SHAPE, which is `{ v, contact: {...}, attestations }` — the one the Home's
+            // profile form writes. Merging these fields at the TOP level instead produced a second shape
+            // inside one record: the conversation's edits and the form's edits would each look fine and
+            // read each other as empty. One record, one shape (spec 356's binding rule applied where the
+            // record is actually written).
             const current = (await this.readDoc<Record<string, unknown>>(g, 'impact-profile', null as never)) ?? {};
-            const next = { ...current, ...clean };
+            const contact = { ...((current.contact ?? {}) as Record<string, unknown>), ...clean };
+            const next = { ...current, v: 1, contact };
             await this.writeDoc(g, 'impact-profile', next);
-            await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.profile.merge', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'impact-profile' } });
+            await profileAudit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.profile.merge', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'impact-profile' } }).catch(() => undefined);
             // What CHANGED, so a reply can say it without reading the record back out — and the refused
             // keys, because a field this record does not hold is a fact the person should hear.
             return json({ ok: true, changed: Object.keys(clean), ...(refused.length ? { refused } : {}) });

@@ -122,7 +122,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY } from './harness-run.js';
+import { askVocabulary, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY } from './harness-run.js';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -1775,6 +1775,25 @@ app.post('/harness/ask', async (c) => {
         // WHO CAN READ MY RECORDS (spec 341 §4.3). The subject is the CONNECTED person, from the
         // session — never an argument, so this cannot be pointed at anyone else's grants. It runs no
         // gate because reading your own list of who you authorized changes nothing.
+        // WHAT MY PROFILE SAYS (spec 323 W2 `impact-profile`). The subject is the CONNECTED person,
+        // from the session — their own contact record, read by their own agent. The TIER is stated in
+        // the interpretation, because "my profile" means three different records to three different
+        // screens and a person acting on the wrong one edits something nobody reads.
+        if (toolId === PROFILE_READ_CAPABILITY) {
+          const doc = await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), 'impact-profile').catch(() => null);
+          // `{ v, contact, attestations }` — the record's own shape, the one the Home's form writes.
+          // Reading the top level instead would report an empty profile for someone who has filled it in.
+          const rec = ((doc as { contact?: Record<string, unknown> } | null)?.contact ?? {}) as Record<string, unknown>;
+          const present = Object.entries(rec).filter(([, v]) => typeof v === 'string' && String(v).trim());
+          return {
+            count: present.length,
+            interpretation: present.length
+              ? 'your PRIVATE contact record — held for you and shared only with apps you grant, never the public directory listing'
+              : 'your private contact record is empty — nothing has been saved to it',
+            profile: Object.fromEntries(present),
+            note: 'answer with what was asked. Say plainly that this is the private record, not the public listing or the agent\'s public name.',
+          };
+        }
         if (toolId === ACCESS_LIST_CAPABILITY) {
           const grants = await askDeps.readGrants?.(String(who.sa).toLowerCase()) ?? [];
           const live = grants.filter((g) => !g.revoked);
@@ -2616,6 +2635,13 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     readGrants: async (person: string) => {
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.list', {}).catch(() => null);
       return (out as { grants?: Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }> } | null)?.grants ?? [];
+    },
+    // The person's own contact record, merged (never replaced) in their own DO. PII, and theirs.
+    mergeProfile: async (person: string, fields: Record<string, string>) => {
+      const out = await callInteractionsInternal(env, person, 'internal.profile.merge', { fields })
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      const r = out as { ok?: boolean; changed?: string[]; refused?: string[]; error?: string };
+      return { ok: r.ok === true, ...(r.changed ? { changed: r.changed } : {}), ...(r.refused ? { refused: r.refused } : {}), ...(r.error ? { error: r.error } : {}) };
     },
     readGrantWire: async (person: string, clientId: string) => {
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);

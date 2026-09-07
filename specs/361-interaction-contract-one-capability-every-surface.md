@@ -136,7 +136,12 @@ the direct mint never left) · **primary payee ✅** (`treasury.primary.declare`
 `ap:primaryPayee` role: the Home's "Receive payments here" control and the sentence "payments to me
 should go to alice2.treasury" now enter at the same boundary for the same one signature; converging GAINED
 the one-primary rule — naming a new one clears the old in the same act, because two marks are ambiguity a
-payer resolves by asking, which is the question the feature exists to remove) · payment — no screen button
+payer resolves by asking, which is the question the feature exists to remove) · **access hygiene ✅** (`access.grants.list` reads with no gate; `access.grant.revoke` takes one mandate
+and kills the delegation ON CHAIN — the property an issuer-granted scope cannot have) · **profile ✅**
+(`profile.contact.update`, the first SELF-ACTING capability: the record is the person's own, so neither
+the form nor the sentence asks for a signature, and the receipt says `self` — spec 350 §3.2a. Converging
+gained a MERGE, so a partial save can no longer delete the fields it did not name, and an email is
+checked before it is stored) · payment — no screen button
 exists; the Ask is already the one implementation · **charters — OPEN, with a named tension:** the legacy button is ONE signature (spec
 253's batched genesis) while the harness path costs TWO (the parent's mandate + the child's genesis),
 and the approveHash bundle cannot merge them because the mandate's delegator is the PARENT and the

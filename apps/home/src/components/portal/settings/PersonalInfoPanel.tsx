@@ -16,6 +16,7 @@ import {
   type ImpactProfileFieldKey,
 } from '../../../profile-store';
 import { useSession } from '../../../context/session';
+import { profileThroughHarness, type ProfileFields } from '../../../home/profile-harness';
 import { activateInteractionsIfNeeded, resolveVia, isKmsVia } from '../../../home/onboarding';
 import { BusyButton } from '../../shared/BusyButton';
 import { LocationFields } from './LocationFields';
@@ -118,7 +119,25 @@ export function PersonalInfoPanel({
     try {
       const savedContact = persistContact(contact);
       const next: ImpactStoredProfile = { v: 1, contact: savedContact, attestations: stored?.attestations };
-      await saveImpactProfile(agentAddress, next);
+      // THROUGH THE HARNESS — spec 361 I4. The scalar fields go through the same capability the Ask uses,
+      // so "my email is x@y.z" and this form are one implementation with one receipt trail. Neither asks
+      // for a signature: the record is the person's own (`selfAuthorized`).
+      //
+      // The LOCATION is not a scalar — it carries its own precision rules — so it stays with the store's
+      // own writer, and the two writes are ordered: the capability MERGES, so the document write must go
+      // first or it would overwrite the merge with the form's pre-merge copy.
+      if (session?.token) {
+        const scalars: ProfileFields = {};
+        for (const k of ['firstName', 'lastName', 'email', 'phone', 'organizationName', 'organizationCountry', 'city', 'country'] as const) {
+          const v = (savedContact as Record<string, unknown>)[k];
+          if (typeof v === 'string' && v.trim()) scalars[k] = v.trim();
+        }
+        await saveImpactProfile(agentAddress, { ...next, contact: { ...savedContact, ...(savedContact.location ? { location: savedContact.location } : {}) } });
+        const through = await profileThroughHarness({ person: agentAddress, fields: scalars, session: { token: session.token } });
+        if (!through.ok) throw new Error(through.error);
+      } else {
+        await saveImpactProfile(agentAddress, next);
+      }
       setStored(next);
       setContact(savedContact);
       setSavedNotice('Saved to your encrypted vault');
