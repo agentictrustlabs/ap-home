@@ -1807,6 +1807,23 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string } | 
   return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}) };
 }
 
+/**
+ * Spec 367 W2 — the few-shot block rendered from the playbook's contracts. One line per example, the
+ * positive ones as the exact tool call, the negative ones as what NOT to choose and why. Deterministic
+ * (same definition ⇒ same block), so the receipt's playbook digest covers what the planner was taught.
+ */
+export function utteranceExamples(tools: ReadonlyArray<{ id: string; utterances?: ReadonlyArray<{ says: string; args?: Record<string, string>; isNot?: string }> }>): string {
+  const lines: string[] = [];
+  for (const t of tools) {
+    for (const u of t.utterances ?? []) {
+      if (u.isNot !== undefined) lines.push(`- "${u.says}" → NOT ${t.id}: ${u.isNot}`);
+      else lines.push(`- "${u.says}" → ${t.id} ${JSON.stringify(u.args ?? {})}`);
+    }
+  }
+  if (!lines.length) return '';
+  return `\n\nEXAMPLES FROM THE PLAYBOOK (the domain author's own; follow their shape exactly — arguments are the person's WORDS, never addresses):\n${lines.join('\n')}`;
+}
+
 export function orgPhraseOf(goal: string): string | undefined {
   const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?.,;!]+?)\s*[?.!]*$/i);
   if (!m) return undefined;
@@ -2877,6 +2894,10 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
     // contract naming a decision nobody implements would read as "this asks nothing" while asking
     // everything.
     ...(contract.decisions?.length ? { decisions: [...contract.decisions] } : {}),
+    // Spec 367 W2 — the contract's VERBS join the built-in's (union: an act answers to every word either
+    // declares; the contract's are the domain author's). Behavioural: plan admission reads them to say an
+    // instruction must be answered by an act — never which act, never authority.
+    ...(builtin.verbs?.length || contract.verbs?.length ? { verbs: [...new Set([...(builtin.verbs ?? []), ...(contract.verbs ?? [])])] } : {}),
     // Raised only — never lowered.
     ...(builtin.risk || contract.risk
       ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
@@ -3076,7 +3097,11 @@ fanned out.`;
   // The playbook's own words lead: an agent set to an archetype is TOLD what it is before the rules of
   // asking. Rendered from the compiled definition (spec 354) — versioned and receipted, never a silent
   // prompt edit.
-  const withPlaybook = playbook ? `${playbook.instructions}\n\n---\n\n${fanOutPrompt}` : fanOutPrompt;
+  // Spec 367 W2 — THE SKILL'S OWN EXAMPLES teach the planner. Each contract's utterances, positive and
+  // negative, rendered once as few-shot; the same fixtures are the scenario eval set. Absent ⇒ nothing
+  // is rendered (an archetype with no examples plans from descriptions, as before).
+  const examples = playbook ? utteranceExamples(Object.values(playbook.tools ?? {})) : '';
+  const withPlaybook = playbook ? `${playbook.instructions}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
   const selected = selectPlanner(env as never, { systemPrompt: withPlaybook });
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based

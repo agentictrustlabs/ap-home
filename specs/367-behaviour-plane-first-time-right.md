@@ -1,6 +1,6 @@
 # Spec 367 — The behaviour plane, first time right: plan admission, skills that teach the planner, typed cross-agent exchange, the private graph query, and memory from confirmations
 
-**Status:** W1 (plan admission) shipped 2026-09-07 · W2–W5 open · **Extends:** [spec 350](350-authority-aware-agent-harness.md)
+**Status:** W1 (plan admission) + W2 (skills teach the planner) shipped 2026-09-07 · W3–W5 open · **Extends:** [spec 350](350-authority-aware-agent-harness.md)
 (the loop), [spec 354](354-archetype-driven-agent-behavior.md) (SKILL.md → definition), [spec 355](355-ontology-driven-ask-and-orchestration.md)
 (compile, don't interpret), [spec 358](358-semantic-context-plane.md) (the knowledge plane; truthfulness evals; vault memory),
 [spec 356](356-ontology-grounded-vault-questions.md) / [357](357-natural-language-questions-of-the-public-kb.md) (the two query tiers),
@@ -55,7 +55,7 @@ verbs are declared on the tool today and compile from the contract's utterances 
 **Evidence.** `packages/orchestration/test/unit/admission.test.ts` (rules + the loop's re-plan and denial);
 live: "send 10 usdc to David" reaches the payment capability at `alice.me`.
 
-## 2. W2 — Skills teach the planner (utterances → few-shot → evals)
+## 2. W2 — Skills teach the planner (utterances → few-shot → evals) ✅ shipped 2026-09-07
 
 Today a SKILL.md compiles into instructions and one tool description; the planner learns each act from a
 paragraph. The contract gains `utterances:` — example sentences, the arguments each yields, and **negative**
@@ -65,6 +65,17 @@ fixtures are the eval set: `check:ask-scenarios` runs every utterance through cl
 (no model where the shape is compiled; a recorded model elsewhere) and fails the build when a scenario
 plans wrong. A scenario then ships with the skill and is tested before deploy — not discovered at the prompt.
 Spec 358 W2's truthfulness set extends from *answers* to *plans*. **Gate:** the four §0 scenarios are fixtures.
+
+**Shipped:** `SkillExecutionContractV1.verbs` + `utterances[{ says, args? | isNot? }]` with validators (an example may
+not name an undeclared input or carry an address; a read declares no verbs) → `DefinitionToolV1.verbs/utterances`
+(`~/skills` compiler `669644c`, deployed `skills-ontology-production`) → `mergeContractTool` unions verbs onto the
+running tool and `utteranceExamples` renders the few-shot block after the playbook doctrine (same definition ⇒ same
+block, so the receipt's digest covers what the planner was taught). All fourteen `agentic-trust` contracts carry
+examples (40 scenarios, six of them negative). **`pnpm check:ask-scenarios`** reads the deployed definitions:
+offline, every positive example's declared plan passes admission and every negative one is not an instruction for
+that act; `ASK_SCENARIOS_LIVE=1` asks each sentence at the deployed agent as a demo persona and requires the reply
+to name the tool (an act ⇒ `authority_required`/`prompt` for it; a read ⇒ its evidence). Alice's assignment moved to
+digest `0x1418b6b6…` — the person-steward playbook now teaches.
 
 ## 3. W3 — The typed cross-agent exchange (spec 366 R2)
 
