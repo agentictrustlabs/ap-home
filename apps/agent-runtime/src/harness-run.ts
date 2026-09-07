@@ -1442,7 +1442,7 @@ export function partyTypesFor(capabilityId: string, arg: string): readonly strin
  * authority whose limits name a string, and minting it throws. So the words become addresses HERE, once,
  * before anything is shown or signed.
  */
-async function resolveStepArgs(
+export async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
@@ -1586,6 +1586,29 @@ async function resolveStepArgs(
   // person was shown a mandate whose ceiling was a placeholder. An argument counts as given only if it is
   // the KIND of value it is supposed to be; for a quantity that means a number.
   const NUMERIC = new Set(['amount', 'usdc']);
+  // PEOPLE WRITE AMOUNTS THE WAY PEOPLE WRITE AMOUNTS. Asked "how much?", they answer "10 usdc", "$10",
+  // "10 dollars", "1,000" — and the strict number test read every one of those as no answer at all, so
+  // the identical question came back with nothing said about why. That is the same silent-refusal shape
+  // as the treasury prompt loop, and a person cannot debug it: the box says 10 and the agent says "how
+  // much?".
+  //
+  // Normalising is NOT guessing: a currency word or symbol next to a figure adds no information this
+  // deployment does not already have (one demo token), a thousands comma is punctuation, and anything
+  // that still is not a number is REPORTED rather than dropped.
+  const readAmount = (raw: string): string | null => {
+    const v = raw.trim().toLowerCase()
+      .replace(/^[$€£]/, '')
+      .replace(/\b(usdc|usd|dollars?|bucks?)\b/g, '')
+      .replace(/(\d),(?=\d{3}\b)/g, '$1')   // thousands separator only — "10,50" stays unreadable
+      .replace(/\s+/g, '');
+    return /^\d+(\.\d+)?$/.test(v) ? v : null;
+  };
+  for (const k of NUMERIC) {
+    const raw = String(out[k] ?? '').trim();
+    if (!raw || /^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) continue;
+    const read = readAmount(raw);
+    if (read) out[k] = read;
+  }
   const given = (k: string): boolean => {
     const v = String(out[k] ?? '').trim();
     if (!v) return false;
@@ -1596,6 +1619,16 @@ async function resolveStepArgs(
   if (where?.required?.length) {
     const missing = where.required.filter((k) => !PARTY_ARGS.includes(k)
       && (ALTERNATIVES[k] ?? [k]).every((alt) => !given(alt)));
+    // WHAT THEY WROTE THAT WE COULD NOT READ. Kept before the placeholder sweep deletes it, so the
+    // question can name it — asking again in the same words, as though nothing had been typed, is the
+    // one thing this must never do.
+    const unreadable = new Map<string, string>();
+    for (const k of NUMERIC) {
+      const raw = String(out[k] ?? '').trim();
+      // A PLACEHOLDER IS THE PLANNER'S, NOT THE PERSON'S. Quoting `<UNKNOWN>` back at somebody who typed
+      // "a tenner" tells them about our plumbing and nothing about their answer.
+      if (raw && !given(k) && !/^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) unreadable.set(k, raw);
+    }
     // A placeholder must not survive into the step either: it would be encoded into a caveat.
     for (const k of NUMERIC) if (String(out[k] ?? '').trim() && !given(k)) delete out[k];
     if (missing.length) {
@@ -1605,9 +1638,12 @@ async function resolveStepArgs(
         type: 'text' as const, required: true,
         ...(WORD_FOR_ARG[k]?.hint ? { hint: WORD_FOR_ARG[k]!.hint } : {}),
       }));
+      const said = [...unreadable.values()][0];
       throw new InputRequired({
         kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-        prompt: missing.length === 1 && missing[0] === 'amount' ? 'How much should I send?' : 'I need a little more to do that.',
+        prompt: said
+          ? `I could not read “${said}” as an amount. How much, as a figure?`
+          : missing.length === 1 && missing[0] === 'amount' ? 'How much should I send?' : 'I need a little more to do that.',
         fields,
       });
     }

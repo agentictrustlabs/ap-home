@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { isInputRequired } from '@agenticprimitives/orchestration';
 import { ownAgentsOfType } from '@agenticprimitives/context';
-import { partyTypesFor, HARNESS_ACTION_TOOLS, NEVER_THE_ASKER } from '../src/harness-run.js';
+import { partyTypesFor, HARNESS_ACTION_TOOLS, NEVER_THE_ASKER, resolveStepArgs } from '../src/harness-run.js';
 
 const NATHAN = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1';
 const NATHAN_TREASURY = '0x2c471607fec409516ab6de6b7517bcf95f1f2edc';
@@ -84,5 +84,36 @@ describe('the acting party is declared, not inferred', () => {
       if (!cap?.authorityArg) continue;
       expect(NEVER_THE_ASKER.has(cap.authorityArg), `${cap.id} would act as its own counterparty`).toBe(false);
     }
+  });
+});
+
+// ── AMOUNTS, AS PEOPLE WRITE THEM (the live loop: "keeps asking me how much should I send") ──
+//
+// Asked "how much?", a person answered "10 usdc" and the strict number test read it as no answer, so the
+// same question came back with nothing said about why. Two rules now: read the figure out of what they
+// wrote, and when it genuinely cannot be read, SAY what could not be read rather than asking again in
+// the identical words.
+describe('an amount a person typed', () => {
+  const env = { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x'.padEnd(42, '1'), MOCK_USDC: '0x'.padEnd(42, '2') } as never;
+  const where = { stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute', required: ['amount'] };
+
+  const norm = async (usdc: string) => resolveStepArgs({ usdc }, env, {}, where);
+
+  it.each([
+    ['10 usdc', '10000000'],
+    ['$10', '10000000'],
+    ['10 dollars', '10000000'],
+    ['  12.50  ', '12500000'],
+    ['1,000', '1000000000'],
+  ])('reads %s', async (typed, expected) => {
+    const out = await norm(typed);
+    expect(out.amount).toBe(expected);
+  });
+
+  it('names what it could not read instead of asking the same question again', async () => {
+    let raised: unknown = null;
+    try { await norm('a tenner'); } catch (e) { raised = e; }
+    expect(isInputRequired(raised)).toBe(true);
+    expect((raised as { request: { prompt: string } }).request.prompt).toContain('a tenner');
   });
 });
