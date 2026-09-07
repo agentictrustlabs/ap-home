@@ -182,7 +182,9 @@ export function useVoice() {
     const utters = speechChunks(text).map((piece) => {
       const u = new SpeechSynthesisUtterance(piece);
       u.lang = voiceRef.current?.lang ?? navigator.language ?? 'en-US';
-      if (voiceRef.current) u.voice = voiceRef.current;
+      // A voice the engine will not take (a stale object after `voiceschanged`, a test double) must not
+      // cost the sentence: the engine's default voice says it instead.
+      if (voiceRef.current) { try { u.voice = voiceRef.current; } catch { /* default voice */ } }
       u.rate = 1;
       u.pitch = 1;
       u.onstart = () => { if (speakGen.current === gen) setSpeaking(true); };
