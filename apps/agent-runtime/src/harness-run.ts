@@ -34,8 +34,7 @@
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer,
-} from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
@@ -60,7 +59,7 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
-import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker } from '@agenticprimitives/context';
+import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, fanOutBindingFor } from '@agenticprimitives/ontology';
@@ -199,6 +198,7 @@ export const ACCESS_LIST_TOOL: ToolSpec = {
 
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
+  verbs: ['invite', 'add', 'bring'],
   description:
     'Invite an agent to join an organization or team as a member. Requires a mandate from the organization. '
     + 'Produces a signed access grant the invitee redeems when they join — it does NOT make them a member by itself. '
@@ -246,6 +246,7 @@ export const UNSUPPORTED_TOOL: ToolSpec = {
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
+    verbs: ['send', 'pay', 'transfer', 'wire'],
     description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA, NAME, or the words the person used — "bob", "my daughter", "sarah" all work: the payee is resolved from the asker\'s own household and links, so pass what they said), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
     inputSchema: {
       type: 'object',
@@ -286,6 +287,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   RESOLUTION_REQUEST_TOOL,
   {
     id: 'messaging.direct.send',
+    verbs: ['message', 'text', 'write to', 'tell', 'dm', 'send a message', 'send a note'],
     description:
       'Send a DIRECT MESSAGE to another agent — a person, an organization, anyone with an inbox. Use this '
       + 'whenever the ask is to message, write to, tell or DM somebody. Args: recipient (their ADDRESS or '
@@ -307,6 +309,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   },
   {
     id: 'treasury.fund',
+    verbs: ['fund', 'top up', 'add funds', 'deposit'],
     description:
       'Fund a treasury with DEMO USDC (a faucet mint, not a transfer — no one is debited). Requires a '
       + 'mandate from the funder, because the mint is made in their name. Args: funder (the SA whose '
@@ -343,6 +346,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // stranger's agent can honour it. It grants nothing: nobody may spend from the marked treasury, and
     // no gate reads the role — the resolver uses it to stop asking a payer a question only you can answer.
     id: PRIMARY_PAYEE_CAPABILITY,
+    verbs: ['set my primary', 'make my primary', 'mark my primary', 'use my treasury'],
     description:
       'Say which of the owner\'s treasuries plays a standing role: the one that RECEIVES payments to '
       + 'them (role "payee" — the default, what others read before paying you) or the one they PAY FROM '
@@ -376,6 +380,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // Recording somebody as your spouse does not let you spend their money. The household answers "who
     // did you mean" and nothing else.
     id: HOUSEHOLD_RECORD_CAPABILITY,
+    verbs: ['add', 'record', 'put'],
     description:
       'Record someone as part of this person\'s household — the private note of who they live with. '
       + 'Args: member (their agent, by name or address), role ("member" default, "guardian", '
@@ -411,6 +416,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // `low` and NOT informational: it writes. A receipt records it, and the ladder does not ask a second
     // party to approve somebody correcting their own phone number.
     id: PROFILE_UPDATE_CAPABILITY,
+    verbs: ['update my', 'change my', 'set my', 'edit my'],
     description:
       'Change this person\'s own contact profile — the PRIVATE record. Args: any of firstName, lastName, '
       + 'email, phone, organizationName, organizationCountry, city, country. Only the fields given are '
@@ -444,6 +450,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // (ADR-0041). It is `medium` because it takes authority AWAY — the failure mode is losing access
     // you meant to keep, which the person can restore by granting again.
     id: ACCESS_REVOKE_CAPABILITY,
+    verbs: ['revoke', 'remove access', 'disconnect', 'cut off'],
     description:
       'Revoke ON CHAIN a read grant this person issued to an app, so it stops working everywhere rather '
       + 'than only here. Args: app (the client id from access.grants.list, e.g. "demo-jp"), holder (the '
@@ -462,6 +469,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     interaction: { navigationTarget: 'settings' },
   },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
+    verbs: [`create a ${noun}`, `create ${noun}`, `charter a ${noun}`, `charter ${noun}`, `start a ${noun}`, `make a ${noun}`, `new ${noun}`],
     id: capability,
     description:
       `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, `
@@ -3165,6 +3173,20 @@ fanned out.`;
     ports: {
       mandateVerifier: verifier, policyEvaluator: policy,
       approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink,
+      // PLAN ADMISSION (spec 367 W1) — the plan's SHAPE, judged from declarations before any step runs:
+      // an instruction must be answered by an act (`verbs` on the action tools); a placeholder is not an
+      // argument; a step whose tool declares a `subject` may not leave it empty when the sentence names
+      // an agent the asker KNOWS (their own links — private tier, never the directory). Refused ⇒ one
+      // re-plan told why ⇒ refused in words. The verifier still judges every admitted step.
+      planAdmission: planAdmission([
+        instructionNeedsAct,
+        noPlaceholders,
+        subjectNamedInAsk(async () => {
+          if (!input.person || !deps.readSubjectRecord) return [];
+          const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
+          return relationshipRows(doc).map((r) => ({ name: r.name, agent: r.agent }));
+        }),
+      ]),
       // spec 360 — what the playbook promised FOLLOWS a successful step. Isolated by the loop: an effect
       // that cannot be delivered never fails the act that produced it.
       effectSink: declaredEffectSink(
