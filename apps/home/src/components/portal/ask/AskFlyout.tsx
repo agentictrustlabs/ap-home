@@ -605,6 +605,15 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
               {!p.label && p.raw && p.raw.toLowerCase() !== p.agent.toLowerCase() && (
                 <span className="muted" style={{ fontSize: 11 }}> (you said “{p.raw}”)</span>
               )}
+              {/* WHY IT DECIDED RATHER THAN ASKED (spec 363 §2). A party the person never named is one
+                  a rule chose, and a choice that cannot say why is indistinguishable from a guess — so
+                  the reason is shown right where the person is about to sign, and it is the rule's own
+                  words, not a model's. */}
+              {p.because && (
+                <div className="muted" style={{ fontSize: 11, marginLeft: 2 }} data-testid={`ask-because-${p.arg}`}>
+                  ↳ {p.because}
+                </div>
+              )}
             </div>
           ))}
         </div>

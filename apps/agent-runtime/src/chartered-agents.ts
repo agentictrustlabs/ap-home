@@ -36,9 +36,11 @@ export interface CharteredDeps {
   reverseName?: (agent: string) => Promise<string | null>;
   /** Bound: an agent with hundreds of children answers with the first page, never a stalled request. */
   maxEdges?: number;
-  /** `ap:primaryPayee` — read per edge so a resolver can stop asking which one to pay. Optional: without
-   *  it nothing is marked, and the person is asked, which is the behaviour that always worked. */
-  primaryRole?: Hex;
+  /** The modelled ROLES to read per edge, as `{ iri: bytes32 }` — `ap:primaryPayee` (which account
+   *  receives) and `ap:primaryPayer` (which one spends) are the two today, and they are deliberately
+   *  different questions. Read only when there is a CHOICE to disambiguate, which is the only time the
+   *  answer changes anything. Absent ⇒ nothing is marked and the person is asked, which always worked. */
+  roles?: Readonly<Record<string, Hex>>;
 }
 
 /**
@@ -71,14 +73,24 @@ export function charteredAgentsReader(deps: CharteredDeps) {
       if (!name || name.toLowerCase().split('.').pop() !== type) continue;
       matched.push({ id, agent: e.subject.toLowerCase(), name });
     }
-    if (matched.length < 2 || !deps.primaryRole) return matched.map(({ agent, name }) => ({ agent, name }));
+    const roleEntries = Object.entries(deps.roles ?? {});
+    if (matched.length < 2 || !roleEntries.length) return matched.map(({ agent, name }) => ({ agent, name }));
 
-    // WHICH ONE THEY WANT PAID — asked only now, when there is more than one and the answer decides
-    // whether the payer is questioned about somebody else's accounts.
-    const out: Array<{ agent: string; name?: string; primary?: boolean }> = [];
+    // WHICH ONES THEY MARKED — asked only now, when there is more than one and the answer decides
+    // whether a person is questioned about their own (or somebody else's) accounts.
+    const out: Array<{ agent: string; name?: string; primary?: boolean; roles?: string[] }> = [];
     for (const m of matched) {
-      const primary = (await deps.readContract({ address: deps.relationships, abi: HAS_ROLE_ABI, functionName: 'hasRole', args: [m.id, deps.primaryRole] } as never).catch(() => false)) === true;
-      out.push({ agent: m.agent, name: m.name, ...(primary ? { primary: true } : {}) });
+      const carried: string[] = [];
+      for (const [iri, role] of roleEntries) {
+        const has = (await deps.readContract({ address: deps.relationships, abi: HAS_ROLE_ABI, functionName: 'hasRole', args: [m.id, role] } as never).catch(() => false)) === true;
+        if (has) carried.push(iri);
+      }
+      out.push({
+        agent: m.agent, name: m.name,
+        ...(carried.length ? { roles: carried } : {}),
+        // `primary` stays for the payee short-circuit that predates the roles list — same fact, older name.
+        ...(carried.some((i) => i.endsWith('#primaryPayee')) ? { primary: true } : {}),
+      });
     }
     return out;
   };

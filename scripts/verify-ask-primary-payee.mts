@@ -1,7 +1,7 @@
 /**
  * "PAY ME HERE", conversationally — spec 361 I4's next family (`treasury.primary.declare`).
  *
- *   npx tsx scripts/verify-ask-primary-payee.mts [handle] [treasuryName]
+ *   npx tsx scripts/verify-ask-primary-payee.mts [handle] [treasuryName] [payee|payer]
  *
  * Drives the Ask the way the Home surface does: ask → answer any prompt → mint the mandate → done.
  * Then asserts the role is live ON CHAIN, which is the only place the preference actually is.
@@ -25,6 +25,8 @@ const enforcers = { delegationManager: D.dm, timestamp: D.timestamp, allowedTarg
 
 const handle = process.argv[2] ?? 'alice';
 const treasuryName = process.argv[3] ?? 'alice3.treasury';
+const roleWord = (process.argv[4] ?? 'payee').toLowerCase();
+const ROLE_KEY = roleWord === 'payer' ? 'PRIMARY_PAYER' : 'PRIMARY_PAYEE';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300) }; } };
 const pub = createPublicClient({ transport: http(RPC) });
 
@@ -45,7 +47,7 @@ const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
 const ask = async (body: Record<string, unknown>) =>
   j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' }, body: JSON.stringify({ session: si.homeSession, addressee: si.agent, ...body }) }));
 
-let r = await ask({ message: `payments to me should go to ${treasuryName}` });
+let r = await ask({ message: roleWord === 'payer' ? `pay from ${treasuryName} by default` : `payments to me should go to ${treasuryName}` });
 const runRef = r.reply?.runRef;
 for (let turn = 0; turn < 6; turn++) {
   const k = r.reply?.kind;
@@ -75,9 +77,22 @@ if (r.reply?.kind !== 'done') throw new Error(`expected done: ${JSON.stringify(r
 const treasury = String((r.reply.result as { treasury?: string })?.treasury ?? '').toLowerCase() as Address;
 const owner = String(si.agent).toLowerCase() as Address;
 const edge = await pub.readContract({ address: REL, abi: REL_ABI, functionName: 'getEdgeByTriple', args: [treasury, owner, RELATIONSHIP_TYPE.CHARTERED_UNDER] }) as Hex;
-const has = await pub.readContract({ address: REL, abi: REL_ABI, functionName: 'hasRole', args: [edge, ROLE.PRIMARY_PAYEE] }) as boolean;
-console.log(`on chain: ${treasury} primaryPayee=${has}`);
+const has = await pub.readContract({ address: REL, abi: REL_ABI, functionName: 'hasRole', args: [edge, ROLE[ROLE_KEY as 'PRIMARY_PAYEE' | 'PRIMARY_PAYER']] }) as boolean;
+console.log(`on chain: ${treasury} ${roleWord}=${has}`);
 if (!has) throw new Error('the run said done and the chain does not carry the role');
+
+if (roleWord === 'payer') {
+  // THE WHOLE POINT: the owner asks to pay and is no longer asked which account — and the answer says
+  // WHY it chose, because a decision that cannot cite itself is a guess (spec 363 §2).
+  const probe = await ask({ message: 'send bob 1 usdc' });
+  const asked = probe.reply?.kind === 'prompt' ? probe.reply.prompt.prompt : null;
+  const cited = (probe.reply?.parties ?? []).find((p: { arg: string }) => p.arg === 'payer');
+  console.log(`owner sees: ${probe.reply?.kind}${asked ? ` — "${asked}"` : ''}${cited?.because ? ` · because ${cited.because}` : ''}`);
+  if (asked && /which of your/i.test(asked)) throw new Error('the account was marked and the question came back anyway');
+  if (!cited?.because) throw new Error('it decided without saying why — a decision that cannot cite itself is a guess');
+  console.log('\n✓ treasury.primary.declare (payer): marked, honoured by the decision plane, and CITED.');
+  process.exit(0);
+}
 
 // AND THE PAYER'S RESOLVER STOPS ASKING — the whole point of the preference.
 const other = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: handle === 'alice' ? 'nathan' : 'alice', client_id: 'demo-jp' }) }));

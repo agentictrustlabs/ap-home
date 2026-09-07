@@ -140,3 +140,33 @@ describe('a planner placeholder in a party argument', () => {
     expect(seen.some((n) => /unknown/i.test(n))).toBe(false);
   });
 });
+
+// ── A UNIT THE PLANNER COMPUTED IS NOT A UNIT (the live incident: 0.00002 USDC) ──
+//
+// Asked to send 20 USDC the planner wrote `amount: "20"` — the base-unit field — and twenty smallest
+// units settled on chain under a mandate every gate approved. The receipt read "0.00002 USDC", which is
+// the only reason anyone noticed.
+describe('an amount the planner wrote in the wrong unit', () => {
+  const env = { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x'.padEnd(42, '1'), MOCK_USDC: '0x'.padEnd(42, '2') } as never;
+  const where = { stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute' };
+
+  it('is never converted for them — it is named back, and the person says what it is in', async () => {
+    let raised: unknown = null;
+    try { await resolveStepArgs({ amount: '20' }, env, {}, where); } catch (e) { raised = e; }
+    expect(isInputRequired(raised)).toBe(true);
+    const req = (raised as { request: { prompt: string; fields: Array<{ name: string }> } }).request;
+    expect(req.prompt).toContain('20');
+    expect(req.fields[0]!.name).toBe('usdc');
+  });
+
+  it('a SCREEN\'s supplied plan may still state base units — it computed them', async () => {
+    const out = await resolveStepArgs({ amount: '20000000' }, env, {}, { ...where, computedUnits: true });
+    expect(out.amount).toBe('20000000');
+  });
+
+  it('the human figure still converts, exactly once', async () => {
+    const out = await resolveStepArgs({ usdc: '20' }, env, {}, where);
+    expect(out.amount).toBe('20000000');
+    expect(out.usdc).toBeUndefined();
+  });
+});

@@ -57,6 +57,7 @@ import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/c
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
+import { decide, PAYMENT_SOURCE_ACCOUNT } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
@@ -220,15 +221,18 @@ export const UNSUPPORTED_TOOL: ToolSpec = {
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
-    description: 'Pay an ERC-20 amount from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), asset (token address), payee (recipient SA), amount (smallest units as a decimal string; USDC has 6 decimals, so 100 USDC is "100000000").',
+    description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA or name), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
     inputSchema: {
       type: 'object',
       properties: {
         payer: { type: 'string', description: 'The paying treasury or organization — its address, or its name (e.g. nathan.treasury)' },
         asset: { type: 'string', description: 'ERC-20 token contract address' },
         payee: { type: 'string', description: 'Recipient address, or its agent name (e.g. bob.me)' },
-        amount: { type: 'string', description: 'Amount in the token\'s SMALLEST units (2 USDC = "2000000"). Use `usdc` instead when the ask says a decimal figure.' },
-        usdc: { type: 'string', description: 'Amount in whole USDC as the person said it, e.g. "2" or "12.11". Use this when the ask names a plain figure — do not convert it yourself.' },
+        // THE ONLY QUANTITY A PLANNER MAY WRITE. A base-unit field used to sit beside this one, and a
+        // model asked for "20 USDC" wrote `amount: "20"` — twenty base units, two hundred-thousandths of
+        // a dollar. It settled, the receipt honestly said 0.00002 USDC, and nothing else could have
+        // caught it. Units are the system's job; the planner's job is to repeat the figure it was told.
+        usdc: { type: 'string', description: 'The amount as the PERSON said it, in whole USDC — e.g. "20", "12.50". Never convert it, never write smallest units.' },
       },
       // Either unit, never a guess — the same vocabulary `treasury.fund` uses. A capability that
       // understood only smallest-units left "send 2 usdc" with no amount at all, which made the
@@ -277,8 +281,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       'Fund a treasury with DEMO USDC (a faucet mint, not a transfer — no one is debited). Requires a '
       + 'mandate from the funder, because the mint is made in their name. Args: funder (the SA whose '
       + 'authority this needs — normally the person asking), treasury (its ADDRESS or its NAME, e.g. '
-      + '"alice2.treasury" — either works), amount (smallest units as a decimal string — USDC has 6 '
-      + 'decimals, so 12.11 USDC is "12110000"). Use this whenever the ask is to fund, top up or add '
+      + '"alice2.treasury" — either works), usdc (the amount AS THE PERSON SAID IT, in whole USDC — '
+      + '"20", "12.50"; never smallest units, never converted). Use this whenever the ask is to fund, top up or add '
       + 'demo USDC to a treasury: it takes the name directly, so no lookup is needed first.',
     inputSchema: {
       type: 'object',
@@ -286,8 +290,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         funder: { type: 'string', description: 'The funding SA (whose authority this needs)' },
         asset: { type: 'string', description: 'The demo USDC contract address (ask the agent if unknown)' },
         treasury: { type: 'string', description: 'The treasury SA to credit' },
-        amount: { type: 'string', description: 'Amount in the token\'s SMALLEST units (12.11 USDC = "12110000"). Use `usdc` instead if the ask says a decimal figure.' },
-        usdc: { type: 'string', description: 'Amount in whole USDC as the person said it, e.g. "12.11". Use this when the ask names a decimal figure — do not convert it yourself.' },
+        usdc: { type: 'string', description: 'The amount as the PERSON said it, in whole USDC — e.g. "20", "12.50". Never convert it, never write smallest units.' },
       },
       // `funder` is OPTIONAL on purpose. The planner chooses ONE tool (that is what the planner IS), so a
       // capability whose required args it cannot fill from the sentence is a capability it will not
@@ -311,17 +314,20 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // no gate reads the role — the resolver uses it to stop asking a payer a question only you can answer.
     id: PRIMARY_PAYEE_CAPABILITY,
     description:
-      'Say which of the owner\'s treasuries receives payments — the "pay me here" preference other '
-      + 'agents read before paying you, so "send alice 10 usdc" resolves instead of asking. Args: '
-      + 'treasury (its ADDRESS or NAME, e.g. "alice2.treasury"), holder (the SA whose preference this is '
-      + '— normally the person asking), on (false to stop receiving here; default true). It authorizes '
-      + 'no spending and nobody else can set it.',
+      'Say which of the owner\'s treasuries plays a standing role: the one that RECEIVES payments to '
+      + 'them (role "payee" — the default, what others read before paying you) or the one they PAY FROM '
+      + '(role "payer", so this agent stops asking which account every time). Args: treasury (ADDRESS or '
+      + 'NAME, e.g. "alice2.treasury"), role ("payee" | "payer"), holder (the SA whose preference this '
+      + 'is — normally the person asking), on (false to clear it; default true). Use for "pay me here", '
+      + '"payments to me go to X", "pay from X by default", "use X for my payments". It authorizes no '
+      + 'spending and nobody else can set it.',
     inputSchema: {
       type: 'object',
       properties: {
         treasury: { type: 'string', description: 'The treasury to be paid — address or name' },
         holder: { type: 'string', description: 'Whose preference this is (the treasury\'s owner)' },
-        on: { type: 'boolean', description: 'true to receive payments here (default), false to stop' },
+        on: { type: 'boolean', description: 'true to mark it (default), false to stop' },
+        role: { type: 'string', description: '"payee" — where money sent TO this person lands (default) — or "payer", the account they SPEND from. Two different questions: the account you publish and the account you use are often not the same.' },
       },
       required: ['treasury'],
     },
@@ -923,6 +929,10 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     if (named && named !== owner) throw new Error(`the preference is the owner's to set (${wire.delegator}); the plan named ${named}`);
     const treasury = await partyAddress(args.treasury, deps, 'the treasury to be paid');
     const on = args.on === undefined ? true : args.on === true || String(args.on).toLowerCase() === 'true';
+    // WHICH STANDING ROLE. Receiving and spending are different questions about the same account, and
+    // conflating them would move money out of the one its owner publishes.
+    const roleWord = /^pay(er|ing|s)?$|from|spend/i.test(String(args.role ?? '')) ? 'payer' : 'payee';
+    const roleHash = roleWord === 'payer' ? ROLE.PRIMARY_PAYER : ROLE.PRIMARY_PAYEE;
 
     const readEdge = async (subject: string): Promise<Hex | null> => {
       const id = await deps.readContract({
@@ -941,7 +951,7 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
       };
     }
     const hasRole = async (id: Hex): Promise<boolean> => (await deps.readContract({
-      address: relationships, abi: REL_ROLE_ABI, functionName: 'hasRole', args: [id, ROLE.PRIMARY_PAYEE],
+      address: relationships, abi: REL_ROLE_ABI, functionName: 'hasRole', args: [id, roleHash],
     }).catch(() => false)) === true;
 
     // ONE PRIMARY, OR THE PREFERENCE SAYS NOTHING. Two treasuries both marked is not "more preferred" —
@@ -955,17 +965,17 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
       for (const other of others) {
         const otherEdge = await readEdge(other.agent.toLowerCase());
         if (otherEdge && await hasRole(otherEdge)) {
-          calls.push({ target: relationships, what: `cleared ${other.name ?? other.agent}`, data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: 'removeRole', args: [otherEdge, ROLE.PRIMARY_PAYEE] }) });
+          calls.push({ target: relationships, what: `cleared ${other.name ?? other.agent}`, data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: 'removeRole', args: [otherEdge, roleHash] }) });
         }
       }
     }
     const already = await hasRole(edgeId);
     if (already === on && !calls.length) {
       // Nothing to do is not a failure, and pretending a transaction happened would be a claim.
-      return { declared: on, alreadySet: true, treasury, owner };
+      return { declared: on, role: roleWord, alreadySet: true, treasury, owner };
     }
     if (already !== on) {
-      calls.push({ target: relationships, what: on ? 'marked' : 'cleared', data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: on ? 'addRole' : 'removeRole', args: [edgeId, ROLE.PRIMARY_PAYEE] }) });
+      calls.push({ target: relationships, what: on ? 'marked' : 'cleared', data: encodeFunctionData({ abi: REL_ROLE_ABI, functionName: on ? 'addRole' : 'removeRole', args: [edgeId, roleHash] }) });
     }
 
     const dm = env.DELEGATION_MANAGER as Address;
@@ -981,7 +991,7 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
       const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
       txHashes.push(txHash);
     }
-    return { declared: on, treasury, owner, txHash: txHashes[txHashes.length - 1] ?? null, ...(txHashes.length > 1 ? { txHashes } : {}) };
+    return { declared: on, role: roleWord, treasury, owner, txHash: txHashes[txHashes.length - 1] ?? null, ...(txHashes.length > 1 ? { txHashes } : {}) };
   };
 }
 
@@ -1559,7 +1569,18 @@ export async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
   lookups: PartyLookups,
-  where?: { stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[] },
+  where?: {
+    stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[];
+    /**
+     * THE BASE-UNIT FIGURE IN THESE ARGS WAS COMPUTED BY US, not written by a planner.
+     *
+     * True for a SCREEN's supplied plan (the form computed 20000000 and knows it) and for the
+     * re-normalisation this function does over args the loop already normalised. False — the default —
+     * for anything a planner wrote, which is why `amount: "20"` meaning twenty dollars is refused
+     * rather than spent.
+     */
+    computedUnits?: boolean;
+  },
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ...args };
 
@@ -1577,6 +1598,65 @@ export async function resolveStepArgs(
   const PLACEHOLDER = /^<.*>$|^(unknown|tbd|n\/a|none|null|undefined|todo|xxx+)$/i;
   for (const [k, v] of Object.entries(out)) {
     if (typeof v === 'string' && PLACEHOLDER.test(v.trim())) delete out[k];
+  }
+
+  const NUMERIC = new Set(['amount', 'usdc']);
+  // PEOPLE WRITE AMOUNTS THE WAY PEOPLE WRITE AMOUNTS. Asked "how much?", they answer "10 usdc", "$10",
+  // "10 dollars", "1,000" — and the strict number test read every one of those as no answer at all, so
+  // the identical question came back with nothing said about why. That is the same silent-refusal shape
+  // as the treasury prompt loop, and a person cannot debug it: the box says 10 and the agent says "how
+  // much?".
+  //
+  // Normalising is NOT guessing: a currency word or symbol next to a figure adds no information this
+  // deployment does not already have (one demo token), a thousands comma is punctuation, and anything
+  // that still is not a number is REPORTED rather than dropped.
+  const readAmount = (raw: string): string | null => {
+    const v = raw.trim().toLowerCase()
+      .replace(/^[$€£]/, '')
+      .replace(/\b(usdc|usd|dollars?|bucks?)\b/g, '')
+      .replace(/(\d),(?=\d{3}\b)/g, '$1')   // thousands separator only — "10,50" stays unreadable
+      .replace(/\s+/g, '');
+    return /^\d+(\.\d+)?$/.test(v) ? v : null;
+  };
+  for (const k of NUMERIC) {
+    const raw = String(out[k] ?? '').trim();
+    if (!raw || /^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) continue;
+    const read = readAmount(raw);
+    if (read) out[k] = read;
+  }
+  // ── A UNIT THE PLANNER COMPUTED IS NOT A UNIT ────────────────────────────────────────────────────
+  //
+  // THE INCIDENT: asked to send 20 USDC, the planner wrote `amount: "20"` into the base-unit field —
+  // twenty smallest units, two hundred-thousandths of a dollar. Every gate passed (it is well under any
+  // ceiling), the transfer settled, and the receipt honestly read "0.00002 USDC". Nothing else in the
+  // system could have caught it, because nothing else knew what the person had said.
+  //
+  // So base units are no longer an argument a planner can write: the field is gone from its schema, and
+  // a value that arrives in it anyway is treated as a figure of UNKNOWN unit — named back to the person
+  // rather than converted by us. A SUPPLIED PLAN is different: a screen that computed 20000000 knows
+  // exactly what it means, and that is the one caller allowed to say so.
+  if (out.amount !== undefined && !where?.computedUnits) {
+    const said = String(out.amount).trim();
+    delete out.amount;
+    if (out.usdc === undefined && said) {
+      throw new InputRequired({
+        kind: 'data', stepRef: where?.stepRef ?? 'pending', toolId: where?.toolId ?? '',
+        prompt: `How much should I send? I read “${said}” but not what it is in.`,
+        fields: [{ name: 'usdc', label: 'How much', type: 'text', required: true, hint: `in whole USDC — type ${said} if that is what you meant` }],
+      });
+    }
+  }
+
+  // ONE UNIT, ONCE, AND EARLY. The planner may say `usdc: "3"` or `amount: "3000000"` — both honest
+  // readings of "3 usdc" — and everything downstream must see exactly one. It ran at the END of this
+  // function until the choice prompt needed to know what the act COSTS: a person asking for 20 was
+  // offered accounts holding 7, because the list was built before anything had read the figure.
+  // Only a figure we can actually READ is converted. An unreadable answer ("a tenner") is left where it
+  // is, so the question below can name it back — converting here threw a bare error instead, which is
+  // the same silent-refusal shape in different clothes.
+  if (out.usdc !== undefined && out.amount === undefined && /^\d+(\.\d+)?$/.test(String(out.usdc).trim())) {
+    out.amount = fundingAmount(out).toString();
+    delete out.usdc;
   }
 
   // ── WHOSE AGENT ACTS ─────────────────────────────────────────────────────────────────────────────
@@ -1611,17 +1691,62 @@ export async function resolveStepArgs(
           break;
         }
         if (mine.length > 1) {
+          // WHAT THE ACT COSTS, when the figure is already known — so the list can say which accounts can
+          // actually do it. Offering an account that will revert as an equal choice is offering a wrong
+          // answer politely, and the person asking for 20 was shown six accounts holding less.
+          const needs = /^\d+$/.test(String(out.amount ?? ''))
+            ? { amount: BigInt(String(out.amount)), display: `${(Number(out.amount) / 1e6).toLocaleString('en-US', { maximumFractionDigits: 6 })} USDC` }
+            : undefined;
+
+          // ── THE DECISION PLANE (spec 363 §2) ──
+          //
+          // The person may have said which account they pay from — `ap:primaryPayer`, a mark on the
+          // public charteredUnder edge. When exactly one carries it, that IS the answer and the question
+          // is not worth asking; the rule says so, and the reply CITES it, because a decision that
+          // cannot say why is indistinguishable from a guess.
+          //
+          // A marked account that cannot cover the act does NOT decide: paying from it would fail, and
+          // using it silently would turn a preference into a wrong answer. The question comes back with
+          // what is known, which is the fail-closed default this table always ends in.
+          if (where.capabilityId === 'treasury.payment.execute' && arg === 'payer') {
+            const chosen = decide(PAYMENT_SOURCE_ACCOUNT, mine.map((c) => ({ value: c, satisfies: c.roles ?? [] })));
+            if (chosen) {
+              const held = lookups.valueHeld ? await lookups.valueHeld(chosen.value.agent).catch(() => null) : null;
+              const covers = !needs || !held || held.amount >= needs.amount;
+              if (covers) {
+                lookups.onResolved?.({
+                  arg, raw: partyWord(arg), agent: chosen.value.agent, label: chosen.value.label,
+                  hint: candidateHint(chosen.value), because: chosen.because, ruleId: chosen.ruleId,
+                });
+                out[arg] = chosen.value.agent;
+                found = true;
+                break;
+              }
+            }
+          }
+
           // Two of yours could pay — a person may hold several treasuries, and creating one in a sentence
           // makes that ordinary. Which one is yours to say, not ours to rank.
+          const choices = await choicesFor(mine, lookups, needs);
+          // NOT ONE OF THEM CAN DO IT. Asking someone to choose between accounts that will all revert is
+          // asking them to pick which failure they would like; the useful answer is the shortfall and
+          // what would fix it. The list stays — they may be about to fund one, and hiding a person's own
+          // accounts to make a point is worse — but the question stops pretending it is a choice.
+          const noneCover = !!needs && choices.length > 0 && choices.every((c) => /not enough for/.test(c.hint));
+          const fullest = noneCover ? choices[0]!.hint.split(' · ')[0]!.split(' — ')[0] : '';
           throw new InputRequired({
             kind: 'data', stepRef: where.stepRef, toolId: where.toolId,
-            prompt: `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${partyWord(arg)}?`,
+            prompt: noneCover
+              ? `None of your ${type === 'treasury' ? 'treasuries' : `${type}s`} holds ${needs!.display} — the fullest has ${fullest}. Fund one first, or pick it anyway if you are about to.`
+              : needs
+                ? `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should pay the ${needs.display}?`
+                : `Which of your ${type === 'treasury' ? 'treasuries' : `${type}s`} should be ${partyWord(arg)}?`,
             fields: [{
               name: arg, label: partyWord(arg), type: 'choice', required: true,
-              // WHAT EACH ONE HOLDS, richest first. A person who has created treasuries in conversation
-              // can hold a dozen, and a list of bare addresses puts the choice on the reader with the
-              // least to go on. The balance is evidence, never the answer — the question is still asked.
-              choices: await choicesFor(mine, lookups),
+              // WHAT EACH ONE HOLDS, and whether it can cover this act — the ones that can, first. The
+              // balance is evidence, never the answer: the question is still asked, because an account
+              // that cannot pay today may be the one they mean to fund.
+              choices,
               // One of theirs may not be in their tree yet; a full name is always a valid answer.
               allowOther: true,
             }],
@@ -1715,30 +1840,6 @@ export async function resolveStepArgs(
   // amount with the literal string "<UNKNOWN>" — so the argument was present, this check passed, and the
   // person was shown a mandate whose ceiling was a placeholder. An argument counts as given only if it is
   // the KIND of value it is supposed to be; for a quantity that means a number.
-  const NUMERIC = new Set(['amount', 'usdc']);
-  // PEOPLE WRITE AMOUNTS THE WAY PEOPLE WRITE AMOUNTS. Asked "how much?", they answer "10 usdc", "$10",
-  // "10 dollars", "1,000" — and the strict number test read every one of those as no answer at all, so
-  // the identical question came back with nothing said about why. That is the same silent-refusal shape
-  // as the treasury prompt loop, and a person cannot debug it: the box says 10 and the agent says "how
-  // much?".
-  //
-  // Normalising is NOT guessing: a currency word or symbol next to a figure adds no information this
-  // deployment does not already have (one demo token), a thousands comma is punctuation, and anything
-  // that still is not a number is REPORTED rather than dropped.
-  const readAmount = (raw: string): string | null => {
-    const v = raw.trim().toLowerCase()
-      .replace(/^[$€£]/, '')
-      .replace(/\b(usdc|usd|dollars?|bucks?)\b/g, '')
-      .replace(/(\d),(?=\d{3}\b)/g, '$1')   // thousands separator only — "10,50" stays unreadable
-      .replace(/\s+/g, '');
-    return /^\d+(\.\d+)?$/.test(v) ? v : null;
-  };
-  for (const k of NUMERIC) {
-    const raw = String(out[k] ?? '').trim();
-    if (!raw || /^<.*>$|^(unknown|tbd|n\/a|null|undefined)$/i.test(raw)) continue;
-    const read = readAmount(raw);
-    if (read) out[k] = read;
-  }
   const given = (k: string): boolean => {
     const v = String(out[k] ?? '').trim();
     if (!v) return false;
@@ -1784,10 +1885,6 @@ export async function resolveStepArgs(
   // exactly one. Converting here means the delegation package never learns a token symbol and no reader
   // has to guess which field to trust; leaving it to them is how `stepLimits` came to throw on an amount
   // the person had plainly stated.
-  if (out.usdc !== undefined && out.amount === undefined) {
-    out.amount = fundingAmount(out).toString();
-    delete out.usdc;
-  }
 
   // THE TOKEN IS A DEPLOYMENT FACT, AND THE PLANNER MUST NOT SUPPLY IT.
   //
@@ -1903,7 +2000,13 @@ export async function askReplyFor(env: HarnessEnv, input: {
   const withProv = <T extends AskReply>(reply: T): T => (prov ? ({ ...reply, skillProvenance: prov } as T) : reply);
   if (r.outcome === 'authority-required' && r.required) {
     // Already normalised by the loop (`normalizeArgs`); re-run defensively for a caller that did not.
-    const args = await resolveStepArgs(r.required.args, env, { ...(input.resolveName ? { resolveName: input.resolveName } : {}) });
+    // RE-NORMALISING WHAT THE LOOP ALREADY NORMALISED. `computedUnits` because the base-unit figure in
+    // these args is OURS — the loop converted it from what the person said — and the planner-unit guard
+    // must not fire on our own arithmetic. It did, and an InputRequired thrown here (outside the loop's
+    // catch) escaped as "input required: data for (pending)".
+    const args = await resolveStepArgs(r.required.args, env, { ...(input.resolveName ? { resolveName: input.resolveName } : {}) }, {
+      stepRef: r.required.stepRef, toolId: r.required.toolId, computedUnits: true,
+    });
     // The resource was read out of an arg BEFORE the args were normalised, so it has to be re-read from
     // the resolved ones — not merely repaired when it looks wrong. It looked fine: the planner's recalled
     // token address is a perfectly well-formed address for another chain, and `locations` would have
@@ -2570,6 +2673,8 @@ fanned out.`;
       if (r.label || !resolved.has(key)) resolved.set(key, r);
     } }, {
       stepRef: 'pending', toolId, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}),
+      // A SCREEN'S OWN PLAN may state base units; a planner may not (see the unit guard above).
+      ...(input.plan ? { computedUnits: true } : {}),
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),

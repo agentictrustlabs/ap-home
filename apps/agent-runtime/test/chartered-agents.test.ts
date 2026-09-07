@@ -73,12 +73,14 @@ describe('charteredAgentsReader', () => {
         : a.functionName === 'hasRole' ? a.args[0] === ids[1]
         : edge({ subject: a.args[0] === ids[0] ? T2 : T3 })) as never,
       relationships: REL, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
-      primaryRole: `0x${'ab'.repeat(32)}`,
+      // Spec 363 — roles by IRI, so a reader can carry more than one modelled mark per edge.
+      roles: { 'https://agenticprimitives.dev/ns/core#primaryPayee': `0x${'ab'.repeat(32)}` },
       reverseName: async (agent: string) => (agent === T2 ? 'alice2.treasury' : 'alice3.treasury'),
     });
     expect(await call(ALICE, 'treasury')).toEqual([
       { agent: T2, name: 'alice2.treasury' },
-      { agent: T3, name: 'alice3.treasury', primary: true },
+      // `roles` is the modelled list (spec 363); `primary` is the same fact under its older name.
+      { agent: T3, name: 'alice3.treasury', roles: ['https://agenticprimitives.dev/ns/core#primaryPayee'], primary: true },
     ]);
   });
 
@@ -93,7 +95,8 @@ describe('charteredAgentsReader', () => {
         : a.functionName === 'hasRole' ? hasRole()
         : edge()) as never,
       relationships: REL, relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
-      primaryRole: `0x${'ab'.repeat(32)}`,
+      // Spec 363 — roles by IRI, so a reader can carry more than one modelled mark per edge.
+      roles: { 'https://agenticprimitives.dev/ns/core#primaryPayee': `0x${'ab'.repeat(32)}` },
       reverseName: async () => 'alice2.treasury',
     });
     expect(await call(ALICE, 'treasury')).toEqual([{ agent: T2, name: 'alice2.treasury' }]);

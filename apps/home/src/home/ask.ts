@@ -86,7 +86,11 @@ export type AskReply =
       alsoApprove?: { purpose: string; digest: `0x${string}` }[];
       /** What the words became. "send nathan a message" is authorized against an ADDRESS; this is where a
        *  person sees which one, before they sign rather than after. */
-      parties?: Array<{ arg: string; raw: string; agent: string; label?: string; hint?: string }> }
+      parties?: Array<{
+        arg: string; raw: string; agent: string; label?: string; hint?: string;
+        /** Spec 363 — why a party was DECIDED rather than asked, in the deciding rule's own words. */
+        because?: string; ruleId?: string;
+      }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[];
       /** Spec 361 — where the outcome lives, from the acted capability's CONTRACT (never a hand-kept

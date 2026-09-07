@@ -118,7 +118,7 @@ import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
 import { verifiedGrants, grantAllows } from './resolution-invitation.js';
 import { actionLink } from './resolution-request.js';
-import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
+import { RELATIONSHIP_TYPE, ROLE, ROLE_IRI } from '@agenticprimitives/agent-relationships';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
@@ -2658,7 +2658,9 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     charteredAgents: charteredAgentsReader({
       readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
       relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
-      primaryRole: ROLE.PRIMARY_PAYEE,
+      // BOTH modelled roles, keyed by the IRI the decision plane names them by (spec 363): which
+      // account receives, and which one spends. Different questions, different answers.
+      roles: { [ROLE_IRI.PRIMARY_PAYEE]: ROLE.PRIMARY_PAYEE, [ROLE_IRI.PRIMARY_PAYER]: ROLE.PRIMARY_PAYER },
       ...(env.AGENT_RELATIONSHIP ? { relationships: env.AGENT_RELATIONSHIP as Address } : {}),
       reverseName: async (agent: string) => {
         if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
