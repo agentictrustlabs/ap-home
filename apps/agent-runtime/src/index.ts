@@ -271,6 +271,8 @@ export interface Env {
    */
   ORCHESTRATION_LLM?: string;
   ANTHROPIC_API_KEY?: string;
+  /** Spec 365 — the display name system mail (a sign-in code) goes out under. */
+  EMAIL_FROM_NAME?: string;
   ORCHESTRATION_MODEL?: string;
   /**
    * spec 329 §4.1 — the per-member routed-consult deadline (ms). Overrides the
@@ -7166,10 +7168,27 @@ app.get('/discovery/agent', async (c) => {
 // It sends AS THE DEPLOYMENT'S ADDRESS, not as the person's own mailbox — we hold no credential for
 // their mail, and pretending otherwise would forge a From: header. The body says who it is from.
 app.post('/email/send', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; to?: string; subject?: string; text?: string; html?: string; as?: string } | null;
-  if (!body?.session || !body.to || !body.text?.trim()) return c.json({ ok: false, error: 'session, to and text are required' }, 400);
-  const who = await verifyHomeSession(body.session, c.env);
-  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const rawBody = await c.req.text();
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { session?: string; to?: string; subject?: string; text?: string; html?: string; as?: string } | null;
+  if (!body?.to || !body.text?.trim()) return c.json({ ok: false, error: 'to and text are required' }, 400);
+  // TWO CREDENTIALS, one at a time. A PERSON's Home session writes as themselves (or as an organization
+  // they steward); the HOME'S SERVER, with no person in the loop — a sign-in code, a verification — writes
+  // SYSTEM mail under the same HMAC bridge envelope the custody routes accept (SEC-010: freshness + single-
+  // use nonce). System mail goes out as the deployment's own address and threads nowhere: there is no
+  // correspondent whose thread it belongs to.
+  let who: { ok: true; sa: string } | { ok: false; error: string; status: number };
+  let system = false;
+  if (body.session) {
+    const v = await verifyHomeSession(body.session, c.env);
+    if (!v.ok) return c.json({ ok: false, error: v.error }, v.status as 401);
+    who = { ok: true, sa: String(v.sa) };
+  } else {
+    const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+    if (!secret) return c.json({ ok: false, error: 'session required (no bridge configured for system mail)' }, 401);
+    const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'email.send', nonces: bridgeNonceStore(c.env) });
+    if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+    who = { ok: true, sa: '' }; system = true;
+  }
   const to = body.to.trim().toLowerCase();
   if (!isEmailAddress(to)) return c.json({ ok: false, error: `"${body.to}" is not an email address` }, 400);
   const sender = emailSender(c.env as unknown as EmailEnv);
@@ -7180,6 +7199,7 @@ app.post('/email/send', async (c) => {
   // its thread copy belongs in the org's inbox, not the steward's). Standing is DERIVED here from the
   // person's own links and the chain (spec 353 S5) — never asserted by the caller.
   let from = String(who.sa).toLowerCase();
+  if (system && body.as) return c.json({ ok: false, error: 'system mail cannot be sent as an agent' }, 400);
   if (body.as) {
     const org = String(body.as).toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(org)) return c.json({ ok: false, error: '`as` must be an agent address' }, 400);
@@ -7197,19 +7217,21 @@ app.post('/email/send', async (c) => {
     if (standing?.relation !== 'steward' && standing?.relation !== 'self') return c.json({ ok: false, error: `you do not steward ${org} — mail goes out only as an agent you steward` }, 403);
     from = org;
   }
-  const fromName = c.env.AGENT_NAME_REGISTRY && c.env.AGENT_NAME_UNIVERSAL_RESOLVER
+  const fromName = system ? (c.env.EMAIL_FROM_NAME ?? null) : c.env.AGENT_NAME_REGISTRY && c.env.AGENT_NAME_UNIVERSAL_RESOLVER
     ? await new AgentNamingClient({
         rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID),
         registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
       }).reverseResolve(from as Address).catch(() => null)
     : null;
   const subject = (body.subject ?? '').trim() || `A message from ${fromName ?? 'an agent'}`;
-  const text = `${body.text.trim()}\n\n— ${fromName ?? from}, via ${new URL(c.env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://faithnet.me').host}`;
+  // System mail is sent VERBATIM — a sign-in code with a signature line appended is a stranger's mail.
+  const text = system ? body.text.trim() : `${body.text.trim()}\n\n— ${fromName ?? from}, via ${new URL(c.env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://faithnet.me').host}`;
   const sent = await sender.send({ to, subject, text, ...(body.html?.trim() ? { html: body.html } : {}) });
   if (!sent.ok) return c.json({ ok: false, error: sent.error ?? 'the email did not go', via: sent.via }, 502);
 
   // THEIR OWN COPY, in the thread with that address. Best-effort: the mail HAS gone, and failing the
   // request now would tell them it did not.
+  if (system) return c.json({ ok: true, via: sent.via, threaded: false, system: true });
   const recorded = await callInteractionsInternal(c.env, from, 'internal.email.admit', {
     direction: 'out', claimedFrom: to, subject, bodyText: body.text.trim(),
     gateway: (c.env.HARNESS_AGENT_SA ?? '').toLowerCase(),

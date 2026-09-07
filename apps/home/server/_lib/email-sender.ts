@@ -2,10 +2,14 @@
 // key set, it LOGS the message and returns ok — the build/flows never break; set SENDGRID_API_KEY +
 // EMAIL_FROM (a verified sender) to send for real. Uses the SendGrid v3 REST API directly (no npm dep →
 // provider stays swappable, build stays lean).
+import { signBridgeCall } from './bridge-hmac';
+
 export interface EmailEnv {
-  /** The a2a Worker that holds the Cloudflare Email Service binding (spec 365). When set and a steward
-   *  session is given, mail goes out through its `/email/send`, AS the organization, with a thread copy. */
+  /** The a2a Worker that holds the Cloudflare Email Service binding (spec 365). When set, EVERY mail this
+   *  Home sends goes out through its `/email/send`: as a person or an organization under their session, or
+   *  as system mail (a sign-in code) under the HMAC bridge envelope the custody routes already use. */
   A2A_CUSTODY_URL?: string;
+  A2A_CUSTODY_BRIDGE_SECRET?: string;
   SENDGRID_API_KEY?: string;
   /** Verified sender, e.g. `no-reply@impact-agent.me` — REQUIRED by SendGrid (must be a verified sender/domain). */
   EMAIL_FROM?: string;
@@ -20,7 +24,7 @@ export interface OutboundEmail {
 
 /** True once a provider is configured — the UI shows "email login/invite available" only when this is set. */
 export function emailSendingEnabled(env: EmailEnv): boolean {
-  return !!(env.SENDGRID_API_KEY && env.SENDGRID_API_KEY.trim() && env.EMAIL_FROM && env.EMAIL_FROM.trim()) || !!env.A2A_CUSTODY_URL?.trim();
+  return !!(env.A2A_CUSTODY_URL?.trim() && env.A2A_CUSTODY_BRIDGE_SECRET?.trim()) || !!(env.SENDGRID_API_KEY && env.SENDGRID_API_KEY.trim() && env.EMAIL_FROM && env.EMAIL_FROM.trim());
 }
 
 /** Who the mail goes out as, when a steward sends it for an organization through the Worker rail. */
@@ -29,16 +33,22 @@ export interface SendAs { session: string; as: string }
 export async function sendEmail(env: EmailEnv, msg: OutboundEmail, sendAs?: SendAs): Promise<{ ok: boolean; error?: string }> {
   const key = env.SENDGRID_API_KEY?.trim();
   const from = env.EMAIL_FROM?.trim();
-  // THE WORKER RAIL (Cloudflare Email Service). This Home runs where no email binding exists; the a2a Worker
-  // holds one, sends from a zone onboarded to Email Sending, and threads a copy into the organization's own
-  // inbox. Chosen by configuration (`A2A_CUSTODY_URL`), never by a failed attempt (ADR-0013).
+  // THE WORKER RAIL (Cloudflare Email Service) — the ONE rail when the Worker is configured. This Home runs
+  // where no email binding exists; the a2a Worker holds one, sends from a zone onboarded to Email Sending,
+  // and threads a person's or organization's copy into their own inbox. A person's mail carries their
+  // session; system mail (a sign-in code, a verification) carries the HMAC bridge envelope. Chosen by
+  // configuration, never by a failed attempt (ADR-0013); SendGrid remains only for a deployment without it.
   const a2a = env.A2A_CUSTODY_URL?.trim();
-  if (a2a && sendAs && !(key && from)) {
+  if (a2a && env.A2A_CUSTODY_BRIDGE_SECRET?.trim()) {
     try {
-      const r = await fetch(`${a2a.replace(/\/$/, '')}/email/send`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session: sendAs.session, as: sendAs.as, to: msg.to, subject: msg.subject, text: msg.text ?? '', html: msg.html }),
-      });
+      const payload = { to: msg.to, subject: msg.subject, text: msg.text ?? '', ...(msg.html ? { html: msg.html } : {}) };
+      const url = `${a2a.replace(/\/$/, '')}/email/send`;
+      const r = sendAs
+        ? await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...payload, session: sendAs.session, as: sendAs.as }) })
+        : await (async () => {
+            const envelope = await signBridgeCall({ secret: env.A2A_CUSTODY_BRIDGE_SECRET!, audience: 'email.send', payload });
+            return fetch(url, { method: 'POST', headers: envelope.headers, body: envelope.body });
+          })();
       const body = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; via?: string };
       if (!r.ok || body.ok === false) return { ok: false, error: body.error ?? `worker email ${r.status}` };
       return { ok: true };

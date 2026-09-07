@@ -116,6 +116,23 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
     window.location.assign(u.toString());
   };
 
+  // Spec 324 §7 / 361 — the invited-by-email person arrived as ANOTHER home: apply as it. The applicant's
+  // own agent sends `org.apply` to the organization's agent; the steward's Applications panel approves.
+  const [applied, setApplied] = useState<string | null>(null);
+  const applyAsThisHome = async () => {
+    if (!session || !agentAddress || !invite) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch('/connect/inbox', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ action: 'apply', org: invite.org.toLowerCase(), bodyText: `Invited by email to ${invite.orgName}${invite.invitedBy ? ` by ${invite.invitedBy}` : ''} (invitation ${token.slice(0, 8)}…) — arriving as ${agentName ?? agentAddress} rather than the invited email's home.` }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
+      if (!res.ok || body.ok === false) throw new Error(asMsg(body.error, `the request could not be sent (${res.status})`));
+      setApplied(`Sent — ${invite.orgName}'s stewards will see your request under Members → Applications and can admit ${agentName ?? 'this home'} with one signature.`);
+    } catch (e) { setErr(asMsg(e, 'could not send the request')); } finally { setBusy(false); }
+  };
+
   const accept = async () => {
     if (!session || !agentAddress || !invite) return;
     if (emailInviteNeedsSignOut(agentAddress, invite.invitedAgent)) {
@@ -233,10 +250,19 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
               <BusyButton busy={false} busyLabel="Signing out…" onClick={() => signOut()}>
                 Sign out to accept this invitation
               </BusyButton>
-              <p style={{ fontSize: '.75rem', opacity: 0.55, marginTop: '.6rem' }}>
-                After you sign out, this link sets up the invited home
-                {invite.appName ? ` and takes you to ${invite.appName}` : ` and joins ${invite.orgName}`}.
+              {/* THE OTHER HONEST CHOICE. An emailed invitation's grant was signed to the agent the email's
+                  own Home deploys; a person who already HAS a Home (Google, say) is a different agent, and
+                  no grant to it exists yet. Rather than dead-end on "sign out", offer to join AS this
+                  home through the organization's application flow: the request carries the invitation's
+                  reference, and a steward admits it with the same one-signature grant the members panel
+                  already issues. Nothing here confers membership — the steward's decision does. */}
+              <p style={{ fontSize: '.9rem', opacity: 0.75, marginTop: '1rem' }}>
+                Or keep this home and ask {invite.orgName} to admit <b>{agentName ?? 'it'}</b> instead — a steward approves it, and you get a Join link here.
               </p>
+              <BusyButton busy={busy} busyLabel="Sending your request…" onClick={() => void applyAsThisHome()} className="btn ghost">
+                Join as {agentName ?? 'this home'} instead
+              </BusyButton>
+              {applied && <p style={{ fontSize: '.85rem', color: 'var(--color-sage-700, #3f6212)', marginTop: '.6rem' }}>{applied}</p>}
             </>
           ) : session && agentAddress ? (
             <>
