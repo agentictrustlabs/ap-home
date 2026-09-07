@@ -121,9 +121,12 @@ export function hearingVocabulary(parts: { names: readonly string[]; verbs: read
   const labels = [...new Set([...(parts.assets ?? ['USDC', 'ETH']), ...parts.names].map((s) => s.trim()).filter(Boolean))].slice(0, 120);
   const verbs = [...new Set(parts.verbs.map((s) => s.trim()).filter(Boolean))].slice(0, 60);
   // A prose-shaped prompt biases better than a bare list: Whisper conditions on it as prior text.
+  // The answers a dialog asks for are in the prior too: a one-word "Granted." on a one-second clip is the
+  // hardest thing the recognizer hears, and the surface takes any positive answer — but "granite" less well.
   const prompt = [
     labels.length ? `Names: ${labels.join(', ')}.` : '',
     verbs.length ? `Things people ask: ${verbs.join('; ')}.` : '',
+    'Answers: yes, no, approve, approved, granted, confirm, cancel.',
   ].filter(Boolean).join(' ').slice(0, 1500);
   return { labels, prompt };
 }

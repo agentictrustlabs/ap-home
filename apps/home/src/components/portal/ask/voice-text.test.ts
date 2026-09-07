@@ -84,7 +84,11 @@ describe('moving between agents by name', () => {
     expect(closestOption('alice person', options)?.href).toBe('/');
     expect(closestOption('bob', options)).toBeNull();
   });
-  it('takes grant, approve, yes and granted as consent', () => {
-    for (const w of ['grant', 'approve', 'yes', 'granted', 'approved']) expect(yesNo(w)).toBe('yes');
+  it('takes any positive answer as consent, a clear no as no, and hears a short word slightly wrong', () => {
+    for (const w of ['grant', 'approve', 'yes', 'granted', 'approved', 'Granted.', 'sure, go ahead', 'sounds good', 'yep', 'absolutely', 'I authorize it', 'accept', 'okay sign it', 'please proceed', 'that is correct', 'go for it'])
+      expect(yesNo(w), w).toBe('yes');
+    for (const w of ['granite', 'a proved', 'yess', 'approve.', 'grantit']) expect(yesNo(w), w).toBe('yes');
+    for (const w of ['no', "no, don't sign it", 'not yet', 'cancel that', 'hold on', 'wait']) expect(yesNo(w), w).toBe('no');
+    for (const w of ['the weather is nice', 'what did you say', 'granola bar recipe']) expect(yesNo(w), w).toBeNull();
   });
 });

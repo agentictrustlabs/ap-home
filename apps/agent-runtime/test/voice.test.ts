@@ -39,7 +39,7 @@ describe("the ear's vocabulary", () => {
   it('is names plus verbs, deduplicated and bounded, as a prose prompt', () => {
     const v = hearingVocabulary({ names: ['alice2.treasury', 'alice2.treasury', 'Bob'], verbs: ['send money', 'send money', 'invite someone'] });
     expect(v.labels).toEqual(['USDC', 'ETH', 'alice2.treasury', 'Bob']);
-    expect(v.prompt).toBe('Names: USDC, ETH, alice2.treasury, Bob. Things people ask: send money; invite someone.');
+    expect(v.prompt).toBe('Names: USDC, ETH, alice2.treasury, Bob. Things people ask: send money; invite someone. Answers: yes, no, approve, approved, granted, confirm, cancel.');
   });
 });
 

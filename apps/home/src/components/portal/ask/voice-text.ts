@@ -3,11 +3,38 @@
 // (`reply.spoken`); nothing here composes words about the world.
 import type { AskReply } from '../../../home/ask';
 
+// CONSENT IS ANY POSITIVE ANSWER. "Yes", "granted", "approved", "sure, go ahead", "sounds good" — the person
+// is answering a question they were just read, and a check that takes only two spellings of yes is a form
+// with a voice. A clear negative wins over anything positive in the same breath ("no, don't sign it");
+// nothing recognisable is asked again, never guessed. Whisper hears one short word imperfectly ("granite"
+// for "granted"), so a short answer is also matched by closeness to the consent words.
+const NEGATIVE = /\b(no|nope|nah|cancel|stop|don'?t|do not|never ?mind|not yet|hold on|wait|decline|declined|refuse|reject|rejected|deny|denied|negative|abort)\b/;
+const POSITIVE_STEMS = ['yes', 'yeah', 'yep', 'yup', 'yea', 'ya', 'aye', 'sure', 'ok', 'okay', 'fine', 'good', 'great', 'correct', 'right', 'affirmative', 'positive', 'absolutely', 'definitely', 'certainly', 'indeed', 'please', 'proceed', 'continue', 'confirm', 'approv', 'grant', 'authoriz', 'accept', 'agree', 'allow', 'sign', 'consent', 'permit', 'go'];
+const CONSENT_WORDS = ['yes', 'granted', 'approved', 'approve', 'confirm', 'confirmed', 'accept', 'authorize', 'agreed', 'okay'];
+const POSITIVE_PHRASES = /\b(go ahead|do it|go for it|make it so|let'?s do it|sounds good|of course|by all means|carry on|that'?s (right|correct|fine|good))\b/;
+
+const bigramsOf = (s: string): string[] => { const out: string[] = []; for (let i = 0; i + 1 < s.length; i++) out.push(s.slice(i, i + 2)); return out; };
+function wordSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const B = new Map<string, number>();
+  for (const g of bigramsOf(b)) B.set(g, (B.get(g) ?? 0) + 1);
+  let shared = 0;
+  const A = bigramsOf(a);
+  for (const g of A) { const n = B.get(g) ?? 0; if (n > 0) { shared++; B.set(g, n - 1); } }
+  return (2 * shared) / (A.length + bigramsOf(b).length);
+}
+
 /** A yes or a no, or neither (then we ask again rather than guess). */
 export function yesNo(t: string): 'yes' | 'no' | null {
-  const s = ` ${t.toLowerCase().replace(/[^a-z'\s]/g, ' ')} `;
-  if (/\b(no|nope|cancel|stop|don't|do not|never mind|nevermind)\b/.test(s)) return 'no';
-  if (/\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|confirm|continue|do it|proceed|approve|approved|grant|granted|sign|agree|agreed)\b/.test(s)) return 'yes';
+  const s = ` ${t.toLowerCase().replace(/[^a-z'\s]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (NEGATIVE.test(s)) return 'no';
+  const words = s.trim().split(' ').filter(Boolean);
+  if (words.some((w) => POSITIVE_STEMS.some((stem) => w === stem || (stem.length >= 4 && w.startsWith(stem))))) return 'yes';
+  if (POSITIVE_PHRASES.test(s)) return 'yes';
+  // A short answer heard slightly wrong: "granite", "a proved", "yess" (bigram similarity ≥ 0.6 to a consent word).
+  if (words.length <= 3 && words.some((w) => w.length >= 3 && CONSENT_WORDS.some((c) => wordSimilarity(w, c) >= 0.6))) return 'yes';
+  if (words.length <= 3 && CONSENT_WORDS.some((c) => wordSimilarity(words.join(''), c) >= 0.6)) return 'yes';
   return null;
 }
 
