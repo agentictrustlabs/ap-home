@@ -60,7 +60,7 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
-import { MEMBERSHIP_LIST_TOOL, membershipListInvoker } from '@agenticprimitives/context';
+import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
 import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, fanOutBindingFor } from '@agenticprimitives/ontology';
@@ -1364,6 +1364,9 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);
     }
+    if (toolId === AFFILIATIONS_LIST_TOOL.id) {
+      return affiliationsListInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}) }, person)(toolId, args, ctx);
+    }
     if (toolId === RESOLUTION_REQUEST_TOOL.id) {
       return resolutionRequestInvoker(
         {
@@ -1757,6 +1760,45 @@ const partyWord = (arg: string): string => PARTY_ROLES.find((r) => r.arg === arg
  * display name whole ("Missio Nexus"), and "missio nexus organization" is not that name. Resolution is
  * the resolver's (`resolveStepArgs` → `resolveParty`): this never looks anything up.
  */
+/**
+ * "What teams am I part of / which organizations do I belong to / do I have a treasury" → the affiliations
+ * read, with the TYPE word the sentence used mapped onto the ontology's suffix vocabulary. A sentence that
+ * asks about being part of something with no type word lists everything. Null when the sentence is not
+ * about the asker's own links (e.g. "who are the members of X" — a roster, which is a different read).
+ */
+export function affiliationAskOf(goal: string): { type: string | null } | null {
+  const g = goal.toLowerCase().trim();
+  const words: Record<string, string> = {
+    team: 'team', teams: 'team', org: 'org', orgs: 'org', organization: 'org', organizations: 'org', organisation: 'org', organisations: 'org',
+    circle: 'circle', circles: 'circle', church: 'church', churches: 'church', treasury: 'treasury', treasuries: 'treasury',
+    workspace: 'workspace', workspaces: 'workspace', service: 'svc', services: 'svc', registry: 'registry', registries: 'registry',
+  };
+  const typeWord = Object.keys(words).find((w) => new RegExp(`\\b${w}\\b`).test(g));
+  const mine = /\b(am i|do i|i am|i'm|i belong|my)\b/.test(g);
+  const about = /\b(part of|member of|belong|on|in|have|hold|do i)\b/.test(g);
+  const asksList = /^(what|which|list|show|do i|am i)\b/.test(g);
+  if (!mine || !about || !asksList) return null;
+  if (/\bmembers?\b.*\b(of|in|on)\b/.test(g)) return null; // a roster question, not "what am I in"
+  return { type: typeWord ? words[typeWord]! : null };
+}
+
+/**
+ * The single-payment sentence: the payee's WORDS and the amount as said. "send 10 usdc to David" →
+ * { payee: 'David', usdc: '10' }; "pay david 10 usdc" → the same; "send 10 usdc" → no payee (asked for).
+ * Never resolves anything and never invents a value: an absent part is omitted, and the capability asks.
+ */
+export function paymentAskOf(goal: string): { payee?: string; usdc?: string } | null {
+  const g = goal.trim();
+  if (!/\b(send|pay|transfer)\b/i.test(g)) return null;
+  if (/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/i.test(g)) return null; // the fan-out shape
+  if (!/\busdc\b/i.test(g)) return null; // only money we know the unit of; "send a message" is not this
+  const amount = g.match(/(\d+(?:\.\d+)?)\s*usdc/i)?.[1];
+  let rest = g.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\b[\s\S]*$/i, ' ');
+  const to = rest.match(/\bto\s+(.+?)\s*$/i)?.[1];
+  const payee = (to ?? rest).replace(/^(to|please|now)\s+/i, '').replace(/[.!?]+$/, '').trim();
+  return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}) };
+}
+
 export function orgPhraseOf(goal: string): string | undefined {
   const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?.,;!]+?)\s*[?.!]*$/i);
   if (!m) return undefined;
@@ -2969,6 +3011,10 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
       const org = orgPhraseOf(goal);
       return { steps: [{ toolId: MEMBERSHIP_LIST_TOOL.id, args: org ? { org } : {} }] };
     }
+    // "What teams am I on / which circles do I belong to" — the person's own links by TYPE. The type word
+    // is the ontology's own suffix vocabulary (ADR-0061), read from the sentence; nothing else is decided.
+    const aff = affiliationAskOf(goal);
+    if (aff) return { steps: [{ toolId: AFFILIATIONS_LIST_TOOL.id, args: aff.type ? { type: aff.type } : {} }] };
     if (/\b(what|which|how many)\b.*\b(kinds?|types?|records?)\b.*\b(hold|have|vault|keep)|\brecords? (do|does) .* hold\b/.test(g)) {
       return { steps: [{ toolId: VAULT_QUESTION_TOOL.id, args: { question: goal } }] };
     }
@@ -2991,6 +3037,17 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
       ],
       rationale: 'compiled: per-member payment (spec 358 W4)',
     };
+  };
+
+  // ONE PAYMENT, one correct plan (spec 355: compile, don't interpret). "send 10 usdc to David" is the
+  // payment capability with the payee's WORDS and the amount as said — and live, a model given a bare
+  // first name chose the household lookup instead (a read that ends with "nothing was sent"), despite
+  // that tool saying in its own description never to be used that way. The shape is deterministic, so
+  // it is compiled; who "David" is stays the resolver's question (private tier, or ask). The fan-out
+  // form ("every member") is matched first and excluded here.
+  const compiledPayment = (goal: string): Plan | null => {
+    const p = paymentAskOf(goal);
+    return p ? { steps: [{ toolId: 'treasury.payment.execute', args: { ...(p.payee ? { payee: p.payee } : {}), ...(p.usdc ? { usdc: p.usdc } : {}) } }], rationale: 'compiled: single payment (spec 355)' } : null;
   };
 
   // Fan-out guidance (spec 358 W4) — appended to whichever prompt applies. The form is taught, the
@@ -3022,7 +3079,7 @@ fanned out.`;
     // to re-plan around (re-planning a click would act on something nobody clicked).
     ? { plan: async () => ({ steps: input.plan!.steps }) }
     : {
-        plan: async (pin) => compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? selected.planner.plan(pin),
+        plan: async (pin) => compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal) ?? selected.planner.plan(pin),
       };
   const kind = input.plan ? 'supplied' : selected.kind;
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
@@ -3045,6 +3102,8 @@ fanned out.`;
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never) }, deps) ? [VAULT_QUESTION_TOOL] : []),
     MEMBERSHIP_LIST_TOOL,
+    // What the asker is PART OF, by agent type (ADR-0061) — their own links, private tier.
+    ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
