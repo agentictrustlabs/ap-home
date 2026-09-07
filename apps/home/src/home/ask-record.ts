@@ -35,6 +35,8 @@ export interface IssuedInvitation {
   invitee: Address;
   memberAccessDelegation: DelegationWire;
   invited: true;
+  /** Household invitations (spec 368): kinship + role, carried onto the membership at redemption. */
+  facets?: { kin?: string; role?: string };
 }
 
 export function invitationOf(result: unknown): IssuedInvitation | null {
@@ -52,7 +54,7 @@ export async function recordInvitation(inv: IssuedInvitation, sessionToken: stri
   const res = await fetch('/connect/org-invite/agent', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
-    body: JSON.stringify({ org: inv.org.toLowerCase(), agent: inv.invitee.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation }),
+    body: JSON.stringify({ org: inv.org.toLowerCase(), agent: inv.invitee.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation, ...(inv.facets ?? {}) }),
   }).catch((e: unknown) => ({ ok: false, status: 0, json: async () => ({ error: String(e) }) }) as unknown as Response);
   if (!res.ok) {
     const b = (await res.json().catch(() => ({}))) as { error?: string };

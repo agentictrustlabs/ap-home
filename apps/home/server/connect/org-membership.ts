@@ -60,14 +60,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // POSTs it (redeem handed it to the invitee); the in-app path stored it in the org vault at invite
   // time (`org.invite:agent:<sa>`, spec 321 W2b) — looked up here when none was posted.
   let mad = body?.memberAccessDelegation;
+  // Household facets the invitation carried (spec 368) — read from the org's own record, never from the
+  // joiner's body: how they are related is the founder's statement, made when they invited.
+  let facets: { kin?: string; role?: string } = {};
   if (!mad) {
     try {
       // spec 341 §5.5b — the invitee CLAIMS the invite addressed to them: `orgVault` routes an
       // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
       // The address below is not sent — passing one would re-open the hole that op closes.
       const vault = await orgVault(env, org, token);
-      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string } | null) : null;
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string } | null) : null;
       if (rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
+      if (rec) facets = { ...(typeof rec.kin === 'string' ? { kin: rec.kin } : {}), ...(typeof rec.role === 'string' ? { role: rec.role } : {}) };
     } catch { /* unreachable — membership still records; the grant can be re-looked-up later */ }
   }
   const madValid = !!mad && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === person && !!mad.signature;
@@ -136,7 +140,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         admittedAt: new Date().toISOString(),
         // The ROLE is declarative and authorizes nothing; the DELEGATION is what confers access. Both are
         // named here so a reader can see which role a given grant materialises (aporg:RoleAssignment).
-        roleAssignment: { assignedRole: 'member', materializedByDelegation: d },
+        // A household membership carries its `aphh:` facets beside the generic role (spec 368): the
+        // household role and the kinship — declarative, both; the delegation is still the authority.
+        roleAssignment: { assignedRole: 'member', materializedByDelegation: d, ...(facets.role ? { householdRole: facets.role } : {}), ...(facets.kin ? { kinRelation: facets.kin } : {}) },
       },
     });
     membershipRecorded = r.status === 200;

@@ -35,11 +35,16 @@ async function askTurn(body: Record<string, unknown>): Promise<{ reply?: AskRepl
 export async function inviteThroughHarness(input: {
   org: Address;
   invitee: Address | string;
+  /** Household invitations (spec 368): kinship + household role, carried onto the membership. */
+  kin?: string;
+  role?: string;
   session: { token: string };
   signHash: SignHash;
 }): Promise<{ ok: true; recorded: boolean; emailDelivery?: { ok: boolean; delivery?: string; error?: string } } | { ok: false; error: string }> {
   const { org, invitee, session, signHash } = input;
-  const plan = { steps: [{ toolId: 'organization.membership.invite', args: { org: org.toLowerCase(), invitee: invitee.toLowerCase() } }] };
+  // Household facets (spec 368): how the invitee is related, carried on the invitation and the membership.
+  const facets = { ...(input.kin ? { kin: input.kin } : {}), ...(input.role ? { role: input.role } : {}) };
+  const plan = { steps: [{ toolId: 'organization.membership.invite', args: { org: org.toLowerCase(), invitee: invitee.toLowerCase(), ...facets } }] };
   const message = `invite ${invitee.toLowerCase()} to ${org.toLowerCase()}`;
 
   // Turn 1 — deterministic entry, no mandate: authority_required carrying BOTH digests.

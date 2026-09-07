@@ -2889,11 +2889,13 @@ export class InteractionsDO {
           // The room says so (Welcome topic): an invitation went out — to a named agent, or by email (the
           // address itself is never on the board; the record never held it either).
           if (op === 'invite.put' && st0.grant) {
-            const data = (body.data && typeof body.data === 'object' ? body.data : {}) as { invitedBy?: string; displayName?: string; status?: string };
+            const data = (body.data && typeof body.data === 'object' ? body.data : {}) as { invitedBy?: string; displayName?: string; status?: string; kin?: string };
             if (!data.status || data.status === 'pending') {
               const by = typeof data.invitedBy === 'string' && /^0x[0-9a-f]{40}$/i.test(data.invitedBy) ? await this.boardNameFor(st0.grant, data.invitedBy) : null;
               const who = resource.startsWith('org.invite:agent:') ? await this.boardNameFor(st0.grant, resource.slice('org.invite:agent:'.length)) : (data.displayName || 'someone, by email');
-              await this.postWelcome(st0.grant, principal, `📨 ${by ? `${by} invited` : 'An invitation went to'} ${who}${by ? ' to join' : ''}.`);
+              // A household's line says the kinship (spec 368) — "invited Bob to join as spouse".
+              const asKin = typeof data.kin === 'string' && data.kin.trim() ? ` as ${data.kin.trim()}` : '';
+              await this.postWelcome(st0.grant, principal, `📨 ${by ? `${by} invited` : 'An invitation went to'} ${who}${by ? ' to join' : ''}${asKin}.`);
             }
           }
           return json({ ok: true });

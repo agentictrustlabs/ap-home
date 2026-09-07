@@ -19,6 +19,9 @@ import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
 import { AgentName } from '../shared/AgentName';
 import { householdThroughHarness, readHouseholdThroughHarness, type HouseholdMemberRow } from '../../home/household-harness';
+import { inviteThroughHarness } from '../../home/invite-harness';
+import { signHashFor, resolveVia } from '../../home/onboarding';
+import { useManagedAgents } from './ManagedAgents';
 import { searchAgentsKb } from '../../lib/agent-search';
 import { ensureCsrfToken, csrfHeaders } from '../../csrf';
 import { mutedText, errorText } from './theme';
@@ -27,7 +30,12 @@ const KIN = ['', 'spouse', 'child', 'parent', 'sibling'] as const;
 const ROLES = ['member', 'guardian', 'dependent'] as const;
 
 export function HouseholdPanel() {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, profile } = useSession();
+  // THE HOUSEHOLD AGENT (spec 368): the family's SHARED record, as this note is the person's own. When the
+  // person stewards one, each recorded person can be invited into it — the household Bob is in as spouse
+  // is then the same household Alice founded, not two private notes that happen to agree.
+  const { agents: managed } = useManagedAgents(session?.token ?? null);
+  const householdAgents = useMemo(() => managed.filter((a) => a.kind === 'household' && a.relationship !== 'member'), [managed]);
   const [rows, setRows] = useState<HouseholdMemberRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState('');
@@ -135,6 +143,30 @@ export function HouseholdPanel() {
     } finally { setBusy(false); }
   }
 
+  /**
+   * INVITE INTO THE HOUSEHOLD AGENT — the same one-prompt ceremony as any organization invitation, run
+   * through the harness with the kinship and role this note records carried onto the invitation and, when
+   * they accept, onto their membership. The household's custodian (this person) signs; nothing here is
+   * done on the side.
+   */
+  async function inviteToHousehold(m: HouseholdMemberRow, house: { agent: string; name?: string | null }) {
+    if (!session?.token) return;
+    setBusy(true); setErr(''); setInvited(null);
+    try {
+      const via = resolveVia(profile?.credential, session.via);
+      const sign = await signHashFor(via, house.agent as Address, { token: session.token });
+      const out = await inviteThroughHarness({
+        org: house.agent as Address, invitee: m.agent as Address, session: { token: session.token }, signHash: sign,
+        ...(m.relation ? { kin: m.relation } : {}), ...(m.role ? { role: m.role } : {}),
+      });
+      if (!out.ok) throw new Error(out.error);
+      const label = house.name ? house.name.split('.')[0] : 'your household';
+      setInvited(`${m.label ?? m.agent} was invited to ${label}${m.relation ? ` as your ${m.relation}` : ''} — they are in it once they accept.${out.recorded ? '' : ' (The vault record could not be stored; it can be re-sent.)'}`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }
+
   /** Removing names the household too: the same person can be in two, and taking them out of one is not
    *  taking them out of the other. */
   async function remove(agent: string, house: string) {
@@ -183,7 +215,17 @@ export function HouseholdPanel() {
             {m.relation ? `your ${m.relation}` : 'lives with you'}
             {m.role === 'dependent' ? ' — cared for here' : m.role === 'guardian' ? ' — responsible for dependents here' : ''}
           </span>
-          <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 11 }}
+          {householdAgents.length > 0 && (() => {
+            // The household agent this section belongs with: the one whose label matches the section, else the first.
+            const target = householdAgents.find((a) => (a.name ?? '').toLowerCase().split('.')[0] === house.toLowerCase()) ?? householdAgents[0]!;
+            return (
+              <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 11 }}
+                disabled={busy} onClick={() => void inviteToHousehold(m, target)} data-testid={`household-invite-agent-${m.agent}`}>
+                Invite to {target.name ? target.name.split('.')[0] : 'household'}
+              </button>
+            );
+          })()}
+          <button type="button" className="btn-ghost" style={{ marginLeft: householdAgents.length ? 0 : 'auto', fontSize: 11 }}
             disabled={busy} onClick={() => void remove(m.agent, m.household ?? house)} data-testid={`household-remove-${m.agent}`}>
             Remove
           </button>
@@ -244,6 +286,15 @@ export function HouseholdPanel() {
       )}
       {picked && <p style={{ ...mutedText, fontSize: 11, marginTop: 4 }}>Adding <strong>{picked.label}</strong>.</p>}
       {invited && <p style={{ ...mutedText, fontSize: 11.5, marginTop: 6 }} data-testid="household-invited">{invited}</p>}
+      {/* THE SHARED HOUSEHOLD (spec 368). This note is yours; a household AGENT is the family's own — one
+          record everyone is in, with a vault, an inbox and, if you like, a treasury. Without one, "your
+          spouse" and their "spouse" are two private notes; with one, they are two memberships of the same
+          household. */}
+      {loaded && householdAgents.length === 0 && rows.length > 0 && (
+        <p style={{ ...mutedText, fontSize: 11.5, marginTop: 8 }} data-testid="household-make-agent">
+          This is your own note. To share one household with the people in it, <a href="/agents" style={{ textDecoration: 'underline' }}>create a household agent</a> — then each person here can be invited into it, with how you are related carried onto their membership.
+        </p>
+      )}
       <p style={{ ...mutedText, fontSize: 11, marginTop: 8 }}>
         They need an agent for you to record them — this record holds agents, not names on a list.
       </p>

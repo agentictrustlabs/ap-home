@@ -342,7 +342,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         )}
         {thread.map((e, i) => (
           <div key={i} className={e.role === 'you' ? 'ask-msg you' : 'ask-msg agent'}>
-            {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} realm={realm} addressee={addressee} />}
+            {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} realm={realm} addressee={addressee} onNext={(n) => void doCommand({ id: n.capability, label: n.words } as AskVocabularyEntry, n.args)} />}
           </div>
         ))}
         {/* Somebody is waiting on a decision only they can make. A line, with the place to make it — not
@@ -643,7 +643,7 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
 }
 
 /** What the agent said, in the shape it said it. */
-function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null }) {
+function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; onNext?: (next: { capability: string; args: Record<string, unknown>; words: string; why?: string }) => void }) {
   if (reply.kind === 'answer') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
@@ -686,6 +686,17 @@ function ReplyView({ reply, realm, addressee }: { reply: AskReply; realm?: { kin
         {(reply.effects ?? []).some((e) => e.ok && e.produces === 'PaymentReceipt') && (
           <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }} data-testid="ask-effect-ok">
             Both sides have the receipt.
+          </div>
+        )}
+        {/* Spec 368 §3 — WHAT MAY FOLLOW, proposed by the agent as a compiled command ("invite Bob to your
+            household as spouse"). One click runs it as a new turn, which asks for its own signature: the
+            proposal carries no authority, and nothing was done on the side. */}
+        {reply.next && (
+          <div style={{ marginTop: 6 }} data-testid="ask-next">
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px', minHeight: 0 }} onClick={() => onNext?.(reply.next!)}>
+              {reply.next.words.charAt(0).toUpperCase() + reply.next.words.slice(1)} →
+            </button>
+            {reply.next.why && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{reply.next.why}</div>}
           </div>
         )}
         {/* Spec 361 I2 — WHERE THE OUTCOME LIVES, said by the capability's own contract. This used to be

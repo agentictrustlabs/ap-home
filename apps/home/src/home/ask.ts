@@ -105,7 +105,11 @@ export type AskReplyVariant =
        *  could not be delivered is the difference between "they were told" and "they will never know". */
       effects?: Array<{ produces: string; ok: boolean; error?: string }>;
       /** Spec 363 W6 — what was DECIDED for the person on the way here, and on what basis. */
-      decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }> }
+      decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }>;
+      /** Spec 368 §3 — what MAY FOLLOW: a compiled command the agent proposes (e.g. "invite Bob to your
+       *  household as spouse" after a household note). A proposal only — confirming it runs a new turn
+       *  that asks for its own authority. */
+      next?: { capability: string; args: Record<string, unknown>; words: string; why?: string } }
   | { kind: 'refused'; runRef: string; outcome: string; error: string; receipts: unknown[] };
 
 /** Spec 367 wave 1 — what the planner actually received on this turn (mirror of the a2a `PlannerTraceV1`). Display only. */

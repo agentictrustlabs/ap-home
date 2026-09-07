@@ -207,12 +207,16 @@ export const INVITE_TOOL: ToolSpec = {
     'Invite an agent to join an organization or team as a member. Requires a mandate from the organization. '
     + 'Produces a signed access grant the invitee redeems when they join — it does NOT make them a member by itself. '
     + 'Args: org (the organization or team SA — whose authority this needs), invitee (the person\'s SA address; '
-    + 'use the directory tools first when the ask names someone rather than an address).',
+    + 'use the directory tools first when the ask names someone rather than an address). When the org is a '
+    + 'HOUSEHOLD (spec 368), kin (spouse, child, parent, sibling) and role (member, guardian, dependent) ride on '
+    + 'the invitation and onto the membership — the family\'s shared record of how they are related.',
   inputSchema: {
     type: 'object',
     properties: {
       org: { type: 'string', description: 'The organization or team SA address' },
       invitee: { type: 'string', description: 'The invitee\'s smart-agent address (0x…)' },
+      kin: { type: 'string', description: 'Household only — how the invitee is related to the household\'s founder: spouse | child | parent | sibling | a word of your own' },
+      role: { type: 'string', description: 'Household only — member (default) | guardian | dependent' },
     },
     required: ['org', 'invitee'],
   },
@@ -942,6 +946,12 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     }
     if (invitee === org) throw new Error('an organization cannot invite itself');
     if (person && invitee === person.toLowerCase()) throw new Error('you are already the steward of this organization — an invitation to yourself grants nothing');
+    // HOUSEHOLD FACETS (spec 368): kinship and role travel with the invitation and onto the membership
+    // (`aphh:kinRelation` / `aphh:householdRole`). Declarative — they authorize nothing (a guardian still
+    // needs a delegation to act for anyone) — so they are carried, never verified here.
+    const kin = String(args.kin ?? '').trim().toLowerCase();
+    const role = String(args.role ?? '').trim().toLowerCase();
+    const facets = kin || role ? { ...(kin ? { kin } : {}), ...(role ? { role } : {}) } : undefined;
 
     const digest = intentDigest(ctx.intent);
     const chainId = Number(env.CHAIN_ID);
@@ -974,7 +984,7 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
         const delivered = inviteeEmail && deps?.deliverEmailInvitation && session
           ? await deps.deliverEmailInvitation({ org, email: inviteeEmail, memberAccessDelegation: approvedWire, session }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
           : undefined;
-        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
+        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(facets ? { facets } : {}), ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
       }
     }
 
@@ -990,7 +1000,7 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     // The invitation is the SIGNED grant. Storing it is the surface's half (the org's vault); returning
     // it unsigned-but-claimed would be an invitation that verifies nowhere.
     const wireOut: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
-    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true };
+    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true, ...(facets ? { facets } : {}) };
   };
 }
 
@@ -1269,10 +1279,60 @@ export function householdRecordInvoker(deps: HarnessDeps, person: Address | unde
       ...(isFlagTrue(args.remove) ? { remove: true as const } : {}),
     });
     if (!out.ok) throw new Error(out.error ?? 'the household record could not be written');
+    // WHAT FOLLOWS (spec 368 §3): the note is the person's own; the HOUSEHOLD AGENT is the family's shared
+    // record. When they steward one, the next act is to invite this person INTO it, kinship carried —
+    // so the household Bob is in as spouse is the same household Alice founded. That invitation is the
+    // household's own act (its custodian signs), so it is PROPOSED here, never done on the side.
+    const next = isFlagTrue(args.remove) ? undefined : await householdNextFor(deps, person, member, label, args);
     return {
       ...out, member, tier: 'private', record: 'household.data',
+      ...(next?.householdAgent ? { householdAgent: next.householdAgent } : {}),
+      ...(next ? { next: next.next } : {}),
       note: 'this is your own private record of who you live with — it is not published anywhere, and it grants nobody any authority',
     };
+  };
+}
+
+/** A proposed follow-up act: a compiled command the person may confirm (the surface runs it as a plan;
+ *  authority is asked for there, never assumed here). */
+export interface NextActV1 { capability: string; args: Record<string, unknown>; words: string; why: string }
+
+/**
+ * The household agent this note should also land in, and the act that puts the person there.
+ *
+ * Chartered `.household` agents are read from the `ap:charteredUnder` edges the person signed (spec 355 —
+ * the edge, never a name resemblance). With one: invite the member into it, kinship and role carried.
+ * With several: the one whose label matches the household the person named; else the first. With none:
+ * propose creating one — until it exists, the family has nothing shared to be in.
+ */
+export async function householdNextFor(
+  deps: Pick<HarnessDeps, 'charteredAgents'>, person: Address, member: string, label: string, args: Record<string, unknown>,
+): Promise<{ householdAgent?: { agent: string; name?: string }; next: NextActV1 } | undefined> {
+  const houses = deps.charteredAgents ? await deps.charteredAgents(person.toLowerCase(), 'household').catch(() => []) : [];
+  const who = label || member;
+  const kin = String(args.kin ?? '').trim().toLowerCase();
+  const role = String(args.role ?? '').trim().toLowerCase();
+  if (!houses.length) {
+    return {
+      next: {
+        capability: 'household.create', args: {},
+        words: `create your household agent, so ${who} can be in the same household as you`,
+        why: 'the note you just made is yours alone; a household agent is the record the whole family shares',
+      },
+    };
+  }
+  const wanted = String(args.household ?? '').trim().toLowerCase();
+  const named = wanted ? houses.find((h) => (h.name ?? '').toLowerCase().split('.')[0] === wanted) : undefined;
+  const chosen = named ?? houses.find((h) => h.primary) ?? houses[0]!;
+  const houseName = chosen.name ? chosen.name.split('.')[0] : 'your household';
+  return {
+    householdAgent: { agent: chosen.agent, ...(chosen.name ? { name: chosen.name } : {}) },
+    next: {
+      capability: ORG_INVITE_CAPABILITY,
+      args: { org: chosen.agent, invitee: member, ...(kin ? { kin } : {}), ...(role ? { role } : {}) },
+      words: `invite ${who} to ${houseName}${kin ? ` as your ${kin}` : ''}`,
+      why: `${houseName} is the household the family shares — this puts ${who} in it, with how you are related recorded on their membership`,
+    },
   };
 }
 
@@ -2815,6 +2875,12 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const mail = res.inviteeEmail
         ? (res.emailDelivery?.ok ? ` — invitation ${res.emailDelivery.delivery === 'logged' ? 'link logged (email not configured)' : `emailed to ${res.inviteeEmail}`}` : ` — but the email to ${res.inviteeEmail} did not go: ${res.emailDelivery?.error ?? 'delivery failed'}`)
         : '';
+      // WHAT MAY FOLLOW (spec 368 §3): an invoker may propose the next act as a compiled command. It is a
+      // proposal the person confirms on the surface — the run that results asks for its own authority.
+      const nextRaw = (res as { next?: unknown }).next as Partial<NextActV1> | undefined;
+      const next: NextActV1 | undefined = nextRaw && typeof nextRaw.capability === 'string' && nextRaw.args && typeof nextRaw.args === 'object' && typeof nextRaw.words === 'string'
+        ? { capability: nextRaw.capability, args: nextRaw.args as Record<string, unknown>, words: nextRaw.words, why: typeof nextRaw.why === 'string' ? nextRaw.why : '' }
+        : undefined;
       const fulfillment = actedCap ? {
         capability: actedCap, established,
         ...(res.txHash ? { evidence: `tx ${res.txHash}` } : actedReceipt?.outputDigest ? { evidence: `receipt ${actedReceipt.stepRef}` } : {}),
@@ -2822,7 +2888,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
           ? `${CAPABILITY_WORDS[actedCap] ?? actedCap}: submitted and recorded — the outcome is not established until the other party acts`
           : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`) + mail,
       } : undefined;
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(next ? { next } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);

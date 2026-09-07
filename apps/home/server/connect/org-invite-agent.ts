@@ -19,7 +19,7 @@ const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string } }
+    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const agent = (body?.agent ?? '').toLowerCase();
@@ -49,7 +49,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   if (!vault) return json({ error: 'org vault not enabled — a steward must enable channel/vault storage first' }, 409);
   try {
-    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending' });
+    // Household facets (spec 368) ride on the record so redemption can put them on the membership. Declarative.
+    const kin = typeof body?.kin === 'string' ? body.kin.trim().toLowerCase().slice(0, 40) : '';
+    const role = typeof body?.role === 'string' ? body.role.trim().toLowerCase().slice(0, 40) : '';
+    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}) });
   } catch (e) {
     return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
