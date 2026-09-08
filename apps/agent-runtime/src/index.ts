@@ -3238,6 +3238,28 @@ export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     },
     // The inverse read: whose treasury is this? Used ONLY to deliver a payee-side receipt to the person
     // behind the paid treasury — the same edge, read from the other end. It grants nothing.
+    // THE VALUE RAIL'S EVIDENCE (spec 373): the on-chain `atl:agentType`, memoised per run because a
+    // payment reads both ends and a fan-out reads the payer once per item. Null when the profile resolver
+    // is not configured or the agent is unregistered — and the rail treats null as "refuse", not "allow".
+    agentTypeOf: (() => {
+      const seen = new Map<string, Promise<string | null>>();
+      return (agent: string) => {
+        const who = agent.toLowerCase();
+        if (!seen.has(who)) {
+          seen.set(who, (async () => {
+            if (!env.PROFILE_RESOLVER || !env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+            const d = await new AgentNamingClient({
+              rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID),
+              registry: env.AGENT_NAME_REGISTRY as Address,
+              universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+              profileResolver: env.PROFILE_RESOLVER as Address,
+            }).readDerivedType(who as Address);
+            return d.agentType ?? null;
+          })().catch(() => null));
+        }
+        return seen.get(who)!;
+      };
+    })(),
     ownerOf: charteredOwnerReader({
       readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
       relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,

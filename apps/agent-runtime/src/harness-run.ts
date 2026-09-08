@@ -767,6 +767,10 @@ export interface HarnessDeps {
   nameOf?: (address: string) => Promise<string | null>;
   /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
   ownerOf?: (agent: string) => Promise<string | null>;
+  /** THE VALUE RAIL'S EVIDENCE (spec 373) — the on-chain `atl:agentType` of an agent. A typed name is a
+   *  claim; this record is the authority (ADR-0061), genesis writes it, and an unnamed treasury still has
+   *  it. Absent or unreadable ⇒ a value move is REFUSED, because a rail that fails open is not a rail. */
+  agentTypeOf?: (agent: string) => Promise<string | null>;
   /** What an agent holds of the deployment's value asset — annotates a choice between accounts. */
   valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
   /** The apps a person has authorized to read their records, and whether each grant is still live. */
@@ -1054,6 +1058,28 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
  * it had found and that nothing had happened. A capability that accepts the words a person used needs no
  * such chain, and the resolution is the chain's own (immediate, unlike the directory).
  */
+/**
+ * THE VALUE RAIL, enforced (spec 373). Refuse unless this end of the transfer is a treasury, on chain.
+ *
+ * The refusal is a sentence a person can act on — whose account it is, what it is instead, and what would
+ * fix it — because "invalid payee" tells somebody holding money nothing about what to do next.
+ */
+async function refuseUnlessTreasury(deps: HarnessDeps, agent: string, end: string): Promise<void> {
+  const who = String(agent ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(who)) throw new Error(`the account ${end} did not resolve to an agent — money moves between treasuries`);
+  const name = (await deps.nameOf?.(who).catch(() => null)) ?? null;
+  const label = name ?? `${who.slice(0, 8)}…${who.slice(-4)}`;
+  if (!deps.agentTypeOf) throw new Error(`this agent cannot read what kind of account ${label} is, and money only moves between treasuries — nothing was paid`);
+  const type = (await deps.agentTypeOf(who).catch(() => null))?.toLowerCase() ?? null;
+  if (type === 'treasury') return;
+  if (type === 'person') {
+    throw new Error(`${label} is a person, and money moves between treasuries — a person is who a payment is FOR, an account is where it GOES. Name their treasury, or ask them to mark one to be paid into.`);
+  }
+  throw new Error(type
+    ? `${label} is ${type === 'org' ? 'an organization' : `a ${type}`}, and money moves between treasuries — name the treasury it charters.`
+    : `${label} has no agent type recorded on chain, so this agent cannot tell it is a treasury — money only moves between treasuries, and nothing was paid.`);
+}
+
 async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
   const raw = String(value ?? '').trim();
   if (/^0[xX][0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase() as Address;
@@ -1568,6 +1594,17 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       throw new Error(`the payment is made by the mandate's delegator (${(paymentPresented.wire as Delegation).delegator}); the plan named ${payer}`);
     }
     const payee = await partyAddress(args.payee, deps, 'the payee');
+    // ── THE VALUE RAIL (spec 373) ──────────────────────────────────────────────────────────────────
+    // Money moves between ACCOUNTS. Both ends are checked HERE, at the moment of acting, because this is
+    // the one place nothing can go around: a hand-supplied plan, a peer's step, an address typed straight
+    // into the argument, or a resolver that learns a new way to be wrong. On 2026-09-08 every other gate
+    // passed and the money landed on `carol.me`.
+    //
+    // The evidence is the on-chain `atl:agentType`, never the name: a suffix is a claim, the record is the
+    // authority, and an unnamed treasury has the record but no suffix. Fail-closed — unreadable is
+    // refused, and the sentence says which end and what it is.
+    await refuseUnlessTreasury(deps, payer || (paymentPresented.wire as Delegation).delegator.toLowerCase(), 'paying from');
+    await refuseUnlessTreasury(deps, payee, 'being paid');
     const amount = fundingAmount(args);
     const wire = paymentPresented.wire as Delegation;
     const digest = intentDigest(ctx.intent);
