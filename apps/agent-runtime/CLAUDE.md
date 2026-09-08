@@ -59,10 +59,13 @@ proxies selected MCP requests during local demos.
   as itself with no mandate; an act parks open to stewards; `POST /harness/triggers` + `/triggers/fire` (stewards).
   **Spec 371:** reads declare `answers`/`answer`; `balance-read.ts` (`treasury.balance.read`) renders
   "alice2.treasury holds 190.1 USDC."; question admission + a question-fidelity check on the composer.
-  **Spec 372 S2 (`standard-a2a.ts`):** `POST /api/a2a` serves the A2A **1.0** PascalCase methods too — the
-  Home session as a bearer is the principal, the executor is `/harness/ask` in-process, the reply kind is
-  the task state (`prompt` → INPUT_REQUIRED, `authority_required` → AUTH_REQUIRED). The live card gains the
-  1.0 fields; a released card is untouched. A door, never a grant.
+  **Spec 372 (`standard-a2a.ts`):** `POST /api/a2a` serves **one wire — A2A 1.0** — and two things behind it.
+  A message carrying the DELEGATED-TASK EXTENSION goes to the agent's own `A2aTaskDO`, where the unchanged
+  runtime authorizes the grant and verifies the sender's envelope; a message carrying none is a conversation
+  answered by `/harness/ask` in-process (reply kind → task state: `prompt` → INPUT_REQUIRED,
+  `authority_required` → AUTH_REQUIRED). Who is calling is the `Authorization` header: a Home session bearer,
+  or an agent's **session wire** (S3c). `message/send` / `tasks/*` are DELETED — `forwardA2aTask` with them.
+  The live card gains the 1.0 fields + the extension; a released card is untouched. A door, never a grant.
 
 ## What this app does not own
 

@@ -18,7 +18,6 @@ import { checkSessionWireShape } from './session-wire.js';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
 import {
   createA2aAgent,
-  dispatchA2aRpc,
   hashA2aMessage,
   hashA2aTaskRequest,
   type A2aAgent,
@@ -29,6 +28,7 @@ import {
   type McpClient,
   type SkillHandler,
 } from '@agenticprimitives/a2a';
+import { createAgentBackedServer, createMemoryTaskStore } from '@agenticprimitives/a2a/standard';
 import { createDurableObjectTaskStore } from '@agenticprimitives/a2a/cloudflare';
 // Content fabric over A2A→MCP (ADR-0055): the content intents ride the existing vault seam.
 import { A2A_CONTENT_INTENTS, parseVaultResourceId, toVaultRecordResource } from '@agenticprimitives/content-storage';
@@ -1266,20 +1266,47 @@ export class A2aTaskDO {
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }
     }
+    // THE FOLDED WIRE (spec 372 S4). One set of method names — A2A 1.0's — and the delegation-authorized
+    // runtime behind `SendMessage` carrying the delegated-task extension. This used to be a second wire of
+    // our own (`message/send`, `tasks/get`); the authority it carried moved into the extension and the
+    // gates behind it are unchanged. The caller is authenticated at the Worker's door and passed in;
+    // absent, only the message's own signature speaks for it, which is what a peer agent presents.
     const agentSA = (url.searchParams.get('agent') ?? (await this.state.storage.get<string>(AGENT_SA_KEY))) as Address | null;
     if (!agentSA) return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'agent not bound to this task store' } }, { status: 400 });
     await this.state.storage.put(AGENT_SA_KEY, agentSA); // remember for alarm() rehydration
-    const agent = this.build(agentSA);
 
-    let body: { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
-    try { body = await req.json(); } catch { return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
-    if (body.params && typeof body.method === 'string' && DELEGATION_METHODS.has(body.method) && body.params.delegation) {
-      body.params = { ...body.params, delegation: normalizeDelegation(body.params.delegation as Record<string, unknown>) };
-    }
-    const resp = await dispatchA2aRpc(agent, body);
+    let envelope: { rpc?: unknown; principal?: { agent?: string } | null };
+    try { envelope = await req.json(); } catch { return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
+    const rpc = (envelope?.rpc ?? envelope) as { method?: string };
+    const who = envelope?.principal?.agent ? { agent: String(envelope.principal.agent).toLowerCase() } : null;
+
+    const server = this.standardServer(agentSA, who);
+    const res = await server.handle(new Request('https://a2a-task-do/', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'a2a-version': '1.0' }, body: JSON.stringify(rpc),
+    }));
+    const resp = await res.json().catch(() => ({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'the folded wire returned no JSON' } }));
     // Schedule the runtime to advance any newly-due task (alarm() runs processDue()).
-    if (body.method === 'message/send' || body.method === 'tasks/resubmit') await this.state.storage.setAlarm(Date.now() + ALARM_DELAY_MS);
+    if (rpc?.method === 'SendMessage') await this.state.storage.setAlarm(Date.now() + ALARM_DELAY_MS);
     return Response.json(resp);
+  }
+
+  /** The A2A 1.0 server over this object's runtime + store (spec 372 S4). Built per request so the
+   *  authenticated caller is the one this request proved, never a cached one. */
+  private standardServer(agentSA: Address, principal: { agent: string } | null) {
+    const agent = this.build(agentSA);
+    return createAgentBackedServer({
+      agent,
+      runtimeStore: createDurableObjectTaskStore(this.state.storage),
+      ownStore: createMemoryTaskStore(),
+      // Internal, never served: the PUBLIC card is the Worker's, and it advertises the same extension.
+      card: {
+        name: agentSA, description: 'delegation-authorized tasks', version: '1',
+        supportedInterfaces: [{ url: 'https://a2a-task-do/', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
+        capabilities: { streaming: false, pushNotifications: true },
+        defaultInputModes: ['application/json'], defaultOutputModes: ['application/json'], skills: [],
+      },
+      ...(principal ? { principal: async () => principal } : {}),
+    });
   }
 
   /** Spec 370 P5 — arm the single alarm for the earliest due trigger, unless something sooner is set. */

@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { deliverOutbound, hashDeliveryBody, wireTargets } from '../src/outbound-delivery.js';
 import { encodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
+import { AP_DELEGATED_TASK_EXTENSION } from '@agenticprimitives/a2a/standard';
 
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
@@ -37,7 +38,8 @@ function recording() {
     transport: {
       async rpc(target: Address, request: Record<string, unknown>) {
         calls.push({ target, request });
-        return { jsonrpc: '2.0', id: 1, result: { taskId: `0x${'11'.repeat(32)}`, state: 'submitted' } };
+        // The A2A 1.0 answer (spec 372 S4): a task, in the 1.0 shape.
+        return { jsonrpc: '2.0', id: 1, result: { task: { id: `0x${'11'.repeat(32)}`, contextId: 'c', status: { state: 'TASK_STATE_SUBMITTED' } } } };
       },
     } as never,
   };
@@ -61,7 +63,23 @@ const run = (over: Record<string, unknown> = {}) => {
   };
 };
 
-const paramsOf = (rec: ReturnType<typeof recording>) => rec.calls[0]!.request.params as Record<string, never>;
+/**
+ * What the sender actually put on the wire, read back in the FOLDED shape (spec 372 S4): the delegation,
+ * the requester and the signed envelope live in the message's delegated-task extension, and the input is
+ * the message's data part. The properties asserted below are the same ones as before the fold — who signs,
+ * what binds the body, that the grant travels untouched — only the field paths moved.
+ */
+const paramsOf = (rec: ReturnType<typeof recording>) => {
+  const params = rec.calls[0]!.request.params as { message: { metadata?: Record<string, never>; parts: { data?: unknown }[]; messageId: string; contextId?: string } };
+  const ext = (params.message.metadata?.[AP_DELEGATED_TASK_EXTENSION] ?? {}) as Record<string, never>;
+  return {
+    ...ext,
+    // The envelope's fields, at the names the pre-fold tests used.
+    message: { ...ext, messageId: params.message.messageId, threadId: params.message.contextId },
+    input: params.message.parts[0]?.data,
+    delegation: ext.delegation,
+  } as Record<string, never>;
+};
 
 describe('two identities, never collapsed', () => {
   it('sends as the PERSON\u2019s agent, never as the key', async () => {
@@ -231,7 +249,7 @@ describe('a non-envelope payload (org.apply)', () => {
     const { rec, go } = run({ payload: application(), skill: 'org.apply' });
     await go();
     expect(rec.calls).toHaveLength(1);
-    const msg = (rec.calls[0]!.request.params as { message: Record<string, unknown> }).message;
+    const msg = paramsOf(rec).message as unknown as Record<string, unknown>;
     expect(msg.skill).toBe('org.apply');
   });
 
@@ -241,7 +259,7 @@ describe('a non-envelope payload (org.apply)', () => {
     // recorded against a key rather than a person — or refused outright.
     const { rec, go } = run({ payload: application(), skill: 'org.apply' });
     await go();
-    const msg = (rec.calls[0]!.request.params as { message: Record<string, unknown> }).message;
+    const msg = paramsOf(rec).message as unknown as Record<string, unknown>;
     expect(String(msg.sender).toLowerCase()).toBe(ALICE.toLowerCase());
   });
 
@@ -250,9 +268,9 @@ describe('a non-envelope payload (org.apply)', () => {
     // assertion that keeps "exempt from a field it does not have" from becoming "exempt".
     const { rec, go } = run({ payload: application(), skill: 'org.apply' });
     await go();
-    const params = rec.calls[0]!.request.params as { message: Record<string, unknown>; delegation: unknown };
+    const params = paramsOf(rec) as unknown as { message: Record<string, unknown>; delegation: unknown };
     expect(String(params.message.signature).startsWith('0x51')).toBe(true);
-    // The grant travels as `params.delegation`, NOT on the message — the shape the existing
+    // The grant travels in the delegated-task EXTENSION, not on the message body — the shape the existing
     // envelope tests already assert. My first version read `message.delegation`, got `undefined`, and
     // would have "passed" against any other wrong location had I asserted merely that it was truthy.
     expect(params.delegation).toEqual(GRANT);
@@ -263,7 +281,7 @@ describe('a non-envelope payload (org.apply)', () => {
     // payload has to be hashed the same way an envelope one is.
     const { rec, go } = run({ payload: application(), skill: 'org.apply' });
     await go();
-    const params = rec.calls[0]!.request.params as { message: Record<string, unknown>; input: unknown };
+    const params = paramsOf(rec) as unknown as { message: Record<string, unknown>; input: unknown };
     expect(params.message.bodyHash).toBe(hashDeliveryBody(params.input));
   });
 

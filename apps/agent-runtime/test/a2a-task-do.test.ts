@@ -121,14 +121,22 @@ describe('JSON-RPC framing', () => {
 
   // The alarm is what advances a submitted task. Scheduling it on submit — and NOT on a read — is the
   // difference between a task that progresses and a DO that wakes up for nothing.
-  it('schedules the runtime alarm on submit, and not on a read', async () => {
-    await rpc({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: { taskId: '0x01' } });
+  // Spec 372 S4 — the folded wire: A2A 1.0 method names, one set, and the delegation-authorized runtime
+  // behind `SendMessage`. `message/send` and `tasks/get` are gone, not renamed at the edge.
+  it('schedules the runtime alarm on SendMessage, and not on a read', async () => {
+    await rpc({ jsonrpc: '2.0', id: 1, method: 'GetTask', params: { id: `0x${'01'.repeat(32)}` } });
     expect(st.alarmAt()).toBeNull();
 
     // Scheduled even though the params are rejected: the alarm advances whatever IS due, and coupling
     // it to a handler's verdict would mean a rejected submit could strand an unrelated ready task.
-    await rpc({ jsonrpc: '2.0', id: 2, method: 'message/send', params: {} });
+    await rpc({ jsonrpc: '2.0', id: 2, method: 'SendMessage', params: {} });
     expect(st.alarmAt()).toBeGreaterThan(0);
+  });
+
+  it('the retired profile method names are simply not methods any more', async () => {
+    const out = await (await rpc({ jsonrpc: '2.0', id: 3, method: 'message/send', params: {} })).json() as { result?: unknown; error?: { code: number } };
+    expect(out.result).toBeUndefined();
+    expect(out.error?.code).toBe(-32601);
   });
 });
 

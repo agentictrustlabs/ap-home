@@ -118,7 +118,7 @@ import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders, isInternalCall } from './internal-marker.js';
-import { isStandardA2aMethod, standardServerFor, withStandardCardFields } from './standard-a2a.js';
+import { standardServerFor, withStandardCardFields } from './standard-a2a.js';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
@@ -1081,6 +1081,16 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),
+    // Spec 372 S4 — the delegation-authorized runtime lives on the agent's own object. The authenticated
+    // caller travels with the request; the object re-runs every gate regardless.
+    delegatedRpc: async (who, rpc, principal) => {
+      const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(who.toLowerCase()));
+      const res = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${who}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rpc, principal: principal ? { agent: principal.agent } : null }),
+      }));
+      return (await res.json().catch(() => ({ error: { code: -32603, message: `the task object answered ${res.status}` } }))) as never;
+    },
     claimAssertion: async (who, digest, expiresAtMs) => {
       const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(who.toLowerCase()));
       const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', {
@@ -2564,19 +2574,6 @@ app.post('/agent-cards/:op', async (c) => {
 // 269 W5). The runtime is an A2aTaskDO sharded per agent (idFromName(agentSA)); it authorizes the delegation
 // (ERC-1271 + isRevoked), persists the task, advances it via alarm(), and answers tasks/get|cancel|resubmit.
 // `ctx.agent` MUST be resolved (non-null) by the caller. Shared by both ingress shapes below.
-async function forwardA2aTask(c: Context<{ Bindings: Env }>, agent: Address, raw: string): Promise<Response> {
-  let body: { jsonrpc?: string; id?: string | number | null; method?: string };
-  try { body = JSON.parse(raw); } catch { return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400); }
-  if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
-    return c.json({ jsonrpc: '2.0', id: body.id ?? null, error: { code: -32600, message: 'invalid JSON-RPC request' } }, 400);
-  }
-  const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(agent.toLowerCase()));
-  const doResp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${agent}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
-  }));
-  return new Response(await doResp.text(), { status: 200, headers: { 'Content-Type': 'application/json' } });
-}
-
 /**
  * A2A JSON-RPC task endpoint — TWO ingress shapes, ONE runtime:
  *  - `/api/a2a` — agent from the per-agent subdomain Host (`<handle>.impact-agent.io`). The direct/legacy
@@ -2599,8 +2596,7 @@ app.post('/api/a2a', async (c) => {
   if (!ctx.agent) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
   }
-  if (isStandardA2aMethod(raw)) return serveStandardA2a(c, ctx, raw);
-  return forwardA2aTask(c, ctx.agent, raw);
+  return serveStandardA2a(c, ctx, raw);
 });
 
 app.post('/api/a2a/:handle', async (c) => {
@@ -2613,8 +2609,7 @@ app.post('/api/a2a/:handle', async (c) => {
   if (!ctx.agent) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name ?? c.req.param('handle')}` } }, 404);
   }
-  if (isStandardA2aMethod(raw)) return serveStandardA2a(c, ctx, raw);
-  return forwardA2aTask(c, ctx.agent, raw);
+  return serveStandardA2a(c, ctx, raw);
 });
 
 /**

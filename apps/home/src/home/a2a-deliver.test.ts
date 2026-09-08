@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { deliverOverA2a } from './a2a-deliver';
 import { CONTRACTS } from '../lib/chain';
+import { AP_DELEGATED_TASK_EXTENSION } from '@agenticprimitives/a2a/standard';
 
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
@@ -23,7 +24,8 @@ function recordingTransport() {
     transport: {
       async rpc(target: Address, request: Record<string, unknown>) {
         calls.push({ target, request });
-        return { jsonrpc: '2.0', id: 1, result: { taskId: `0x${'11'.repeat(32)}`, state: 'submitted' } };
+        // The A2A 1.0 answer (spec 372 S4): a task, in the 1.0 shape.
+        return { jsonrpc: '2.0', id: 1, result: { task: { id: `0x${'11'.repeat(32)}`, contextId: 'c', status: { state: 'TASK_STATE_SUBMITTED' } } } };
       },
     } as never,
   };
@@ -48,13 +50,24 @@ const deliver = (over: Record<string, unknown> = {}) => {
   };
 };
 
-describe('the call is an ordinary message/send', () => {
+/**
+ * What the Home actually put on the wire, read back in the FOLDED shape (spec 372 S4): the delegation, the
+ * requester and the signed envelope live in the message's delegated-task extension. Same properties as
+ * before the fold — one grant, one signature, a ref and a hash — at moved field paths.
+ */
+const sentParams = (rec: { calls: { request: { params?: unknown } }[] }) => {
+  const params = rec.calls[0]!.request.params as { message: { metadata?: Record<string, never>; parts: { data?: unknown }[] } };
+  const ext = (params.message.metadata?.[AP_DELEGATED_TASK_EXTENSION] ?? {}) as Record<string, never>;
+  return { ...ext, message: ext, input: params.message.parts[0]?.data } as Record<string, never>;
+};
+
+describe('the call is an ordinary SendMessage on the A2A 1.0 wire', () => {
   it('targets the recipient with method message/send', async () => {
     const { rec, run } = deliver();
     await run();
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0]!.target).toBe(BOB);
-    expect(rec.calls[0]!.request.method).toBe('message/send');
+    expect(rec.calls[0]!.request.method).toBe('SendMessage');
   });
 
   // `authorizeA2aMessage` requires delegate === requester === message.sender. Making them equal by
@@ -63,7 +76,7 @@ describe('the call is an ordinary message/send', () => {
   it('keeps delegate, requester and message.sender the same account', async () => {
     const { rec, run } = deliver();
     await run();
-    const p = rec.calls[0]!.request.params as {
+    const p = sentParams(rec) as unknown as {
       delegation: { delegator: Address; delegate: Address };
       requester: Address;
       message: { sender: Address };
@@ -77,7 +90,7 @@ describe('the call is an ordinary message/send', () => {
   it('carries a grant scoped to the recipient and the delivery skill', async () => {
     const { rec, run } = deliver();
     await run();
-    const p = rec.calls[0]!.request.params as { delegation: { caveats: { enforcer: Address; terms: string }[] } };
+    const p = sentParams(rec) as unknown as { delegation: { caveats: { enforcer: Address; terms: string }[] } };
     const targets = p.delegation.caveats.find((c) => c.enforcer === CONTRACTS.allowedTargetsEnforcer);
     expect(targets!.terms.toLowerCase()).toContain(BOB.slice(2).toLowerCase());
     expect(p.delegation.caveats.some((c) => c.enforcer === CONTRACTS.allowedMethodsEnforcer)).toBe(true);
@@ -99,7 +112,7 @@ describe('two signatures, over two different things', () => {
     expect(signed).toHaveLength(2);
     expect(signed[0]).not.toBe(signed[1]);
     expect(signed[0]).toBe(r.grantDigest);
-    const p = rec.calls[0]!.request.params as { message: { signature: Hex } };
+    const p = sentParams(rec) as unknown as { message: { signature: Hex } };
     expect(p.message.signature).toBeDefined();
     expect(p.message.signature).not.toBe(p.message.signature.replace(/./g, '0'));
   });
@@ -122,7 +135,7 @@ describe('the body stays in the vault', () => {
     // bigint-aware, because `Delegation.salt` is a bigint — the constraint this test discovered, and
     // the one a real fetch transport has to satisfy (see `A2aDeliverInput.transport`).
     const raw = JSON.stringify(rec.calls[0]!.request, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
-    const p = rec.calls[0]!.request.params as { message: { bodyRef: { owner: Address; recordType: string }; bodyHash: Hex } };
+    const p = sentParams(rec) as unknown as { message: { bodyRef: { owner: Address; recordType: string }; bodyHash: Hex } };
     expect(p.message.bodyRef.recordType).toBe('message.body:dm:msg_1');
     // WHOSE vault — the recipient's, which is what lets them read it under their own authority.
     expect(p.message.bodyRef.owner).toBe(BOB);
@@ -167,7 +180,7 @@ describe('delivering under a pre-existing wire (spec 341 §5.1a)', () => {
       wire: { delegation: WIRE, delegate: WIRE_DELEGATE },
     });
 
-    const p = rec.calls[0]!.request.params as {
+    const p = sentParams(rec) as unknown as {
       delegation: unknown; requester: Address; message: { sender: Address };
     };
     // The wire is passed through untouched — re-minting would need the person's credential, which the
