@@ -19,6 +19,9 @@ export const BALANCE_READ_TOOL: ToolSpec = {
   description: 'The current balance of a treasury or organization, read on chain, in USDC. Names the account; when none is named, every treasury the person holds. A READ: no authority is spent.',
   inputSchema: { type: 'object', properties: { account: { type: 'string', description: 'The treasury or organization — its address or its name (alice2.treasury). Omit for all of your own treasuries.' } } },
   answers: ['balance', 'how much', 'how much money', 'funds', 'what do i hold', 'holds'],
+  // Spec 366 R2 — a TREASURY is a subject: "what is alice3.treasury's balance", asked at alice.me, is
+  // answered by alice3.treasury's own agent under its own realm rule (371 §2.1), not read across.
+  subject: 'account',
   answer: '{{label}} holds {{display}}.',
   establishes: 'lookup',
 };

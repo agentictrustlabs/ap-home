@@ -765,6 +765,13 @@ export interface HarnessDeps {
   askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string } }) => Promise<SubjectAnswerV1>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
+  /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
+   *  for standing, and that their own tree is not this agent's to read. Every standing derivation in this
+   *  run inherits it (`StandingDeps.context`). */
+  standingContext?: { presented?: readonly unknown[]; routed?: boolean };
+  /** Verifies a stewardship wire on chain (shape, ERC-1271, revocation). Built once per deployment so a
+   *  read tool can judge a wire the asker PRESENTED (spec 366 R2); absent ⇒ no wire is believed. */
+  verifyStewardship?: StandingDeps['verifyStewardship'];
   /** `ap:charteredUnder` owner of an agent, from chain — who a payee treasury's receipt is told to. */
   ownerOf?: (agent: string) => Promise<string | null>;
   /** THE VALUE RAIL'S EVIDENCE (spec 373) — the on-chain `atl:agentType` of an agent. A typed name is a
@@ -811,6 +818,20 @@ export function routedSubjectFor(tool: { subject?: string } | undefined, args: R
 
 /** The receiver's profile answer as the sender reads it (mirror of `@agenticprimitives/a2a` SubjectAnswerV1). */
 export interface SubjectAnswerProfileV1 { extension: string; version: 1; agent: string; inResponseTo: { operationId: string; runRef: string; stepRef: string }; outcome: 'answer' | 'refused' | 'needs' | 'error'; result?: unknown; said?: string; run: { runRef: string; receipts: Array<{ stepRef: string; capability?: string; status: string; binding?: unknown }> } }
+
+/** One step another agent answered (spec 366): who, reached how, under which of its runs, with what receipts. */
+export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; name?: string; observedVia: string; runRef?: string; receipts?: number }
+
+/** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
+export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
+  const out: RoutedStepV1[] = [];
+  steps.forEach((o, i) => {
+    const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: unknown[] } } | null | undefined)?.via;
+    if (!via?.agent) return;
+    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}) });
+  });
+  return out;
+}
 
 /** The body `/harness/ask` answers with. The reply is NESTED under `reply`; `ok`/`error` sit on the envelope. */
 export interface AskReplyEnvelopeV1 {
@@ -1526,6 +1547,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return membershipListInvoker(
         {
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+          ...(deps.standingContext ? { context: deps.standingContext } : {}),
+          ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
           ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -1541,6 +1564,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return invitationsListInvoker(
         {
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+          ...(deps.standingContext ? { context: deps.standingContext } : {}),
+          ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -1563,8 +1588,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       )(toolId, args, ctx);
     }
     if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
-    if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(deps, (addressee ?? person) as Address, person)(toolId, args, ctx);
-    if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(deps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
+    // The coordination reads judge standing themselves; the routed context rides in as `StandingDeps.context`.
+    const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}) };
+    if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(coordinationDeps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps, session)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
@@ -1883,6 +1910,9 @@ export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
  *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
 export type AskReplyVariant =
   | { kind: 'answer'; text: string; runRef: string;
+      /** Spec 366 — WHICH STEPS WERE ANSWERED BY ANOTHER AGENT, and how: the subject's agent, how it was
+       *  reached, its run and its receipts. Evidence a surface can show and a record can cite (M8). */
+      routed?: RoutedStepV1[];
       /** WHAT IT READ TO SAY THAT. A generated query is the one kind of evidence a person cannot
        *  reconstruct from the answer, and an answer whose query nobody can inspect is a claim (spec 357
        *  §4). Present when a step produced one; display only, and it decides nothing. */
@@ -2119,7 +2149,10 @@ export function utteranceExamples(tools: ReadonlyArray<{ id: string; utterances?
 const KIND_SUFFIX: Record<string, string> = { person: 'me', me: 'me', org: 'org', organization: 'org', team: 'team', workspace: 'workspace', treasury: 'treasury', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc', svc: 'svc', circle: 'circle', church: 'church' };
 
 export function orgPhraseOf(goal: string): string | undefined {
-  const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?.,;!]+?)\s*[?.!]*$/i);
+  // The phrase may carry a DOT: "members of calvary.org", "members of alice-home-church.impact" are typed
+  // names, and excluding the dot here meant no typed name ever reached the step — the roster read then
+  // fell to the addressee (spec 366 R3's incident). Only sentence punctuation ends the phrase.
+  const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?,;!]+?)\s*[?.!]*$/i);
   if (!m) return undefined;
   const phrase = (m[1] ?? '')
     // "… of missio nexus 1 usdc" (the fan-out sentence) — the amount is the payment's, not the name's.
@@ -2925,7 +2958,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     else {
       const read = input.deps.readSubjectRecord;
       standing = await deriveStanding(
-        { readSubjectRecord: read, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}) },
+        { readSubjectRecord: read, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}), ...(input.deps?.standingContext ? { context: input.deps.standingContext } : {}) },
         { principal: input.principal, subject: delegator },
       ).catch((e: unknown) => { standingUnavailable = e instanceof Error ? e.message : String(e); return undefined; });
     }
@@ -2969,7 +3002,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     const pendingCapability = r.prompt.toolId ?? '';
     if (input.principal && input.deps?.readSubjectRecord && AUTHORITY_BEARING_CAPABILITIES.includes(pendingCapability)) {
       const st = await deriveStanding(
-        { readSubjectRecord: input.deps.readSubjectRecord, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}) },
+        { readSubjectRecord: input.deps.readSubjectRecord, ...(input.verifyStewardship ? { verifyStewardship: input.verifyStewardship } : {}), ...(input.deps.standingContext ? { context: input.deps.standingContext } : {}) },
         { principal: input.principal, subject: input.addressee },
       ).catch(() => null);
       if (st?.relation === 'member') {
@@ -3041,7 +3074,8 @@ async function askReplyForInner(env: HarnessEnv, input: {
     const results = input.suppliedPlan
       ? r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result }))
       : [];
-    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}) });
+    const routed = routedStepsOf(r.steps);
+    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
     // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
     // template and its result has the fields, the reply is the template over the result — the person's
     // unit, no interpretation, no model. The composer is for reads that declare no sentence.

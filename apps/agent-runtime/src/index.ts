@@ -2234,6 +2234,10 @@ app.post('/harness/ask', async (c) => {
   // just verified, the asker named is the session's own agent, and the plan is the profile's request. Nothing
   // in the profile is trusted as authority — standing is derived below against this agent's own records.
   let inResponseTo: HarnessRunInput['inResponseTo'];
+  // Spec 366 R2 — what the asker PRESENTED for standing (their stewardship wire for this subject). Verified
+  // here like any wire; never believed on its word. R3 — and because this ask is routed, the asker's own
+  // tree is another agent's vault and is not read by this one.
+  let routedStanding: { presented: readonly unknown[]; routed: true } | undefined;
   if (body.subjectAsk !== undefined) {
     const v = validateSubjectAsk(body.subjectAsk);
     if (!v.ok) return c.json({ ok: false, error: `subject-ask profile: ${v.errors.join('; ')}` }, 400);
@@ -2242,6 +2246,7 @@ app.post('/harness/ask', async (c) => {
     const step = body.plan?.steps?.[0];
     if (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
     inResponseTo = { agent: sa.asker.agent.toLowerCase() as Address, operationId: sa.correlation.operationId, runRef: sa.correlation.runRef, stepRef: sa.correlation.stepRef };
+    routedStanding = { presented: sa.asker.presented ?? [], routed: true };
   }
 
   // ── spec 350 W3 — the durable run. A resume names the runRef; everything the person already said and
@@ -2280,7 +2285,8 @@ app.post('/harness/ask', async (c) => {
   // another intent, and the mandate does not travel.
   const intent = { goal: turn.message, context: { addressee, asker: who.sa } };
   const audit = buildAuditSink(c.env);
-  const askDeps = harnessDeps(c.env, audit);
+  const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
+  if (routedStanding) askDeps.standingContext = routedStanding;
   try {
     // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
     // surface long-polls them while this request is in flight. Fire-and-forget under waitUntil: a line
@@ -3176,7 +3182,23 @@ async function callInteractionsInternal(env: Env, principal: string, op: string,
   return out;
 }
 
-export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
+/**
+ * The execution context an IN-PROCESS call runs under. A routed ask goes through `app.fetch` (a Worker
+ * cannot fetch its own hostname), and Hono refuses `c.executionCtx` when none was passed — so every routed
+ * ask has answered 500 "This context has no ExecutionContext" since the ask route first used `waitUntil`
+ * (P5, 2026-09-08; found by the R2 gate). The request's own context when there is one; otherwise a shim
+ * that lets background work run for as long as the isolate is up, which is what an alarm-driven caller
+ * has anyway.
+ */
+function executionContextFor(ctx?: ExecutionContext): ExecutionContext {
+  if (ctx) return ctx;
+  return {
+    waitUntil: (p: Promise<unknown>) => { void p.catch((e) => console.warn('[in-process] background work failed:', e instanceof Error ? e.message : String(e))); },
+    passThroughOnException: () => undefined,
+  } as unknown as ExecutionContext;
+}
+
+export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: ExecutionContext } = {}): HarnessDeps {
   const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
   const deps: HarnessDeps = {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
@@ -3279,6 +3301,18 @@ export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
         return seen.get(who)!;
       };
     })(),
+    // THE STEWARDSHIP VERIFIER, once, for every standing derivation in a run (spec 366 R2). It was built
+    // inline for the reply path only, so a read tool judging a PRESENTED wire had no way to check it and
+    // silently skipped it — a steward asking her own organization's roster over a routed ask was told she
+    // had no link (found by the R2 gate, 2026-09-08).
+    verifyStewardship: chainStewardshipCheck({
+      readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
+      chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
+      allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER,
+      vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+      ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+    }),
     ownerOf: charteredOwnerReader({
       readContract: ((args: never) => pub.readContract(args) as Promise<unknown>) as never,
       relationshipType: RELATIONSHIP_TYPE.CHARTERED_UNDER,
@@ -3519,9 +3553,18 @@ export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     const inProcess = served.some((d) => host === d || host.endsWith(`.${d}`));
     // Spec 366 R2 — the SUBJECT-ASK PROFILE: the externally meaningful delegated request and its causal
     // correlation, typed and versioned, beside the supplied plan the receiver's harness already understands.
+    // Spec 366 R2 — WHAT THE ASKER HOLDS, PRESENTED. Their stewardship wire for this subject travels with
+    // the ask, from their own tree, for the receiver to verify against the chain. The receiver no longer
+    // reads that tree itself (R3): what you hold, you present; what it knows of you, it reads at home.
+    const presented: unknown[] = [];
+    if (asker && deps.readSubjectRecord) {
+      const tree = await deps.readSubjectRecord(asker.toLowerCase(), 'relationships.data').catch(() => null);
+      const row = relationshipRows(tree).find((r) => r.agent.toLowerCase() === subject.toLowerCase());
+      if (row?.relationship === 'steward' && row.stewardshipDelegation) presented.push(row.stewardshipDelegation);
+    }
     const profile = subjectAsk({
       request: { capability: toolId, args, goal },
-      asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session } },
+      asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session }, ...(presented.length ? { presented } : {}) },
       correlation,
     });
     const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile });
@@ -3529,7 +3572,7 @@ export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
     const via = { agent: subject, name, host, observedVia: (inProcess ? 'serving-handler' : 'network') as 'serving-handler' | 'network' };
     let res: Response;
     try {
-      res = inProcess ? await app.fetch(req, env) : await fetch(req);
+      res = inProcess ? await app.fetch(req, env, executionContextFor(opts.executionCtx)) : await fetch(req);
     } catch (e) {
       return { ok: false, via, refused: `could not reach ${name ?? subject} at ${host}: ${e instanceof Error ? e.message : String(e)}` };
     }

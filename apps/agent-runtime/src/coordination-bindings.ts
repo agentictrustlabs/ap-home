@@ -13,7 +13,7 @@
 // contracts declare, and the DO still derives the caller's standing from its own records (ADR-0054).
 import type { Address } from 'viem';
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
-import { deriveStanding, relationshipRows, type StandingDeps } from '@agenticprimitives/context';
+import { deriveStanding, relationshipRows, subjectOfRead, type StandingDeps } from '@agenticprimitives/context';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import {
   COORDINATION_INDEX_RESOURCE, coordinationEventsResource, reduceEventLog, visibleEndeavorRows, endeavorViewFor,
@@ -102,11 +102,14 @@ export interface CoordinationDeps extends StandingDeps {
 
 const isAddr = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s);
 
-/** The org an argument names, resolved already by the party resolver; else the agent being asked. */
-function orgOf(args: Record<string, unknown>, addressee: Address): { org: Address } | { refused: string } {
-  const raw = String(args.org ?? '').trim();
-  if (raw && !isAddr(raw)) return { refused: `this agent does not know an organization called “${raw}” among your links` };
-  return { org: (raw || addressee).toLowerCase() as Address };
+/**
+ * The org an argument names, resolved already by the party resolver — and ONLY the agent being asked
+ * (spec 366 R3, `subjectOfRead`): another agent's endeavors are read at that agent; a person's own agent
+ * asked about no organization asks which one.
+ */
+function orgOf(args: Record<string, unknown>, addressee: Address, principal: Address | undefined, toolId: string, stepRef?: string): { org: Address } | { refused: string } {
+  const sub = subjectOfRead(args, addressee, principal, { toolId, arg: 'org', noun: 'organization or team', stepRef });
+  return 'refused' in sub ? sub : { org: sub.subject };
 }
 
 /** The stewardship wire the asker's OWN links hold for this org — what the DO's steward gate verifies. */
@@ -122,10 +125,12 @@ async function stewardshipWireFor(deps: StandingDeps, person: Address, org: Addr
  * the substrate does not already compute for a click.
  */
 export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, person?: Address): ToolInvoker {
-  return async (toolId, args) => {
-    const o = orgOf(args, addressee);
+  return async (toolId, args, ctx) => {
+    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id);
     if ('refused' in o) return { endeavors: [], count: 0, refused: o.refused };
     if (!person) return { endeavors: [], count: 0, refused: 'this agent does not know who is asking' };
+    // `deps` is StandingDeps-shaped: the harness maps the routed context (what the asker presented, that
+    // their tree is not ours to read) onto `context`, and the verifier rides along (spec 366 R2/R3).
     const standing = await deriveStanding(deps, { principal: person, subject: o.org }).catch(() => null);
     if (!standing || standing.relation === 'none') {
       const reason = `an organization's work is its own record, and ${standing?.because ?? 'this agent cannot read your links'} — only someone who belongs there can see it`;
@@ -160,8 +165,8 @@ export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, 
  * the stewardship wire their own links hold. The reducer validates the command; this passes it on.
  */
 export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, person: Address | undefined, session: string | undefined): ToolInvoker {
-  return async (toolId, args) => {
-    const o = orgOf(args, addressee);
+  return async (toolId, args, ctx) => {
+    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id);
     if ('refused' in o) throw new Error(o.refused);
     if (!person || !session) throw new Error('this act needs the person\'s own session');
     if (!deps.interactionsOp) throw new Error('coordination acts are not wired on this agent');
