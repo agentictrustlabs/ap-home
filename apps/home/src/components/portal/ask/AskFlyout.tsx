@@ -588,17 +588,6 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             Voice {voice.enabled ? 'on' : 'off'}
           </button>
         )}
-        {models.length > 0 && (
-          <select
-            data-testid="ask-model" aria-label="Model" className="btn ghost"
-            title="Which model plans and answers this conversation. Authority is unchanged whichever you pick."
-            style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
-            value={model ?? ''} disabled={models.length === 1 || !!busy}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
-        )}
         <button
           type="button" className="btn ghost" data-testid="ask-diagnostics-toggle"
           aria-label="Show what the agent did" aria-pressed={showDiag}
@@ -713,6 +702,22 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           <select data-testid="ask-command" className="input" style={{ fontSize: 11.5, padding: '2px 6px', minHeight: 0, width: 'auto' }} value="" onChange={(e) => { const c = commands.find((x) => x.id === e.target.value); if (c) setCommand(c); }} disabled={!!busy}>
             <option value="">choose an action…</option>
             {commands.map((c) => <option key={c.id} value={c.id}>{c.label ?? c.id}</option>)}
+          </select>
+        </div>
+      )}
+      {/* Spec 377 — which model proposes, chosen by the person. Same row shape as "Do:" so the two read as one
+          control strip. Rendered only when the agent offers more than one; a single offer is not a choice. */}
+      {models.length > 1 && !command && !pending && (
+        <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
+          <span>Model:</span>
+          <select
+            data-testid="ask-model" aria-label="Model" className="input"
+            title="Which model plans and answers this conversation. Authority is unchanged whichever you pick."
+            style={{ fontSize: 11.5, padding: '2px 6px', minHeight: 0, width: 'auto' }}
+            value={model ?? ''} disabled={!!busy}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
         </div>
       )}
