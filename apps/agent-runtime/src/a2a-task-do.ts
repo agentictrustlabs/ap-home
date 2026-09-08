@@ -902,6 +902,10 @@ export class A2aTaskDO {
         for (const [key, run] of rows) {
           const updatedAt = Number((run as { updatedAt?: number }).updatedAt ?? 0);
           if (updatedAt && now - updatedAt > RUN_TTL_MS) { expired.push(key); continue; }
+          // Spec 370 P1 tail — a run past its own window is gone from the list, not shown as unfinished.
+          const r = run as { expiresAt?: number; awaiting?: { kind?: string; expiresAt?: number } };
+          const window = typeof r.awaiting?.expiresAt === 'number' ? r.awaiting.expiresAt : typeof r.expiresAt === 'number' ? r.expiresAt : r.awaiting?.kind === 'data' ? undefined : updatedAt ? updatedAt + 30 * 60_000 : undefined;
+          if (window !== undefined && window < now) { expired.push(key); continue; }
           // Mandates are bearer-shaped wires; enumeration is a LISTING, not a resume, so the keyring
           // never rides along. Loading the run by its ref is what hands those back.
           const { presented: _presented, ...rest } = run;

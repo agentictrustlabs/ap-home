@@ -121,3 +121,20 @@ describe('the executed record and the wait window (spec 370 P1)', () => {
     expect(isExpired({}, now)).toBe(false);
   });
 });
+
+// Spec 370 P1 tail — every checkpoint expires; older rows expire by age unless they wait on a data question.
+import { expiryFor } from '../src/harness-runs.js';
+describe('a run stops being resumable (P1 tail)', () => {
+  const now = 10_000_000;
+  it('an authority request keeps the signature window; a data question keeps a day', () => {
+    expect(expiryFor(undefined, now)).toBe(now + 30 * 60_000);
+    expect(expiryFor({ kind: 'data', prompt: 'who?', stepRef: 's0' }, now)).toBe(now + 24 * 3600_000);
+  });
+  it('a top-level window expires a run; an old row with no window expires by age unless it waits on data', () => {
+    expect(isExpired({ expiresAt: now - 1, updatedAt: now - 5 }, now)).toBe(true);
+    expect(isExpired({ expiresAt: now + 1, updatedAt: now - 5 }, now)).toBe(false);
+    expect(isExpired({ updatedAt: now - 31 * 60_000 }, now)).toBe(true);
+    expect(isExpired({ updatedAt: now - 29 * 60_000 }, now)).toBe(false);
+    expect(isExpired({ updatedAt: now - 3 * 3600_000, awaiting: { kind: 'data', prompt: 'who?', stepRef: 's0' } }, now)).toBe(false);
+  });
+});

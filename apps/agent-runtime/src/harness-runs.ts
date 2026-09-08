@@ -65,6 +65,10 @@ export interface HarnessRunCheckpointV1 {
    * Evidence of what happened; never permission for what has not. DO-local and TTL'd like the rest.
    */
   executed?: { plan: Plan; completed: Array<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
+  /** Spec 370 P1 tail — when this run stops being resumable, whatever it waits for. An authority request
+   *  waits for a mandate minted for THIS request, minutes not days; 240 of them listed as "unfinished"
+   *  was a day's asks a person had simply walked away from. Absent on older rows ⇒ `updatedAt`-based. */
+  expiresAt?: number;
   /** Set when the run is a WORK ITEM nobody has picked up: `asker` is the principal rather than a person,
    *  and any steward who can mint the mandate may claim it (`endeavor-authority-steps.claimableBy`). */
   openToStewards?: boolean;
@@ -181,8 +185,18 @@ export function mergeTurn(
 export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation', number> = { data: 24 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000 };
 
 /** Past its window: resumable no longer. Absent window ⇒ the day prune is the only expiry. */
-export function isExpired(cp: Pick<HarnessRunCheckpointV1, 'awaiting'>, now = Date.now()): boolean {
-  return typeof cp.awaiting?.expiresAt === 'number' && cp.awaiting.expiresAt < now;
+export function isExpired(cp: Pick<HarnessRunCheckpointV1, 'awaiting' | 'expiresAt' | 'updatedAt'>, now = Date.now()): boolean {
+  if (typeof cp.awaiting?.expiresAt === 'number') return cp.awaiting.expiresAt < now;
+  if (typeof cp.expiresAt === 'number') return cp.expiresAt < now;
+  // Older rows carry no window. A data question keeps the day; anything else — an authority request, a
+  // signature — is stale after the same half hour a new row would get.
+  if (cp.awaiting?.kind === 'data') return false;
+  return typeof cp.updatedAt === 'number' && now - cp.updatedAt > AWAIT_WINDOW_MS.signature;
+}
+
+/** The window a run keeps from the moment it stopped: the prompt's own, else the authority window. */
+export function expiryFor(awaiting: HarnessRunCheckpointV1['awaiting'] | undefined, now = Date.now()): number {
+  return now + (awaiting ? AWAIT_WINDOW_MS[awaiting.kind] : AWAIT_WINDOW_MS.signature);
 }
 
 /** The completed steps of a run result, as a checkpoint records them — successful, named, with their

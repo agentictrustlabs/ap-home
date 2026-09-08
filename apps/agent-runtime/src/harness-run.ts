@@ -271,6 +271,9 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         // a dollar. It settled, the receipt honestly said 0.00002 USDC, and nothing else could have
         // caught it. Units are the system's job; the planner's job is to repeat the figure it was told.
         usdc: { type: 'string', description: 'The amount as the PERSON said it, in whole USDC — e.g. "20", "12.50". Never convert it, never write smallest units.' },
+        // WHY, in the person's words ("to cover poker night"). Carried onto the receipt; read by no gate and
+        // never a party — a reason is not a payee.
+        memo: { type: 'string', description: 'The reason for the payment, if the person gave one ("to cover poker night last night"). Never an agent.' },
       },
       // Either unit, never a guess — the same vocabulary `treasury.fund` uses. A capability that
       // understood only smallest-units left "send 2 usdc" with no amount at all, which made the
@@ -336,6 +339,9 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         asset: { type: 'string', description: 'The demo USDC contract address (ask the agent if unknown)' },
         treasury: { type: 'string', description: 'The treasury SA to credit' },
         usdc: { type: 'string', description: 'The amount as the PERSON said it, in whole USDC — e.g. "20", "12.50". Never convert it, never write smallest units.' },
+        // WHY, in the person's words ("to cover poker night"). Carried onto the receipt; read by no gate and
+        // never a party — a reason is not a payee.
+        memo: { type: 'string', description: 'The reason for the payment, if the person gave one ("to cover poker night last night"). Never an agent.' },
       },
       // `funder` is OPTIONAL on purpose. The planner chooses ONE tool (that is what the planner IS), so a
       // capability whose required args it cannot fill from the sentence is a capability it will not
@@ -1995,8 +2001,24 @@ export function affiliationAskOf(goal: string): { type: string | null } | null {
  * { payee: 'David', usdc: '10' }; "pay david 10 usdc" → the same; "send 10 usdc" → no payee (asked for).
  * Never resolves anything and never invents a value: an absent part is omitted, and the capability asks.
  */
-export function paymentAskOf(goal: string): { payee?: string; usdc?: string } | null {
-  const g = goal.trim();
+/**
+ * THE REASON IS NOT THE PAYEE. "Send bob 0.2 USDC to cover poker night last night" names one payee and one
+ * reason; the clause after `to cover` / `for` / `because` / `toward` is why, and it travels as `memo` —
+ * onto the receipt, never into a party. Before this, "cover poker night last night" was looked up as an
+ * agent, nothing answered to it, and the person was asked which agent they meant by their own reason.
+ */
+export function splitPurpose(sentence: string): { body: string; memo?: string } {
+  const m = sentence.match(/\s+(?:(?:to|in order to)\s+(?:cover|pay for|pay back|reimburse|settle|help with|chip in for|contribute to)|for|because|since|as (?:a )?(?:reimbursement|thanks|payment) for|towards?|regarding|re:)\s+(.+?)\s*[.!?]*$/i);
+  if (!m || m.index === undefined) return { body: sentence };
+  // "for" is also how a person says WHO — "send 5 usdc for bob" is rare but "pay for bob's ticket" is a
+  // reason; the marker `for` is taken as a reason only when what follows is not a lone name.
+  const memo = m[1]!.trim();
+  if (/^for$/i.test(sentence.slice(m.index).trim().split(/\s+/)[0] ?? '') && /^[a-z0-9.@-]+$/i.test(memo)) return { body: sentence };
+  return { body: sentence.slice(0, m.index).trim(), memo };
+}
+
+export function paymentAskOf(goal: string): { payee?: string; usdc?: string; memo?: string } | null {
+  const { body: g, memo } = splitPurpose(goal.trim());
   if (!/\b(send|pay|transfer)\b/i.test(g)) return null;
   if (/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/i.test(g)) return null; // the fan-out shape
   if (!/\busdc\b/i.test(g)) return null; // only money we know the unit of; "send a message" is not this
@@ -2004,7 +2026,7 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string } | 
   let rest = g.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\b[\s\S]*$/i, ' ');
   const to = rest.match(/\bto\s+(.+?)\s*$/i)?.[1];
   const payee = (to ?? rest).replace(/^(to|please|now)\s+/i, '').replace(/[.!?]+$/, '').trim();
-  return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}) };
+  return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}), ...(memo ? { memo } : {}) };
 }
 
 /**
@@ -3480,7 +3502,7 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // form ("every member") is matched first and excluded here.
   const compiledPayment = (goal: string): Plan | null => {
     const p = paymentAskOf(goal);
-    return p ? { steps: [{ toolId: 'treasury.payment.execute', args: { ...(p.payee ? { payee: p.payee } : {}), ...(p.usdc ? { usdc: p.usdc } : {}) } }], rationale: 'compiled: single payment (spec 355)' } : null;
+    return p ? { steps: [{ toolId: 'treasury.payment.execute', args: { ...(p.payee ? { payee: p.payee } : {}), ...(p.usdc ? { usdc: p.usdc } : {}), ...(p.memo ? { memo: p.memo } : {}) } }], rationale: 'compiled: single payment (spec 355)' } : null;
   };
 
   // Fan-out guidance (spec 358 W4) — appended to whichever prompt applies. The form is taught, the

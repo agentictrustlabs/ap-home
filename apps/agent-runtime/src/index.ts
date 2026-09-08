@@ -106,7 +106,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context'
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer } from './orchestration.js';
-import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS } from './harness-runs.js';
+import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
 import { toErrorCode } from './harness-workflow-core.js';
@@ -2183,6 +2183,7 @@ app.post('/harness/ask', async (c) => {
           // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
           // next turn replays them instead of planning and executing the whole ask again.
           executed: { plan: result.plan, completed: completedStepsOf(result) },
+          expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : undefined, now),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
       } else {
