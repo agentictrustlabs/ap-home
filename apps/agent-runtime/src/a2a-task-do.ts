@@ -89,7 +89,8 @@ import {
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, type Env, type IncomingDelegation } from './index.js';
+import { dueNow, advanced, type TriggerScheduleV1 } from './triggers.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 /** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
@@ -844,6 +845,31 @@ export class A2aTaskDO {
       // narrates itself, long-polled by the surface. Rebuildable, TTL'd, and read only by the asker whose
       // run it is (recorded on the first append — a runRef is a client-chosen string).
       const pkey = (ref: string) => `harness:progress:${ref}`;
+      // Spec 370 P5 — THE AGENT'S OWN SCHEDULE, under its single alarm. Rows are rebuildable from the
+      // playbook (a sync replaces what the digest no longer declares, keeps timing for what it still does).
+      const tkey = (id: string) => `harness:trigger:${id}`;
+      if (op === 'trigger-sync') {
+        const rows = (body as { rows?: Array<{ triggerId: string; playbookDigest: string; nextAt: number }> } | null)?.rows ?? [];
+        const existing = await this.state.storage.list<{ triggerId: string; playbookDigest: string; nextAt: number }>({ prefix: 'harness:trigger:' });
+        const keep = new Set(rows.map((r) => tkey(r.triggerId)));
+        const stale = [...existing.keys()].filter((k) => !keep.has(k));
+        if (stale.length) await this.state.storage.delete(stale);
+        const out: unknown[] = [];
+        if (rows[0] && (rows[0] as { agent?: string }).agent) await this.state.storage.put(AGENT_SA_KEY, String((rows[0] as { agent?: string }).agent).toLowerCase());
+        for (const r of rows) {
+          const prior = existing.get(tkey(r.triggerId));
+          // Same playbook ⇒ the row keeps its clock; a new digest starts the interval over.
+          const row = prior && prior.playbookDigest === r.playbookDigest ? { ...r, nextAt: prior.nextAt, ...(prior as Record<string, unknown>) } : r;
+          await this.state.storage.put(tkey(r.triggerId), row);
+          out.push(row);
+        }
+        await this.armTriggerAlarm();
+        return Response.json({ ok: true, rows: out });
+      }
+      if (op === 'trigger-list') {
+        const rows = [...(await this.state.storage.list<unknown>({ prefix: 'harness:trigger:' })).values()];
+        return Response.json({ ok: true, rows });
+      }
       if (op === 'progress-append') {
         if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });
         const cur = (await this.state.storage.get<{ asker: string; at: number; lines: unknown[] }>(pkey(body.runRef))) ?? { asker: body.asker, at: Date.now(), lines: [] };
@@ -1214,8 +1240,38 @@ export class A2aTaskDO {
     return Response.json(resp);
   }
 
+  /** Spec 370 P5 — arm the single alarm for the earliest due trigger, unless something sooner is set. */
+  private async armTriggerAlarm(): Promise<void> {
+    const rows = [...(await this.state.storage.list<{ nextAt?: number }>({ prefix: 'harness:trigger:' })).values()];
+    const next = rows.length ? Math.min(...rows.map((r) => Number(r.nextAt ?? 0)).filter((n) => n > 0)) : null;
+    if (next === null || !Number.isFinite(next)) return;
+    const current = await this.state.storage.getAlarm();
+    if (current === null || current > next) await this.state.storage.setAlarm(Math.max(next, Date.now() + 1000));
+  }
+
+  /** Spec 370 P5 — run every due trigger once: the agent asks as itself, presenting nothing. */
+  private async fireDueTriggers(): Promise<void> {
+    const rows = [...(await this.state.storage.list<TriggerScheduleV1>({ prefix: 'harness:trigger:' })).values()];
+    for (const row of dueNow(rows)) {
+      let outcome: TriggerScheduleV1['lastOutcome'] = 'failed';
+      let said: string | undefined;
+      let runRef = `trigger-${row.triggerId}-${Date.now().toString(36)}`;
+      try {
+        const r = await runUnattendedAsk(this.env, row, runRef);
+        outcome = r.outcome; said = r.said; runRef = r.runRef;
+      } catch (e) {
+        said = e instanceof Error ? e.message : String(e);
+      }
+      await this.state.storage.put(`harness:trigger:${row.triggerId}`, advanced(row, outcome, runRef, said));
+    }
+  }
+
   async alarm(): Promise<void> {
     const agentSA = await this.state.storage.get<string>(AGENT_SA_KEY);
+    // Spec 370 P5 — triggers fire even for an agent that has never run a task here: the schedule was
+    // synced by an ask, and the ask route stored the SA for exactly this rehydration.
+    try { await this.fireDueTriggers(); } catch (e) { console.warn('[triggers] firing failed:', e instanceof Error ? e.message : String(e)); }
+    try { await this.armTriggerAlarm(); } catch { /* re-armed on the next sync */ }
     if (!agentSA) return;
     const agent = this.build(agentSA as Address);
     await agent.processDue();

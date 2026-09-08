@@ -13,7 +13,7 @@
 //
 // NO ASSIGNMENT ⇒ NO NARROWING (spec 354 §4.3): the bare harness stands, its buttons still work, and the
 // Ask offers everything the surface allows. A playbook refines; its absence is not a restriction.
-import { validateAgentHarnessDefinition, definitionDigest, type AgentHarnessDefinitionV1, type DefinitionToolV1 } from '@agenticprimitives/capability-claims';
+import { validateAgentHarnessDefinition, definitionDigest, type AgentHarnessDefinitionV1, type DefinitionToolV1, type TriggerV1 } from '@agenticprimitives/capability-claims';
 
 export interface PlaybookScope {
   archetypeId: string;
@@ -23,6 +23,8 @@ export interface PlaybookScope {
   capabilityIds: Set<string>;
   /** The behavioral prose, for the planner's system prompt. */
   instructions: string;
+  /** Spec 370 P5 — what the playbook asks on its own, and when. Synced to the agent's schedule on each ask. */
+  triggers?: TriggerV1[];
   /** spec 360 — what the playbook promises FOLLOWS each capability, keyed by capability id. Carried
    *  through to the loop as data; it grants nothing and no verifier reads it. */
   declaredEffects?: Record<string, unknown[]>;
@@ -82,6 +84,7 @@ export async function loadPlaybook(
     digest: derived,
     capabilityIds: new Set(rec.definition.tools.map((t) => t.capability?.id ?? t.id)),
     instructions: rec.definition.instructions,
+    ...(rec.definition.triggers?.length ? { triggers: rec.definition.triggers } : {}),
     ...(rec.definition.declaredEffects ? { declaredEffects: rec.definition.declaredEffects as unknown as Record<string, unknown[]> } : {}),
     tools: Object.fromEntries(rec.definition.tools.map((t) => [t.capability?.id ?? t.id, t])),
   };

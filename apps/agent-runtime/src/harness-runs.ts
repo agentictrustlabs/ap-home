@@ -65,6 +65,9 @@ export interface HarnessRunCheckpointV1 {
    * Evidence of what happened; never permission for what has not. DO-local and TTL'd like the rest.
    */
   executed?: { plan: Plan; completed: Array<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
+  /** Spec 370 P5 — this run was started by a TRIGGER of the agent's playbook, not by a person: the asker
+   *  is the agent, nothing was presented, and a steward finishes it. Display and audit; no gate reads it. */
+  trigger?: { id: string; playbookDigest: string };
   /** Spec 370 P1 tail — when this run stops being resumable, whatever it waits for. An authority request
    *  waits for a mandate minted for THIS request, minutes not days; 240 of them listed as "unfinished"
    *  was a day's asks a person had simply walked away from. Absent on older rows ⇒ `updatedAt`-based. */

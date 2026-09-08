@@ -7,6 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
+import { syncTriggers, listTriggers, type TriggerScheduleV1 } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -1293,6 +1294,80 @@ app.post('/harness/runs', async (c) => {
   return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
 });
 
+/**
+ * Spec 370 P5 — RUN A TRIGGER'S ASK UNATTENDED. The asker is the agent itself and nothing is presented:
+ * an informational ask completes and its answer is kept on the trigger row (and returned to whoever
+ * fired it); an ask that reaches an authority-bearing step, or a question, is PARKED — a checkpoint
+ * open to stewards, listed among their unfinished runs, finished by one of them granting the mandate.
+ * A trigger adds a clock, never authority (the user's decision, 2026-09-08: the agent, no mandate).
+ */
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
+  const agent = row.agent.toLowerCase() as Address;
+  const deps = harnessDeps(env, buildAuditSink(env));
+  const intent = { goal: row.ask, context: { addressee: agent, asker: agent, trigger: row.triggerId } };
+  const { result, interactionFor, trace, tools } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
+    intent, presented: null, person: agent, runRef, addressee: agent, surface: { realm: { kind: 'org' } } as never,
+    // An unattended run has no person's session behind it: the public directory and the vault questions
+    // are a person's reads. The playbook's own tools (the work reads, the acts) do not come this way.
+    mcpInvoke: async (toolId) => ({ refused: `${toolId} is not available to an unattended run — a person asks that` }),
+  });
+  const reply = await askReplyFor(env as unknown as HarnessEnv, {
+    intent, result, addressee: agent, composer: selectComposer(env), deps, interactionFor, plannerTrace: trace, tools,
+    resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
+  } as never);
+  const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+  if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
+    const now = Date.now();
+    await saveRun(env as never, {
+      runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
+      openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
+      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + row.everyMs } } : {}),
+      executed: { plan: result.plan, completed: completedStepsOf(result) },
+      // A parked trigger run waits until the trigger would fire again — then a fresh one replaces it.
+      expiresAt: now + row.everyMs,
+      createdAt: now, updatedAt: now,
+    });
+    return { outcome: 'parked', said: spoken, runRef };
+  }
+  if (reply.kind === 'answer' || reply.kind === 'done') return { outcome: 'answered', said: reply.kind === 'answer' ? reply.text : spoken, runRef };
+  return { outcome: 'failed', said: reply.kind === 'refused' ? reply.error : spoken, runRef };
+}
+
+/** May this session see or fire an agent's triggers: the agent's own session, or a steward by the caller's own links. */
+async function mayDriveTriggers(env: Env, caller: Address, agent: Address): Promise<boolean> {
+  if (caller.toLowerCase() === agent.toLowerCase()) return true;
+  const deps = harnessDeps(env, buildAuditSink(env));
+  const doc = await deps.readSubjectRecord?.(caller.toLowerCase(), 'relationships.data').catch(() => null);
+  return relationshipRows(doc).some((r) => r.agent.toLowerCase() === agent.toLowerCase() && r.relationship === 'steward');
+}
+
+// POST /harness/triggers { session, addressee } — spec 370 P5. The agent's schedule: what its playbook asks
+// on its own, when each is next due, and what the last firing reached. Stewards only.
+app.post('/harness/triggers', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address } | null;
+  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may see its schedule' }, 403);
+  return c.json({ ok: true, addressee, triggers: await listTriggers(c.env as never, addressee) });
+});
+
+// POST /harness/triggers/fire { session, addressee, triggerId } — spec 370 P5. Run one trigger now, as
+// the alarm would: the live gate, and a steward's "do it now". Stewards only.
+app.post('/harness/triggers/fire', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; triggerId?: string } | null;
+  if (!body?.session || !body.addressee || !body.triggerId) return c.json({ ok: false, error: 'session, addressee and triggerId are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may fire its triggers' }, 403);
+  const row = (await listTriggers(c.env as never, addressee)).find((t) => t.triggerId === body.triggerId);
+  if (!row) return c.json({ ok: false, error: `no trigger "${body.triggerId}" on this agent — ask it something first so its schedule syncs, or check its playbook` }, 404);
+  const out = await runUnattendedAsk(c.env, row, `trigger-${row.triggerId}-${Date.now().toString(36)}`);
+  return c.json({ ok: true, addressee, triggerId: row.triggerId, ...out });
+});
+
 // POST /harness/progress { session, addressee, runRef, after?, wait? } — spec 370 P2. The run's progress
 // lines after `after`, LONG-POLLED: the request is held up to `wait` ms (≤ 4 s) until a new line lands or
 // the run reaches its reply, so a surface sees each step within a few hundred milliseconds of it without
@@ -2054,7 +2129,7 @@ app.post('/harness/ask', async (c) => {
       progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
-    const { result, resolved, interactionFor, trace, tools: offeredTools } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+    const { result, resolved, interactionFor, trace, tools: offeredTools, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
@@ -2245,6 +2320,9 @@ app.post('/harness/ask', async (c) => {
     }) : undefined;
     // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
     const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+    // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
+    // idempotent, and the only moment the Worker sees which playbook the agent holds).
+    c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
@@ -2920,7 +2998,7 @@ async function callInteractionsInternal(env: Env, principal: string, op: string,
   return out;
 }
 
-function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
+export function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
   const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
   const deps: HarnessDeps = {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,

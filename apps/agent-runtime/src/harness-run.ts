@@ -31,6 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -3403,7 +3404,7 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[] }> {
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[]; playbook: { digest: string; triggers?: TriggerV1[] } | null }> {
   const resolved: ResolvedParties = new Map();
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
@@ -3819,5 +3820,5 @@ be emitted together; the runtime runs them side by side.`;
     source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
     ...(r.because ? { because: r.because } : {}),
   }));
-  return { result, plannerKind: kind, resolved, interactionFor, trace , tools };
+  return { result, plannerKind: kind, resolved, interactionFor, trace, tools, playbook: playbook ? { digest: playbook.digest, ...(playbook.triggers?.length ? { triggers: playbook.triggers } : {}) } : null };
 }
