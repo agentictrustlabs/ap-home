@@ -34,6 +34,7 @@
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
+import { replayingInvoker, type RunRecordV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
@@ -1641,6 +1642,9 @@ export interface HarnessRunInput {
   /** Spec 370 P2 — one sentence per loop event, as the run goes, for a surface to show or say. Composed
    *  here because the tools' words are known here; what the caller does with it is its business. */
   onProgress?: (line: Omit<ProgressLineV1, 'seq' | 'at'>) => void;
+  /** Spec 370 P6 — REPLAY a recorded run: its plan is the plan, its observations answer every step, and
+   *  every gate runs again against the world as it is now. Nothing executes. */
+  replayOf?: RunRecordV1;
   /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
    *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
    *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
@@ -3415,8 +3419,9 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[]; playbook: { digest: string; triggers?: TriggerV1[] } | null }> {
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[]; events: RunEvent[]; presentedRefs: string[]; playbook: { digest: string; triggers?: TriggerV1[] } | null }> {
   const resolved: ResolvedParties = new Map();
+  const events: RunEvent[] = [];
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
   const enforcers = harnessEnforcers(env);
@@ -3580,8 +3585,10 @@ be emitted together; the runtime runs them side by side.`;
   // A RESUME plans nothing (spec 370 P1): the checkpoint holds the plan this intent was admitted with, and
   // the loop takes it from `resume` — this planner is never consulted on that path. Named so the trace
   // says where the plan came from.
-  let plannerUsed: PlannerTraceV1['planner'] = input.resume ? 'checkpoint' : input.plan ? 'supplied' : selected.kind;
-  const planner: Planner = input.plan
+  let plannerUsed: PlannerTraceV1['planner'] = input.replayOf ? 'replay' : input.resume ? 'checkpoint' : input.plan ? 'supplied' : selected.kind;
+  const planner: Planner = input.replayOf
+    ? { plan: async () => ({ steps: input.replayOf!.plan.steps.map((st) => ({ ...st })), rationale: `replay of ${input.replayOf!.runRef}` }) }
+    : input.plan
     // The screen's plan verbatim — interpretation is what Ask ADDS in front of the same boundary, not a
     // toll every caller pays. One-shot: a failed supplied step is the caller's to correct, not a model's
     // to re-plan around (re-planning a click would act on something nobody clicked).
@@ -3669,6 +3676,8 @@ be emitted together; the runtime runs them side by side.`;
     // the asker's session, and what comes back is the subject's own answer (or its refusal, in its
     // words). The local invoker never reads another principal's records for a routed step.
     invoke: async (toolId, args, ctx) => {
+      // Spec 370 P6 — on a replay nothing runs: the record answers, or refuses a step it never held.
+      if (input.replayOf) return replayingInvoker(input.replayOf)(toolId, args, ctx);
       const tool = tools.find((t) => t.id === toolId);
       const subject = routedSubjectFor(tool, args, input.addressee);
       if (!subject) return localInvoke(toolId, args, ctx);
@@ -3724,6 +3733,7 @@ be emitted together; the runtime runs them side by side.`;
     }),
     ports: {
       events: (e) => {
+        events.push(e);
         if (e.type === 'PlanRefused') trace.admission.push({ refused: e.violations, replanned: e.replanning });
         else if (e.type === 'PlanCreated') trace.admission.push({ refused: [], replanned: false });
         if (input.onProgress) {
@@ -3831,5 +3841,5 @@ be emitted together; the runtime runs them side by side.`;
     source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
     ...(r.because ? { because: r.because } : {}),
   }));
-  return { result, plannerKind: kind, resolved, interactionFor, trace, tools, playbook: playbook ? { digest: playbook.digest, ...(playbook.triggers?.length ? { triggers: playbook.triggers } : {}) } : null };
+  return { result, plannerKind: kind, resolved, interactionFor, trace, tools, events, presentedRefs: presentedList.map((p) => p.ref), playbook: playbook ? { digest: playbook.digest, ...(playbook.triggers?.length ? { triggers: playbook.triggers } : {}) } : null };
 }

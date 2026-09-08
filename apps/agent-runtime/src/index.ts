@@ -7,6 +7,9 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
+import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
+import { recordOf, replayingInvoker } from '@agenticprimitives/orchestration';
+import { putRecord, getRecord, listRecords } from './run-records.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1 } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
@@ -1368,6 +1371,57 @@ app.post('/harness/triggers/fire', async (c) => {
   return c.json({ ok: true, addressee, triggerId: row.triggerId, ...out });
 });
 
+// POST /harness/records { session, addressee, runRef? } — spec 370 P6. The agent's run records (a week): with a
+// runRef, one record in full minus its mandates; without, the listing. The asker's own — a run is looked
+// back on by whoever asked it.
+app.post('/harness/records', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
+  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const caller = String(who.sa).toLowerCase();
+  if (body.runRef) {
+    const rec = await getRecord(c.env as never, addressee, body.runRef);
+    if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+    if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== caller) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+    const { presented: _p, ...shown } = rec;
+    return c.json({ ok: true, record: shown });
+  }
+  const records = (await listRecords(c.env as never, addressee)).filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
+  return c.json({ ok: true, records });
+});
+
+// POST /harness/replay { session, addressee, runRef } — spec 370 P6. Replay a record: the same plan, the
+// same observations, every gate again against the chain as it is NOW. Nothing runs; the report says, per
+// step, what was decided then and what is decided now. A recorded allow is never replayed as permission.
+app.post('/harness/replay', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
+  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const rec = await getRecord(c.env as never, addressee, body.runRef);
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to replay' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const { result } = await runUnderMandate(c.env as unknown as HarnessEnv, deps, {
+    intent: rec.intent, presented: (rec.presented ?? []).map((p) => p.wire as never), person: who.sa as Address, session: body.session,
+    runRef: `${rec.runRef}:replay`, addressee, replayOf: rec,
+    mcpInvoke: replayingInvoker(rec),
+  });
+  const recordedBy = new Map(rec.receipts.filter((r) => !r.stepRef.endsWith(':compensate')).map((r) => [r.stepRef, r]));
+  const replayedBy = new Map(result.receipts.map((r) => [r.stepRef, r]));
+  const verdictOf = (r: { authority?: { decision: { decision: string } } } | undefined) => r?.authority?.decision.decision ?? null;
+  const verdicts = [...new Set([...recordedBy.keys(), ...replayedBy.keys()])].map((stepRef) => {
+    const a = recordedBy.get(stepRef); const b = replayedBy.get(stepRef);
+    const recorded = verdictOf(a); const replayed = verdictOf(b);
+    const because = b?.authority?.decision.decision === 'deny' ? b.authority.decision.reasons.map((x) => `${x.code}: ${x.message}`).join('; ') : b?.status === 'authority-required' ? 'no live mandate on the replay' : undefined;
+    return { stepRef, toolId: a?.toolId ?? b?.toolId ?? '', recorded, replayed, changed: recorded !== replayed, ...(because ? { because } : {}) };
+  });
+  return c.json({ ok: true, runRef: rec.runRef, recordedOutcome: rec.outcome, outcome: result.outcome, verdicts, steps: result.steps.map((o) => ({ stepRef: o.stepRef, toolId: o.step.toolId, ok: o.ok, replayed: true })) });
+});
+
 // POST /harness/progress { session, addressee, runRef, after?, wait? } — spec 370 P2. The run's progress
 // lines after `after`, LONG-POLLED: the request is held up to `wait` ms (≤ 4 s) until a new line lands or
 // the run reaches its reply, so a surface sees each step within a few hundred milliseconds of it without
@@ -2129,7 +2183,7 @@ app.post('/harness/ask', async (c) => {
       progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
-    const { result, resolved, interactionFor, trace, tools: offeredTools, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+    const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
@@ -2183,8 +2237,11 @@ app.post('/harness/ask', async (c) => {
           const doc = await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), 'impact-profile').catch(() => null);
           // `{ v, contact, attestations }` — the record's own shape, the one the Home's form writes.
           // Reading the top level instead would report an empty profile for someone who has filled it in.
-          const rec = ((doc as { contact?: Record<string, unknown> } | null)?.contact ?? {}) as Record<string, unknown>;
-          const present = Object.entries(rec).filter(([, v]) => typeof v === 'string' && String(v).trim());
+          // THE FIELDS ARE THE RECORD'S (spec 371 §2.2) — read by the same list the edit writes, nested
+          // location included, each under its own label. A read that flattened only the top level showed
+          // a city and no street the moment the street was set.
+          const at = (o: unknown, path: string): unknown => path.split('.').reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined), o);
+          const present = CONTACT_FIELDS.map((f) => [f.label, at(doc, f.path)] as const).filter(([, v]) => typeof v === 'string' && String(v).trim());
           return {
             count: present.length,
             interpretation: present.length
@@ -2323,6 +2380,11 @@ app.post('/harness/ask', async (c) => {
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
     // idempotent, and the only moment the Worker sees which playbook the agent holds).
     c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
+    // Spec 370 P6 — THE RUN RECORD: what this turn observed, decided and received, kept a week on the
+    // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
+    // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
+    // costs a replay, never the run.
+    c.executionCtx.waitUntil(putRecord(c.env as never, addressee, recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) })).catch((e: unknown) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });

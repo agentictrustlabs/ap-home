@@ -870,6 +870,29 @@ export class A2aTaskDO {
         const rows = [...(await this.state.storage.list<unknown>({ prefix: 'harness:trigger:' })).values()];
         return Response.json({ ok: true, rows });
       }
+      // Spec 370 P6 — THE RUN RECORD: what a finished run observed, decided and received, kept for a week
+      // on the agent's own object for looking back and replaying. Listed WITHOUT its mandates.
+      const rkey = (ref: string) => `harness:record:${ref}`;
+      if (op === 'record-put') {
+        const rec = (body as { record?: { runRef?: string } } | null)?.record;
+        if (!rec?.runRef) return Response.json({ ok: false, error: 'record.runRef required' }, { status: 400 });
+        await this.state.storage.put(rkey(rec.runRef), rec);
+        return Response.json({ ok: true });
+      }
+      if (op === 'record-get') {
+        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
+        return Response.json({ ok: true, record: (await this.state.storage.get(rkey(body.runRef))) ?? null });
+      }
+      if (op === 'record-list') {
+        const rows = [...(await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:record:' })).values()];
+        const now = Date.now();
+        const stale = rows.filter((r) => now - Number(r.at ?? 0) > 7 * 24 * 3600_000).map((r) => rkey(String(r.runRef)));
+        if (stale.length) await this.state.storage.delete(stale);
+        const live = rows.filter((r) => now - Number(r.at ?? 0) <= 7 * 24 * 3600_000)
+          .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0 }))
+          .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
+        return Response.json({ ok: true, records: live });
+      }
       if (op === 'progress-append') {
         if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });
         const cur = (await this.state.storage.get<{ asker: string; at: number; lines: unknown[] }>(pkey(body.runRef))) ?? { asker: body.asker, at: Date.now(), lines: [] };
