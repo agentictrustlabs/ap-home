@@ -52,6 +52,13 @@ proxies selected MCP requests during local demos.
   `scripts/verify-harness-payment.mts`, `-team-create.mts`, `verify-ask-surface.mts`. **`POST /harness/hear`**
   (spec 369): audio → words, Workers AI Whisper behind `TranscriberPort` (`src/voice.ts`), biased by what the
   agent knows about the asker and repaired against known labels; in memory only. Every ask reply carries `spoken`.
+  **Spec 370 (parity waves):** a resume REPLAYS completed steps (`executed` on the checkpoint, P1); progress lines
+  long-polled at `POST /harness/progress` (P2, `harness-progress.ts`); coordination reads/acts bound thinly onto the
+  Endeavor substrate (P4, `coordination-bindings.ts`); **triggers** (P5, `triggers.ts`): the playbook's `triggers[]`
+  sync to the agent's task DO on every ask and fire under its single alarm as `runUnattendedAsk` — the agent asks
+  as itself with no mandate; an act parks open to stewards; `POST /harness/triggers` + `/triggers/fire` (stewards).
+  **Spec 371:** reads declare `answers`/`answer`; `balance-read.ts` (`treasury.balance.read`) renders
+  "alice2.treasury holds 190.1 USDC."; question admission + a question-fidelity check on the composer.
 
 ## What this app does not own
 

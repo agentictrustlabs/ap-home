@@ -41,10 +41,12 @@ export function balanceReadInvoker(deps: BalanceDeps, addressee: Address, person
     if (!deps.valueHeld) return { items: [], count: 0, reason: 'this agent cannot read balances — no asset is configured', interpretation: 'on-chain balance of the USDC asset' };
     const raw = String((args as { account?: unknown }).account ?? '').trim();
     if (raw && !isAddr(raw)) return { items: [], count: 0, reason: `this agent does not know an account called “${raw}” among your links`, interpretation: 'on-chain balance of the USDC asset' };
-    // Named ⇒ that account. Unnamed ⇒ the asker's own treasuries; a person with none holds nothing to
-    // report, and the agent being asked (a treasury or an organization) answers for itself.
+    // Named ⇒ that account. Unnamed ⇒ THE REALM YOU STAND IN is the subject (spec 371 §2.1): asked inside
+    // alice3.treasury, "what is the balance" is alice3's — never hers and her other treasury's beside it.
+    // Only in the person's OWN realm does "my balance" mean every treasury they hold.
     let accounts: Array<{ agent: string; name?: string; primary?: boolean }> = [];
     if (raw) accounts = [{ agent: raw.toLowerCase() }];
+    else if (person && addressee.toLowerCase() !== person.toLowerCase()) accounts = [{ agent: addressee.toLowerCase() }];
     else if (person && deps.charteredAgents) accounts = await deps.charteredAgents(person.toLowerCase(), 'treasury').catch(() => []);
     if (!accounts.length) accounts = [{ agent: addressee.toLowerCase() }];
     const items: BalanceItem[] = [];

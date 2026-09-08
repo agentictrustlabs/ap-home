@@ -17,6 +17,10 @@ describe('the balance read', () => {
     expect(JSON.stringify(r)).not.toMatch(/12000000/);
     expect(renderAnswer(BALANCE_READ_TOOL.answer!, r)).toBe('alice2.treasury holds 12 USDC. alice3.treasury holds 0 USDC.');
   });
+  it('inside a treasury or an organization, an unnamed question is about THAT realm — never the asker\'s other accounts', async () => {
+    const r = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice3.treasury' }, T2 as never, ALICE)('treasury.balance.read', {}, { intent: { goal: 'what is the balance' }, step: { toolId: 'x', args: {} }, index: 0 }) as { items: Array<{ label: string }> };
+    expect(r.items.map((i) => i.label)).toEqual(['alice3.treasury']);
+  });
   it('named: that account; a name that did not resolve is refused by name, never guessed', async () => {
     const one = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice2.treasury' }, ALICE, ALICE)('treasury.balance.read', { account: T1 }, { intent: { goal: 'x' }, step: { toolId: 'x', args: {} }, index: 0 }) as { items: Array<{ label: string }> };
     expect(one.items.map((i) => i.label)).toEqual(['alice2.treasury']);
