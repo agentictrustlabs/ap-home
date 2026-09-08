@@ -11,7 +11,7 @@ import { rememberTurn, CONVERSATION_RECORD, type ConversationMemoryV1 } from '@a
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
-import { syncTriggers, listTriggers, type TriggerScheduleV1 } from './triggers.js';
+import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -1532,18 +1532,21 @@ async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined,
   return { delivered: state === 'TASK_STATE_COMPLETED', note: state ? `${state}${said ? `: ${said}` : ''}` : (body?.error?.message ?? `${res.status}`) };
 }
 
-export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
   const agent = row.agent.toLowerCase() as Address;
-  const { reply, spoken, result } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId } });
+  // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
+  // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.
+  const { reply, spoken, result } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId, ...context } });
   if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
     const now = Date.now();
     await saveRun(env as never, {
       runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
       openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
-      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + row.everyMs } } : {}),
+      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } } : {}),
       executed: { plan: (result as { plan: unknown }).plan, completed: completedStepsOf(result as never) },
-      // A parked trigger run waits until the trigger would fire again — then a fresh one replaces it.
-      expiresAt: now + row.everyMs,
+      // A parked schedule run waits until the trigger would fire again — then a fresh one replaces it. A
+      // run fired by an event, a webhook or a message waits the ordinary window (spec 375).
+      expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data),
       createdAt: now, updatedAt: now,
     } as never);
     return { outcome: 'parked', said: spoken, runRef };
@@ -1562,6 +1565,53 @@ async function mayDriveTriggers(env: Env, caller: Address, agent: Address): Prom
 
 // POST /harness/triggers { session, addressee } — spec 370 P5. The agent's schedule: what its playbook asks
 // on its own, when each is next due, and what the last firing reached. Stewards only.
+/**
+ * Spec 375 — FIRE an agent's triggers from a source other than its clock: the interactions object after an
+ * Endeavor commit (`event`), the webhook door (`webhook`), the messaging skill (`message`). One unattended
+ * run per matching row, the agent as the asker holding nothing; the outcome lands on the row.
+ */
+export async function fireTriggersAt(env: Env, agent: Address, source: TriggerSource): Promise<Array<{ triggerId: string; runRef: string; outcome: string }>> {
+  return fireTriggers(env as never, agent, source, (row, runRef, context) => runUnattendedAsk(env, row, runRef, context));
+}
+
+/**
+ * Spec 375 §2 — an Endeavor event fires at its PARTICIPANTS: the principal whose log it was appended to,
+ * and the agent the event names (a participant, a requester, an actor), each under its own playbook.
+ * Never a fan-out from one run: each participant's run is its own, at its own agent.
+ */
+export async function fireEndeavorEventTriggers(env: Env, principal: Address, endeavorId: string, events: ReadonlyArray<Record<string, unknown>>): Promise<void> {
+  for (const ev of events) {
+    const type = String(ev.type ?? '');
+    if (!type) continue;
+    const named = ['participant', 'requester', 'actor', 'proposer', 'by', 'assignee', 'steward']
+      .map((k) => ev[k]).filter((v): v is string => typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)).map((v) => v.toLowerCase() as Address);
+    const at = [...new Set([principal.toLowerCase() as Address, ...named])];
+    const pub = Object.fromEntries(Object.entries(ev).filter(([, v]) => typeof v !== 'object' || v === null || Array.isArray(v)));
+    for (const agent of at) {
+      const fired = await fireTriggersAt(env, agent, { kind: 'event', event: { ...(pub as Record<string, unknown>), type, endeavorId } }).catch((e: unknown) => { console.warn('[triggers] event firing failed:', e instanceof Error ? e.message : String(e)); return []; });
+      if (fired.length) console.log(`[triggers] ${type} on ${endeavorId} fired at ${agent}: ${fired.map((f) => `${f.triggerId}→${f.outcome}`).join(', ')}`);
+    }
+  }
+}
+
+// POST /harness/hooks/:agent/:triggerId — spec 375, the WEBHOOK door. `Authorization: Bearer <row token>` is
+// admission for exactly one row of one agent; it is never a session and never a mandate, and the payload is
+// context the run may read, never an argument it trusts. No row, wrong token ⇒ 401 and nothing starts.
+app.post('/harness/hooks/:agent/:triggerId', async (c) => {
+  const agent = String(c.req.param('agent') ?? '').toLowerCase();
+  const triggerId = String(c.req.param('triggerId') ?? '');
+  if (!/^0x[0-9a-f]{40}$/.test(agent) || !/^[a-z][a-z0-9-]{1,40}$/.test(triggerId)) return c.json({ ok: false, error: 'agent address and trigger id required' }, 400);
+  const token = /^Bearer\s+(.+)$/i.exec(c.req.header('authorization') ?? '')?.[1]?.trim() ?? '';
+  if (!token) return c.json({ ok: false, error: 'unauthorized' }, 401);
+  const raw = await c.req.text();
+  if (raw.length > 64_000) return c.json({ ok: false, error: 'payload too large' }, 413);
+  let payload: unknown = null;
+  try { payload = raw ? JSON.parse(raw) : null; } catch { payload = { text: raw.slice(0, 4000) }; }
+  const fired = await fireTriggersAt(c.env, agent as Address, { kind: 'webhook', triggerId, token, payload });
+  if (!fired.length) return c.json({ ok: false, error: 'unauthorized' }, 401);
+  return c.json({ ok: true, agent, fired });
+});
+
 app.post('/harness/triggers', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address } | null;
   if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);

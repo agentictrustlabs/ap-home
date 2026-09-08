@@ -120,6 +120,9 @@ export interface EndeavorOpDeps {
   writeAudit(action: string, subject: { type: string; id: string }, timestamp?: string): Promise<void>;
   /** Persist a fabric message body at the envelope's own resource (hash-bound). */
   putTopicBody(envelope: AnyMessageEnvelope, bodyText: string): Promise<void>;
+  /** OPTIONAL — spec 375: called after a command COMMITS with the events it appended, so the events can
+   *  fire the participants' triggers. Fire-and-forget: the caller must not await inside `serialize`. */
+  onCommitted?(endeavorId: string, events: CoordinationEventV1[], state: CoordinationStateV1): void;
   /** OPTIONAL — fire-and-forget hand-off to the org's own agent to DRAFT a multi-step plan from the
    *  adopted goal (spec 327 planner reused; the org is the actor via internal.endeavor.proposePlan).
    *  Absent (internal doors, unconfigured LLM) ⇒ no auto-draft, the steward authors the plan by hand. */
@@ -578,6 +581,9 @@ async function appendToEndeavorLog(
     index.endeavors[endeavorId] = entry;
     await deps.writeDoc(COORDINATION_INDEX_RESOURCE, index);
   }
+  // Spec 375 — the appended events fire the participants' triggers. Scheduled, never awaited: a fired run
+  // may call back into this object, and awaiting it inside the mutex would deadlock the log.
+  try { deps.onCommitted?.(endeavorId, r.events, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
   return { ok: true, state: next, events: r.events };
 }
 

@@ -7,7 +7,7 @@ const AGENT = '0x0000000000000000000000000000000000000a11' as const;
 describe('trigger schedules', () => {
   it('rows from a playbook, first due one interval from now', () => {
     const rows = schedulesFor(AGENT, '0xdigest', [{ id: 'daily', kind: 'schedule', every: 'PT24H', ask: 'what are we working on' }], 1000);
-    expect(rows).toEqual([{ agent: AGENT, triggerId: 'daily', ask: 'what are we working on', every: 'PT24H', everyMs: 86_400_000, nextAt: 1000 + 86_400_000, playbookDigest: '0xdigest' }]);
+    expect(rows).toEqual([{ agent: AGENT, triggerId: 'daily', kind: 'schedule', ask: 'what are we working on', every: 'PT24H', everyMs: 86_400_000, nextAt: 1000 + 86_400_000, playbookDigest: '0xdigest' }]);
     expect(dueNow(rows, 1000)).toEqual([]);
     expect(dueNow(rows, 1000 + 86_400_000)).toHaveLength(1);
     expect(nextDue(rows)).toBe(1000 + 86_400_000);

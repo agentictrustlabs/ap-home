@@ -83,7 +83,7 @@ import type { Vault } from '@agenticprimitives/vault';
 import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from './session-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
@@ -588,6 +588,8 @@ export class InteractionsDO {
     const doorAudit = buildAuditSink(this.env);
     return {
       principal,
+      // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
+      onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
       principalCaip: caip10(chainId, principal as Address),
       sessionSa: principal,
       sessionCaip: caip10(chainId, principal as Address),
@@ -2684,6 +2686,8 @@ export class InteractionsDO {
           const doorAudit = buildAuditSink(this.env);
           const res = await handleEndeavorOp({
             principal,
+            // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
+            onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
             principalCaip: caip10(chainId, principal as Address),
             sessionSa: requester,
             sessionCaip: caip10(chainId, requester as Address),
@@ -2718,6 +2722,8 @@ export class InteractionsDO {
           const doorAudit = buildAuditSink(this.env);
           return handleEndeavorOp({
             principal,
+            // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
+            onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
             principalCaip: caip10(chainId, principal as Address),
             sessionSa: principal,
             sessionCaip: caip10(chainId, principal as Address),
@@ -3483,6 +3489,8 @@ export class InteractionsDO {
         try {
           const res = await handleEndeavorOp({
           principal,
+          // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
+          onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
           principalCaip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address),
           sessionSa,
           sessionCaip,

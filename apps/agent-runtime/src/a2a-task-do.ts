@@ -889,6 +889,14 @@ export class A2aTaskDO {
         const rows = [...(await this.state.storage.list<unknown>({ prefix: 'harness:trigger:' })).values()];
         return Response.json({ ok: true, rows });
       }
+      // Spec 375 — a firing from OUTSIDE the alarm (an event, a webhook, a message) records its outcome on
+      // the row, the way the alarm does for a schedule. The row must already exist: a firing cannot mint one.
+      if (op === 'trigger-advance') {
+        const row = (body as { row?: { triggerId?: string } } | null)?.row;
+        if (!row?.triggerId || !(await this.state.storage.get(tkey(row.triggerId)))) return Response.json({ ok: false, error: 'no such trigger' }, { status: 404 });
+        await this.state.storage.put(tkey(row.triggerId), row);
+        return Response.json({ ok: true });
+      }
       // Spec 370 P6 — THE RUN RECORD: what a finished run observed, decided and received, kept for a week
       // on the agent's own object for looking back and replaying. Listed WITHOUT its mandates.
       const rkey = (ref: string) => `harness:record:${ref}`;
