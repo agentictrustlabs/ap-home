@@ -3,7 +3,7 @@
 // `@agenticprimitives/context` owns the plane (resolution, standing, the kb/vault questions, discovery
 // reads); this module owns what only a deployment knows: HOW discovery is reached (a Cloudflare service
 // binding here, a base URL in dev — Workers cannot fetch sibling workers.dev hosts, error 1042) and
-// WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 375),
+// WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
 import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, type PlannerEnv, type LlmProvider } from './orchestration.js';
@@ -22,7 +22,7 @@ export function discoveryFetchFor(env: DiscoveryEnv): DiscoveryFetch {
   };
 }
 
-/** Kept as a name for the env subset the model wiring reads; it IS the planner's env (spec 375). */
+/** Kept as a name for the env subset the model wiring reads; it IS the planner's env (spec 377). */
 export type ModelEnv = PlannerEnv;
 
 /** The one structured model call the plane may make (grounded SPARQL, record selection). `undefined`

@@ -1,5 +1,5 @@
 // A deployment configured to plan with a model must never plan without one (ADR-0013: no silent fallback).
-// Spec 375: a deployment OFFERS an ordered allowlist; a turn may name one; nothing swaps.
+// Spec 377: a deployment OFFERS an ordered allowlist; a turn may name one; nothing swaps.
 import { describe, it, expect } from 'vitest';
 import { llmConfigured, selectPlanner, selectComposer, llmAllowlist, defaultProvider, resolveProvider, availableModels, modelFor, GROQ_DEFAULTS } from '../../src/orchestration.js';
 import { structuredCallFor } from '../../src/context-wiring.js';
@@ -22,7 +22,7 @@ describe('llmConfigured', () => {
   });
 });
 
-describe('the offer (spec 375)', () => {
+describe('the offer (spec 377)', () => {
   const both = { ORCHESTRATION_LLM: 'anthropic,groq', ANTHROPIC_API_KEY: 'a', GROQ_API_KEY: 'g' } as never;
 
   it('parses an ordered allowlist, trimmed and case-insensitive; the first is the default', () => {

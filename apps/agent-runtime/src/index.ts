@@ -277,7 +277,7 @@ export interface Env {
    */
   DEMO_EDGE_URL?: string;
   /**
-   * ADR-0044 / spec 375 — which models this deployment plans and composes with. A comma-separated ORDERED
+   * ADR-0044 / spec 377 — which models this deployment plans and composes with. A comma-separated ORDERED
    * allowlist of providers (`anthropic`, `groq`); the first is the default, and a turn may name another (the
    * Home Ask's picker). Each listed provider needs its own key (`ANTHROPIC_API_KEY`, `GROQ_API_KEY`) — listed
    * and keyless is a thrown configuration error, never a fallback (ADR-0013). Unset ⇒ the deterministic
@@ -1949,7 +1949,7 @@ app.get('/harness/vocabulary', async (c) => {
     rules: d.rules.map((r) => ({ id: r.id, basis: r.basis.property, cardinality: r.basis.cardinality, because: r.because })),
     whenNoneApply: 'the question is asked',
   }));
-  // Spec 375 — the models this deployment OFFERS a surface (allowlisted AND credentialed), the default marked.
+  // Spec 377 — the models this deployment OFFERS a surface (allowlisted AND credentialed), the default marked.
   // Read without a session for the same reason the capability list is. A listed-but-keyless provider is
   // omitted here and throws on the turn that names it — the surface never shows a choice it cannot serve.
   return c.json({ ok: true, capabilities: (() => { const fields = commandFieldsFor(playbook as never); return askVocabulary(playbook).map((cap) => ({ ...cap, ...(fields[cap.id]?.length ? { fields: fields[cap.id] } : {}) })); })(), decisions, models: availableModels(c.env) });
@@ -2396,7 +2396,7 @@ app.post('/harness/ask', async (c) => {
     subjectAsk?: unknown;
     /** Spec 369 — how the words arrived (recorded on the trace; the words themselves are the person's). */
     channel?: 'text' | 'voice';
-    /** Spec 375 — the provider the person chose for this conversation (`anthropic`, `groq`). Absent ⇒ the
+    /** Spec 377 — the provider the person chose for this conversation (`anthropic`, `groq`). Absent ⇒ the
      *  deployment default. A provider this agent does not offer is a 400, never a swap. */
     model?: string;
   } | null;
@@ -2406,7 +2406,7 @@ app.post('/harness/ask', async (c) => {
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
-  // Spec 375 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
+  // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
   const chosen = resolveProvider(c.env, body.model);
   if (!chosen.ok) return c.json({ ok: false, error: chosen.error }, 400);

@@ -91,7 +91,7 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
-# ADR-0044 / spec 327 / spec 375 — the models the Ring-0 orchestration loop plans and composes with: a
+# ADR-0044 / spec 327 / spec 377 — the models the Ring-0 orchestration loop plans and composes with: a
 # comma-separated ORDERED allowlist of providers; the FIRST is the default, and the Home Ask's picker may
 # name another per conversation. Each listed provider needs its own secret, and a provider that is listed
 # and keyless is a thrown configuration error, never a fallback (ADR-0013):
@@ -384,7 +384,7 @@ EMAIL_FROM_NAME = "faithnet"
 # spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
 AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
-# Spec 375 — ordered allowlist; first = default. Needs ANTHROPIC_API_KEY and GROQ_API_KEY secrets on this env
+# Spec 377 — ordered allowlist; first = default. Needs ANTHROPIC_API_KEY and GROQ_API_KEY secrets on this env
 # (`wrangler secret put GROQ_API_KEY --env faithnet`). See the [env.production.vars] comment for the rules.
 ORCHESTRATION_LLM = "anthropic,groq"
 ASSISTANT_RATE_MAX = "60"

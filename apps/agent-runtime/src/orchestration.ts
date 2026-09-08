@@ -91,7 +91,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 /** The env subset the planner selection needs. */
 export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL'>;
 
-// ── WHICH MODEL PROPOSES — spec 375 ──────────────────────────────────────────────────────────────────────
+// ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
 // A deployment OFFERS an ordered list of providers (`ORCHESTRATION_LLM="anthropic,groq"`); the first is the
 // default. A turn may NAME one (the Ask's picker); absent, the default runs. Nothing here decides authority —
@@ -105,7 +105,7 @@ export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq'];
 export type PlannerKind = LlmProvider | 'rule-based';
 
 /** Groq is THIS APP's configuration of the vendor-neutral OpenAI-compatible adapter — the package names no
- *  host and no model (spec 375 §2). Override with ORCHESTRATION_GROQ_MODEL / ORCHESTRATION_GROQ_BASE_URL.
+ *  host and no model (spec 377 §2). Override with ORCHESTRATION_GROQ_MODEL / ORCHESTRATION_GROQ_BASE_URL.
  *  `openai/gpt-oss-120b` is the strongest tool-calling model on Groq's free catalog as of 2026-09-08 (the
  *  Llama 3.x ids were retired from it); verified live with `tool_choice: 'required'`. */
 export const GROQ_DEFAULTS = { model: 'openai/gpt-oss-120b', baseUrl: 'https://api.groq.com/openai/v1' } as const;

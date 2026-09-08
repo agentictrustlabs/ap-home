@@ -29,7 +29,7 @@ import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, m
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 
-/** Spec 375 — where this browser remembers which model the person picked for the Ask. */
+/** Spec 377 — where this browser remembers which model the person picked for the Ask. */
 const MODEL_PREF_KEY = 'ask.model';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
@@ -195,7 +195,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       }
     })();
     try {
-      // Spec 375 — the person's model pick rides EVERY turn of a run (a resume composes with it too); this is
+      // Spec 377 — the person's model pick rides EVERY turn of a run (a resume composes with it too); this is
       // the one place all turns pass through, so it is the one place it is attached.
       const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, { ...state, ...(model ? { model } : {}) }).finally(() => { polling = false; });
       // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
@@ -457,7 +457,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   // (no model re-derives it), and a form is not a second path.
   const [commands, setCommands] = useState<AskVocabularyEntry[]>([]);
   const [command, setCommand] = useState<AskVocabularyEntry | null>(null);
-  // Spec 375 — WHICH MODEL PROPOSES, chosen by the person. The agent publishes what it offers with its
+  // Spec 377 — WHICH MODEL PROPOSES, chosen by the person. The agent publishes what it offers with its
   // vocabulary; the pick is remembered per browser and sent on every turn. It changes who proposes, never
   // what is permitted — authority is unchanged whichever is picked (369's rule for voice, applied here).
   const [models, setModels] = useState<AskModelOption[]>([]);

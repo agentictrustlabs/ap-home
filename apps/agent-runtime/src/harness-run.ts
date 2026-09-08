@@ -1783,7 +1783,7 @@ export interface HarnessRunInput {
   surface?: AskScopeV1;
   /** Spec 369 — the words arrived by voice (the transcript the agent itself produced). Trace only. */
   channel?: 'text' | 'voice';
-  /** Spec 375 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
+  /** Spec 377 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
    *  default. Validated by the caller against what the deployment offers; never a gate input. */
   provider?: LlmProvider;
   /** The agent being asked. Informational tools that read an organization's own records default to it —
@@ -2001,7 +2001,7 @@ export type AskReplyVariant =
 export interface PlannerTraceV1 {
   /** Who proposed the plan: the screen (supplied), a compiled one-correct-plan shape, or the model. */
   planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'rule-based' | string;
-  /** Spec 375 — the concrete model the planner ran (`openai/gpt-oss-120b`, `claude-sonnet-4-6`). Absent
+  /** Spec 377 — the concrete model the planner ran (`openai/gpt-oss-120b`, `claude-sonnet-4-6`). Absent
    *  for supplied / compiled / rule-based plans. Display only. */
   model?: string;
   /** The tool ids the planner could choose from — a capability absent here was never an option. */
@@ -3161,7 +3161,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     } catch (e) {
       // THE FLOOR, AND WHY IT IS THE FLOOR. The evidence stated plainly is the honest reply when no sentence
       // could be composed — but a floor reached in silence reads as the agent's answer. A provider that
-      // refused (a free tier's rate limit, spec 375) is named here, so the person knows to wait or to pick
+      // refused (a free tier's rate limit, spec 377) is named here, so the person knows to wait or to pick
       // another model; nothing here retries on a different one (ADR-0013).
       const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').slice(0, 240);
       return withEvidence(`${raw}\n\n(The answer could not be put into words — ${why} — so the evidence is shown as it was found.)`);

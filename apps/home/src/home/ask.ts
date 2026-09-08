@@ -117,7 +117,7 @@ export type AskReplyVariant =
 /** Spec 367 wave 1 — what the planner actually received on this turn (mirror of the a2a `PlannerTraceV1`). Display only. */
 export interface PlannerTrace {
   planner: string;
-  /** Spec 375 — the concrete model that planned (`openai/gpt-oss-120b`), when a model did. */
+  /** Spec 377 — the concrete model that planned (`openai/gpt-oss-120b`), when a model did. */
   model?: string;
   toolsExposed: string[];
   playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
@@ -130,7 +130,7 @@ export interface PlannerTrace {
   recalledTurns?: number;
 }
 
-/** Spec 375 — one model the agent OFFERS for an Ask: the provider id a turn names, the words the picker
+/** Spec 377 — one model the agent OFFERS for an Ask: the provider id a turn names, the words the picker
  *  shows, the concrete model behind it, and whether it is the one a turn gets when it names none. */
 export interface AskModelOption { id: string; label: string; model: string; free: boolean; default: boolean }
 export type AskReply = AskReplyVariant & {
@@ -233,7 +233,7 @@ export async function homeVocabulary(agent?: string): Promise<AskVocabularyEntry
   return (await readVocabulary(agent))?.caps ?? [];
 }
 
-/** Spec 375 — the models the agent OFFERS for an Ask. Empty ⇒ the agent names none (the picker is not
+/** Spec 377 — the models the agent OFFERS for an Ask. Empty ⇒ the agent names none (the picker is not
  *  shown and a turn names no model; the deployment default runs). Shares the vocabulary read. */
 export async function homeModels(agent?: string): Promise<AskModelOption[]> {
   return (await readVocabulary(agent))?.models ?? [];
@@ -287,7 +287,7 @@ export interface AskTurnState {
   supplied: SuppliedInput[];
   /** Set once the agent has checkpointed this run: later turns send the runRef and the new answers only. */
   resumable?: boolean;
-  /** Spec 375 — the provider the person chose for this conversation (`AskModelOption.id`). Sent on EVERY
+  /** Spec 377 — the provider the person chose for this conversation (`AskModelOption.id`). Sent on EVERY
    *  turn of a run so a resume composes with it too. Absent ⇒ the agent's default. */
   model?: string;
 }
