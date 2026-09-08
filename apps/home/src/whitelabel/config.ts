@@ -303,6 +303,19 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'poker-buyin'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The caps the ceremony binds into the mandate. `payee` is the Poker Site Treasury on
+      // faithchain; `asset` is the chain's test USDC (6dp). A buy-in is at most 200 USDC, a night at
+      // most 1000 across at most 5 buy-ins, and the window is a day — a session, not a standing
+      // arrangement. `push` because the card room charges at the moment the player sits.
+      paymentConfig: {
+        payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
+        asset: '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae',
+        maxAmountPerCharge: '200000000',
+        maxAggregate: '1000000000',
+        maxRedemptionsPerWindow: 5,
+        windowSeconds: 86400,
+        mode: 'push',
+      },
     },
     {
       client_id: 'demo-org',
@@ -656,6 +669,20 @@ const faithImpact: WhiteLabelConfig = {
 };
 
 /** The active white-label for this deployment. */
+/**
+ * Templates whose ceremony ALSO mints a capped payment delegation from the member's treasury.
+ *
+ * This used to be a bare `template === 'x402-pay'` at each call site, which quietly meant any other
+ * payment template completed as an ordinary sign-in and returned no mandate — the app got a session
+ * and nothing to spend under, with no error to explain it. Adding a template here is the one place
+ * that decides it; the entry still has to carry a `paymentConfig` for the caps.
+ */
+export const PAYMENT_TEMPLATES: readonly string[] = ['x402-pay', 'poker-buyin'];
+
+export function isPaymentTemplate(template: string | null | undefined): boolean {
+  return template != null && PAYMENT_TEMPLATES.includes(template);
+}
+
 export const whitelabel: WhiteLabelConfig = faithImpact;
 
 /** Interpolate {name} / {app} (and any {token}) into a copy string. Missing tokens stay literal. */

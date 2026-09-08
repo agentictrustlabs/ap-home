@@ -114,3 +114,57 @@ describe('sender → receiver over one SendMessage', () => {
     if (!noWire.ok) expect(noWire.refused).toMatch(/no A2A 1\.0 endpoint/);
   });
 });
+
+// ── Spec 374 §4 — THE DEBTOR'S ANSWER, delivered to the creditor's agent ──────────────────────────────
+import { subjectAnswerMessage, subjectAnswerOf } from '../../src/subject-hop.js';
+import { subjectAnswer } from '@agenticprimitives/a2a';
+
+const MARKER = 'test-marker-0123456789abcdef0123456789abcdef';
+const delivered = subjectAnswer({
+  agent: CHURCH, inResponseTo: { operationId: 'run-bob:s0', runRef: 'run-bob', stepRef: 's0' }, outcome: 'answer',
+  result: { invited: ALICE }, said: 'Invited.', run: { runRef: 'run-church', receipts: [{ stepRef: 's0', status: 'executed' }] },
+});
+
+describe('the delivered answer', () => {
+  it('rides the same extension URI and is told apart from an ask by shape', () => {
+    const m = subjectAnswerMessage(delivered);
+    expect(m.role).toBe('ROLE_AGENT');
+    const back = subjectAnswerOf(m);
+    expect(back && 'answer' in back ? back.answer.inResponseTo.operationId : null).toBe('run-bob:s0');
+    expect(subjectAskOf(m)).not.toBeNull(); // the ask reader sees the key…
+    expect(subjectAskOf(m) && 'errors' in subjectAskOf(m)!).toBe(true); // …and refuses the shape — a receiver checks the answer reader FIRST
+    expect(subjectAnswerOf(subjectAskMessage(profile))).toBeNull(); // an ask is not an answer
+  });
+
+  it('an in-Worker agent caller resumes exactly the run that waited; a stranger to the marker is not admitted', async () => {
+    const calls: Array<{ debtor: string; id: string }> = [];
+    const server = standardServerFor(ALICE, { ...card, name: 'bob.me' }, 'bob.faithnet.ai', {
+      env: { A2A_INTERNAL_MARKER: MARKER } as never,
+      appFetch: async () => new Response('{}'),
+      verifySession: async () => ({ ok: false, status: 401, error: 'no' }),
+      resumeFromCommitment: async ({ debtor, answer }) => {
+        calls.push({ debtor, id: answer.inResponseTo.operationId });
+        return answer.inResponseTo.operationId === 'run-bob:s0' ? { ok: true, runRef: 'run-bob', said: 'The invitation went out.' } : { ok: false, reason: 'no run waits on that' };
+      },
+    });
+    const send = (answer: unknown, headers: Record<string, string>) => server.handle(new Request('https://bob.faithnet.ai/api/a2a', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'a2a-version': '1.0', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: subjectAnswerMessage(answer as never) } }),
+    })).then((r) => r.json() as Promise<{ result?: { task?: { status: { state: string; message?: { parts: Array<{ text?: string }> } } } }; error?: { code: number } }>);
+
+    // The debtor, through the marker: the run resumes.
+    const ok = await send(delivered, { 'x-ap-internal': MARKER, 'x-ap-internal-agent': CHURCH });
+    expect(ok.result?.task?.status.state).toBe('TASK_STATE_COMPLETED');
+    expect(calls).toEqual([{ debtor: CHURCH, id: 'run-bob:s0' }]);
+
+    // An answer nothing waits on: rejected, in words that do not say whether a run exists.
+    const none = await send({ ...delivered, inResponseTo: { ...delivered.inResponseTo, operationId: 'run-other:s0' } }, { 'x-ap-internal': MARKER, 'x-ap-internal-agent': CHURCH });
+    expect(none.result?.task?.status.state).toBe('TASK_STATE_REJECTED');
+    expect(none.result?.task?.status.message?.parts[0]?.text).toMatch(/nothing this agent is waiting on/);
+
+    // Naming an agent WITHOUT the marker is nobody: the door stays shut before any method runs.
+    const shut = await send(delivered, { 'x-ap-internal-agent': CHURCH });
+    expect(shut.error?.code ?? 0).not.toBe(0);
+    expect(calls.length).toBe(2);
+  });
+});

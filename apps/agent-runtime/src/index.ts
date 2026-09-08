@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, replayingInvoker } from '@agenticprimitives/orchestration';
+import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1 } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
@@ -137,8 +137,8 @@ import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
-import { subjectAsk, subjectAnswer, validateSubjectAsk } from '@agenticprimitives/a2a';
-import { sendSubjectAskOverWire } from './subject-hop.js';
+import { subjectAsk, subjectAnswer, validateSubjectAsk, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { sendSubjectAskOverWire, subjectAnswerMessage } from './subject-hop.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -950,7 +950,12 @@ async function checkGatewayAssertion(
   const gaToken = c.req.header('x-agentic-gateway-assertion');
   const gaSecret = c.env.GATEWAY_ASSERTION_SECRET?.trim();
   const gaRequired = c.env.DEMO_REQUIRE_GATEWAY_ASSERTION === 'true';
-  if (gaRequired && (!gaToken || !gaSecret)) {
+  // Spec 374 §4 / spec 341 §7 — AN IN-WORKER CALL NEVER CROSSED THE EDGE, so it carries no edge assertion;
+  // it carries the in-Worker marker, which is the trust for exactly this hop (a subject agent delivering
+  // a finished act to a creditor agent served here). The marker is checked, never assumed, and a request
+  // that carries neither is refused as before.
+  const inWorker = isInternalCall(c.req.raw, c.env);
+  if (gaRequired && !inWorker && (!gaToken || !gaSecret)) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'gateway_assertion_required' } }, 401);
   }
   if (gaToken && gaSecret) {
@@ -1089,6 +1094,8 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),
+    // Spec 374 §4 — a delivered answer resumes the run that asked, and only that run.
+    resumeFromCommitment: (input) => resumeFromCommitment(c.env, input),
     // Spec 372 N1 — the outsider's unfinished run, on the addressee's own object, open to its stewards.
     // The same checkpoint a trigger leaves (P5): no mandate presented, nothing supplied, a window after
     // which it reads expired rather than pending forever. Claiming it grants nothing — a steward resumes
@@ -1408,15 +1415,25 @@ app.post('/harness/runs', async (c) => {
  * agent whose schedule fired, and a runtime's is the agent whose session wire was verified on chain at the
  * door. This function is handed one, and asserts nothing about how it was established.
  */
-export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown> }): Promise<{
-  reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
+export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
+  /** Spec 374 §4 — RESUME a checkpointed run with what was delivered: the plan it was admitted with, the
+   *  steps that completed (replayed), the wires it presented (re-verified), and the supplied inputs now
+   *  including the debtor's answer for the step that waited. No session: the run finishes as the agent. */
+  resume?: { plan?: Plan; executed?: HarnessRunCheckpointV1['executed']; presented?: DelegationWireV1[]; supplied?: SuppliedInputV1[] };
+}): Promise<{
+  reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string; runRef?: string };
   spoken: string;
-  result: { plan: unknown };
+  result: { plan: unknown; receipts?: unknown[] };
+  events: RunEvent[];
+  presentedRefs: string[];
 }> {
   const deps = harnessDeps(env, buildAuditSink(env));
   const intent = { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
-  const { result, interactionFor, trace, tools } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
-    intent, presented: null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
+  const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
+    intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
+    ...(input.resume?.plan ? { plan: input.resume.plan } : {}),
+    ...(input.resume?.executed ? { resume: input.resume.executed } : {}),
+    ...(input.resume?.supplied?.length ? { supplied: input.resume.supplied } : {}),
     // An unattended run has no person's session behind it: the public directory and the vault questions
     // are a person's reads. The playbook's own tools (the work reads, the acts) do not come this way.
     mcpInvoke: async (toolId) => ({ refused: `${toolId} is not available to an unattended run — a person asks that` }),
@@ -1426,7 +1443,89 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
-  return { reply: reply as never, spoken, result: result as never };
+  return { reply: reply as never, spoken, result: result as never, events, presentedRefs };
+}
+
+/**
+ * Spec 374 §4 — THE DEBTOR'S ANSWER ARRIVES. A run on `addressee`'s object suspended on a commitment
+ * (`awaiting.kind = 'commitment'`); the subject's agent has now delivered what came of the act. Exactly
+ * one run matches — the debtor is the caller and the id is the correlation the creditor minted — and it
+ * resumes with the delivered outcome as the waiting step's supplied input. Anything else matches nothing.
+ */
+async function resumeFromCommitment(env: Env, input: { addressee: Address; debtor: Address; answer: SubjectAnswerV1 }): Promise<{ ok: true; runRef: string; said: string } | { ok: false; reason: string }> {
+  // The listing STRIPS what a run presented (a listing never hands out mandates); the match is made on
+  // it, and the run itself is loaded for the resume.
+  const runs = await listRuns(env as never, input.addressee).catch(() => []);
+  const found = runs.find((r) => r.awaiting?.kind === 'commitment' && r.awaiting.commitment
+    && r.awaiting.commitment.debtor.toLowerCase() === input.debtor.toLowerCase()
+    && r.awaiting.commitment.id === input.answer.inResponseTo.operationId
+    && r.runRef === input.answer.inResponseTo.runRef);
+  const hit = found ? await loadRun(env as never, input.addressee, found.runRef).catch(() => null) : null;
+  if (!hit || !hit.awaiting) return { ok: false, reason: 'no run waits on that' };
+  const a = input.answer;
+  const delivered: NonNullable<SuppliedInputV1['delivered']> = {
+    outcome: a.outcome === 'answer' ? 'answer' : a.outcome === 'refused' ? 'refused' : 'error',
+    ...(a.result !== undefined ? { result: a.result } : {}), ...(a.said ? { said: a.said } : {}),
+    receipts: a.run.receipts, runRef: a.run.runRef,
+  };
+  let resumed: Awaited<ReturnType<typeof runAgentAsk>>;
+  try {
+    resumed = await runAgentAsk(env, {
+      agent: hit.asker, addressee: input.addressee, ask: hit.message, runRef: hit.runRef,
+      resume: { ...(hit.plan ? { plan: hit.plan } : {}), ...(hit.executed ? { executed: hit.executed } : {}), presented: hit.presented, supplied: [...hit.supplied, { stepRef: hit.awaiting.stepRef, delivered }] },
+    });
+  } catch (e) {
+    // The run that waited could not be resumed: say why, and leave it waiting rather than dropping it.
+    console.warn('[commitment] resume failed:', e instanceof Error ? e.message : String(e));
+    return { ok: false, reason: `the waiting run could not be resumed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const { reply, spoken, result, events, presentedRefs } = resumed;
+  const now = Date.now();
+  if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
+    // The plan had more to do and it needs the asker: the run parks for THEM again, as it would have
+    // had the step finished in the first turn.
+    const p = reply.prompt;
+    await saveRun(env as never, {
+      ...hit, supplied: [...hit.supplied, { stepRef: hit.awaiting.stepRef, delivered }],
+      ...(p ? { awaiting: { kind: p.kind as 'data' | 'signature' | 'confirmation', prompt: p.prompt, stepRef: p.stepRef, expiresAt: now + (AWAIT_WINDOW_MS[p.kind as 'data'] ?? AWAIT_WINDOW_MS.data) } } : { awaiting: undefined }),
+      executed: { plan: (result as { plan: Plan }).plan, completed: completedStepsOf(result as never) },
+      expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now,
+    } as never);
+  } else {
+    await dropRun(env as never, input.addressee, hit.runRef).catch(() => undefined);
+    // The record of the run, the way the ask route keeps one: what was asked, what ran, what it came to.
+    const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
+    await putRecord(env as never, input.addressee, recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) })).catch((e: unknown) => console.warn('[commitment] record not kept:', e instanceof Error ? e.message : String(e)));
+  }
+  return { ok: true, runRef: hit.runRef, said: spoken || reply.text || '' };
+}
+
+/**
+ * Spec 374 §4 — DELIVER a finished routed act's outcome to the creditor's agent, over the one wire. Inside
+ * this deployment the hop is in-process through the standard mount (a Worker cannot fetch its own
+ * account's hostnames), the caller named by the in-Worker marker. A creditor served elsewhere waits on
+ * W3 (the subject agent's session wire) and is logged, never guessed at.
+ */
+async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined, input: { debtor: Address; creditor: Address; answer: SubjectAnswerV1 }): Promise<{ delivered: boolean; note: string }> {
+  const deps = harnessDeps(env, buildAuditSink(env));
+  const name = await deps.nameOf?.(input.creditor).catch(() => null) ?? null;
+  const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+  if (!host) return { delivered: false, note: `${input.creditor} publishes no endpoint this agent can reach` };
+  const served = a2aBaseDomains(env);
+  if (!served.some((d) => host === d || host.endsWith(`.${d}`))) return { delivered: false, note: `${name} is served elsewhere — delivery across deployments is spec 374 W3` };
+  const rpc = { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: subjectAnswerMessage(input.answer) } };
+  const req = new Request(`https://${host}/api/a2a`, {
+    method: 'POST',
+    headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': input.debtor }),
+    body: JSON.stringify(rpc),
+  });
+  const res = await app.fetch(req, env, executionContextFor(ctx));
+  const body = (await res.json().catch(() => null)) as { result?: { task?: { status?: { state?: string; message?: { parts?: Array<{ text?: string }> } } } }; error?: { message?: string } } | null;
+  const state = body?.result?.task?.status?.state;
+  const said = (body?.result?.task?.status?.message?.parts ?? []).map((p) => p.text ?? '').join(' ').trim();
+  console.log(`[commitment] delivered to ${name ?? input.creditor} → ${res.status} ${state ?? body?.error?.message ?? ''} ${said}`);
+  return { delivered: state === 'TASK_STATE_COMPLETED', note: state ? `${state}${said ? `: ${said}` : ''}` : (body?.error?.message ?? `${res.status}`) };
 }
 
 export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
@@ -2279,6 +2378,9 @@ app.post('/harness/ask', async (c) => {
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
   }
   let satisfied: { stepId: string; ok: boolean; error?: string } | undefined;
+  // Spec 374 §4 — when this run was a routed act another agent waited on: whether its outcome reached
+  // that agent. Reported on the finishing reply so a steward (and a gate) can see the asker was told.
+  let routedDelivery: { delivered: boolean; note: string; creditor?: Address } | undefined;
   const turn = mergeTurn(stored, { ...(body.message ? { message: body.message } : {}), presented: body.presented ?? null, ...(body.supplied ? { supplied: body.supplied } : {}) });
   if ('error' in turn) return c.json({ ok: false, error: turn.error }, 409);
   // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
@@ -2422,8 +2524,15 @@ app.post('/harness/ask', async (c) => {
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
     // caller to retry a refusal as though it were weather.
     try {
-      if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
+      if (reply.kind === 'prompt' || reply.kind === 'authority_required' || reply.kind === 'waiting') {
         const now = Date.now();
+        // Spec 374 — A ROUTED ACT THIS AGENT CANNOT FINISH FOR THIS ASKER parks open to its own stewards,
+        // and remembers WHOSE run is waiting on it: when a steward finishes it, the outcome is delivered
+        // to that agent, which resumes the run that asked. The asker's session is not kept — a steward
+        // resumes under their own.
+        const routedAct = inResponseTo && reply.kind !== 'waiting'
+          ? { openToStewards: true as const, outsider: { agent: String(who.sa).toLowerCase() as Address, surface: 'subject-ask' as const }, routedFrom: { creditor: inResponseTo.agent, correlation: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef } } }
+          : {};
         await saveRun(c.env as never, {
           runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
           presented: turn.presented, supplied: turn.supplied,
@@ -2433,14 +2542,41 @@ app.post('/harness/ask', async (c) => {
           // second turn — and completed on chain with nothing to satisfy.
           ...(stored?.origin ? { origin: stored.origin } : {}),
           ...(stored?.openToStewards ? { openToStewards: true } : {}),
+          ...(stored?.outsider ? { outsider: stored.outsider } : {}),
+          ...(stored?.routedFrom ? { routedFrom: stored.routedFrom } : {}),
+          ...routedAct,
           ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS[reply.prompt.kind] } } : {}),
+          // Spec 374 — waiting on another agent's steward: the commitment is the record, and only the
+          // debtor's delivered answer moves this run (the asker cannot resume it).
+          ...(reply.kind === 'waiting' ? { awaiting: { kind: 'commitment' as const, prompt: reply.text, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.commitment, commitment: reply.commitment } } : {}),
           // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
           // next turn replays them instead of planning and executing the whole ask again.
           executed: { plan: result.plan, completed: completedStepsOf(result) },
-          expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : undefined, now),
+          expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : reply.kind === 'waiting' ? { kind: 'commitment', prompt: reply.text, stepRef: reply.stepRef } : undefined, now),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
       } else {
+        // Spec 374 §4 — A ROUTED ACT FINISHED (a steward signed it, or refused it): the outcome goes to
+        // the agent whose run is waiting on it. Evidence of what this organization did — its receipts —
+        // never a grant; the creditor's agent matches it to the one step it suspended for exactly this.
+        if (stored?.routedFrom) {
+          const outcome: SubjectAnswerV1['outcome'] = reply.kind === 'done' || reply.kind === 'answer' ? 'answer' : 'refused';
+          const said = reply.kind === 'done' ? (reply.fulfillment?.words ?? 'Done.') : reply.kind === 'answer' ? reply.text : reply.error;
+          const resultOut: unknown = reply.kind === 'done'
+            ? { result: reply.result ?? null, fulfillment: reply.fulfillment ?? null, receipts: reply.receipts.map((rc) => ({ stepRef: rc.stepRef, status: rc.status, ...(rc.capability?.id ? { capability: rc.capability.id } : {}) })) }
+            : reply.kind === 'answer' ? (reply.results?.[0]?.result ?? { text: reply.text }) : undefined;
+          const delivered = subjectAnswer({
+            agent: addressee,
+            inResponseTo: stored.routedFrom.correlation,
+            outcome,
+            ...(resultOut !== undefined ? { result: resultOut } : {}),
+            said,
+            run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
+          });
+          routedDelivery = await deliverRoutedOutcome(c.env, c.executionCtx, { debtor: addressee, creditor: stored.routedFrom.creditor, answer: delivered })
+            .catch((e: unknown) => ({ delivered: false, note: `not delivered: ${e instanceof Error ? e.message : String(e)}` }));
+          routedDelivery = { ...routedDelivery, creditor: stored.routedFrom.creditor };
+        }
         // A capability that ran for a PLAN STEP satisfies it with its RECEIPT — the run, the mandate and
         // the transaction — rather than a note claiming it happened. The step stays open if this fails:
         // an endeavor that reports work it cannot evidence is the thing this binding exists to prevent.
@@ -2529,7 +2665,7 @@ app.post('/harness/ask', async (c) => {
     c.executionCtx.waitUntil(putRecord(c.env as never, addressee, recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) })).catch((e: unknown) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
-    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -3602,7 +3738,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${status} ${JSON.stringify(envelope).slice(0, 600)}`);
     const read = readSubjectReply(envelope, toolId, name ?? subject, status);
     const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}), ...(read.receipts?.length ? { receipts: read.receipts } : {}) };
-    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer` };
+    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer`, ...(read.needs ? { needs: true, said: read.said ?? '' } : {}) };
   };
   return deps;
 }

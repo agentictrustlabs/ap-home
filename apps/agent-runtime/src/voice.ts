@@ -147,7 +147,7 @@ export function plainSpeech(s: string): string {
 }
 
 export interface SpeakableReply {
-  kind: 'answer' | 'done' | 'refused' | 'authority_required' | 'prompt';
+  kind: 'answer' | 'done' | 'refused' | 'authority_required' | 'prompt' | 'waiting';
   text?: string;
   fulfillment?: { established: string; words: string };
   outcome?: string; error?: string;
@@ -174,6 +174,8 @@ export async function spokenFor(reply: SpeakableReply, nameOf: (address: string)
   };
   switch (reply.kind) {
     case 'answer': return name(plainSpeech(reply.text ?? ''));
+    // Spec 374 — the run waits on another agent's steward; the words say so, and nothing is asked of the listener.
+    case 'waiting': return name(plainSpeech(reply.text ?? 'This is waiting on another agent.'));
     case 'done': {
       const f = reply.fulfillment;
       return name(f ? (f.established === 'submission' ? `Submitted — ${plainSpeech(f.words)}.` : `Done — ${plainSpeech(f.words)}.`) : 'Done.');

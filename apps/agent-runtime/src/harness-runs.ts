@@ -18,7 +18,7 @@
 // mandate is re-verified (on chain: signature, revocation, intent binding, limits), the ladder is
 // re-applied and the approval re-checked — every turn, exactly as the first. The checkpoint holds only
 // what the person already gave us; it grants nothing and it decides nothing.
-import type { SuppliedInputV1, Plan, StepReceipt } from '@agenticprimitives/orchestration';
+import type { SuppliedInputV1, Plan, StepReceipt, CommitmentRefV1 } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { internalHeaders } from './internal-marker.js';
@@ -56,7 +56,9 @@ export interface HarnessRunCheckpointV1 {
   /** What the run is waiting for, for a surface that lists pending work. `expiresAt` (spec 370 P1) is
    *  when waiting stops being resumable: a signature or confirmation is asked against a mandate minted
    *  for minutes, and a run past its window reads EXPIRED rather than pending forever. */
-  awaiting?: { kind: 'data' | 'signature' | 'confirmation'; prompt: string; stepRef: string; expiresAt?: number };
+  awaiting?: { kind: 'data' | 'signature' | 'confirmation' | 'commitment'; prompt: string; stepRef: string; expiresAt?: number;
+    /** Spec 374 — when `kind` is `commitment`: what another agent owes this run, and where it waits. */
+    commitment?: CommitmentRefV1 };
   /**
    * Spec 370 P1 — WHAT RAN. The plan the run was admitted with (fan-out already expanded) and the steps
    * that completed, each with what it returned and the receipt that recorded it. A resume hands these
@@ -71,7 +73,11 @@ export interface HarnessRunCheckpointV1 {
   /** Spec 372 N1 — this run was started by an OUTSIDE runtime on the standard A2A surface, calling as the
    *  agent named: it presented no mandate and cannot sign one, so a steward finishes it. Display and audit;
    *  no gate reads it — the asker is `asker`, verified at the door, and that is what `claimableBy` reads. */
-  outsider?: { agent: Address; surface: 'a2a-standard' };
+  outsider?: { agent: Address; surface: 'a2a-standard' | 'subject-ask' };
+  /** Spec 374 — this run is a ROUTED ACT another agent's run is waiting on: when it finishes, the outcome
+   *  is DELIVERED to the creditor's agent, which resumes the run that asked. The correlation is the
+   *  creditor's (spec 366 R2), echoed so the creditor can match it to exactly one suspended step. */
+  routedFrom?: { creditor: Address; correlation: { operationId: string; runRef: string; stepRef: string } };
   /** Spec 370 P1 tail — when this run stops being resumable, whatever it waits for. An authority request
    *  waits for a mandate minted for THIS request, minutes not days; 240 of them listed as "unfinished"
    *  was a day's asks a person had simply walked away from. Absent on older rows ⇒ `updatedAt`-based. */
@@ -189,7 +195,9 @@ export function mergeTurn(
 /** How long a wait stays resumable (spec 370 P1). A signature or a confirmation answers a mandate minted
  *  for the request — minutes, not days — so half an hour is generous; a data question (which Nathan?)
  *  has no mandate yet and may wait two hours — after that the person has moved on, and asking again costs less than a list of ghosts. */
-export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation', number> = { data: 2 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000 };
+export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation' | 'commitment', number> = { data: 2 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000,
+  // Spec 374 — a commitment waits on ANOTHER agent's steward, on that agent's clock; a day is the outer bound here.
+  commitment: 24 * 3600_000 };
 
 /** Past its window: resumable no longer. Absent window ⇒ the day prune is the only expiry. */
 export function isExpired(cp: Pick<HarnessRunCheckpointV1, 'awaiting' | 'expiresAt' | 'updatedAt'>, now = Date.now()): boolean {

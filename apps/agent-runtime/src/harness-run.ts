@@ -34,7 +34,7 @@
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
-import { replayingInvoker, type RunRecordV1, type RunEvent } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -218,15 +218,16 @@ export const INVITE_TOOL: ToolSpec = {
   description:
     'Invite an agent to join an organization or team as a member. Requires a mandate from the organization. '
     + 'Produces a signed access grant the invitee redeems when they join — it does NOT make them a member by itself. '
-    + 'Args: org (the organization or team SA — whose authority this needs), invitee (the person\'s SA address; '
-    + 'use the directory tools first when the ask names someone rather than an address). When the org is a '
+    + 'Args: org (the organization or team, as the ask names it — whose authority this needs), invitee (the person '
+    + 'to invite, EXACTLY as the ask names them — a name, a typed name like carol.me, or an address; the agent '
+    + 'resolves it, so never plan a directory lookup in its place). When the org is a '
     + 'HOUSEHOLD (spec 368), kin (spouse, child, parent, sibling) and role (member, guardian, dependent) ride on '
     + 'the invitation and onto the membership — the family\'s shared record of how they are related.',
   inputSchema: {
     type: 'object',
     properties: {
-      org: { type: 'string', description: 'The organization or team SA address' },
-      invitee: { type: 'string', description: 'The invitee\'s smart-agent address (0x…)' },
+      org: { type: 'string', description: 'The organization or team, as the ask names it (a name or an address)' },
+      invitee: { type: 'string', description: 'The person to invite, as the ask names them (a name, a typed name, or an address)' },
       kin: { type: 'string', description: 'Household only — how the invitee is related to the household\'s founder: spouse | child | parent | sibling | a word of your own' },
       role: { type: 'string', description: 'Household only — member (default) | guardian | dependent' },
     },
@@ -234,6 +235,10 @@ export const INVITE_TOOL: ToolSpec = {
   },
   capability: { id: ORG_INVITE_CAPABILITY, action: 'invite', resourceArg: 'org', authorityArg: 'org' },
   risk: 'medium',
+  // Spec 374 — the ORGANIZATION invites; the act runs at its own agent, whose steward signs its grant. An
+  // ask about another organization is sent there (spec 366 R1, for acts), and the asker's run holds a
+  // commitment until the organization's steward finishes it.
+  subject: 'org',
 };
 
 /**
@@ -798,9 +803,13 @@ export interface SubjectAnswerV1 {
   /** The subject agent's structured result for the routed step (its invoker's own shape). */
   result?: unknown;
   /** Who answered, and where — and, under the subject-ask profile, the receiver's own receipts (S) naming R. */
-  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network'; receipts?: Array<{ stepRef: string; capability?: string; status: string }> };
+  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network' | 'delivered'; receipts?: Array<{ stepRef: string; capability?: string; status: string }> };
   /** When the subject's agent did not answer: its words, relayed verbatim (a refusal is an answer). */
   refused?: string;
+  /** Spec 374 — the receiver PARKED the step for its own steward (or asked something): `via.runRef` is
+   *  where it waits, `said` is its words. An act on this becomes a commitment; a read relays the words. */
+  needs?: boolean;
+  said?: string;
 }
 
 /**
@@ -845,7 +854,7 @@ export interface AskReplyEnvelopeV1 {
  * prompt it raised, an authority it needs) — never retried, never guessed. Reading `kind` off the
  * ENVELOPE instead of `reply` made every real answer read as "needs more" (caught live 2026-09-07).
  */
-export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer?: SubjectAnswerProfileV1 }) | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; runRef?: string; receipts?: Array<{ stepRef: string; capability?: string; status: string }> } {
+export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer?: SubjectAnswerProfileV1 }) | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; needs?: boolean; said?: string; runRef?: string; receipts?: Array<{ stepRef: string; capability?: string; status: string }> } {
   if (!envelope) return { ok: false, refused: `${who} answered with something that was not a reply (${status})` };
   // THE PROFILE ANSWER, when the receiver speaks it (spec 366 R2): typed outcome, the receiver's own run and
   // receipts naming our request. A receiver that does not speak the profile answers with the plain reply.
@@ -853,7 +862,10 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
   if (sa && sa.extension === 'https://agenticprimitives.org/a2a/subject-ask/v1') {
     const receipts = sa.run?.receipts ?? [];
     if (sa.outcome === 'answer') return { ok: true, result: sa.result, runRef: sa.run.runRef, receipts };
-    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), runRef: sa.run?.runRef, receipts };
+    // Spec 374 — `needs` from the receiver means it PARKED the act for its own steward (or asked the
+    // asker something); the run reference is where it waits, and the caller decides whether that is a
+    // commitment (an act) or a relayed question (a read).
+    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), ...(sa.outcome === 'needs' ? { needs: true, said: sa.said ?? '' } : {}), runRef: sa.run?.runRef, receipts };
   }
   if (envelope.ok === false || envelope.error) return { ok: false, refused: `${who} refused: ${envelope.error ?? status}` };
   const reply = envelope.reply;
@@ -1941,6 +1953,9 @@ export type AskReplyVariant =
        *  input, verified on chain like everything else. */
       alsoApprove?: Array<{ purpose: string; digest: Hex }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
+  /** Spec 374 — the run waits on ANOTHER agent's steward. Not resumable by the asker: only the debtor's
+   *  delivered answer moves it. `on` is where the act actually waits; `commitment` is the record. */
+  | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: Address; name?: string; runRef: string }; commitment: CommitmentRefV1 }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
       /** Spec 367 §6 — what the acted step ESTABLISHED, in its outcome class's words; a surface says no more than this. */
       fulfillment?: { capability: string; established: OutcomeClass; evidence?: string; words: string };
@@ -3012,6 +3027,12 @@ async function askReplyForInner(env: HarnessEnv, input: {
         };
       }
     }
+    if (r.prompt.kind === 'commitment') {
+      const cm = r.prompt.commitment;
+      const name = cm.at.name ?? cm.at.agent;
+      return { kind: 'waiting', runRef: r.runRef, stepRef: r.prompt.stepRef, on: { agent: cm.at.agent as Address, ...(cm.at.name ? { name: cm.at.name } : {}), runRef: cm.at.runRef }, commitment: cm,
+        text: `${name}'s steward has to finish this — it has been asked and is waiting on them. It will finish here when they do; nothing was signed for them.` };
+    }
     return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   }
   if (r.outcome === 'completed') {
@@ -3777,6 +3798,8 @@ be emitted together; the runtime runs them side by side.`;
     // tier; if that address is not the agent addressed, the step goes to the subject's own harness with
     // the asker's session, and what comes back is the subject's own answer (or its refusal, in its
     // words). The local invoker never reads another principal's records for a routed step.
+    // Spec 374 §1 — a step routed to another agent is JUDGED there: no mandate is asked of the asker here.
+    authorityJudgedElsewhere: (rs) => routedSubjectFor(rs.tool, rs.args, input.addressee),
     invoke: async (toolId, args, ctx) => {
       // Spec 370 P6 — on a replay nothing runs: the record answers, or refuses a step it never held.
       if (input.replayOf) return replayingInvoker(input.replayOf)(toolId, args, ctx);
@@ -3787,6 +3810,19 @@ be emitted together; the runtime runs them side by side.`;
         return { refused: `this agent cannot ask ${subject} — agent-to-agent asks are not wired here`, via: { agent: subject } };
       }
       const stepRef = ctx.step.id ?? `s${ctx.index}`;
+      const subjectName = await deps.nameOf?.(subject).catch(() => null) ?? null;
+      const whoName = subjectName ? `${subjectName} (${subject})` : subject;
+      // Spec 374 §4 — THE DEBTOR'S ANSWER, delivered: this run suspended on a commitment and the subject's
+      // agent has now said what came of it. The step takes that as its result; nothing is re-asked.
+      const delivered = inputsFor(ctx.supplied, stepRef).find((x: SuppliedInputV1) => x.delivered)?.delivered;
+      if (delivered) {
+        const via = { agent: subject, ...(subjectName ? { name: subjectName } : {}), ...(delivered.runRef ? { runRef: delivered.runRef } : {}), observedVia: 'delivered' as const, ...(delivered.receipts?.length ? { receipts: delivered.receipts as Array<{ stepRef: string; capability?: string; status: string }> } : {}) };
+        if (delivered.outcome === 'answer') {
+          const r: Record<string, unknown> = (delivered.result && typeof delivered.result === 'object') ? (delivered.result as Record<string, unknown>) : { result: delivered.result };
+          return { ...r, via, note: `${String(r.note ?? '')} Done by ${whoName}'s own agent, under its steward's signature — say so in one clause.`.trim() };
+        }
+        return { refused: `${whoName} ${delivered.outcome === 'refused' ? 'refused' : 'could not finish'}: ${delivered.said ?? ''}`.trim(), via, note: `${whoName}'s own agent decided this; relay its words.` };
+      }
       const answer = await deps.askSubjectAgent({
         subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
@@ -3794,6 +3830,22 @@ be emitted together; the runtime runs them side by side.`;
       });
       const who = answer.via.name ? `${answer.via.name} (${subject})` : subject;
       if (!answer.ok) {
+        // Spec 374 — AN ACT THE SUBJECT PARKED FOR ITS OWN STEWARD. The subject's agent took the request
+        // and is waiting on someone this asker is not; this run holds the commitment and waits with it.
+        // A READ that came back `needs` is a question relayed in the subject's words, as before.
+        if (answer.needs && answer.via.runRef && !tool?.answers) {
+          const name = answer.via.name ?? subjectName ?? subject;
+          throw new InputRequired({
+            kind: 'commitment', stepRef, toolId,
+            prompt: `Waiting on ${name}'s steward — ${answer.said || 'they have to finish this at their own agent'}.`,
+            commitment: {
+              id: `${input.runRef ?? 'run'}:${stepRef}`, debtor: subject, creditor: (input.addressee ?? input.person ?? subject).toLowerCase(),
+              content: { capability: toolId, args, goal: input.intent.goal },
+              conditions: `a steward of ${name} finishes it`, state: 'proposed',
+              at: { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}), runRef: answer.via.runRef },
+            },
+          });
+        }
         return { refused: answer.refused ?? `${who} did not answer`, via: answer.via, note: `${who}'s own agent was asked and answered this way; relay its words, do not retry or guess.` };
       }
       const r = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };

@@ -26,7 +26,7 @@ import { hasWallet } from '../../lib/wallet';
 import { clearPasskey, forcePhonePasskeyOnce, isUvMissingError, type DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
-import { whitelabel, fmt } from '../../whitelabel/config';
+import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { CENTRAL_AUTH_DOMAIN } from '../../lib/domain';
 import { useSession } from '../../context/session';
 import type { EnrollApi } from './useEnrollReq';
@@ -273,7 +273,7 @@ export function OnboardingJourney({
       // `existingAgent` avoids a wasted re-auth for first-run x402-pay connects. openHome here is
       // wallet/passkey only; SOCIAL (KMS) members connect through RecognizedEnroll (which already has a
       // session token + charges via signHashFor — all custodians).
-      if (api.enroll.template === 'x402-pay' && pc && existingAgent && (via === 'passkey' || via === 'wallet' || isKmsVia(via))) {
+      if (isPaymentTemplate(api.enroll.template) && pc && existingAgent && (via === 'passkey' || via === 'wallet' || isKmsVia(via))) {
         // wallet/passkey re-open the home for a fresh token; a social/KMS member reuses the
         // cross-subdomain SSO session token (openHome is wallet/passkey-only).
         const opened = isKmsVia(via)

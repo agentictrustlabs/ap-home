@@ -23,8 +23,9 @@ import {
   type SessionWirePrincipalDeps, type StandardTaskStore, type TaskV1,
 } from '@agenticprimitives/a2a/standard';
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
-import { internalHeaders, type InternalMarkerEnv } from './internal-marker.js';
-import { subjectAskOf, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
+import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
+import { subjectAskOf, subjectAnswerOf, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
+import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
  *  read knows which side holds it — the shape is minted, not guessed (`newTaskId` in the DO). */
@@ -84,6 +85,11 @@ export interface StandardMountDeps {
    *  trigger's does (P5): listed among their unfinished runs, finished by one of them under their own
    *  session and their own mandate. The A2A task is the runtime's handle; this is the stewards'. */
   parkRun?: (input: { runRef: string; ask: string; addressee: Address; asker: Address; reply: { kind: string; prompt?: { kind: string; prompt: string; stepRef: string } }; result?: { plan: unknown } }) => Promise<void>;
+  /** Spec 374 §4 — THE DEBTOR'S ANSWER ARRIVES: a routed act this agent's run was waiting on finished at
+   *  the subject's agent. Finds the run on THIS agent's object that suspended on exactly that commitment
+   *  (debtor = the caller, id = `inResponseTo.operationId`) and resumes it with the delivered outcome.
+   *  No such run ⇒ `{ ok: false }` and the task is rejected with words that do not say whether one exists. */
+  resumeFromCommitment?: (input: { addressee: Address; debtor: Address; answer: SubjectAnswerV1 }) => Promise<{ ok: true; runRef: string; said: string } | { ok: false; reason: string }>;
 }
 
 interface AskEnvelope {
@@ -166,6 +172,14 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
     // AGENT's session wire, verified on chain per request (spec 372 S3c). The scheme token selects which
     // runs — neither is ever tried because the other failed, and each fails closed on its own terms.
     principal: async (request): Promise<Principal | null> => {
+      // Spec 374 §4 — AN AGENT OF THIS WORKER, calling in-process. A Worker cannot fetch its own account's
+      // hostnames, so a subject agent delivering a finished act to a creditor agent served here makes the
+      // hop through this handler with the in-Worker marker (spec 341 §7) and names itself. The marker is
+      // the door; the name is checked against the run it claims to answer, never trusted beyond that.
+      const internalAgent = request.headers.get('x-ap-internal-agent');
+      if (internalAgent && /^0x[0-9a-fA-F]{40}$/.test(internalAgent)) {
+        return isInternalCall(request, deps.env) ? { kind: 'agent', agent: internalAgent.toLowerCase() } : null;
+      }
       const auth = request.headers.get('authorization') ?? '';
       if (/^A2A-Session\s/i.test(auth)) return byWire ? byWire(request) : null;
       const token = /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim();
@@ -180,6 +194,21 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         // AN AGENT ASKING AS ITSELF (spec 372 S3c). It has no person's session and is given none: the run
         // is the same one a trigger fires — no mandate presented, reads bounded to what this agent's own
         // records say to that asker, an act suspending as AUTH_REQUIRED with what it would need.
+        // Spec 374 §4 — a DELIVERED ANSWER to a routed act this agent's run is waiting on. The caller is the
+        // debtor (an agent); the match against a run this agent itself suspended is the only authorization.
+        const delivered = subjectAnswerOf(ctx.message);
+        if (delivered && 'errors' in delivered) { await ctx.reject([{ text: `the delivered answer is malformed: ${delivered.errors.join('; ')}` }]); return; }
+        if (delivered) {
+          if (ctx.principal?.kind !== 'agent' || !deps.resumeFromCommitment) { await ctx.reject([{ text: 'a delivered answer comes from the agent that owed it' }]); return; }
+          await ctx.working();
+          const r = await deps.resumeFromCommitment({ addressee: agent, debtor: ctx.principal.agent as Address, answer: delivered.answer });
+          // A resume that FAILED is said as such (the debtor is not a stranger and the words help); a run
+          // that does not exist is not confirmed or denied.
+          if (!r.ok) { await ctx.reject([{ text: r.reason.startsWith('the waiting run') ? r.reason : 'nothing this agent is waiting on matches that answer' }]); return; }
+          ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef: r.runRef };
+          await ctx.complete([{ text: r.said || 'The waiting run finished.' }]);
+          return;
+        }
         if (!session && ctx.principal?.kind === 'agent' && deps.askAsAgent) {
           if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
           await ctx.working();

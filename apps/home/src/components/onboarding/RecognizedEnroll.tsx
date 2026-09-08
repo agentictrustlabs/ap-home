@@ -26,7 +26,7 @@ import { issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire }
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
-import { whitelabel, fmt } from '../../whitelabel/config';
+import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { createManagedAgent, fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
@@ -477,7 +477,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // ALL custodians (wallet / passkey / social-KMS) — the charge is signed via signHashFor, which
         // handles every credential. With no treasury we connect without payment and the app surfaces
         // "create a treasury" rather than attempting a charge.
-        if (enroll.template === 'x402-pay' && pc && treasuryAddr) {
+        if (isPaymentTemplate(enroll.template) && pc && treasuryAddr) {
           // spec 272 — charge the tier amount the relying app requested (enroll.payAmount), CAPPED by the
           // client's registered per-charge max. Defaults to the max (≈ pay-as-you-go) when unspecified.
           const cap = BigInt(pc.maxAmountPerCharge);

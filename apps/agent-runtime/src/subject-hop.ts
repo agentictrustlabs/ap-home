@@ -12,7 +12,7 @@
 // never reads the subject's records locally instead (R3), and it never guesses a path (ADR-0013).
 //
 // Everything here is pure: the caller supplies `fetch`; nothing reads a store or a chain.
-import { AP_SUBJECT_ASK_EXTENSION_URI, validateSubjectAsk, type SubjectAskV1 } from '@agenticprimitives/a2a';
+import { AP_SUBJECT_ASK_EXTENSION_URI, validateSubjectAsk, type SubjectAskV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import type { AgentCardV1, MessageV1, TaskV1 } from '@agenticprimitives/a2a/standard';
 
 /** The A2A 1.0 JSON-RPC endpoint a card publishes, or null when it publishes none. */
@@ -99,4 +99,40 @@ export async function sendSubjectAskOverWire(input: SubjectHopInput): Promise<Su
   if (envelope) return { ok: true, endpoint, task, envelope };
   const said = (task.status?.message?.parts ?? []).map((p) => (typeof p.text === 'string' ? p.text : '')).filter(Boolean).join(' ');
   return { ok: false, endpoint, task, refused: `${task.status?.state ?? 'unknown state'}${said ? `: ${said}` : ''}`, status: res.status };
+}
+
+// ── The answer, delivered (spec 374 §4) ──────────────────────────────────────────────────────────────
+//
+// When a routed ACT finishes at the subject's agent — its steward signed, or refused — the outcome is
+// DELIVERED to the creditor's agent as a message under the same extension URI: a `SubjectAnswerV1` whose
+// `inResponseTo` names the creditor's own correlation. The two payloads share a URI and are told apart
+// by shape (an ask has `request`; an answer has `inResponseTo`), so one metadata key carries both halves
+// of one conversation.
+
+const isAddr = (v: unknown): v is string => typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v);
+
+/** The message that delivers a finished routed act's outcome to the creditor's agent. */
+export function subjectAnswerMessage(answer: SubjectAnswerV1): MessageV1 {
+  return {
+    messageId: hex32(),
+    role: 'ROLE_AGENT',
+    parts: [{ text: answer.said ?? (answer.outcome === 'answer' ? 'Done.' : answer.outcome) }],
+    extensions: [AP_SUBJECT_ASK_EXTENSION_URI],
+    metadata: { [AP_SUBJECT_ASK_EXTENSION_URI]: answer },
+  };
+}
+
+/** The delivered answer a received message carries, structurally checked; null when it carries none. */
+export function subjectAnswerOf(message: Pick<MessageV1, 'metadata'>): { answer: SubjectAnswerV1 } | { errors: string[] } | null {
+  const raw = message.metadata?.[AP_SUBJECT_ASK_EXTENSION_URI] as Partial<SubjectAnswerV1> | undefined;
+  if (raw === undefined || raw === null || typeof raw !== 'object' || !('inResponseTo' in raw)) return null;
+  const errors: string[] = [];
+  if (raw.extension !== AP_SUBJECT_ASK_EXTENSION_URI) errors.push(`extension: expected ${AP_SUBJECT_ASK_EXTENSION_URI}`);
+  if (raw.version !== 1) errors.push('version: expected 1');
+  if (!isAddr(raw.agent)) errors.push('agent: an address');
+  const r = raw.inResponseTo as Record<string, unknown> | undefined;
+  if (!r || !['operationId', 'runRef', 'stepRef'].every((k) => typeof r[k] === 'string' && r[k])) errors.push('inResponseTo: { operationId, runRef, stepRef }');
+  if (!['answer', 'refused', 'needs', 'error'].includes(String(raw.outcome))) errors.push('outcome: answer | refused | needs | error');
+  if (!raw.run || typeof (raw.run as { runRef?: unknown }).runRef !== 'string') errors.push('run.runRef: required');
+  return errors.length ? { errors } : { answer: raw as SubjectAnswerV1 };
 }

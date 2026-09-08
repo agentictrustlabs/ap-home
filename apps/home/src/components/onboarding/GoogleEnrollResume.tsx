@@ -8,7 +8,7 @@
 // exactly as the in-page flow would. This is what lets "Continue with Google" return to demo-org.
 import { useEffect, useRef, useState } from 'react';
 import { secureHome, secureHomeNoName, givePermission, activateVaultIfNeeded, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
-import { whitelabel, fmt } from '../../whitelabel/config';
+import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { nameLabel } from '../../lib/domain';
 import { homeLabel, type Home } from '../../home/types';
@@ -123,7 +123,7 @@ export function GoogleEnrollResume() {
       let payment: Parameters<typeof givePermission>[5];
       let treasuryAddr: `0x${string}` | null = null;
       const pc = relyingApp?.paymentConfig;
-      if (enroll.template === 'x402-pay' && pc) {
+      if (isPaymentTemplate(enroll.template) && pc) {
         try {
           treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as `0x${string}`) ?? null;
         } catch (e) { console.warn('[google-resume] listManagedAgents failed:', e); }

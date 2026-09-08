@@ -95,6 +95,8 @@ export type AskReplyVariant =
         because?: string; ruleId?: string;
       }> }
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: AskPrompt }
+  /** Spec 374 — the run waits on ANOTHER agent's steward; not resumable here. `on` is where it waits. */
+  | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: string; name?: string; runRef: string }; spoken?: string }
   | { kind: 'done'; runRef: string; result: unknown; receipts: unknown[];
       /** Spec 367 §6 — what the act ESTABLISHED: a submission is said as a submission, never as the outcome. */
       fulfillment?: { capability: string; established: 'lookup' | 'submission' | 'authoritative'; evidence?: string; words: string };

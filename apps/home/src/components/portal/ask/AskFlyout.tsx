@@ -914,6 +914,9 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
 /** What the agent said, in the shape it said it. */
 function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; onNext?: (next: { capability: string; args: Record<string, unknown>; words: string; why?: string }) => void }) {
   if (reply.kind === 'answer') return <span>{reply.text}</span>;
+  // Spec 374 — the run waits on another agent's steward: said as a sentence, asked of nobody here. The run
+  // stays in the unfinished list until the other agent's answer arrives; there is nothing to click.
+  if (reply.kind === 'waiting') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
     return (
