@@ -138,6 +138,7 @@ import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk } from '@agenticprimitives/a2a';
+import { sendSubjectAskOverWire } from './subject-hop.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -2488,12 +2489,18 @@ app.post('/harness/ask', async (c) => {
     const UNFINISHED_SHOWN = 3;
     const shown = otherRuns.slice(0, UNFINISHED_SHOWN);
     // Spec 366 R2 — S: the profile answer naming R, with this agent's own run and receipts as evidence.
+    // A READ THAT REFUSED IS A REFUSAL, not an answer (spec 366 R4). A tool answers a stranger with
+    // `{ refused }` inside its result — the loop treats that as an honest read and the composer narrates
+    // it — but on the wire the OUTCOME must say what happened: a task that "completed" with a refusal
+    // inside made a stranger's ask look answered (seen live 2026-09-08). The words stay the tool's.
+    const routedResult = reply.kind === 'answer' ? (reply.results?.find((r) => r.toolId === body.plan?.steps?.[0]?.toolId) ?? reply.results?.[0])?.result ?? { text: reply.text } : undefined;
+    const toolRefusal = routedResult && typeof routedResult === 'object' && typeof (routedResult as { refused?: unknown }).refused === 'string' ? (routedResult as { refused: string }).refused : null;
     const answer = inResponseTo ? subjectAnswer({
       agent: addressee,
       inResponseTo: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef },
-      outcome: reply.kind === 'answer' ? 'answer' : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
-      ...(reply.kind === 'answer' ? { result: (reply.results?.find((r) => r.toolId === body.plan?.steps?.[0]?.toolId) ?? reply.results?.[0])?.result ?? { text: reply.text } } : {}),
-      ...(reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
+      outcome: reply.kind === 'answer' ? (toolRefusal ? 'refused' : 'answer') : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
+      ...(reply.kind === 'answer' && !toolRefusal ? { result: routedResult } : {}),
+      ...(toolRefusal ? { said: toolRefusal } : reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
       run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
     }) : undefined;
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
@@ -3567,19 +3574,33 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session }, ...(presented.length ? { presented } : {}) },
       correlation,
     });
-    const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile });
-    const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
     const via = { agent: subject, name, host, observedVia: (inProcess ? 'serving-handler' : 'network') as 'serving-handler' | 'network' };
-    let res: Response;
-    try {
-      res = inProcess ? await app.fetch(req, env, executionContextFor(opts.executionCtx)) : await fetch(req);
-    } catch (e) {
-      return { ok: false, via, refused: `could not reach ${name ?? subject} at ${host}: ${e instanceof Error ? e.message : String(e)}` };
+    let envelope: AskReplyEnvelopeV1 | null;
+    let status: number;
+    if (inProcess) {
+      const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile });
+      const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
+      let res: Response;
+      try {
+        res = await app.fetch(req, env, executionContextFor(opts.executionCtx));
+      } catch (e) {
+        return { ok: false, via, refused: `could not reach ${name ?? subject} at ${host}: ${e instanceof Error ? e.message : String(e)}` };
+      }
+      envelope = (await res.json().catch(() => null)) as AskReplyEnvelopeV1 | null;
+      status = res.status;
+    } else {
+      // ANOTHER DEPLOYMENT (spec 366 R4): resolved through its card, carried over the one wire (spec 372
+      // S4) as a `SendMessage` with the profile in the metadata; the reply is the receiver's envelope,
+      // returned verbatim as the task's `subject-answer` artifact. Unreachable, or no 1.0 endpoint on the
+      // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
+      const hop = await sendSubjectAskOverWire({ cardUrl: `https://${host}/.well-known/agent-card.json`, profile, session, fetch: (u, init) => fetch(u, init) });
+      if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
+      envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
+      status = 200;
     }
-    const envelope = (await res.json().catch(() => null)) as AskReplyEnvelopeV1 | null;
     // What the subject's agent actually said, for the log a tail can read (`[subject-ask]`).
-    console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${res.status} ${JSON.stringify(envelope).slice(0, 600)}`);
-    const read = readSubjectReply(envelope, toolId, name ?? subject, res.status);
+    console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${status} ${JSON.stringify(envelope).slice(0, 600)}`);
+    const read = readSubjectReply(envelope, toolId, name ?? subject, status);
     const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}), ...(read.receipts?.length ? { receipts: read.receipts } : {}) };
     return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer` };
   };

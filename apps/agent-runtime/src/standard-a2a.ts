@@ -24,6 +24,7 @@ import {
 } from '@agenticprimitives/a2a/standard';
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, type InternalMarkerEnv } from './internal-marker.js';
+import { subjectAskOf, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
  *  read knows which side holds it — the shape is minted, not guessed (`newTaskId` in the DO). */
@@ -199,6 +200,32 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
           if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true } }]); return; }
           await ctx.reject([{ text: words || asked.reply.error || 'Refused.' }]);
+          return;
+        }
+        // A SUBJECT-ASK FROM ANOTHER DEPLOYMENT (spec 366 R4). Another agent's harness routed one step here,
+        // about THIS agent, under the asker's Home session (the bearer) and the profile in the metadata.
+        // It is the same request the in-process hop makes — the same `/harness/ask` body, the same
+        // consistency checks there (credential = verified session, asker = session's agent, plan =
+        // request) — and the envelope it answers with rides back verbatim as the `subject-answer`
+        // artifact, so the sender reads it exactly as it reads the in-process reply.
+        const routed = subjectAskOf(ctx.message);
+        if (routed && 'errors' in routed) { await ctx.reject([{ text: `the subject-ask profile is malformed: ${routed.errors.join('; ')}` }]); return; }
+        if (routed) {
+          if (!session) { await ctx.reject([{ text: 'a routed ask carries the asker’s Home session as the bearer; this one carried none' }]); return; }
+          if (ctx.principal?.agent) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: ctx.principal.agent };
+          const ask = routed.ask;
+          const body = JSON.stringify({ session, addressee: agent, message: ask.request.goal, plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] }, subjectAsk: ask });
+          await ctx.working();
+          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json' }), body }), deps.env);
+          const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
+          if (!envelope) { await ctx.fail([{ text: `the ask answered ${res.status} with no envelope` }]); return; }
+          await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
+          const outcome = envelope.subjectAnswer?.outcome ?? (envelope.reply?.kind === 'answer' ? 'answer' : envelope.ok === false ? 'error' : 'refused');
+          const said = envelope.subjectAnswer?.said || envelope.reply?.text || envelope.reply?.summary || envelope.error || '';
+          if (outcome === 'answer') { await ctx.complete([{ text: said || 'Answered.' }]); return; }
+          if (outcome === 'needs') { await ctx.inputRequired([{ text: said || 'More is needed.' }]); return; }
+          if (outcome === 'error') { await ctx.fail([{ text: said || `the ask answered ${res.status}` }]); return; }
+          await ctx.reject([{ text: said || 'Refused.' }]);
           return;
         }
         const data = dataOf(ctx.message.parts);
