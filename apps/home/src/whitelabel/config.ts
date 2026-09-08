@@ -306,7 +306,14 @@ const faithImpact: WhiteLabelConfig = {
       // The caps the ceremony binds into the mandate. `payee` is the Poker Site Treasury on
       // faithchain; `asset` is the chain's test USDC (6dp). A buy-in is at most 200 USDC, a night at
       // most 1000 across at most 5 buy-ins, and the window is a day — a session, not a standing
-      // arrangement. `push` because the card room charges at the moment the player sits.
+      // arrangement.
+      //
+      // `pull`, emphatically NOT `push`. A push ceremony CHARGES as it mints (onboarding.ts's
+      // all-custodian charge, gated on `mode !== 'pull'`), which is right for pay-per-read: you
+      // authorise and pay in one act. A buy-in is the opposite — the player authorises a ceiling now
+      // and the card room takes a buy-in only when they actually sit down. With `push` the ceremony
+      // took 200 USDC at the moment of approval, for nothing, and the player then paid a second 200
+      // for the real seat. `pull` mints the mandate and moves no money.
       paymentConfig: {
         payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
         asset: '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae',
@@ -314,7 +321,7 @@ const faithImpact: WhiteLabelConfig = {
         maxAggregate: '1000000000',
         maxRedemptionsPerWindow: 5,
         windowSeconds: 86400,
-        mode: 'push',
+        mode: 'pull',
       },
     },
     {

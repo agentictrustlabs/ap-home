@@ -11,7 +11,7 @@ import { fundThroughHarness } from '../../home/fund-harness';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { AGENT_NAME_PARENT } from '../../lib/domain';
-import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent } from '../../connect-client';
+import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, listManagedAgents, invalidateRelatedOrgs, signsWithoutPrompt, type AgentKind, type ManagedAgent, type CreateManagedAgentResult } from '../../connect-client';
 import { BusyButton } from '../shared/BusyButton';
 import { PrimaryPayee } from './PrimaryPayee';
 import { assignDefaultArchetype } from '../../home/default-archetype';
@@ -181,6 +181,77 @@ export function FundForm({
   );
 }
 
+/**
+ * Charter one managed agent AND everything it is born with — the create ceremony itself, the
+ * storage an organization needs before its first member arrives, the playbook the effect resolver
+ * reads off the payer, and the member's own timeline entry — in one call that RETURNS THE AGENT.
+ *
+ * This was the body of `CreateAgentForm.create`, and it is a function now because the form is no
+ * longer the only surface that charters an agent. The treasury ceremony (`app/choose-treasury`)
+ * creates a person treasury on behalf of an app that asked for one, and it has to hand that
+ * treasury's ADDRESS straight back to the app — which a form whose only output is `onDone()`
+ * cannot do. Copying the sequence over there would have left four best-effort steps free to drift
+ * apart: a treasury born without the playbook that makes it say what it paid, a hole in the
+ * timeline, an org with no channel storage. One implementation, two callers, and the result comes
+ * back.
+ *
+ * Everything after the create itself is BEST-EFFORT on purpose. None of it grants anything, and a
+ * person's new agent must not fail to exist because a courtesy failed.
+ */
+export async function createAgentWithBirthrights(
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string },
+  token: string,
+  onStep: (s: string) => void,
+): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
+  const { kind, label, parent, person, via } = input;
+  const res = await createManagedAgent(
+    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
+    token, onStep,
+  );
+  if (!res.ok) return res;
+  // spec 321 — enable channel storage AT CREATE so the steward never meets the "Enable (steward)"
+  // banner: bind the org's vault key + issue its standing delivery grant (channels.data + message
+  // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
+  // the org); device prompts on passkey/wallet. Best-effort — the steward-gated Enable button on
+  // the channels page remains the recovery path if either leg fails.
+  if (kind === 'org') {
+    try {
+      const v = via.toLowerCase() as Via;
+      onStep('Enabling channel storage…');
+      const bound = await activateVaultIfNeeded(res.result.agent, v, { token });
+      if (!bound.ok) throw new Error(bound.error);
+      const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
+      if (!grant.ok) throw new Error(grant.error);
+      // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
+      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token });
+      if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
+      // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
+      // "About this organization" card + roster read) and a default #general channel, so a fresh
+      // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
+      onStep('Setting up the organization…');
+      if (res.result.stewardshipDelegation) {
+        await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org.profile', { v: 1, displayName: res.result.name || label || '' }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
+      }
+      await fetch('/connect/channels', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'create', communityId: res.result.agent.toLowerCase(), title: 'general' }),
+      }).catch((e) => console.warn('[org-create] default channel failed:', e));
+    } catch (e) {
+      console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
+    }
+  }
+  // THE PLAYBOOK IT IS BORN WITH (spec 354 §3). A treasury with no assignment runs the bare harness —
+  // which is a documented state, except that the spec-360 effect resolver reads the PAYER's playbook,
+  // so an unassigned treasury moves money and tells nobody.
+  const born = await assignDefaultArchetype(res.result.agent, kind, token);
+  if (!born.ok) console.warn(`[agent-create] no default playbook for ${kind}:`, born.reason);
+  // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
+  void emitControlEvent(token, 'agent-added', []);
+  notifyAgentsChanged(); // every dropdown/list instance (topbar switcher included) re-reads immediately
+  return res;
+}
+
 /** Inline "name it and create" form for one agent slot (MAM-D4 exact-name, MAM-D5 one prompt).
  *
  *  `choices` turns the single-slot form into a chartering form: the person picks WHAT to create, and the
@@ -211,54 +282,12 @@ export function CreateAgentForm({
       return;
     }
     setBusy(true); setErr(''); setStep('');
-    const res = await createManagedAgent(
-      { kind, label: named ? clean : undefined, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
-      token, setStep,
+    const res = await createAgentWithBirthrights(
+      { kind, label: named ? clean : undefined, parent, person, via }, token, setStep,
     );
-    if (!res.ok) { setBusy(false); setErr(res.error); return; }
-    // spec 321 — enable channel storage AT CREATE so the steward never meets the "Enable (steward)"
-    // banner: bind the org's vault key + issue its standing delivery grant (channels.data + message
-    // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
-    // the org); device prompts on passkey/wallet. Best-effort — the steward-gated Enable button on
-    // the channels page remains the recovery path if either leg fails.
-    if (kind === 'org') {
-      try {
-        const v = via.toLowerCase() as Via;
-        setStep('Enabling channel storage…');
-        const bound = await activateVaultIfNeeded(res.result.agent, v, { token });
-        if (!bound.ok) throw new Error(bound.error);
-        const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
-        if (!grant.ok) throw new Error(grant.error);
-        // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
-        const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token });
-        if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
-        // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
-        // "About this organization" card + roster read) and a default #general channel, so a fresh
-        // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
-        setStep('Setting up the organization…');
-        if (res.result.stewardshipDelegation) {
-          await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org.profile', { v: 1, displayName: res.result.name || clean }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
-        }
-        await fetch('/connect/channels', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: 'create', communityId: res.result.agent.toLowerCase(), title: 'general' }),
-        }).catch((e) => console.warn('[org-create] default channel failed:', e));
-      } catch (e) {
-        console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
-      }
-    }
-    // THE PLAYBOOK IT IS BORN WITH (spec 354 §3). A treasury with no assignment runs the bare harness —
-    // which is a documented state, except that the spec-360 effect resolver reads the PAYER's playbook,
-    // so an unassigned treasury moves money and tells nobody. Best-effort, like every other activation
-    // above: behaviour grants nothing, and a person's new agent must not fail to exist over it.
-    const born = await assignDefaultArchetype(res.result.agent, kind, token);
-    if (!born.ok) console.warn(`[agent-create] no default playbook for ${kind}:`, born.reason);
     setBusy(false);
-    // Control-plane timeline (spec 310 W4): a new agent joined the member's tree.
-    void emitControlEvent(token, 'agent-added', []);
+    if (!res.ok) { setErr(res.error); return; }
     setOpen(false); setLabel('');
-    notifyAgentsChanged(); // every dropdown/list instance (topbar switcher included) re-reads immediately
     onDone();
   }
 
