@@ -1364,6 +1364,15 @@
       .org-chooser-row.create .org-chooser-meta { font-family: inherit; }
       .org-chooser-check { color: var(--color-accent, #2563eb); font-weight: 700; font-size: 1.05rem; }
 
+      /* ── Treasury chooser (/choose-treasury) ─────────────────────────── */
+      /* Deliberately a skin on the org chooser, not a second layout: the two screens ask the same
+         shape of question, so they are built from the same rows. Only what MONEY needs differs. */
+      .treasury-chooser .consent-app { margin-bottom: .15rem; }
+      /* The balance is a number a person reads, not an identifier — the org chooser's monospace,
+         dimmed meta line is exactly wrong for it. */
+      .treasury-chooser .org-chooser-meta.treasury-chooser-balance { font-family: inherit; opacity: 1; font-size: .8rem; }
+      .onboarding-card:has(.treasury-chooser) { max-width: 480px; padding: 1.4rem 1.25rem 1.25rem; align-items: stretch; text-align: left; gap: .7rem; }
+
       /* ── Identity facts + misc ───────────────────────────────────────── */
       .identity-facts { display: flex; flex-direction: column; gap: 0; margin: .5rem 0 0; }
       .identity-facts > div { display: flex; justify-content: space-between; align-items: center; gap: 1rem; font-size: .875rem; border-bottom: 1px solid var(--color-border); padding: .6rem 0; }
