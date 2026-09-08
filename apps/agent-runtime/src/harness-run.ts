@@ -35,6 +35,7 @@ import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology'
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { replayingInvoker, type RunRecordV1, type RunEvent } from '@agenticprimitives/orchestration';
+import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
@@ -1645,6 +1646,10 @@ export interface HarnessRunInput {
   /** Spec 370 P6 — REPLAY a recorded run: its plan is the plan, its observations answer every step, and
    *  every gate runs again against the world as it is now. Nothing executes. */
   replayOf?: RunRecordV1;
+  /** Spec 370 P7 — the asker's own recent turns (their vault's `conversation.recent`). Shown to the
+   *  planner as words, handed to the resolver for pronouns and repeated names. NEVER part of the intent:
+   *  the mandate binds the intent's digest, and a memory that grows between turns would break every resume. */
+  conversation?: ConversationMemoryV1 | null;
   /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
    *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
    *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
@@ -3565,6 +3570,8 @@ yourself, do NOT emit one call per member, and never fan out over anything excep
 enumerates. "Choose the tool" above means one CAPABILITY — this two-call form is still one capability,
 fanned out.
 
+${conversationForPrompt(input.conversation, String(input.addressee ?? ''))}
+
 A step that should happen ONLY IF an earlier read found something adds {"$when": {"ref": "<name>.<path>",
 "exists": true}} (or "exists": false for the other branch) to its arguments — the runtime takes or skips
 it from that result; do not plan two alternatives and hope. Reads that need nothing from each other may
@@ -3708,7 +3715,10 @@ be emitted together; the runtime runs them side by side.`;
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
-    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}), onResolved: (r) => {
+    normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}),
+      // Spec 370 P7 — what recent asks resolved, for a pronoun or a repeated name. The same addressee's turns first.
+      ...(input.conversation ? { recentParties: async () => recentParties(input.conversation, { addressee: String(input.addressee ?? '') }) } : {}),
+      onResolved: (r) => {
       // The SAME party can be reported twice — once resolved from words or from the asker's own tree, and
       // once again as the plain address it now is. Keep whichever knows its name: overwriting a labelled
       // record with a bare address is how "nathan.treasury" became "0x2c47…" on the card a person reads

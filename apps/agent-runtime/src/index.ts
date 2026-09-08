@@ -7,6 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
+import { rememberTurn, CONVERSATION_RECORD, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
@@ -2173,6 +2174,8 @@ app.post('/harness/ask', async (c) => {
     // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
     // surface long-polls them while this request is in flight. Fire-and-forget under waitUntil: a line
     // that fails to land costs a progress line, never the run.
+    // Spec 370 P7 — the asker's own recent turns, from their vault. One read; absent ⇒ no memory.
+    const conversation = (await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), CONVERSATION_RECORD).catch(() => null)) as ConversationMemoryV1 | null;
     let progressSeq = 0;
     let progressChain: Promise<void> = Promise.resolve();
     const askerSa = String(who.sa).toLowerCase() as Address;
@@ -2185,6 +2188,7 @@ app.post('/harness/ask', async (c) => {
     };
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
+      conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
@@ -2380,6 +2384,13 @@ app.post('/harness/ask', async (c) => {
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
     // idempotent, and the only moment the Worker sees which playbook the agent holds).
     c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
+    // Spec 370 P7 — REMEMBER THE TURN in the asker's own vault: the words, what they came to, and what
+    // each party word resolved to, so the next ask can say "him". A write that fails costs a recall.
+    if (askDeps.writeSubjectRecord) {
+      const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw)).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
+      const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
+      c.executionCtx.waitUntil(askDeps.writeSubjectRecord(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined));
+    }
     // Spec 370 P6 — THE RUN RECORD: what this turn observed, decided and received, kept a week on the
     // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
