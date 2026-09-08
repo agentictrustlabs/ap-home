@@ -84,6 +84,13 @@ export async function verifyDelegation(
     value: CONTRACTS.valueEnforcer as Address,
     allowedTargets: CONTRACTS.allowedTargetsEnforcer as Address,
     allowedMethods: CONTRACTS.allowedMethodsEnforcer as Address,
+    // The evaluator only recognises an enforcer that is IN this map; anything else is denied as
+    // "unknown enforcer". Omitting these two meant every payment mandate — the whole point of the
+    // x402-pay / poker-buyin templates — failed verification at /oidc/grant and /token with a reason
+    // the member could do nothing about. PaymentEnforcer is stateful and judged on chain, so it is
+    // inert here; DigestBinding is judged off chain against the step.
+    payment: CONTRACTS.paymentEnforcer as Address,
+    digestBinding: CONTRACTS.digestBindingEnforcer as Address,
   };
 
   // Revocation read with a BOUNDED retry of the same call (ADR-0013). Still fail-closed, but a
