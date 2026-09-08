@@ -3027,6 +3027,18 @@ function harnessDeps(env: Env, audit: AuditSink): HarnessDeps {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
       return (out as { data?: unknown } | null)?.data ?? null;
     },
+    // Spec 370 P4 — a PUBLIC op on a principal's InteractionsDO, exactly as the Home's `/connect/work`
+    // route forwards it: the session (and a stewardship wire, when the act is a steward's) travel in the
+    // body, and the DO derives standing, validates the command through the reducer, audits, then writes.
+    // No internal marker: this is the same door a click comes through.
+    interactionsOp: async (principal: Address, op: string, body: Record<string, unknown>) => {
+      if (op.startsWith('internal.')) throw new Error('internal ops are not reachable this way');
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(principal.toLowerCase()));
+      const res = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+      const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
+      if (!res.ok || out.ok === false || out.error) throw new Error(String(out.error ?? `${op} failed (${res.status})`));
+      return out;
+    },
     // spec 360 E5 — deposit a declared-effect artifact in a principal's OWN vault, written by that
     // principal's own grant inside their own DO. Allowlisted by record type there: this cannot be
     // pointed at an arbitrary record, which is the whole reason it is safe to call for a counterparty.

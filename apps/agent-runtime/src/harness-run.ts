@@ -31,6 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
@@ -253,6 +254,8 @@ export const UNSUPPORTED_TOOL: ToolSpec = {
 };
 
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
+  // Spec 370 P4 — Work & Planning, bound thinly onto the Endeavor substrate (coordination-bindings.ts).
+  ...COORDINATION_ACTION_TOOLS,
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -680,6 +683,9 @@ const REDEEM_ABI = [{
 /** What the Worker must supply: chain reads and the service SA's signing + submission. Injected so the
  *  module is testable without a Worker. */
 export interface HarnessDeps {
+  /** Spec 370 P4 — a PUBLIC op on a principal's InteractionsDO as the session (the `/connect/work` door),
+   *  for the coordination acts. The DO derives standing and validates the command; this only carries it. */
+  interactionsOp?: (principal: Address, op: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   readContract: (args: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }) => Promise<unknown>;
   /** Build, sign (with the service SA's custodian) and submit a sponsored userOp from `sender`. */
   executeAsServiceSa: (sender: Address, callData: Hex) => Promise<{ txHash: Hex }>;
@@ -1504,6 +1510,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         person, session,
       )(toolId, args, ctx);
     }
+    if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(deps, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(deps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps, session)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
@@ -1729,6 +1737,12 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'household.create': 'create a household',
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
+  'coordination.endeavor.list': 'see what the organization is working on',
+  'coordination.endeavor.get': 'read one endeavor',
+  'coordination.endeavor.request': 'ask the organization to take on a goal',
+  'coordination.contribution.propose': 'offer to do plan steps',
+  'coordination.contribution.allocate': 'allocate plan steps',
+  'coordination.endeavor.satisfy': 'close an endeavor as done',
   'treasury.payment.execute': 'make payments',
   'treasury.fund': 'fund a treasury with demo USDC',
   'messaging.direct.send': 'send direct messages',
@@ -1877,6 +1891,10 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
   'messaging.direct.send': 'recipient',
+  'coordination.endeavor.request': 'org',
+  'coordination.contribution.propose': 'org',
+  'coordination.contribution.allocate': 'org',
+  'coordination.endeavor.satisfy': 'org',
   // The CALL's target: the relationship record. See the pin in `resolveStepArgs` for why the treasury,
   // which is what the statement is ABOUT, cannot be the caveat's location.
   'treasury.primary.declare': 'record',
@@ -3010,6 +3028,10 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'household.create': ['signature'],
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
+  'coordination.endeavor.request': ['signature'],   // the mandate — asking as you is an act of yours
+  'coordination.contribution.propose': ['signature'],
+  'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature
+  'coordination.endeavor.satisfy': ['signature'],
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
@@ -3541,6 +3563,8 @@ be emitted together; the runtime runs them side by side.`;
     ...(deps.survey && deps.readRecords ? [INVITATIONS_LIST_TOOL] : []),
     // What the asker is PART OF, by agent type (ADR-0061) — their own links, private tier.
     ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
+    // Spec 370 P4 — the organization's work, read through the same record the Home's Work surface reads.
+    ...(deps.readSubjectRecord ? COORDINATION_READ_TOOLS : []),
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),

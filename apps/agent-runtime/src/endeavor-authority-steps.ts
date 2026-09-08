@@ -50,6 +50,13 @@ export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
 /** The mandate-bearing capabilities this list deliberately does NOT treat as plan steps. Named, so the
  *  guard can tell a considered omission from one that happened by accident. */
 export const NOT_PLAN_STEPS: readonly string[] = [
+  // Spec 370 P4 — the coordination plane's OWN commands (request, propose, allocate, satisfy) are how a
+  // plan comes to exist and moves; a plan step that allocated or closed an endeavor would be coordination
+  // coordinating itself. They are Ask capabilities, never assignable work.
+  'coordination.endeavor.request',
+  'coordination.contribution.propose',
+  'coordination.contribution.allocate',
+  'coordination.endeavor.satisfy',
   'treasury.fund',
   'messaging.direct.send',
   'resolution.invitation.request',

@@ -185,6 +185,24 @@ const cases: TruthCaseV1[] = [
   },
 ];
 
+// Spec 370 P4 — Work & Planning through the compiled Coordinator playbook. The domain's first truth case:
+// a question about the organization's work is answered FROM its own work record (the same one the Work
+// screen reads), never from a roster, a directory, or a plausible paragraph.
+cases.push({
+  id: 'work-read-from-the-record',
+  incident: '2026-09-08: before P4 the Ask had no tool for work at all — "what are we working on" was answered by the planner picking whatever read looked closest (a roster, a records survey) and composing prose over it.',
+  question: 'what are we working on',
+  probes: {},
+  run: ask('alice', 'what are we working on', ORG),
+  checks: [
+    answered(),
+    evidenceFromTool('coordination.endeavor.list'),
+    neverClaims(/members? of|roster/i, 'a question about WORK must not be answered from the roster'),
+    emptinessCarriesReason(),
+    noPlaceholderLeaks(),
+  ],
+});
+
 const report = await runTruthSet(cases);
 console.log(formatTruthReport(report));
 process.exit(report.failed ? 1 : 0);
