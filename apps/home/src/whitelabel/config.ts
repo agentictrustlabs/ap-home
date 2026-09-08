@@ -283,6 +283,28 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     {
+      // Pokernight (poker.faithnet.io) — a Texas Hold'em card room where people and AI Smart Agents
+      // sit at the same table. It was self-registered first; this CURATED entry supersedes it
+      // (static wins, and a member entry cannot shadow one), which is what it needs for two things a
+      // self-service registration cannot have:
+      //
+      //   1. `/connect/demo-signin`. The card room offers this Home's demo people on its own sign-in
+      //      page, the way demo-web-pro does — same person, same Smart Agent, real custodian
+      //      signatures — so a buy-in in the demo exercises a real authority chain, not a mock.
+      //   2. `poker-buyin`. Chips are bought with USDC out of the player's own treasury and returned
+      //      to it on cash-out, so the app has to be allowed to ask for a payment mandate. That
+      //      template is curated-only, deliberately.
+      //
+      // localhost:5173 is the Vite dev server: the ceremony cannot run against a dev build without a
+      // registered http redirect, and the registry allows plain http on localhost only.
+      client_id: 'pokernight',
+      name: 'Poker Night',
+      redirect_uris: ['https://poker.faithnet.io/', 'http://localhost:5173/'],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login', 'poker-buyin'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
+    {
       client_id: 'demo-org',
       name: 'Impact',
       redirect_uris: ['https://agenticprimitives-demo-org.pages.dev/', 'http://localhost:5473/'],
@@ -518,6 +540,23 @@ const faithImpact: WhiteLabelConfig = {
       ],
       expiryDays: 365,
     },
+    // Pokernight — a table buy-in. Scoped like x402-pay (capped, one payee) but bounded to a SESSION
+    // rather than a year: a night at a table is the unit of consent, so this expires in a day and the
+    // player re-authorizes next time. The cap the player approves covers the buy-in plus any rebuys
+    // they allow; chips still at the table when they leave are returned to the same treasury.
+    'poker-buyin': {
+      canDo: [
+        'Move USDC from the treasury you pick to the card room’s treasury, up to the amount you approve',
+        'Do that again for a rebuy, within that same approved total',
+        'Return your remaining chips to the treasury you picked when you leave the table',
+      ],
+      cannotDo: [
+        'Move more than the total you approved, or keep charging after tonight’s window closes',
+        'Send funds to any treasury other than the card room’s',
+        'Touch your sign-in methods or recovery',
+      ],
+      expiryDays: 1,
+    },
     // spec 272 recurring — the corpus OWNER collects due subscriptions: signs, with their own credential,
     // the redemption of each due subscriber's standing pull mandate as the collection treasury they custody.
     'subscription-collect': {
@@ -552,7 +591,7 @@ const faithImpact: WhiteLabelConfig = {
     'service-agent-wire': {
       canDo: [
         'Let this service act as an agent you custody, for one specific kind of request',
-        'Bind that permission to the service\u2019s HSM-backed key, revocable by you at any time',
+        'Bind that permission to the service’s HSM-backed key, revocable by you at any time',
       ],
       cannotDo: [
         'Take custody of the agent, or act as it for anything else',
