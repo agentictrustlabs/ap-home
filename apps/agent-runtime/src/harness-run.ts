@@ -1606,6 +1606,9 @@ const IS_NONCE_USED_ABI = [{
 
 export interface HarnessRunInput {
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
+  /** Spec 370 P1 — the checkpoint's record of what ran: the admitted plan and the completed steps. The
+   *  loop replays the completed steps and plans nothing anew; the remaining steps are verified afresh. */
+  resume?: { plan: Plan; completed: ReadonlyArray<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
   /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
    *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
    *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
@@ -3482,7 +3485,10 @@ fanned out.`;
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
   // Spec 367 wave 1 — the trace starts here: which planner actually proposed, and what it could see.
-  let plannerUsed: PlannerTraceV1['planner'] = input.plan ? 'supplied' : selected.kind;
+  // A RESUME plans nothing (spec 370 P1): the checkpoint holds the plan this intent was admitted with, and
+  // the loop takes it from `resume` — this planner is never consulted on that path. Named so the trace
+  // says where the plan came from.
+  let plannerUsed: PlannerTraceV1['planner'] = input.resume ? 'checkpoint' : input.plan ? 'supplied' : selected.kind;
   const planner: Planner = input.plan
     // The screen's plan verbatim — interpretation is what Ask ADDS in front of the same boundary, not a
     // toll every caller pays. One-shot: a failed supplied step is the caller's to correct, not a model's
@@ -3559,6 +3565,7 @@ fanned out.`;
   };
   const result = await runIntent(input.intent, {
     planner, tools, bindingFor,
+    ...(input.resume ? { resume: input.resume } : {}),
 
     // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
     // names its subject; the resolver has already turned the person's words into an address in THEIR

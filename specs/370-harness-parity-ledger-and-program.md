@@ -1,0 +1,73 @@
+# Spec 370 — The harness parity ledger: equal to the leading frameworks, row by row, with the authority twist
+
+**Status:** Draft · **Kind:** program ledger + wave order (supersedes the ordering in [359](359-focus-program-playbooks-domains-durability.md) §5 where they differ; 359's doctrine stands)
+**Grounds:** [350](350-authority-aware-agent-harness.md) (harness; W3/W4/W6 open) · [351](351-agentic-primitives-substrate-program.md) (offerings; §9 what we will not build) · [354](354-archetype-driven-agent-behavior.md) (playbooks K1–K6 ✅) · [358](358-semantic-context-plane.md) (context plane ✅) · [359](359-focus-program-playbooks-domains-durability.md) (focus) · [361](361-interaction-contract-one-capability-every-surface.md) · [362](362-durable-executor-port-and-cloudflare-workflows.md) (durable port + first binding) · [367](367-behaviour-plane-first-time-right.md) (admission ✅, skills teach the planner ✅) · [369](369-voice-as-an-ask-facet.md) · [competitive analysis](../docs/architecture/agentic-framework-competitive-analysis.md) §4/§7 · [harness diagrams](../docs/architecture/harness-architecture-diagrams.md) §8/§12
+
+## 0. What "equal" means here
+
+Equal is measured **per row, against the leader's concrete feature**, not by feature count. A row is
+closed when a person using our harness can do what a person using the leader's can — checkpoint and
+resume a run, watch it progress, run two steps at once, replay a recorded run, schedule one — and
+when the thing that happens is the *same thing with the authority twist attached* (a resume re-verifies;
+a branch is N mandates; a replay re-derives verdicts; a trigger waits on its mandate). Rows marked
+**deliberately absent** are out of Ring 0 by doctrine (351 §9, analysis §6) and are not gaps.
+
+The user's aim, verbatim: *equal with those products/github projects* on skill artifacts, planning,
+admission, execution, coordination and capabilities. This ledger is the list, the order, and the gates.
+
+## 1. The ledger (2026-09-08)
+
+Symbols name what is live; a delta names exactly what is not.
+
+| # | Capability | Leader's concrete feature | Ours today (live) | Delta to equal | Wave |
+| --- | --- | --- | --- | --- | --- |
+| R1 | **Durable execution** | LangGraph checkpointer per superstep + `thread_id` resume; Dapr workflow state; MAF checkpoint store + HITL resume | `HarnessRunCheckpointV1` on `A2aTaskDO` (message, intent, **keyring**, supplied, plan, awaiting, origin, executor); `mergeTurn`; findable runs (`POST /harness/runs`); `DurableStepPort` + `driveApprovalFlow` (four gates unit-tested) + `HARNESS_WORKFLOW` binding behind `executor:'workflow'` | **A resume re-executes every completed step** (planner call + every read again; correctness rests on invoker idempotency). Equal = the checkpoint carries the admitted **plan** and the **completed steps with their receipts**, and a resume replays them as evidence and re-verifies only what has not run (362 §0.1 gate 4). Plus `awaiting.expiresAt` so a waiting run reads *expired* instead of *pending* forever | **P1** |
+| R2 | **Composition operators** | LangGraph edges / conditional edges / `Send` map-reduce; MAF fan-out/fan-in; ADK sequential/parallel/loop agents | `Plan.steps` sequential; `{ $ref }` data flow; `forEach` fan-out with a mandate per item (358 W4); re-plan on failure | No `parallel` (independent steps run one at a time), no `branch` on an observation without a re-plan, no `join`/`race`. Equal = `PlanStep.after?: string[]` (a DAG; independent steps run concurrently, each verified alone) + `when?: { ref, equals/exists }` (a declared branch) + join by data flow. **Twist:** concurrency never shares a verdict; a branch not taken leaves a receipt saying so | **P3** |
+| R3 | **Streaming progress** | LangGraph `astream_events`; OpenAI SDK streaming; A2A `message/stream` SSE (we ship it for tasks in `a2a/sse.ts`) | `POST /harness/ask` is request/response; `PlannerTraceV1` after the fact; the surface says "One moment." | Equal = the run's `RunEvent`s streamed to the surface as they happen (SSE beside the ask) — plan made, step verified, step acted, question raised — so a screen or a voice says *"checking your authority… paying Missio Nexus…"* instead of waiting in silence. **Twist:** an event is an evidence reference, never a permission | **P2** |
+| R4 | **Tracing · evaluation · replay** | LangSmith traces, datasets, evals, replay from a trace | `PlannerTraceV1` on every reply (planner, tools, playbook digest, admission verdicts, bindings); `RunEvent` vocabulary; `evaluation` truth set (`check:ask-truth`), `check:ask-scenarios` + held-out file | No trace store to query across runs; no **replay** (re-run a recorded run's inputs against recorded observations and re-derive every verdict); no OTEL export. Equal = `RunRecordV1` (trace + events + receipts) kept per run on the task DO and exportable; `evaluation.replay()`; OTEL exporter as a Ring-1 sibling. **Twist:** replay re-derives verdicts — a recorded `allow` is never replayed as one | **P6** |
+| R5 | **Triggers / automation** | Buzz YAML triggers (message · reaction · schedule · webhook) pausing for approval; MAF scheduling; LangGraph cron | none — every run is a person asking | Equal = `triggers[]` on the compiled definition (schedule · inbound message · webhook) + an `A2aTaskDO` alarm that starts the run; informational steps run free, an authority-bearing step suspends on its mandate and shows up in unfinished runs (the obligation model IS "pause for approval"). Needs P1 | **P5** |
+| R6 | **Memory + conversation state** | LangGraph store + threads; MAF memory; Mastra memory; OpenAI sessions | `LearnedPreferenceV1` in the vault (358 W5: "when I say alice I mean alice2.treasury"); one run = one thread | No conversation across runs ("send it to him too" after a payment); no scoped confirmation memory (367 W5). Equal = the Ask carries the last N turns' **resolved parties and outcomes** as `intent.context.conversation` (per asker, per addressee, vault-resident, TTL'd) and the resolver may cite it; confirmations become preferences. **Twist:** memory fills WHERE, never authority | **P7** |
+| R7 | **Skills → behaviour (the multiplier)** | nobody: Pydantic Harness closest (capabilities as ports); every framework hand-codes tools | 354 K1–K6 ✅ (`SkillExecutionContractV1` → `AgentHarnessDefinitionV1` by digest → playbook → narrowed vocabulary, `skillRef` on receipts); 367 W2 ✅ (verbs/utterances teach the planner); 361 (interaction contract → screens) | **Coverage**: Treasury + agentic-trust (14 contracts) compile; Work & Planning, stewardship, trust graph, discussions do not yet. Equal-and-ahead = each remaining Home domain as a **compiled playbook with truth cases and no new invoker code** (359 §2 gate) | **P4** then rolling |
+| R8 | **External runtimes as members** | Buzz ACP (Claude Code, Goose join as members); BeeAI ACP | none | Equal = an ACP-speaking runtime admitted as a **member SA** under spec 339's edge with a scoped delegation — one authority model for humans, our agents and theirs. Protocol half in a Ring-1 sibling (ADR-0037) | **P8** |
+| R9 | **A2A conformance** | official TCK (ADK, Mastra pass) | `a2a` package, signed cards (347), tasks, SSE | TCK not in CI (351 P0.9) | **P8** |
+| R10 | **Typed exchange / structured results** | Pydantic AI result types; MAF typed messages | `SubjectAskV1`/`SubjectAnswerV1` (366 R1/367 W4), `ExecutionBindingV1` on receipts, `fulfillment` on done | JSON-RPC carriage of a subject-ask needs a session-bearer auth mode on the A2A ingress (269 is delegation-only) | with P8 |
+| R11 | Human-in-the-loop | LangGraph interrupt/resume; Dapr | `InputRequired` prompts (data · confirmation · signature), `ApprovalPort`, voice answers (369) — **at par in-run** | durable = R1 | P1 |
+| R12 | Guardrails / policy interception | OpenAI guardrails; Strands hooks; Cedar | plan admission (367 W1), risk ladder, per-step mandate verify, on-chain enforcers — **at par on the ladder, ahead beneath it** | — | — |
+| R13 | Multi-agent patterns | MAF/CrewAI handoff, supervisor, group chat | coordination between agents = Endeavor + child delegation (ADR-0054); subject-routed asks (366) — **different by design** | none chased (analysis §6) | — |
+| R14 | Model / tool ecosystem breadth | MAF, ADK adapters; MCP everywhere | one planner adapter behind the port; MCP as a private capability interface — **deliberately narrow** | — | — |
+
+**Ahead, and kept that way:** intent-bound delegated authority, per-step on-chain verification, attenuation and
+revocation, signed and bound cards, receipts with bindings and decisions, skills as executable contracts, the
+two-tier knowledge plane. No wave below trades any of these for a parity row (359 §6).
+
+## 2. Waves, in dependency order
+
+| Wave | Closes | Ships | Gate (must be shown, not argued) |
+| --- | --- | --- | --- |
+| **P1 — resume replays, waits expire** | R1, R11 | `RunIntentOpts.resume { plan, completed }` in `orchestration/loop.ts` (a completed step replays its observation + receipt without invoking or re-verifying; `StepReplayed` event; `StepObservation.stepRef`); the ask route checkpoints `result.plan` + `progress` at every suspension and hands them back on resume; `awaiting.expiresAt` + the DO alarm marking `expired` | Kill the run mid-prompt, resume: the read before it is **not** re-executed (its receipt is the recorded one), the pending step **is** re-verified before it acts; a run whose window closed lists as `expired` and a resume is refused with that word. `scripts/verify-durable-run.mts` extended |
+| **P2 — the run speaks as it goes** | R3 | `GET /harness/ask/events?runRef` SSE from the task DO (events written by the loop's sink); Home progress line + voice reads step names (`"checking your authority"`, `"paying …"`) instead of "One moment." | Within 500 ms of each `RunEvent` the flyout shows it; the voice e2e hears at least one step name during a payment |
+| **P3 — parallel, branch, join** | R2 | `PlanStep.after` (DAG scheduling, concurrent independent steps, each through `authorize()` alone), `PlanStep.when` (declared branch on a prior result; the untaken branch records `skipped`); planner prompt + admission rule for both; `harness-run` fan-out unchanged | Two independent reads run concurrently (trace shows overlapping timestamps), each with its own verdict; a branch selects without a re-plan; the negative twin — a mandate for branch A presented to branch B — is denied at B |
+| **P4 — Work & Planning compiled** | R7 | the Coordinator archetype in `~/skills`; endeavor reads/acts via the compiled definition; truth cases | **no new invoker code** in `demo-a2a`; `check:ask-truth` covers the domain |
+| **P5 — triggers** | R5 | `triggers[]` on `AgentHarnessDefinitionV1`; `A2aTaskDO` alarm → `runUnderMandate` with a system asker; authority-bearing steps suspend into unfinished runs | a scheduled playbook run suspends on its mandate and a steward finishes it from the Ask |
+| **P6 — record, replay, export** | R4 | `RunRecordV1` (trace + events + receipts) on the task DO, listable; `evaluation.replay(record)` re-deriving verdicts against recorded observations; negative twins replayed in CI; Ring-1 OTEL exporter | the W2 negative twins run in CI as replays; a recorded `allow` on a since-revoked mandate replays as `deny` |
+| **P7 — conversation memory** | R6 | `intent.context.conversation` from the asker's own vault (last N turns: resolved parties, outcomes), resolver cites it (`memory`); confirmations → `LearnedPreferenceV1` (367 W5) | "send it to him too" resolves *him* from the previous turn and the receipt's binding says `memory` |
+| **P8 — admission of outsiders, conformance** | R8, R9, R10 | ACP member admission (edge + scoped delegation; protocol in a sibling); TCK in CI; session-bearer JSON-RPC mode | an external runtime acts as a member SA under a delegation that its steward can revoke; TCK green |
+
+P1 → P2 → P3 are one week's shape each and unblock P5/P6; P4 runs beside them (skills repo). P7 and P8
+follow. The order is a dependency chain, not a preference: P5 needs P1's expiring waits, P6 needs P1's
+plan-on-checkpoint and P2's event stream, P3 changes the plan shape P4's playbooks compile to.
+
+## 3. What we do not do (unchanged, restated so the ledger cannot be read as a wishlist)
+
+No framework (the loop stays a loop; operators are plan data). No workflow vendor in Ring 0 (P1 stays
+on the DO; the Workflows binding remains the second executor). No run UI here (P2 ships events; Home
+renders). No group chat. No OAuth-shaped authority. No new hand-built Ask capability where the compiler
+can serve (P4's gate). No score anywhere a grade will do.
+
+## Reference: patterns to port
+
+- LangGraph: checkpoint per superstep with `thread_id`; `Send` for map-reduce (our `forEach`); `interrupt` (our `InputRequired`). Port: the *replay of completed supersteps* on resume (P1) and the streamed event kinds (P2). Not the checkpointer as authority.
+- Dapr Agents / MAF: durable waits with timeouts (P1's `expiresAt`); workflow fan-out/fan-in (P3).
+- LangSmith: run records as datasets; replay (P6). Not the hosted control plane.
+- Buzz: triggers that pause for approval (P5); runtimes as members (P8). Not Nostr, not an ACL.
+- smart-agent (`003-intent-marketplace-proposal`): the task ledger's terminal-state discipline (a denial is terminal; expiry is an outcome) — already ported into `harness-runs.ts`; P1 keeps it.

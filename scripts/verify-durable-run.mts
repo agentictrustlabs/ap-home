@@ -69,8 +69,14 @@ r = await post({ session: alice.homeSession, addressee: WORKSPACE, runRef, prese
 console.log(`  2 ${r.reply?.kind}${r.reply?.kind === 'prompt' ? `: "${r.reply.prompt.prompt.slice(0, 60)}"` : ''}`);
 if (r.reply?.kind !== 'prompt') throw new Error(`expected a prompt from the checkpoint alone: ${JSON.stringify(r).slice(0, 400)}`);
 
+// Spec 370 P1 — from here on the agent PLANS NOTHING: the checkpoint holds the admitted plan and the steps
+// that completed, the loop replays those and attempts only what is still owed. The trace says so.
+const plannedFrom = (reply: { plannerTrace?: { planner?: string } } | undefined) => reply?.plannerTrace?.planner ?? '(no trace)';
+if (plannedFrom(r.reply) !== 'checkpoint') throw new Error(`turn 2 should plan from the checkpoint, not "${plannedFrom(r.reply)}"`);
+console.log('    planned from: checkpoint (no second plan for one intent)');
 // Turn 3: another new browser. Only the runRef and the credential answer.
 r = await post({ session: alice.homeSession, addressee: WORKSPACE, runRef, supplied: [{ stepRef: r.reply.resumeToken, data: { custodian: credential } }] });
+if (plannedFrom(r.reply) !== 'checkpoint') throw new Error(`turn 3 should plan from the checkpoint, not "${plannedFrom(r.reply)}"`);
 console.log(`  3 ${r.reply?.kind}${r.reply?.kind === 'prompt' ? `: "${r.reply.prompt.prompt.slice(0, 60)}"` : ''}`);
 if (r.reply?.kind !== 'prompt' || r.reply.prompt.kind !== 'signature') throw new Error(`expected the genesis signature prompt: ${JSON.stringify(r).slice(0, 400)}`);
 
@@ -84,6 +90,7 @@ if (r.reply?.kind !== 'done') throw new Error(`expected done: ${JSON.stringify(r
 const acted = (r.reply.receipts as Array<Record<string, any>>).find((x) => x.status === 'executed' && x.risk !== 'informational');
 console.log(`  receipt: ${acted?.toolId} ${acted?.status} decision=${acted?.authority?.decision?.decision} afterApproval=${acted?.authority?.afterApproval}`);
 if (acted?.authority?.decision?.decision !== 'allow') throw new Error('the executing turn shows no verification — a resume must re-verify');
+if (plannedFrom(r.reply) !== 'checkpoint') throw new Error(`the acting turn should plan from the checkpoint, not "${plannedFrom(r.reply)}"`);
 console.log(`  ✓ ${r.reply.result.name} at ${r.reply.result.agent}`);
 
 // A finished run leaves nothing behind: resuming it again is not a second team.
@@ -103,4 +110,4 @@ const swapped = await post({ session: alice.homeSession, addressee: WORKSPACE, r
 console.log(`  changed question: ${swapped.error}`);
 if (!/different question/.test(String(swapped.error))) throw new Error('a run accepted a different question');
 
-console.log('\n✓ W3: the run is the agent\'s to remember — resumed from the runRef alone, re-verified on the turn that acted, gone when finished, and nobody else\'s to pick up.');
+console.log('\n✓ W3 + 370 P1: the run is the agent\'s to remember — resumed from the runRef alone, planned once, completed steps replayed, re-verified on the turn that acted, gone when finished, and nobody else\'s to pick up.');

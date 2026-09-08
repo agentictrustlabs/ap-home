@@ -105,7 +105,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context'
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer } from './orchestration.js';
-import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1 } from './harness-runs.js';
+import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
 import { toErrorCode } from './harness-workflow-core.js';
@@ -1999,6 +1999,13 @@ app.post('/harness/ask', async (c) => {
     if (stored?.executor === 'workflow') {
       return c.json({ ok: false, error: 'this run is advancing durably — a custodian decision moves it, not a re-ask (POST /harness/approve)' }, 409);
     }
+    // EXPIRED IS AN OUTCOME (spec 370 P1). A signature asked against a mandate minted for minutes cannot
+    // be given an hour later; saying so — and dropping the checkpoint — beats a resume that fails a step
+    // later with `not-live` and reads like weather.
+    if (stored && isExpired(stored)) {
+      await dropRun(c.env as never, addressee, body.runRef).catch(() => undefined);
+      return c.json({ ok: false, error: 'this run expired while waiting — ask again', expired: true }, 410);
+    }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
   }
   let satisfied: { stepId: string; ok: boolean; error?: string } | undefined;
@@ -2016,6 +2023,8 @@ app.post('/harness/ask', async (c) => {
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
+      // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
+      ...(stored?.executed ? { resume: stored.executed } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
@@ -2134,7 +2143,10 @@ app.post('/harness/ask', async (c) => {
           // second turn — and completed on chain with nothing to satisfy.
           ...(stored?.origin ? { origin: stored.origin } : {}),
           ...(stored?.openToStewards ? { openToStewards: true } : {}),
-          ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } } : {}),
+          ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS[reply.prompt.kind] } } : {}),
+          // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
+          // next turn replays them instead of planning and executing the whole ask again.
+          executed: { plan: result.plan, completed: completedStepsOf(result) },
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
       } else {
@@ -2196,7 +2208,7 @@ app.post('/harness/ask', async (c) => {
     }) : undefined;
     // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
     const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
-    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt })), unfinishedTotal: otherRuns.length } : {}) });
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

@@ -18,7 +18,7 @@
 // mandate is re-verified (on chain: signature, revocation, intent binding, limits), the ladder is
 // re-applied and the approval re-checked — every turn, exactly as the first. The checkpoint holds only
 // what the person already gave us; it grants nothing and it decides nothing.
-import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
+import type { SuppliedInputV1, Plan, StepReceipt } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { internalHeaders } from './internal-marker.js';
@@ -53,8 +53,18 @@ export interface HarnessRunCheckpointV1 {
   /** Spec 361 I4 — the caller-supplied plan, when the run was entered deterministically. Utterance-class
    *  content, which is exactly why it lives HERE (DO-local, TTL'd) and never in engine params (§6). */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
-  /** What the run is waiting for, for a surface that lists pending work. */
-  awaiting?: { kind: 'data' | 'signature' | 'confirmation'; prompt: string; stepRef: string };
+  /** What the run is waiting for, for a surface that lists pending work. `expiresAt` (spec 370 P1) is
+   *  when waiting stops being resumable: a signature or confirmation is asked against a mandate minted
+   *  for minutes, and a run past its window reads EXPIRED rather than pending forever. */
+  awaiting?: { kind: 'data' | 'signature' | 'confirmation'; prompt: string; stepRef: string; expiresAt?: number };
+  /**
+   * Spec 370 P1 — WHAT RAN. The plan the run was admitted with (fan-out already expanded) and the steps
+   * that completed, each with what it returned and the receipt that recorded it. A resume hands these
+   * back to the loop, which REPLAYS them — no planner call, no invoker, no verifier for a step that is
+   * not being attempted (spec 362 §0.1, gate 4) — and judges the remaining steps as if for the first time.
+   * Evidence of what happened; never permission for what has not. DO-local and TTL'd like the rest.
+   */
+  executed?: { plan: Plan; completed: Array<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
   /** Set when the run is a WORK ITEM nobody has picked up: `asker` is the principal rather than a person,
    *  and any steward who can mint the mandate may claim it (`endeavor-authority-steps.claimableBy`). */
   openToStewards?: boolean;
@@ -163,4 +173,25 @@ export function mergeTurn(
     presented: keyring,
     supplied: [...(stored?.supplied ?? []), ...(turn.supplied ?? [])],
   };
+}
+
+/** How long a wait stays resumable (spec 370 P1). A signature or a confirmation answers a mandate minted
+ *  for the request — minutes, not days — so half an hour is generous; a data question (which Nathan?)
+ *  has no mandate yet and may wait a day, which is also when the listing prunes it. */
+export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation', number> = { data: 24 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000 };
+
+/** Past its window: resumable no longer. Absent window ⇒ the day prune is the only expiry. */
+export function isExpired(cp: Pick<HarnessRunCheckpointV1, 'awaiting'>, now = Date.now()): boolean {
+  return typeof cp.awaiting?.expiresAt === 'number' && cp.awaiting.expiresAt < now;
+}
+
+/** The completed steps of a run result, as a checkpoint records them — successful, named, with their
+ *  receipt. A failed or suspended step is not "done" and is not replayed. */
+export function completedStepsOf(result: { steps: ReadonlyArray<{ ok: boolean; stepRef?: string; result?: unknown }>; receipts: ReadonlyArray<StepReceipt> }): HarnessRunCheckpointV1['executed'] extends infer E ? E extends { completed: infer C } ? C : never : never {
+  return result.steps
+    .filter((o) => o.ok && o.stepRef)
+    .map((o) => {
+      const receipt = result.receipts.find((r) => r.stepRef === o.stepRef);
+      return { stepRef: o.stepRef!, ...(o.result !== undefined ? { result: o.result } : {}), ...(receipt ? { receipt } : {}) };
+    });
 }
