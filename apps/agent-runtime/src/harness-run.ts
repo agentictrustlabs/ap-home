@@ -35,7 +35,7 @@ import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
@@ -3475,7 +3475,12 @@ calls, BOTH IN THIS SAME RESPONSE, in order:
 The runtime expands call 2 into one act per member, each separately authorized. Do NOT list members
 yourself, do NOT emit one call per member, and never fan out over anything except what a tool
 enumerates. "Choose the tool" above means one CAPABILITY — this two-call form is still one capability,
-fanned out.`;
+fanned out.
+
+A step that should happen ONLY IF an earlier read found something adds {"$when": {"ref": "<name>.<path>",
+"exists": true}} (or "exists": false for the other branch) to its arguments — the runtime takes or skips
+it from that result; do not plan two alternatives and hope. Reads that need nothing from each other may
+be emitted together; the runtime runs them side by side.`;
   // The playbook's own words lead: an agent set to an archetype is TOLD what it is before the rules of
   // asking. Rendered from the compiled definition (spec 354) — versioned and receipted, never a silent
   // prompt edit.
@@ -3650,6 +3655,7 @@ fanned out.`;
         instructionNeedsAct,
         noPlaceholders,
         dependenciesProvided,
+        branchesDecidable,
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
