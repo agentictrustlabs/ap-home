@@ -38,6 +38,11 @@ import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type Comm
 import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
+
+// Spec 376 — the subset handlers (capability, payment) live in an ambient registry that nothing in this
+// Worker populated: `readMandate` and `deriveMandate` answered null/refused for every mandate, and the
+// first hand-off could not read the parent it held. Registered once, at load.
+registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
@@ -46,7 +51,7 @@ import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep 
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
-  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector,} from '@agenticprimitives/delegation';
+  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -770,6 +775,12 @@ export interface HarnessDeps {
   /** Spec 375 — the kind of the agent being asked (`person` | `org` | `team` | `treasury` | …), read on chain once
    *  per ask. A read consults it to know whether "no subject" means "which one?" (a person) or "me". */
   addresseeKind?: string | null;
+  /** Spec 376 — the harness's own Smart Agent signs a digest (its custodian, the interactions-session key):
+   *  what lets it attenuate a mandate it holds as delegate onward to a specialist. */
+  signAsHarness?: (digest: Hex) => Promise<Hex>;
+  /** Spec 376 — HAND ONE STEP to another agent under a child mandate. The executor's harness runs it with
+   *  the chain presented; what comes back is read like a routed answer (an answer, a refusal, a need). */
+  handoffTo?: (input: { executor: Address; intent: { goal: string; context?: Record<string, unknown> }; plan: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> }; presented: unknown[]; supplied?: SuppliedInputV1[]; parent: { agent: Address; runRef: string; stepRef: string; operationId: string; childRef: string } }) => Promise<SubjectAnswerV1>;
   askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
@@ -809,7 +820,7 @@ export interface SubjectAnswerV1 {
   /** The subject agent's structured result for the routed step (its invoker's own shape). */
   result?: unknown;
   /** Who answered, and where — and, under the subject-ask profile, the receiver's own receipts (S) naming R. */
-  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network' | 'delivered'; receipts?: Array<{ stepRef: string; capability?: string; status: string }> };
+  via: { agent: Address; name?: string | null; host?: string; runRef?: string; observedVia: 'serving-handler' | 'network' | 'delivered' | 'handoff'; receipts?: Array<{ stepRef: string; capability?: string; status: string }>; childRef?: string };
   /** When the subject's agent did not answer: its words, relayed verbatim (a refusal is an answer). */
   refused?: string;
   /** Spec 374 — the receiver PARKED the step for its own steward (or asked something): `via.runRef` is
@@ -826,6 +837,9 @@ export interface SubjectAnswerV1 {
  * agent that argument names; when that agent is not the one addressed, the step is routed there. Pure:
  * reads the tool's declaration and the (already-resolved) args, decides nothing about permission.
  */
+/** Spec 376 — the step in words, for the sub-intent: the capability's phrase, else the tool's id. */
+function toolWordsFor(tool: ToolSpec): string { return (tool.capability?.id && CAPABILITY_WORDS[tool.capability.id]) || tool.answer || tool.id; }
+
 export function routedSubjectFor(tool: { subject?: string } | undefined, args: Record<string, unknown>, addressee: Address | undefined): Address | null {
   if (!tool?.subject) return null;
   const v = String(args[tool.subject] ?? '').trim().toLowerCase();
@@ -838,15 +852,17 @@ export function routedSubjectFor(tool: { subject?: string } | undefined, args: R
 export interface SubjectAnswerProfileV1 { extension: string; version: 1; agent: string; inResponseTo: { operationId: string; runRef: string; stepRef: string }; outcome: 'answer' | 'refused' | 'needs' | 'error'; result?: unknown; said?: string; run: { runRef: string; receipts: Array<{ stepRef: string; capability?: string; status: string; binding?: unknown }> } }
 
 /** One step another agent answered (spec 366): who, reached how, under which of its runs, with what receipts. */
-export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; name?: string; observedVia: string; runRef?: string; receipts?: number }
+export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; name?: string; observedVia: string; runRef?: string; receipts?: number;
+  /** Spec 376 — the child mandate a handed-off step ran under (its delegation hash). */
+  childRef?: string }
 
 /** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
 export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
   const out: RoutedStepV1[] = [];
   steps.forEach((o, i) => {
-    const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: unknown[] } } | null | undefined)?.via;
+    const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: unknown[]; childRef?: string } } | null | undefined)?.via;
     if (!via?.agent) return;
-    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}) });
+    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}) , ...(via.childRef ? { childRef: via.childRef } : {}) });
   });
   return out;
 }
@@ -883,6 +899,12 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
   if (reply.kind === 'answer') {
     const hit = reply.results?.find((r) => r.toolId === toolId) ?? reply.results?.[0];
     return { ok: true, result: hit ? hit.result : { text: reply.text }, ...(runRef ? { runRef } : {}) };
+  }
+  // Spec 376 — a hand-off that FINISHED at the specialist is an answer too: its result and its receipts.
+  if (reply.kind === 'done') {
+    const d = reply as typeof reply & { receipts?: Array<{ stepRef: string; capability?: { id?: string }; status: string }>; result?: unknown };
+    const receipts = (d.receipts ?? []).map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status }));
+    return { ok: true, result: d.result ?? { done: true }, ...(runRef ? { runRef } : {}), receipts };
   }
   const said = reply.kind === 'prompt'
     ? `it asked “${reply.prompt?.prompt ?? ''}” (${reply.prompt?.kind ?? 'prompt'}${reply.prompt?.fields?.length ? `: ${reply.prompt.fields.map((f) => f.name).join(', ')}` : ''})`
@@ -932,20 +954,27 @@ export function suppliedApprovalsPort(
    *  question, or the surface signs as nobody: the prompt went out with an empty `signer`, the answer came
    *  back attributed to '', and the ERC-1271 check refused an approval the person had just given. */
   person?: Address,
+  /** Spec 376 — the keyring, so a CHILD mandate's approval can be judged over its PARENT's reference: the
+   *  second party approved the person's mandate for this step; a child derived from it inherits that. */
+  presentedAll?: MandatePresentation[],
 ): ApprovalPort {
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
   return {
     async request(req) {
-      const want = approvalDigestFor({ stepRef: req.stepRef, mandateRef: req.evidence.mandateRef, intentDigest: req.evidence.intentDigest, capability: req.step.capability.id, action: req.step.capability.action, ...(req.step.capability.resource ? { resource: req.step.capability.resource } : {}) });
+      const digestFor = (mandateRef: string) => approvalDigestFor({ stepRef: req.stepRef, mandateRef, intentDigest: req.evidence.intentDigest, capability: req.step.capability.id, action: req.step.capability.action, ...(req.step.capability.resource ? { resource: req.step.capability.resource } : {}) });
+      const leaf = (presentedAll ?? []).find((p) => p.ref.toLowerCase() === String(req.evidence.mandateRef).toLowerCase())?.wire as { authority?: string } | undefined;
+      const parentRef = leaf?.authority && leaf.authority.toLowerCase() !== ROOT_AUTHORITY.toLowerCase() ? leaf.authority : null;
+      const want = digestFor(req.evidence.mandateRef);
+      const wants = [want, ...(parentRef ? [digestFor(parentRef)] : [])].map((w) => w.toLowerCase());
       // A signature answered into THIS step counts as an approval when it is over the approval digest.
       const answered = (supplied ?? [])
-        .filter((s) => s.stepRef === req.stepRef && s.signature && s.signature.digest.toLowerCase() === want.toLowerCase())
+        .filter((s) => s.stepRef === req.stepRef && s.signature && wants.includes(s.signature.digest.toLowerCase()))
         .map((s) => ({ approver: s.signature!.signer as Address, digest: s.signature!.digest as Hex, signature: s.signature!.signature as Hex }));
       const pool = [...approvals, ...answered];
       const records: string[] = [];
       for (const ob of req.obligations) {
         const allowed = (ob.dischargeableBy.agents ?? []).map((a) => a.toLowerCase());
-        const candidates = pool.filter((a) => a.digest.toLowerCase() === want.toLowerCase() && (allowed.length === 0 || allowed.includes(a.approver.toLowerCase())));
+        const candidates = pool.filter((a) => wants.includes(a.digest.toLowerCase()) && (allowed.length === 0 || allowed.includes(a.approver.toLowerCase())));
         let discharged = false;
         let sawInvalid = false;
         for (const a of candidates) {
@@ -1637,9 +1666,22 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const enforcers = harnessEnforcers(env);
     if (!enforcers.payment) throw new Error('harness: PAYMENT_ENFORCER is not configured');
     const asset = String(args.asset).toLowerCase() as Address;
+    // Spec 376 — THE PAYER IS THE CHAIN'S ROOT DELEGATOR. A child mandate's delegator is the harness that
+    // attenuated it; the USDC that moves is the ROOT delegator's (the treasury the person signed for), and
+    // every check that names the payer names that one.
+    const rootDelegatorOf = (leaf: Delegation): Address => {
+      let cur = leaf;
+      for (let hop = 0; hop < 4 && String(cur.authority).toLowerCase() !== ROOT_AUTHORITY.toLowerCase(); hop++) {
+        const up = presentedAll.map((p) => p.wire as Delegation).find((d) => hashDelegation(d, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address).toLowerCase() === String(cur.authority).toLowerCase());
+        if (!up) break;
+        cur = up;
+      }
+      return cur.delegator.toLowerCase() as Address;
+    };
+    const rootPayer = rootDelegatorOf(paymentPresented.wire as Delegation);
     const payer = args.payer ? await partyAddress(args.payer, deps, 'the payer') : '';
-    if (payer && payer !== (paymentPresented.wire as Delegation).delegator.toLowerCase()) {
-      throw new Error(`the payment is made by the mandate's delegator (${(paymentPresented.wire as Delegation).delegator}); the plan named ${payer}`);
+    if (payer && payer !== rootPayer) {
+      throw new Error(`the payment is made by the mandate's delegator (${rootPayer}); the plan named ${payer}`);
     }
     const payee = await partyAddress(args.payee, deps, 'the payee');
     // ── THE VALUE RAIL (spec 373) ──────────────────────────────────────────────────────────────────
@@ -1651,7 +1693,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // The evidence is the on-chain `atl:agentType`, never the name: a suffix is a claim, the record is the
     // authority, and an unnamed treasury has the record but no suffix. Fail-closed — unreadable is
     // refused, and the sentence says which end and what it is.
-    await refuseUnlessTreasury(deps, payer || (paymentPresented.wire as Delegation).delegator.toLowerCase(), 'paying from');
+    await refuseUnlessTreasury(deps, payer || rootPayer, 'paying from');
     await refuseUnlessTreasury(deps, payee, 'being paid');
     const amount = fundingAmount(args);
     const wire = paymentPresented.wire as Delegation;
@@ -1676,10 +1718,29 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     });
     // Again, at the moment of acting: the balance may have moved since the preview, and a revert with no
     // reason is a worse answer than a sentence with the numbers in it.
-    const late = await preconditionRefusal({ capability: 'treasury.payment.execute', args: { ...args, payer: wire.delegator }, env, deps });
+    const late = await preconditionRefusal({ capability: 'treasury.payment.execute', args: { ...args, payer: rootPayer }, env, deps });
     if (late) throw new Error(late);
+    // Spec 376 — A CHILD REDEEMS WITH ITS CHAIN. The leaf is the mandate the verifier judged; when its
+    // `authority` names a parent this turn also presented, the parent follows it, with ITS OWN redeem-time
+    // args (its bound intent digest; the same nonce keyed under its own hash). `DelegationManager`
+    // enforces every link's caveats; a link that is missing, revoked or wider than its child reverts.
+    const chain: Array<{ delegator: Address; delegate: Address; authority: Hex; caveats: typeof caveats; salt: bigint; signature: Hex }> = [{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }];
+    let auth = String(wire.authority).toLowerCase();
+    for (let hop = 0; hop < 4 && auth !== ROOT_AUTHORITY.toLowerCase(); hop++) {
+      const link = presentedAll.map((p) => p.wire as Delegation).find((d) => hashDelegation(d, Number(env.CHAIN_ID), dm).toLowerCase() === auth);
+      if (!link) throw new Error('the presented mandate is a child whose parent was not presented — a chain is redeemed whole or not at all');
+      const bound = readDigestBindings(link.caveats, enforcers.digestBinding).intent ?? digest;
+      const linkCaveats = link.caveats.map((c) => {
+        const e = c.enforcer.toLowerCase();
+        if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [bound, nonce, keccak256(toBytes(`${hashDelegation(link, Number(env.CHAIN_ID), dm)}:${stepRef}`))]) };
+        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(bound) };
+        return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
+      });
+      chain.push({ delegator: link.delegator, delegate: link.delegate, authority: link.authority as Hex, caveats: linkCaveats, salt: link.salt, signature: link.signature as Hex });
+      auth = String(link.authority).toLowerCase();
+    }
     const transfer = encodeFunctionData({ abi: TRANSFER_ABI, functionName: 'transfer', args: [payee, amount] });
-    const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, transfer] });
+    const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [chain, asset, 0n, transfer] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
     // IDEMPOTENCY IS THE ON-CHAIN NONCE (spec 358 W4-tail). The loop's resume-with-recheck re-invokes a
     // step that already ran (§3.4), and its contract is that the invoker makes that a no-op. For a
@@ -1696,7 +1757,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (alreadySettled) {
       // This exact payment already happened. Report it done, without a txHash we did not just create —
       // the receipt of the settling run holds that; re-inventing one would be a claim (spec 357 §4).
-      return { asset, payee, amount: amount.toString(), payer: wire.delegator, alreadySettled: true };
+      return { asset, payee, amount: amount.toString(), payer: rootPayer, alreadySettled: true };
     }
     // THE EFFECT OWNER DECIDES WHAT HAPPENED (spec 367 §8). The payment's stable identity at the enforcer is
     // (delegator, delegation hash, intent-derived nonce): submitting it twice reverts, and reading it says
@@ -1711,11 +1772,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const settled = enforcers.payment
         ? await deps.readContract({ address: enforcers.payment as Address, abi: IS_NONCE_USED_ABI, functionName: 'isNonceUsed', args: [wire.delegator, dHash, nonce] }).catch(() => null)
         : null;
-      if (settled === true) return { asset, payee, amount: amount.toString(), payer: wire.delegator, alreadySettled: true, outcome: 'committed', effectIdentity: `${dHash}:${nonce}`, reconciled: true };
+      if (settled === true) return { asset, payee, amount: amount.toString(), payer: rootPayer, alreadySettled: true, outcome: 'committed', effectIdentity: `${dHash}:${nonce}`, reconciled: true };
       const reason = e instanceof Error ? e.message : String(e);
       throw new Error(`${settled === false ? 'failed before effect' : 'outcome unknown and not reconcilable'}: ${reason}`);
     }
-    return { txHash, asset, payee, amount: amount.toString(), payer: wire.delegator, outcome: 'committed', effectIdentity: `${dHash}:${nonce}` };
+    return { txHash, asset, payee, amount: amount.toString(), payer: rootPayer, outcome: 'committed', effectIdentity: `${dHash}:${nonce}` };
   };
 }
 
@@ -3064,8 +3125,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
     if (r.prompt.kind === 'commitment') {
       const cm = r.prompt.commitment;
       const name = cm.at.name ?? cm.at.agent;
+      // The receiver's own words travel in the prompt ("Waiting on X — <what it said>"): a person reading
+      // "waiting" deserves to know what the other agent is waiting FOR.
+      const said = r.prompt.prompt.replace(/^Waiting on [^—]+—\s*/, '').replace(/\.$/, '');
       return { kind: 'waiting', runRef: r.runRef, stepRef: r.prompt.stepRef, on: { agent: cm.at.agent as Address, ...(cm.at.name ? { name: cm.at.name } : {}), runRef: cm.at.runRef }, commitment: cm,
-        text: `${name}'s steward has to finish this — it has been asked and is waiting on them. It will finish here when they do; nothing was signed for them.` };
+        text: `${name}'s steward has to finish this — ${said || 'it has been asked and is waiting on them'}. It will finish here when they do; nothing was signed for them.` };
     }
     return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   }
@@ -3797,6 +3861,8 @@ be emitted together; the runtime runs them side by side.`;
   // is about, the resource and authority it names, the outcome class it was expected to establish, its
   // stable operation identity, and where each party came from. Evidence only; no gate reads it.
   const intentDigest = keccak256(toBytes(JSON.stringify({ goal: input.intent.goal, addressee: input.addressee ?? null, asker: input.person ?? null })));
+  // Spec 376 — which steps were HANDED OFF, and to whose run: the receipt's `delegatedTo`.
+  const handedOff = new Map<string, { agent: Address; runRef: string; childRef: string }>();
   const bindingFor = (rs: ResolvedStep): ExecutionBindingV1 => {
     const sourceOf = (v: unknown): NonNullable<ExecutionBindingV1['argSources']>[string] => {
       const low = String(v ?? '').toLowerCase();
@@ -3814,7 +3880,9 @@ be emitted together; the runtime runs them side by side.`;
       expectedOutcome: outcomeClassOf(rs.tool),
       operationId: rs.idempotencyKey ?? `${rs.runRef}:${rs.stepRef}`,
       ...(parties.length ? { argSources: Object.fromEntries(parties.map(([k, v]) => [k, sourceOf(v)])) } : {}),
-      ...(input.inResponseTo ? { correlation: { inResponseTo: input.inResponseTo } } : {}),
+      ...((input.inResponseTo || handedOff.get(rs.stepRef))
+        ? { correlation: { ...(input.inResponseTo ? { inResponseTo: input.inResponseTo } : {}), ...(handedOff.get(rs.stepRef) ? { delegatedTo: { agent: handedOff.get(rs.stepRef)!.agent, runRef: handedOff.get(rs.stepRef)!.runRef } } : {}) } }
+        : {}),
     };
   };
   // THE REALM'S TYPED SUFFIX, whether or not a surface declared it (spec 367 §7 / 371 §2.1). A person's
@@ -3843,6 +3911,68 @@ be emitted together; the runtime runs them side by side.`;
       // Spec 370 P6 — on a replay nothing runs: the record answers, or refuses a step it never held.
       if (input.replayOf) return replayingInvoker(input.replayOf)(toolId, args, ctx);
       const tool = tools.find((t) => t.id === toolId);
+      // Spec 376 — A HAND-OFF. The step names an executor that is not this harness: the step runs THERE,
+      // under a child mandate attenuated from the mandate this run presented. Minted here by this
+      // harness's own Smart Agent (the parent's delegate), bound to the sub-intent, sent with the step;
+      // verified where it is used; recorded here as handed off, never as run.
+      const executor = typeof ctx.step.executor === 'string' && /^0x[0-9a-fA-F]{40}$/.test(ctx.step.executor) ? (ctx.step.executor.toLowerCase() as Address) : null;
+      if (executor && executor !== String(input.addressee ?? '').toLowerCase()) {
+        if (!deps.handoffTo || !deps.signAsHarness) throw new Error(`this agent cannot hand a step to ${executor} — hand-offs are not wired here`);
+        const stepRefH = ctx.step.id ?? `s${ctx.index}`;
+        const enforcersH = harnessEnforcers(env);
+        const chainId = Number(env.CHAIN_ID);
+        const dm = env.DELEGATION_MANAGER as Address;
+        // THE PARENT: the mandate this run presented for this step — the same one the verifier judged.
+        const parentP = presentedList.length > 1 && tool?.capability?.id === 'treasury.payment.execute'
+          ? selectByPayee({ capability: { id: tool.capability.id }, args }, presentedList, enforcersH.payment)
+          : (presentedList[0] ?? null);
+        if (!parentP) throw new Error('a hand-off attenuates a mandate this run holds, and none was presented for this step');
+        const parent = parentP.wire as Delegation;
+        const type = tool?.capability?.id === 'treasury.payment.execute' ? PAYMENT_RAR_TYPE : CAPABILITY_RAR_TYPE;
+        const parentReq = readMandate(parent, type, enforcersH as never);
+        if (!parentReq) throw new Error('the presented delegation carries no intent binding this harness can read — a standing capability cannot parent a child mandate');
+        // THE CHILD IS BOUND TO THE SAME INTENT the person signed for (spec 336 §8.3: authority attenuates
+        // within one intent, never onto a new one — `baseIsSubset` refuses a different digest). It narrows
+        // the WINDOW to minutes; the step's own nonce (intent digest + step ref) makes it single-use on
+        // chain. The specialist's run is admitted against the parent's intent, verbatim.
+        const stepWords = `${tool ? toolWordsFor(tool) : toolId}: ${Object.entries(args).map(([k, v]) => `${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')}`;
+        const subIntent = { goal: input.intent.goal, ...(input.intent.context ? { context: input.intent.context as Record<string, unknown> } : {}) };
+        const now = Math.floor(Date.now() / 1000);
+        const requirement: MandateRequirementV1 = {
+          ...parentReq,
+          validAfter: Math.max(parentReq.validAfter ?? 0, now - 60),
+          validUntil: Math.min(parentReq.validUntil, now + 600),
+        };
+        let saltH = 0n; for (const b of crypto.getRandomValues(new Uint8Array(16))) saltH = (saltH << 8n) | BigInt(b);
+        const derived = deriveMandate({ parent, parentRequirement: parentReq, requirement, grantee: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address, enforcers: enforcersH as never, chainId, delegationManager: dm, salt: saltH });
+        if (!derived.ok) throw new Error(`the child mandate could not be derived: ${derived.reason}`);
+        const child: Delegation = { ...derived.delegation, signature: await deps.signAsHarness(derived.digest) };
+        const childRef = derived.digest;
+        const wireOf = (d: Delegation) => ({ ...d, salt: d.salt.toString() });
+        const parentAgent = String(input.addressee ?? input.person ?? '').toLowerCase() as Address;
+        const operationId = `${input.runRef ?? 'run'}:${stepRefH}`;
+        handedOff.set(stepRefH, { agent: executor, runRef: '', childRef });
+        // The parent run's SUPPLIED inputs for this step — the second party's approval above all — travel
+        // with the step, re-keyed to the one step the specialist runs: an approval given for the person's
+        // mandate is inherited by the child derived from it (the executor's port judges it over the parent).
+        const carried = inputsFor(ctx.supplied, stepRefH).map((x) => ({ ...x, stepRef: 's0' }));
+        const answer = await deps.handoffTo({ executor, intent: subIntent, plan: { steps: [{ toolId, args, id: 's0' }] }, presented: [wireOf(child), wireOf(parent)], ...(carried.length ? { supplied: carried } : {}), parent: { agent: parentAgent, runRef: input.runRef ?? 'run', stepRef: stepRefH, operationId, childRef } });
+        const exName = answer.via.name ?? (await deps.nameOf?.(executor).catch(() => null)) ?? executor;
+        if (answer.via.runRef) handedOff.set(stepRefH, { agent: executor, runRef: answer.via.runRef, childRef });
+        const viaH = { ...answer.via, agent: executor, observedVia: 'handoff' as const, childRef };
+        if (!answer.ok) {
+          if (answer.needs && answer.via.runRef && !tool?.answers) {
+            throw new InputRequired({
+              kind: 'commitment', stepRef: stepRefH, toolId,
+              prompt: `Waiting on ${exName} — ${answer.said || 'it holds the step and has not finished'}.`,
+              commitment: { id: operationId, debtor: executor, creditor: parentAgent, content: { capability: toolId, args, goal: stepWords }, conditions: `${exName} finishes the step under the child mandate`, state: 'proposed', at: { agent: executor, ...(answer.via.name ? { name: answer.via.name } : {}), runRef: answer.via.runRef } },
+            });
+          }
+          throw new Error(`${exName} did not run the step: ${answer.refused ?? 'no answer'}`);
+        }
+        const rH = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };
+        return { ...rH, via: viaH, note: `${String(rH.note ?? '')} Done by ${exName} under a child mandate this agent attenuated from yours — say so in one clause.`.trim() };
+      }
       const subject = routedSubjectFor(tool, args, input.addressee);
       if (!subject) return localInvoke(toolId, args, ctx);
       if (!deps.askSubjectAgent) {
@@ -3997,7 +4127,7 @@ be emitted together; the runtime runs them side by side.`;
         }
       },
       mandateVerifier: verifier, policyEvaluator: policy,
-      approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink,
+      approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person, presentedList), receiptSink,
       // PLAN ADMISSION (spec 367 W1) — the plan's SHAPE, judged from declarations before any step runs:
       // an instruction must be answered by an act (`verbs` on the action tools); a placeholder is not an
       // argument; a step whose tool declares a `subject` may not leave it empty when the sentence names

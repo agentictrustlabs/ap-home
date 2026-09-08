@@ -24,7 +24,8 @@ import {
 } from '@agenticprimitives/a2a/standard';
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
-import { subjectAskOf, subjectAnswerOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
+import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
+import type { HandoffV1 } from '@agenticprimitives/a2a';
 import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
@@ -90,6 +91,9 @@ export interface StandardMountDeps {
    *  (debtor = the caller, id = `inResponseTo.operationId`) and resumes it with the delivered outcome.
    *  No such run ⇒ `{ ok: false }` and the task is rejected with words that do not say whether one exists. */
   resumeFromCommitment?: (input: { addressee: Address; debtor: Address; answer: SubjectAnswerV1 }) => Promise<{ ok: true; runRef: string; said: string } | { ok: false; reason: string }>;
+  /** Spec 376 — RUN ONE HANDED-OFF STEP at this agent under the chain the parent sent, the parent agent as
+   *  the asker (an agent holding a mandate). Returns the `/harness/ask`-shaped envelope the parent reads. */
+  runHandoff?: (input: { executor: Address; parent: Address; handoff: HandoffV1 }) => Promise<Record<string, unknown>>;
 }
 
 interface AskEnvelope {
@@ -194,6 +198,24 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         // AN AGENT ASKING AS ITSELF (spec 372 S3c). It has no person's session and is given none: the run
         // is the same one a trigger fires — no mandate presented, reads bounded to what this agent's own
         // records say to that asker, an act suspending as AUTH_REQUIRED with what it would need.
+        // Spec 376 — A HAND-OFF: another agent's harness asks this agent to run ONE step under a child
+        // mandate it attenuated from the mandate its person granted. The caller is the parent agent; the
+        // chain is verified by THIS harness where it is used, never trusted from the message.
+        const handed = handoffOf(ctx.message);
+        if (handed && 'errors' in handed) { await ctx.reject([{ text: `the hand-off is malformed: ${handed.errors.join('; ')}` }]); return; }
+        if (handed) {
+          if (ctx.principal?.kind !== 'agent' || !deps.runHandoff) { await ctx.reject([{ text: 'a hand-off comes from the agent whose run it is a step of' }]); return; }
+          if (ctx.principal.agent.toLowerCase() !== handed.handoff.parent.agent.toLowerCase()) { await ctx.reject([{ text: 'the hand-off names a parent other than its caller' }]); return; }
+          await ctx.working();
+          const envelope = await deps.runHandoff({ executor: agent, parent: ctx.principal.agent as Address, handoff: handed.handoff });
+          await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
+          const reply = envelope.reply as { kind?: string; text?: string; error?: string; prompt?: { prompt?: string }; summary?: string } | undefined;
+          const said = reply?.text || reply?.summary || reply?.prompt?.prompt || reply?.error || '';
+          if (reply?.kind === 'done' || reply?.kind === 'answer') { await ctx.complete([{ text: said || 'Done.' }]); return; }
+          if (reply?.kind === 'prompt' || reply?.kind === 'authority_required') { await ctx.inputRequired([{ text: said || 'More is needed.' }]); return; }
+          await ctx.reject([{ text: said || 'Refused.' }]);
+          return;
+        }
         // Spec 374 §4 — a DELIVERED ANSWER to a routed act this agent's run is waiting on. The caller is the
         // debtor (an agent); the match against a run this agent itself suspended is the only authorization.
         const delivered = subjectAnswerOf(ctx.message);

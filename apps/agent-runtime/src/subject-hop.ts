@@ -12,7 +12,7 @@
 // never reads the subject's records locally instead (R3), and it never guesses a path (ADR-0013).
 //
 // Everything here is pure: the caller supplies `fetch`; nothing reads a store or a chain.
-import { AP_SUBJECT_ASK_EXTENSION_URI, validateSubjectAsk, type SubjectAskV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { AP_SUBJECT_ASK_EXTENSION_URI, AP_HANDOFF_EXTENSION_URI, validateSubjectAsk, validateHandoff, type SubjectAskV1, type SubjectAnswerV1, type HandoffV1 } from '@agenticprimitives/a2a';
 import type { AgentCardV1, MessageV1, TaskV1 } from '@agenticprimitives/a2a/standard';
 
 /** The A2A 1.0 JSON-RPC endpoint a card publishes, or null when it publishes none. */
@@ -148,4 +148,27 @@ export function subjectAnswerOf(message: Pick<MessageV1, 'metadata'>): { answer:
   if (!['answer', 'refused', 'needs', 'error'].includes(String(raw.outcome))) errors.push('outcome: answer | refused | needs | error');
   if (!raw.run || typeof (raw.run as { runRef?: unknown }).runRef !== 'string') errors.push('run.runRef: required');
   return errors.length ? { errors } : { answer: raw as SubjectAnswerV1 };
+}
+
+// ── The hand-off (spec 376) ───────────────────────────────────────────────────────────────────────────
+//
+// One step, run elsewhere under a child mandate. Rides the one wire as a `SendMessage` whose metadata
+// carries the hand-off profile; the specialist answers with the same `subject-answer` artifact a routed
+// ask does, so the parent reads it with the same reader.
+
+export function handoffMessage(h: HandoffV1): MessageV1 {
+  return {
+    messageId: hex32(),
+    role: 'ROLE_USER',
+    parts: [{ text: h.intent.goal }],
+    extensions: [AP_HANDOFF_EXTENSION_URI],
+    metadata: { [AP_HANDOFF_EXTENSION_URI]: h },
+  };
+}
+
+export function handoffOf(message: Pick<MessageV1, 'metadata'>): { handoff: HandoffV1 } | { errors: string[] } | null {
+  const raw = message.metadata?.[AP_HANDOFF_EXTENSION_URI];
+  if (raw === undefined) return null;
+  const v = validateHandoff(raw);
+  return v.ok ? { handoff: v.handoff } : { errors: v.errors };
 }

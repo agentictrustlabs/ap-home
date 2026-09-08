@@ -137,8 +137,8 @@ import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
-import { subjectAsk, subjectAnswer, validateSubjectAsk, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
-import { sendSubjectAskOverWire, subjectAnswerMessage } from './subject-hop.js';
+import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -1108,6 +1108,16 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
     askAsAgent: (input) => runAgentAsk(c.env, input),
     // Spec 374 §4 — a delivered answer resumes the run that asked, and only that run.
     resumeFromCommitment: (input) => resumeFromCommitment(c.env, input),
+    // Spec 376 — run one handed-off step here, the parent agent as the asker, the chain presented.
+    runHandoff: async ({ executor, parent, handoff: h }) => {
+      const runRef = routedRunRefFor({ runRef: h.parent.runRef, stepRef: h.parent.stepRef });
+      const { reply, spoken, result } = await runAgentAsk(c.env, {
+        agent: parent, addressee: executor, ask: h.intent.goal, runRef, intent: h.intent,
+        resume: { plan: { steps: h.plan.steps }, presented: h.presented as never, supplied: (h.supplied ?? []) as never },
+      });
+      const receipts = ((result as { receipts?: Array<{ stepRef: string; capability?: { id?: string }; status: string }> }).receipts ?? []).map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status }));
+      return { ok: true, addressee: executor, reply: { ...reply, runRef, receipts: (result as { receipts?: unknown[] }).receipts ?? [] }, runRef, spoken, subjectAnswer: subjectAnswer({ agent: executor, inResponseTo: { operationId: h.parent.operationId, runRef: h.parent.runRef, stepRef: h.parent.stepRef }, outcome: reply.kind === 'done' || reply.kind === 'answer' ? 'answer' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : reply.kind === 'refused' ? 'refused' : 'error', ...(reply.kind === 'done' ? { result: (reply as { result?: unknown }).result ?? { done: true } } : {}), said: reply.text ?? reply.error ?? reply.prompt?.prompt ?? '', run: { runRef, receipts } }) };
+    },
     // Spec 372 N1 — the outsider's unfinished run, on the addressee's own object, open to its stewards.
     // The same checkpoint a trigger leaves (P5): no mandate presented, nothing supplied, a window after
     // which it reads expired rather than pending forever. Claiming it grants nothing — a steward resumes
@@ -1432,6 +1442,9 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
    *  steps that completed (replayed), the wires it presented (re-verified), and the supplied inputs now
    *  including the debtor's answer for the step that waited. No session: the run finishes as the agent. */
   resume?: { plan?: Plan; executed?: HarnessRunCheckpointV1['executed']; presented?: DelegationWireV1[]; supplied?: SuppliedInputV1[] };
+  /** Spec 376 — the intent VERBATIM: a handed-off step's child mandate is bound to the digest of exactly
+   *  this intent, so the run must be admitted against it and not a rebuilt one. */
+  intent?: { goal: string; context?: Record<string, unknown> };
 }): Promise<{
   reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string; runRef?: string };
   spoken: string;
@@ -1441,7 +1454,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
 }> {
   const deps = harnessDeps(env, buildAuditSink(env));
   deps.addresseeKind = await deps.agentTypeOf?.(input.addressee).catch(() => null) ?? null;
-  const intent = { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
+  const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     ...(input.resume?.plan ? { plan: input.resume.plan } : {}),
@@ -3792,6 +3805,42 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // in-process through the same handler the public URL reaches (chosen by a fact known before the call,
   // never by watching a request fail — ADR-0013). Anything else is a network call. Either way the
   // receiver is the subject's serving handler, and the answer says which wire it came over.
+  // Spec 376 — this harness's own Smart Agent signs (its custodian, the interactions-session key): how a
+  // mandate it holds as delegate is attenuated onward to a specialist. A raw 32-byte digest, the same
+  // shape every custodian signs a delegation hash with.
+  deps.signAsHarness = async (digest) => {
+    const acct = await interactionsSessionAccount(env);
+    if (!acct.sign) throw new Error('the interactions-session account cannot sign a raw digest');
+    return acct.sign({ hash: digest });
+  };
+  // Spec 376 — HAND ONE STEP to another agent, in-process inside this deployment (a Worker cannot fetch
+  // its own account's hostnames), the caller named by the in-Worker marker as the PARENT agent. The
+  // specialist answers with the same artifact a routed ask does; it is read with the same reader.
+  deps.handoffTo = async ({ executor, intent, plan, presented, supplied, parent }) => {
+    const name = await deps.nameOf?.(executor).catch(() => null) ?? null;
+    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+    const via = { agent: executor, name, ...(host ? { host } : {}), observedVia: 'serving-handler' as const };
+    if (!host) return { ok: false, via, refused: `${executor} publishes no endpoint this agent can hand a step to` };
+    if (!a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, via, refused: `${name} is served elsewhere — a hand-off across deployments is spec 376 W3` };
+    const h = handoff({ intent, plan, presented, ...(supplied?.length ? { supplied } : {}), parent });
+    const rpc = { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: handoffMessage(h) } };
+    const req = new Request(`https://${host}/api/a2a`, {
+      method: 'POST',
+      headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': parent.agent }),
+      body: JSON.stringify(rpc),
+    });
+    let res: Response;
+    try { res = await app.fetch(req, env, executionContextFor(opts.executionCtx)); } catch (e) { return { ok: false, via, refused: `could not reach ${name ?? executor}: ${e instanceof Error ? e.message : String(e)}` }; }
+    const body = (await res.json().catch(() => null)) as { result?: { task?: { artifacts?: Array<{ name?: string; parts: Array<{ data?: unknown }> }>; status?: { state?: string; message?: { parts?: Array<{ text?: string }> } } } }; error?: { message?: string } } | null;
+    const task = body?.result?.task;
+    const envelope = subjectEnvelopeOf((task ?? null) as never) as AskReplyEnvelopeV1 | null;
+    console.log(`[handoff] ${parent.agent} → ${name ?? executor} step ${parent.stepRef}: ${task?.status?.state ?? body?.error?.message ?? res.status}`);
+    if (!envelope) return { ok: false, via, refused: `${name ?? executor} answered ${task?.status?.state ?? body?.error?.message ?? res.status} with no envelope` };
+    const read = readSubjectReply(envelope, plan.steps[0]?.toolId ?? '', name ?? executor, 200);
+    const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}), ...(read.receipts?.length ? { receipts: read.receipts } : {}) };
+    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? executor} did not run the step`, ...(read.needs ? { needs: true, said: read.said ?? '', ...(read.needsWhat !== undefined ? { needsWhat: read.needsWhat } : {}) } : {}) };
+  };
   // Appendix M8 — the subject agent's own progress, read in-process under the asker's session (the same
   // route the flyout long-polls), so the sender can relay it while the hop runs.
   deps.readSubjectProgress = async ({ subject, runRef, session, after, wait }) => {
