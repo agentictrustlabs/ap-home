@@ -128,16 +128,19 @@ export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, 
     if (!person) return { endeavors: [], count: 0, refused: 'this agent does not know who is asking' };
     const standing = await deriveStanding(deps, { principal: person, subject: o.org }).catch(() => null);
     if (!standing || standing.relation === 'none') {
-      return { endeavors: [], count: 0, refused: `an organization's work is its own record, and ${standing?.because ?? 'this agent cannot read your links'} — only someone who belongs there can see it` };
+      const reason = `an organization's work is its own record, and ${standing?.because ?? 'this agent cannot read your links'} — only someone who belongs there can see it`;
+      return { endeavors: [], count: 0, refused: reason, reason };
     }
     if (!deps.readSubjectRecord) return { endeavors: [], count: 0, refused: 'this agent cannot read the organization\'s records' };
     const flags = { steward: standing.relation === 'steward' || standing.relation === 'self', member: true };
     if (toolId === ENDEAVOR_LIST_CAPABILITY) {
       const index = (await deps.readSubjectRecord(o.org, COORDINATION_INDEX_RESOURCE).catch(() => null)) as CoordinationIndexDocV1 | null;
-      if (!index) return { endeavors: [], count: 0, note: 'this organization keeps no work records yet — nothing has been requested or planned there', tier: 'the organization\'s own records' };
+      const interpretation = `the organization's own work record (${COORDINATION_INDEX_RESOURCE}), filtered by your standing (${standing.relation})`;
+      if (!index) return { endeavors: [], count: 0, interpretation, reason: 'this organization keeps no work records yet — nothing has been requested or planned there', tier: 'the organization\'s own records' };
       const rows = visibleEndeavorRows(Object.values(index.endeavors ?? {}), person, flags);
       return {
-        org: o.org, count: rows.length, tier: 'the organization\'s own records', standing: standing.relation,
+        org: o.org, count: rows.length, interpretation, tier: 'the organization\'s own records', standing: standing.relation,
+        ...(rows.length === 0 ? { reason: 'the work record is empty — nothing has been requested or planned' } : {}),
         endeavors: rows.map((e) => ({ endeavorId: e.endeavorId, title: e.title, lifecycle: e.lifecycle, participants: e.participants, requester: e.requester, updatedAt: e.updatedAt, ...(e.stepsTotal !== undefined ? { steps: `${e.stepsSatisfied ?? 0}/${e.stepsTotal}` } : {}) })),
       };
     }
@@ -148,7 +151,7 @@ export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, 
     const state = reduceEventLog(log);
     const view = endeavorViewFor(state, person, flags);
     if (view === 'none') return { refused: 'this endeavor is not visible to you' };
-    return { org: o.org, endeavorId, tier: 'the organization\'s own records', view, state };
+    return { org: o.org, endeavorId, interpretation: `the endeavor's own event log (${coordinationEventsResource(endeavorId)}), reduced to its current state`, tier: 'the organization\'s own records', view, state };
   };
 }
 
