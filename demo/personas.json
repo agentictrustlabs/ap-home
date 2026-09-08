@@ -107,5 +107,23 @@
       }
     ],
     "eoaPrivateKey": "0x08d6e3a1bf0608e582a419c92aaa8d32a1f157a65865c74295d7225eb0d462e7"
+  },
+  "pokersite": {
+    "name": "Poker Site — Pokernight",
+    "sa": "0x52b28B0AF0f0e52378651a156A43Cf1044966976",
+    "blurb": "Runs the Pokernight card room. Custodies its Service Agent and its Treasury.",
+    "custodies": [
+      {
+        "sa": "0x0347e808a0bB7a7a7086a29d853E799f351C04DD",
+        "name": "Poker Site Service Agent",
+        "kind": "service"
+      },
+      {
+        "sa": "0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671",
+        "name": "Poker Site Treasury",
+        "kind": "treasury"
+      }
+    ],
+    "eoaPrivateKey": "0x6df681145d25529156af8dd0b2f884dcb9fc471edbd07924af9c5024526da556"
   }
 }
