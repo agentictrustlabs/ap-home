@@ -31,12 +31,13 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
@@ -1516,6 +1517,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         person, session,
       )(toolId, args, ctx);
     }
+    if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(deps, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(deps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
@@ -1744,6 +1746,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
   'coordination.endeavor.list': 'see what the organization is working on',
+  'treasury.balance.read': 'read a balance',
   'coordination.endeavor.get': 'read one endeavor',
   'coordination.endeavor.request': 'ask the organization to take on a goal',
   'coordination.contribution.propose': 'offer to do plan steps',
@@ -2740,6 +2743,8 @@ export async function askReplyFor(env: HarnessEnv, input: Parameters<typeof askR
 }
 
 async function askReplyForInner(env: HarnessEnv, input: {
+  /** Spec 371 — the tools the run was offered, for rendering a read's `answer` template. */
+  tools?: ToolSpec[];
   intent: { goal: string }; result: RunResult; addressee: Address;
   /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
   surface?: AskScopeV1;
@@ -2967,6 +2972,15 @@ async function askReplyForInner(env: HarnessEnv, input: {
       ? r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result }))
       : [];
     const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}) });
+    // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
+    // template and its result has the fields, the reply is the template over the result — the person's
+    // unit, no interpretation, no model. The composer is for reads that declare no sentence.
+    const offered = input.tools ?? [];
+    const readSteps = r.steps.filter((o) => o.ok && !o.skipped);
+    if (readSteps.length && readSteps.every((o) => offered.find((t) => t.id === o.step.toolId)?.answer)) {
+      const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
+      if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
+    }
     if (!input.composer) return withEvidence(raw);
     try {
       // GROUNDED COMPOSITION — spec 358 W3. Every real gate ran before the invoker; this is the one
@@ -2975,13 +2989,13 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // corrections, then the floor — the evidence stated plainly, because after two ungrounded
       // compositions the person gets the observations, not a third guess.
       let text = await input.composer.compose({ intent: input.intent, observations: r.steps });
-      let violations = checkGroundedComposition(text, evidence);
+      let violations = checkGroundedComposition(text, evidence, input.intent.goal);
       if (violations.length) {
         text = await input.composer.compose({
           intent: input.intent, observations: r.steps,
           corrections: violations.map((v) => v.correction),
         });
-        violations = checkGroundedComposition(text, evidence);
+        violations = checkGroundedComposition(text, evidence, input.intent.goal);
         if (violations.length) text = groundedFallback(evidence);
       }
       return withEvidence(text);
@@ -3320,6 +3334,10 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
     // declares; the contract's are the domain author's). Behavioural: plan admission reads them to say an
     // instruction must be answered by an act — never which act, never authority.
     ...(builtin.verbs?.length || contract.verbs?.length ? { verbs: [...new Set([...(builtin.verbs ?? []), ...(contract.verbs ?? [])])] } : {}),
+    // Spec 371 — what a READ answers (union, like verbs) and how its answer reads (the contract's sentence
+    // wins: it is the domain author's). Behaviour: question admission and rendering, never a gate.
+    ...(builtin.answers?.length || contract.answers?.length ? { answers: [...new Set([...(builtin.answers ?? []), ...(contract.answers ?? [])])] } : {}),
+    ...(contract.answer ? { answer: contract.answer } : builtin.answer ? { answer: builtin.answer } : {}),
     // Spec 367 §6 — what the step establishes: the contract's word, else the built-in's. A contract may
     // LOWER it (authoritative → submission: "an invitation is not a membership") — that is honesty about
     // the outcome, not authority; it may not raise a lookup into an act (a read stays a read).
@@ -3385,7 +3403,7 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1 }> {
+export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[] }> {
   const resolved: ResolvedParties = new Map();
   const chainId = Number(env.CHAIN_ID);
   const dm = env.DELEGATION_MANAGER as Address;
@@ -3457,6 +3475,15 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // no mandate, so a wrong match costs a wrong tool's honest refusal, never an unauthorized act.
   const compiledRead = (goal: string): Plan | null => {
     const g = goal.toLowerCase();
+    // Spec 371 — a balance is the chain's figure now, never a sum of receipts. "what is my balance", "how
+    // much does alice2.treasury hold", "how much money does missio nexus have" → the balance read, with the
+    // account phrase for the party resolver (or none: the asker's own treasuries).
+    if (/\b(balance|how much (money|usdc|funds)?|what do (i|we) (hold|have)|funds)\b/.test(g) && !/\b(pay|send|transfer|receipts?|payments?|history)\b/.test(g)) {
+      const m = goal.match(/\b(?:of|in|does|do|for)\s+(?:the\s+|my\s+)?([a-z0-9][a-z0-9 .'-]*?)\s*(?:hold|have|has|holds|currently)?\s*[?.!]*$/i);
+      const phrase = (m?.[1] ?? '').replace(/\s+(treasury|account|wallet|organization|org)$/i, '').trim();
+      const account = phrase && !/^(i|we|my|our|it|there|this|that|you|money|usdc|funds|balance)$/i.test(phrase) ? phrase : undefined;
+      return { steps: [{ toolId: BALANCE_READ_TOOL.id, args: account ? { account } : {} }], rationale: 'compiled: balance read (spec 371)' };
+    }
     if (/\bmembers?\b.*\b(of|on|in)\b|\bwho (are|is|belongs)\b.*\bmembers?\b|\bwho belongs\b/.test(g)) {
       // THE ORGANIZATION THE SENTENCE NAMES travels with the step. This plan used to carry no args, so
       // the roster read fell to the addressee: asked at alice.me, "how many members are in Missio Nexus"
@@ -3585,6 +3612,8 @@ be emitted together; the runtime runs them side by side.`;
     ...(deps.survey && deps.readRecords ? [INVITATIONS_LIST_TOOL] : []),
     // What the asker is PART OF, by agent type (ADR-0061) — their own links, private tier.
     ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
+    // Spec 371 — the balance read: what an account holds now, on chain, in the person's unit.
+    ...(deps.valueHeld ? [BALANCE_READ_TOOL] : []),
     // Spec 370 P4 — the organization's work, read through the same record the Home's Work surface reads.
     ...(deps.readSubjectRecord ? COORDINATION_READ_TOOLS : []),
     // The person's own access audit — informational, always available on their own surface.
@@ -3702,6 +3731,7 @@ be emitted together; the runtime runs them side by side.`;
         noPlaceholders,
         dependenciesProvided,
         branchesDecidable,
+        questionAnsweredByRead,
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
@@ -3789,5 +3819,5 @@ be emitted together; the runtime runs them side by side.`;
     source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
     ...(r.because ? { because: r.because } : {}),
   }));
-  return { result, plannerKind: kind, resolved, interactionFor, trace };
+  return { result, plannerKind: kind, resolved, interactionFor, trace , tools };
 }

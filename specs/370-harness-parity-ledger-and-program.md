@@ -57,6 +57,14 @@ P1 → P2 → P3 are one week's shape each and unblock P5/P6; P4 runs beside the
 follow. The order is a dependency chain, not a preference: P5 needs P1's expiring waits, P6 needs P1's
 plan-on-checkpoint and P2's event stream, P3 changes the plan shape P4's playbooks compile to.
 
+## 2.1 Cross-cutting: the answer answers the question (spec 371, 2026-09-08)
+
+Not a parity row — a fidelity gate every row's reads inherit: a read contract declares `answers` (the fact
+words a question names) and `answer` (its rendered sentence); question admission refuses a plan that skips
+the read that answers a named fact; a read with a template is rendered, never composed; the composer is
+held to the asked fact and the person's unit. The balance read was the missing tool. See
+[371](371-the-answer-answers-the-question.md).
+
 ## 3. What we do not do (unchanged, restated so the ledger cannot be read as a wishlist)
 
 No framework (the loop stays a loop; operators are plan data). No workflow vendor in Ring 0 (P1 stays

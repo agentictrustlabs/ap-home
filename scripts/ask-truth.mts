@@ -203,6 +203,24 @@ cases.push({
   ],
 });
 
+// Spec 371 — the answer answers the question. "what is my balance" is a number in USDC from the balance
+// read, never a survey of receipts summed in base units.
+cases.push({
+  id: 'balance-is-a-number-in-usdc',
+  incident: '2026-09-08: "what is my balance" → twenty receipts summed in base units, "not a confirmed current balance"; then one receipt at 1,000,000 raw units. Nothing false; the wrong thing answered.',
+  question: 'what is my balance',
+  probes: {},
+  run: ask('alice', 'what is my balance'),
+  checks: [
+    answered(),
+    evidenceFromTool('treasury.balance.read'),
+    claimsRequire(/\d/, /\busdc\b/i, 'a balance is stated in the person\'s unit'),
+    neverClaims(/\b\d{7,}\b/, 'a raw base-unit figure is never the answer'),
+    neverClaims(/receipts?\b.*\b(sum|total|net)|not a confirmed/i, 'a balance is the chain\'s figure, not a sum of receipts'),
+    noPlaceholderLeaks(),
+  ],
+});
+
 const report = await runTruthSet(cases);
 console.log(formatTruthReport(report));
 process.exit(report.failed ? 1 : 0);

@@ -2054,7 +2054,7 @@ app.post('/harness/ask', async (c) => {
       progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
-    const { result, resolved, interactionFor, trace } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+    const { result, resolved, interactionFor, trace, tools: offeredTools } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
@@ -2143,7 +2143,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
-      intent, result, addressee, composer: selectComposer(c.env), deps: askDeps, interactionFor, plannerTrace: trace,
+      intent, result, addressee, composer: selectComposer(c.env), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
