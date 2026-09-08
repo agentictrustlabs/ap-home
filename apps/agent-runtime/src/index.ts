@@ -1055,10 +1055,41 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
   const agent = ctx.agent as Address;
   const host = new URL(ctx.publicOrigin).host;
   const card = standardCardFor(await liveCardFor(c.env, ctx)) as unknown as AgentCardV1;
+  // The chain checks behind an AGENT's session wire (spec 372 S3c): the wire must ERC-1271-verify against
+  // the agent that issued it and be UNREVOKED — a custodian's revoke kills the caller at its next request.
+  // Fail-closed by construction: a read that throws denies (ADR-0013), and no validator configured means
+  // no agent is admitted at all.
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const chainId = Number(c.env.CHAIN_ID);
+  const dm = c.env.DELEGATION_MANAGER as Address;
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
   const server = standardServerFor(agent, card, host, {
     env: c.env as never,
     appFetch: async (req, env) => app.fetch(req, env as Env, c.executionCtx),
     verifySession: (token) => verifyHomeSession(token, c.env),
+    ...(validator && c.env.TIMESTAMP_ENFORCER && c.env.ALLOWED_METHODS_ENFORCER ? {
+      wire: {
+        enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },
+        verifyDelegationSig: async (d) => (await deps.readContract({
+          address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig',
+          args: [d.delegator, hashDelegation(d, chainId, dm), d.signature],
+        })) === true,
+        isRevoked: async (d) => (await deps.readContract({
+          address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked',
+          args: [hashDelegation(d, chainId, dm)],
+        })) === true,
+      },
+    } : {}),
+    askAsAgent: (input) => runAgentAsk(c.env, input),
+    claimAssertion: async (who, digest, expiresAtMs) => {
+      const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(who.toLowerCase()));
+      const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', {
+        method: 'POST', headers: internalHeaders(c.env as never, { 'content-type': 'application/json' }),
+        body: JSON.stringify({ digest, expiresAt: expiresAtMs }),
+      }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; claimed?: boolean };
+      return out.ok === true && out.claimed === true;
+    },
   });
   return server.handle(new Request(c.req.url, { method: 'POST', headers: c.req.raw.headers, body: raw }));
 }
@@ -1330,32 +1361,51 @@ app.post('/harness/runs', async (c) => {
  * open to stewards, listed among their unfinished runs, finished by one of them granting the mandate.
  * A trigger adds a clock, never authority (the user's decision, 2026-09-08: the agent, no mandate).
  */
-export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
-  const agent = row.agent.toLowerCase() as Address;
+/**
+ * AN AGENT ASKS, AS ITSELF — spec 370 P5 (a trigger firing) and spec 372 S3c (an outside runtime speaking
+ * on the standard surface). One shape for both, because they are one thing: a run with NO person's session
+ * behind it and NO mandate presented. What it may read is what the addressee's own records say to an agent;
+ * what it may DO parks, open to the addressee's stewards, until one of them grants the authority.
+ *
+ * The asker is the AGENT, and it is never taken from anything the caller said: a trigger's asker is the
+ * agent whose schedule fired, and a runtime's is the agent whose session wire was verified on chain at the
+ * door. This function is handed one, and asserts nothing about how it was established.
+ */
+export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown> }): Promise<{
+  reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
+  spoken: string;
+  result: { plan: unknown };
+}> {
   const deps = harnessDeps(env, buildAuditSink(env));
-  const intent = { goal: row.ask, context: { addressee: agent, asker: agent, trigger: row.triggerId } };
+  const intent = { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
-    intent, presented: null, person: agent, runRef, addressee: agent, surface: { realm: { kind: 'org' } } as never,
+    intent, presented: null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     // An unattended run has no person's session behind it: the public directory and the vault questions
     // are a person's reads. The playbook's own tools (the work reads, the acts) do not come this way.
     mcpInvoke: async (toolId) => ({ refused: `${toolId} is not available to an unattended run — a person asks that` }),
   });
   const reply = await askReplyFor(env as unknown as HarnessEnv, {
-    intent, result, addressee: agent, composer: selectComposer(env), deps, interactionFor, plannerTrace: trace, tools,
+    intent, result, addressee: input.addressee, composer: selectComposer(env), deps, interactionFor, plannerTrace: trace, tools,
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+  return { reply: reply as never, spoken, result: result as never };
+}
+
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
+  const agent = row.agent.toLowerCase() as Address;
+  const { reply, spoken, result } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId } });
   if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
     const now = Date.now();
     await saveRun(env as never, {
       runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
       openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
-      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + row.everyMs } } : {}),
-      executed: { plan: result.plan, completed: completedStepsOf(result) },
+      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + row.everyMs } } : {}),
+      executed: { plan: (result as { plan: unknown }).plan, completed: completedStepsOf(result as never) },
       // A parked trigger run waits until the trigger would fire again — then a fresh one replaces it.
       expiresAt: now + row.everyMs,
       createdAt: now, updatedAt: now,
-    });
+    } as never);
     return { outcome: 'parked', said: spoken, runRef };
   }
   if (reply.kind === 'answer' || reply.kind === 'done') return { outcome: 'answered', said: reply.kind === 'answer' ? reply.text : spoken, runRef };

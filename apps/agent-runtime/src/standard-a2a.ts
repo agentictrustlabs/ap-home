@@ -12,8 +12,9 @@
 // (spec 372 §1 "task store is a port"), and nothing a person cannot rebuild lives in them (ADR-0055).
 import type { Address } from 'viem';
 import {
-  createStandardA2aServer, createMemoryTaskStore, createMemoryPushStore,
-  type AgentCardV1, type ExecutionContext, type PartV1, type StandardServer,
+  createStandardA2aServer, createMemoryTaskStore, createMemoryPushStore, sessionWirePrincipal,
+  type AgentCardV1, type ExecutionContext, type PartV1, type Principal, type StandardServer,
+  type SessionWirePrincipalDeps,
 } from '@agenticprimitives/a2a/standard';
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, type InternalMarkerEnv } from './internal-marker.js';
@@ -59,6 +60,15 @@ export interface StandardMountDeps {
   appFetch: (request: Request, env: unknown) => Promise<Response>;
   /** Verifies a Home session token → the person's SA. */
   verifySession: (token: string) => Promise<{ ok: true; sa: Address } | { ok: false; status: number; error: string }>;
+  /** Spec 372 S3c — the chain checks behind an AGENT's session wire. Absent ⇒ only people are admitted. */
+  wire?: Pick<SessionWirePrincipalDeps, 'enforcers' | 'verifyDelegationSig' | 'isRevoked'>;
+  /** Spec 372 S3c — spend a caller's assertion once, at the addressed agent's own object. */
+  claimAssertion?: (agent: Address, digest: string, expiresAtMs: number) => Promise<boolean>;
+  /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string }) => Promise<{
+    reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
+    spoken: string;
+  }>;
 }
 
 interface AskEnvelope {
@@ -77,12 +87,26 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
   const key = `${agent.toLowerCase()}@${host}`;
   let st = stores.get(key);
   if (!st) { st = { tasks: createMemoryTaskStore(), push: createMemoryPushStore() }; stores.set(key, st); }
+  const byWire = deps.wire
+    ? sessionWirePrincipal({
+        ...deps.wire,
+        // THE SINGLE WRITER SPENDS IT (spec 372 S3c). The addressed agent's own object decides which caller
+        // was first; a per-isolate memory is not replay protection on a fanned-out edge, as a live replay
+        // showed on 2026-09-08. Unreachable ⇒ the call is refused, never admitted into a replay window.
+        ...(deps.claimAssertion ? { claim: (digest, expiresAt) => deps.claimAssertion!(agent, digest, expiresAt) } : {}),
+        onRefused: (reason, who) => console.warn(`[standard-a2a] wire refused for ${who ?? '?'}: ${reason}`),
+      })
+    : null;
   const server = createStandardA2aServer({
     card,
     tasks: st.tasks,
     push: st.push,
-    principal: async (request) => {
+    // TWO SCHEMES, ONE MECHANISM EACH (ADR-0013). `Bearer` is a PERSON's Home session; `A2A-Session` is an
+    // AGENT's session wire, verified on chain per request (spec 372 S3c). The scheme token selects which
+    // runs — neither is ever tried because the other failed, and each fails closed on its own terms.
+    principal: async (request): Promise<Principal | null> => {
       const auth = request.headers.get('authorization') ?? '';
+      if (/^A2A-Session\s/i.test(auth)) return byWire ? byWire(request) : null;
       const token = /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim();
       if (!token) return null;
       const who = await deps.verifySession(token).catch(() => null);
@@ -92,6 +116,20 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
       execute: async (ctx: ExecutionContext) => {
         const session = String(ctx.principal?.session ?? '');
         const message = textOf(ctx.message.parts);
+        // AN AGENT ASKING AS ITSELF (spec 372 S3c). It has no person's session and is given none: the run
+        // is the same one a trigger fires — no mandate presented, reads bounded to what this agent's own
+        // records say to that asker, an act suspending as AUTH_REQUIRED with what it would need.
+        if (!session && ctx.principal?.kind === 'agent' && deps.askAsAgent) {
+          if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
+          await ctx.working();
+          const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef: `svc-${ctx.task.id}` });
+          const words = asked.spoken || asked.reply.text || '';
+          if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') { await ctx.complete([{ text: words || 'Done.' }]); return; }
+          if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
+          if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }]); return; }
+          await ctx.reject([{ text: words || asked.reply.error || 'Refused.' }]);
+          return;
+        }
         const data = dataOf(ctx.message.parts);
         const runRef = typeof ctx.task.metadata?.runRef === 'string' ? ctx.task.metadata.runRef : undefined;
         const promptStep = typeof ctx.task.metadata?.promptStepRef === 'string' ? ctx.task.metadata.promptStepRef : undefined;

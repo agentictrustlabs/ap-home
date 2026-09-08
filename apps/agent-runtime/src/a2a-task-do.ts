@@ -866,6 +866,25 @@ export class A2aTaskDO {
         await this.armTriggerAlarm();
         return Response.json({ ok: true, rows: out });
       }
+      // Spec 372 S3c — THE ASSERTION LEDGER: a wire-signed caller's assertion, spent once. The standard
+      // surface's own memory is per isolate, which on a fanned-out edge is no protection at all (a replay
+      // landing on a second isolate was accepted, live, 2026-09-08). The agent's object is the estate's
+      // single writer, so the claim happens here: first caller wins, the rest are refused. Rows are pruned
+      // by their own expiry and are a rebuild, never a bereavement (ADR-0055).
+      if (op === 'assertion-claim') {
+        const b = body as { digest?: string; expiresAt?: number } | null;
+        const digest = String(b?.digest ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{64}$/.test(digest)) return Response.json({ ok: false, error: 'digest required' }, { status: 400 });
+        const akey = `a2a:assertion:${digest}`;
+        const now = Date.now();
+        if (await this.state.storage.get(akey)) return Response.json({ ok: true, claimed: false });
+        await this.state.storage.put(akey, { at: now, expiresAt: Number(b?.expiresAt ?? now + 300_000) });
+        // Opportunistic prune: an expired row proves nothing and costs storage.
+        const rows = await this.state.storage.list<{ expiresAt?: number }>({ prefix: 'a2a:assertion:', limit: 200 });
+        const dead = [...rows.entries()].filter(([, v]) => Number(v?.expiresAt ?? 0) < now).map(([k]) => k);
+        if (dead.length) await this.state.storage.delete(dead);
+        return Response.json({ ok: true, claimed: true });
+      }
       if (op === 'trigger-list') {
         const rows = [...(await this.state.storage.list<unknown>({ prefix: 'harness:trigger:' })).values()];
         return Response.json({ ok: true, rows });

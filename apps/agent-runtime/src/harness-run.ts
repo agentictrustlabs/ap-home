@@ -3690,11 +3690,13 @@ be emitted together; the runtime runs them side by side.`;
   // own agent is `me`; any other addressee's typed name says what it is. Without this a probe or a peer
   // that sends no `surface` left "create a service agent" asking "who is the parent?" inside the person's
   // own realm, while the same words with the Home's surface filled it — one fill, one answer.
-  const realmSuffix: string | undefined = input.person && input.addressee && input.addressee.toLowerCase() === input.person.toLowerCase()
-    ? 'me'
-    : input.addressee && deps.nameOf
-      ? ((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined
-      : undefined;
+  // The TYPED NAME decides, never who is asking: `alice.me` is a person's realm, `missio-nexus.org` an
+  // organization's, `alice3.treasury` an account's. (A first cut read "the addressee is the asker ⇒ me",
+  // which is true for a person and false for every agent that asks on its own behalf — a trigger firing
+  // inside an ORG would have called its realm a person's.)
+  const realmSuffix: string | undefined = input.addressee && deps.nameOf
+    ? (((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined)
+    : undefined;
   const result = await runIntent(input.intent, {
     planner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
